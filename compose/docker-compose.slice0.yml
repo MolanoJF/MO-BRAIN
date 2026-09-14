@@ -1,0 +1,54 @@
+# Slice 0: prove the CLI lane. Postgres + one ops container, nothing else.
+# No Caddy, no serve, no worker — those arrive in Slice 1.
+name: brainstand-slice0
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: gbrain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-a-real-deployment}
+      POSTGRES_DB: ${GBRAIN_DB:-gbrain}
+    # No published host port. Slice 0 talks to Postgres from inside brain-net.
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gbrain -d ${GBRAIN_DB:-gbrain}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [brain-net]
+
+  gbrain-ops:
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    build:
+      context: ..
+      dockerfile: docker/gbrain-base.Dockerfile
+      args:
+        GBRAIN_VERSION: ${GBRAIN_VERSION:-0.50.0.0}
+    environment:
+      # GBRAIN_DATABASE_URL, never a bare DATABASE_URL: upstream refuses to
+      # adopt a DATABASE_URL that leaked in from a working-directory .env,
+      # while GBRAIN_DATABASE_URL is always treated as stated intent.
+      GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:-change-me-in-a-real-deployment}@postgres:5432/${GBRAIN_DB:-gbrain}
+      GBRAIN_HOME: /srv/gbrain-home
+      GBRAIN_SELF_UPGRADE_MODE: "off"
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+      - brain-repos:/srv/brain-repos
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [brain-net]
+    # Keeps the container alive so `docker compose exec` has a target.
+    command: ["sleep", "infinity"]
+
+networks:
+  brain-net:
+    driver: bridge
+
+volumes:
+  pg-data:
+  gbrain-home:
+  brain-repos:
