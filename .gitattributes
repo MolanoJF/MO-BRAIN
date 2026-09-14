@@ -1,0 +1,13 @@
+# core.autocrlf=true on Windows would rewrite these to CRLF on checkout, and a
+# CRLF shebang (`#!/bin/bash\r`) fails inside a Linux container with a bare
+# "no such file or directory". Force LF on everything that is read by a Linux
+# process or by Docker.
+*.sh            text eol=lf
+*.Dockerfile    text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Caddyfile       text eol=lf
+*.ts            text eol=lf
+*.json          text eol=lf
+.env.example    text eol=lf
