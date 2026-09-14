@@ -1,0 +1,31 @@
+import { test, expect, beforeAll, afterAll } from 'bun:test';
+import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+
+const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
+
+beforeAll(async () => { await composeUp(); }, 300_000);
+afterAll(async () => { await composeDown(); }, 120_000);
+
+test('the ops container runs the pinned gbrain version', async () => {
+  const r = await composeExec('gbrain-ops', ['gbrain', '--version']);
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.trim()).toBe(PIN);
+});
+
+test('postgres has vector, pg_trgm and pgcrypto', async () => {
+  const r = await composeExec('gbrain-ops', [
+    'psql', process.env.PGURL_FOR_TEST ?? 'postgres://gbrain:change-me-in-a-real-deployment@postgres:5432/gbrain',
+    '-tAc', "select extname from pg_extension order by extname",
+  ]);
+  expect(r.exitCode).toBe(0);
+  const names = r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  expect(names).toContain('vector');
+  expect(names).toContain('pg_trgm');
+  expect(names).toContain('pgcrypto');
+});
+
+test('GBRAIN_HOME is writable in the ops container', async () => {
+  const r = await composeExec('gbrain-ops', ['sh', '-c', 'touch /srv/gbrain-home/.probe && echo ok']);
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.trim()).toBe('ok');
+});
