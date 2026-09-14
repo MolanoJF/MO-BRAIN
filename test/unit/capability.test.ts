@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { diffCapability, toolNames } from '../../src/contracts/capability.ts';
+import { diffCapability, toolNames, parseGbrainVersion } from '../../src/contracts/capability.ts';
 import type { CapabilitySnapshot } from '../../src/contracts/capability.ts';
 
 const base: CapabilitySnapshot = {
@@ -71,5 +71,24 @@ describe('diffCapability', () => {
       wellKnown: { ...base.wellKnown!, profiles: { 'memory-reader': {}, operator: {} } },
     };
     expect(diffCapability(base, after).profilesChanged).toBe(true);
+  });
+});
+
+describe('parseGbrainVersion', () => {
+  test('extracts the version from the real "gbrain X.Y.Z.W" shape', () => {
+    expect(parseGbrainVersion('gbrain 0.50.0.0')).toBe('0.50.0.0');
+  });
+
+  test('accepts a bare version with no leading label', () => {
+    expect(parseGbrainVersion('0.50.0.0')).toBe('0.50.0.0');
+  });
+
+  test('tolerates trailing newline and surrounding whitespace', () => {
+    expect(parseGbrainVersion('gbrain 0.50.0.0\n')).toBe('0.50.0.0');
+    expect(parseGbrainVersion('  gbrain 0.50.0.0  \n')).toBe('0.50.0.0');
+  });
+
+  test('takes the last non-empty line of multi-line output', () => {
+    expect(parseGbrainVersion('Checking for updates...\n\ngbrain 0.50.0.0\n')).toBe('0.50.0.0');
   });
 });

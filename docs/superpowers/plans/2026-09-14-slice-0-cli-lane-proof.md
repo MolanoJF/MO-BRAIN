@@ -197,15 +197,32 @@ RUN bun install -g "github:garrytan/gbrain#v${GBRAIN_VERSION}"
 ENV PATH="/root/.bun/bin:${PATH}"
 
 # MIT obligation: ship the copyright notice and license text.
-RUN cp "$(bun pm -g bin)/../install/global/node_modules/gbrain/LICENSE" /opt/gbrain-LICENSE \
+# bun installs globals under /root/.bun/install/global. NOTE: `bun pm -g bin`
+# returns /usr/local/bin, which is the SYMLINK directory, not the package root.
+RUN cp /root/.bun/install/global/node_modules/gbrain/LICENSE /opt/gbrain-LICENSE \
  || find / -path /proc -prune -o -name LICENSE -path '*gbrain*' -print -quit \
     | xargs -r -I{} cp {} /opt/gbrain-LICENSE
 RUN test -s /opt/gbrain-LICENSE
 
 # Build-time smoke gate: a bad pin fails the BUILD, not the deploy.
+# `gbrain --version` prints "gbrain 0.50.0.0" -- the version is the LAST
+# whitespace-separated token, NOT the whole line. grep -qx rejects a good build.
 RUN gbrain --version | tee /opt/gbrain-version.txt \
- && grep -qx "${GBRAIN_VERSION}" /opt/gbrain-version.txt
-RUN gbrain --tools-json | head -c 1 | grep -q '{'
+ && awk -v v="${GBRAIN_VERSION}" '$NF == v { ok = 1 } END { exit !ok }' /opt/gbrain-version.txt
+# Build-time smoke gate: verify the tool catalog is real, parseable JSON --
+# not just a single leading byte. The catalog is a top-level JSON ARRAY
+# (starts with '[', not '{'); a bare `head -c 1 | grep -q '{'` only ever
+# accepts '{' and so always failed against gbrain's real (array) output.
+# NOTE: deliberately avoids `require("fs")` inside `bun -e` -- on this image
+# (bun 1.3.13) a `require`-containing eval silently swallows a later
+# uncaught exception (prints nothing, exits 0), which would make this gate
+# fake-pass. `Bun.file(...).json()` with top-level await does not have that
+# problem and was verified against both real and broken --tools-json output.
+RUN gbrain --tools-json > /tmp/gbrain-tools.json \
+ && bytes="$(wc -c < /tmp/gbrain-tools.json)" \
+ && test "$bytes" -gt 20 \
+ && bun -e 'const d = await Bun.file("/tmp/gbrain-tools.json").json(); if (typeof d !== "object" || d === null) { console.error("tools-json parsed to a non-object/array:", typeof d); process.exit(1); }' \
+ && rm -f /tmp/gbrain-tools.json
 
 # The product owns the upgrade lane; an unattended in-container self-upgrade
 # would desynchronize the image from the running binary.
@@ -355,6 +372,7 @@ volumes:
 ```ts
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+import { parseGbrainVersion } from '../../src/contracts/capability.ts';
 
 const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
 
@@ -364,7 +382,7 @@ afterAll(async () => { await composeDown(); }, 120_000);
 test('the ops container runs the pinned gbrain version', async () => {
   const r = await composeExec('gbrain-ops', ['gbrain', '--version']);
   expect(r.exitCode).toBe(0);
-  expect(r.stdout.trim()).toBe(PIN);
+  expect(parseGbrainVersion(r.stdout)).toBe(PIN);
 });
 
 test('postgres has vector, pg_trgm and pgcrypto', async () => {
@@ -680,6 +698,7 @@ The only place in the repo that spawns `docker`. Everything else goes through it
 ```ts
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+import { parseGbrainVersion } from '../../src/contracts/capability.ts';
 
 const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
 
@@ -691,7 +710,7 @@ afterAll(async () => { await composeDown(); }, 120_000);
 test('the running binary is exactly the pinned version', async () => {
   const r = await composeExec('gbrain-ops', ['gbrain', '--version']);
   expect(r.exitCode).toBe(0);
-  expect(r.stdout.trim()).toBe(PIN);
+  expect(parseGbrainVersion(r.stdout)).toBe(PIN);
 });
 
 test('a wrong expected pin makes this suite fail', () => {
@@ -1966,7 +1985,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 `test/unit/capability.test.ts`:
 ```ts
 import { test, expect, describe } from 'bun:test';
-import { diffCapability, toolNames } from '../../src/contracts/capability.ts';
+import { diffCapability, toolNames, parseGbrainVersion } from '../../src/contracts/capability.ts';
 import type { CapabilitySnapshot } from '../../src/contracts/capability.ts';
 
 const base: CapabilitySnapshot = {
@@ -2040,6 +2059,25 @@ describe('diffCapability', () => {
     expect(diffCapability(base, after).profilesChanged).toBe(true);
   });
 });
+
+describe('parseGbrainVersion', () => {
+  test('extracts the version from the real "gbrain X.Y.Z.W" shape', () => {
+    expect(parseGbrainVersion('gbrain 0.50.0.0')).toBe('0.50.0.0');
+  });
+
+  test('accepts a bare version with no leading label', () => {
+    expect(parseGbrainVersion('0.50.0.0')).toBe('0.50.0.0');
+  });
+
+  test('tolerates trailing newline and surrounding whitespace', () => {
+    expect(parseGbrainVersion('gbrain 0.50.0.0\n')).toBe('0.50.0.0');
+    expect(parseGbrainVersion('  gbrain 0.50.0.0  \n')).toBe('0.50.0.0');
+  });
+
+  test('takes the last non-empty line of multi-line output', () => {
+    expect(parseGbrainVersion('Checking for updates...\n\ngbrain 0.50.0.0\n')).toBe('0.50.0.0');
+  });
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -2075,6 +2113,16 @@ export type CapabilityDrift = {
   adaptersRemoved: string[];
   profilesChanged: boolean;
 };
+
+/**
+ * `gbrain --version` prints "gbrain 0.50.0.0" -- the version is the LAST
+ * whitespace-separated token, not the whole line. Never compare the raw
+ * output; this is the only place that knows the shape.
+ */
+export function parseGbrainVersion(raw: string): string {
+  const line = raw.trim().split('\n').filter((l) => l.trim()).pop() ?? '';
+  return line.trim().split(/\s+/).pop() ?? '';
+}
 
 /** Tool catalogs may be an array of {name} or an object keyed by name. */
 export function toolNames(tools: unknown): string[] {
@@ -2116,7 +2164,9 @@ export function diffCapability(before: CapabilitySnapshot, after: CapabilitySnap
  * initialized brain; the caller starts `gbrain serve` for the well-known probe.
  */
 export async function captureCapability(opts: { serveBaseUrl?: string } = {}): Promise<CapabilitySnapshot> {
-  const version = (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout.trim();
+  const version = parseGbrainVersion(
+    (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout,
+  );
   const toolsRaw = await composeExec('gbrain-ops', ['gbrain', '--tools-json']);
   const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list', '--json']);
 

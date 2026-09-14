@@ -1,5 +1,6 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+import { parseGbrainVersion } from '../../src/contracts/capability.ts';
 
 const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
 
@@ -11,7 +12,7 @@ afterAll(async () => { await composeDown(); }, 120_000);
 test('the running binary is exactly the pinned version', async () => {
   const r = await composeExec('gbrain-ops', ['gbrain', '--version']);
   expect(r.exitCode).toBe(0);
-  expect(r.stdout.trim()).toBe(PIN);
+  expect(parseGbrainVersion(r.stdout)).toBe(PIN);
 });
 
 test('a wrong expected pin makes this suite fail', () => {

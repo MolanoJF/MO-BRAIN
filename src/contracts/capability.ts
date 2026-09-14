@@ -24,6 +24,16 @@ export type CapabilityDrift = {
   profilesChanged: boolean;
 };
 
+/**
+ * `gbrain --version` prints "gbrain 0.50.0.0" -- the version is the LAST
+ * whitespace-separated token, not the whole line. Never compare the raw
+ * output; this is the only place that knows the shape.
+ */
+export function parseGbrainVersion(raw: string): string {
+  const line = raw.trim().split('\n').filter((l) => l.trim()).pop() ?? '';
+  return line.trim().split(/\s+/).pop() ?? '';
+}
+
 /** Tool catalogs may be an array of {name} or an object keyed by name. */
 export function toolNames(tools: unknown): string[] {
   if (Array.isArray(tools)) {
@@ -64,7 +74,9 @@ export function diffCapability(before: CapabilitySnapshot, after: CapabilitySnap
  * initialized brain; the caller starts `gbrain serve` for the well-known probe.
  */
 export async function captureCapability(opts: { serveBaseUrl?: string } = {}): Promise<CapabilitySnapshot> {
-  const version = (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout.trim();
+  const version = parseGbrainVersion(
+    (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout,
+  );
   const toolsRaw = await composeExec('gbrain-ops', ['gbrain', '--tools-json']);
   const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list', '--json']);
 
