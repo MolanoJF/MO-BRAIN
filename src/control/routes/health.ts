@@ -19,7 +19,17 @@ health.get('/health', async (c) => {
     } catch { /* version stays null */ }
   }
 
+  // Show uncommitted drift rather than pretending a saved page is indexed:
+  // sync imports commits, not the working tree.
+  let repos: unknown[] = [];
+  if (components.ops === 'ok') {
+    try {
+      const r = await callOps<unknown[]>('sources.status', {}, { json: true, timeoutMs: 30_000 });
+      repos = Array.isArray(r.json) ? r.json : [];
+    } catch { repos = []; }
+  }
+
   const ok = Object.values(components).every((s) => s === 'ok');
   // Never include a connection string, a token or an env dump here.
-  return c.json({ ok, components, gbrainVersion, at: new Date().toISOString() }, ok ? 200 : 503);
+  return c.json({ ok, components, gbrainVersion, repos, at: new Date().toISOString() }, ok ? 200 : 503);
 });

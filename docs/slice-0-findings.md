@@ -207,6 +207,13 @@ carries a `resume` param on `mcp.grant` for this, but the tutorial script never 
   signal, separate from `1` (crashed) — gbrain 0.50.0.0 actually runs two lock mechanisms
   (a pidfile mutex and a newer DB-scoped lock, issue #1849), and only the pidfile one was
   ever exercised here.
-- **Git multi-writer note.** Already recorded (`docs/superpowers/plans/PROGRESS.md`'s
-  self-review, and Slice 1's own plan around its "Git multi-writer" section) — left as-is,
-  not duplicated here.
+- **Git multi-writer.** serve + worker + ops commit to one working tree on one
+  shared volume. We serialize the writes we drive and surface `index.lock`
+  staleness plus uncommitted drift on the health page, but full serialization
+  needs either per-process worktrees or a commit lock inside gbrain. File it
+  as an upstream contribution alongside the production Dockerfile.
+- **Push is not inline.** `sources push` runs from backup today and becomes a
+  scheduled reconcile job in Slice 3. A rejected non-fast-forward must surface
+  as an alert, never a silent swallow.
+- **Growth.** Every write is a commit; a year of agent writes makes clone and
+  backup slow. Plan `gc` / rotation before Slice 4 turns on nightly agents.
