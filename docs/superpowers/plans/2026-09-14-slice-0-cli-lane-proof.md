@@ -1215,6 +1215,44 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `OPERATIONS['auth.registerClient']`, `OPERATIONS['auth.rescopeClient']`, `OPERATIONS['auth.clients']`.
 
+> **Plan defect found during execution (Work Item D, 2026-09-14):** as
+> originally written, `beforeAll` created the two source directories with a
+> bare `mkdir -p`. `gbrain sources add --path <dir>` refuses any path that is
+> not a git repository with at least one committed, tracked file ("is not a
+> git repository with committed, tracked files ... an empty commit is not
+> enough" — gbrain reads sources through git objects, so untracked files are
+> invisible). Fixed by adding `seedGitSource(id)` to `test/helpers/stack.ts`
+> (git-init, one committed file, then `sources add`) and calling it for each
+> id before `sources.add`, shown below. This same fix applies to Task 8's
+> `beforeAll`, which has the identical pattern.
+
+> **Plan defect found during execution (Work Item E, 2026-09-14):** three
+> problems surfaced in the original test body. (1) `register-client`'s real
+> (non-JSON) stdout is prose — "Client ID:" with a space — not the
+> `client_id` (underscore) token the assertion expected; widened to
+> `/client[ _]id/i`. (2) `rescope-client <client_id>` looks the client up by
+> its real generated id (`readClientGrant` in gbrain's reference source),
+> never by the human `--name` given at registration — the test now captures
+> the id from register-client's stdout (`aliceClientId`) and rescopes that.
+> (3) `auth rescope-client --dry-run --json` does not actually preview:
+> `rescopeClient`'s own handler implements `--dry-run` (read-only reference
+> `src/cli.ts:833` usage string, `:848` dispatch), but gbrain 0.50.0.0
+> validates flags against a pre-dispatch, per-top-level-COMMAND (not
+> per-subcommand) static allowlist (`src/core/cli-flag-registry.generated.ts`)
+> before the handler ever runs, and the `'auth'` entry in that allowlist
+> omits `--dry-run` — so `gbrain auth <anything> --dry-run` is rejected with
+> `unknown flag --dry-run for 'gbrain auth'` regardless of subcommand. This
+> is a confirmed upstream bug, not a registry mistake. `--json` alone is
+> allowlisted and works. Fixed by setting
+> `auth.rescopeClient.supportsDryRun: false` in the registry (Task 8's `mcp`
+> allowlist DOES include `--dry-run`, so this does not recur there) and
+> splitting the one dry-run test into two honest tests: a real (mutating)
+> `--json` rescope, and a raw `composeExec` probe asserting the CURRENT
+> rejection — a tripwire that turns red the day upstream's allowlist is
+> fixed. Recorded in `docs/slice-0-findings.md` V2 as a slice-defining
+> finding: Slice 2's rescope confirm screen cannot be built on a CLI dry-run
+> preview at this pinned version. Test count for this task is 6, not 5.
+
 - [ ] **Step 1: Write the failing contract test**
 
 `test/contract/auth.contract.test.ts`:
@@ -1222,7 +1260,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
-import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
+import { composeUp, composeDown, composeExec, resetBrain, seedGitSource, BRAIN_DB_URL } from '../helpers/stack.ts';
 
 beforeAll(async () => {
   await composeUp();
@@ -1231,8 +1269,10 @@ beforeAll(async () => {
     nonInteractive: true, force: true, url: BRAIN_DB_URL,
     embeddingModel: 'openai:text-embedding-3-small',
   }, { timeoutMs: 600_000 }));
-  // One source to scope clients against.
-  await composeExec('gbrain-ops', ['mkdir', '-p', '/srv/brain-repos/shared', '/srv/brain-repos/customers']);
+  // One source to scope clients against. Work Item D: `sources add --path`
+  // requires a git-initialized repo with a committed file, not a bare dir.
+  await seedGitSource('shared');
+  await seedGitSource('customers');
   assertOk(OPERATIONS['sources.add']!, await execOperation(OPERATIONS['sources.add']!, {
     id: 'shared', path: '/srv/brain-repos/shared', name: 'Shared company wiki',
   }));
@@ -1241,6 +1281,10 @@ beforeAll(async () => {
   }));
 }, 900_000);
 afterAll(async () => { await composeDown(); }, 120_000);
+
+// Work Item E: rescope-client looks clients up by the real generated
+// client_id, never by --name. Captured below and reused by the rescope tests.
+let aliceClientId = '';
 
 // V2: the control lane is machine-readable — --json, no screen-scraping.
 test('auth clients --json emits a JSON array', async () => {
@@ -1261,7 +1305,11 @@ test('register-client accepts the tutorial flag set and prints credentials', asy
     federatedRead: ['customers', 'shared'],
   });
   assertOk(spec, r);
-  expect(r.stdout).toMatch(/client_id/i);
+  // Work Item E: real stdout is prose — "Client ID:" with a space.
+  expect(r.stdout).toMatch(/client[ _]id/i);
+  const m = /Client ID:\s+(\S+)/.exec(r.stdout);
+  expect(m).not.toBeNull();
+  aliceClientId = m![1]!;
 });
 
 // V7: --token-ttl is bounded 60s..90d (TOKEN_TTL_MIN_SECONDS=60).
@@ -1282,14 +1330,27 @@ test('register-client accepts a token-ttl inside the bounds', async () => {
   }));
 });
 
-// V2: rescope supports --dry-run --json, which is what renders our confirm screen.
-test('rescope-client --dry-run --json previews without mutating', async () => {
+// Work Item E: --dry-run is unconditionally rejected pre-dispatch for every
+// `gbrain auth *` subcommand at this pinned version (upstream bug — see the
+// defect note above). Split into a real (mutating) --json rescope and a
+// raw-CLI tripwire for the rejection, instead of the original single test
+// that asserted a preview which cannot actually happen.
+test('rescope-client --json emits parseable JSON (real mutation, no dry-run)', async () => {
+  expect(aliceClientId).not.toBe(''); // depends on the register-client test above
   const spec = OPERATIONS['auth.rescopeClient']!;
   const r = await execOperation(spec, {
-    id: 'alice-example', federatedRead: ['customers', 'shared'], boundSlugPrefixes: 'alice-example/',
-  }, { json: true, dryRun: true });
+    id: aliceClientId, federatedRead: ['customers', 'shared'], boundSlugPrefixes: 'alice-example/',
+  }, { json: true });
   assertOk(spec, r);
   expect(r.json).not.toBeNull();
+});
+
+test('auth --dry-run is rejected pre-dispatch at this pinned version (upstream bug)', async () => {
+  const r = await composeExec('gbrain-ops', [
+    'gbrain', 'auth', 'rescope-client', 'alice-example', '--dry-run', '--json',
+  ]);
+  expect(r.exitCode).not.toBe(0);
+  expect(r.stderr + r.stdout).toMatch(/unknown flag --dry-run for 'gbrain auth'/);
 });
 ```
 
@@ -1359,7 +1420,10 @@ Expected: FAIL — `OPERATIONS['auth.clients'] is undefined`.
       { name: 'yes', flag: '--yes', kind: 'flag' },
     ],
     supportsJson: true,
-    supportsDryRun: true,
+    // Work Item E: false, not true — see the defect note above. rescopeClient
+    // itself supports --dry-run, but gbrain's pre-dispatch flag allowlist for
+    // the 'auth' command omits it, so every invocation is rejected upstream.
+    supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],
   },
@@ -1390,7 +1454,9 @@ Expected: FAIL — `OPERATIONS['auth.clients'] is undefined`.
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `bun test test/contract/auth.contract.test.ts`
-Expected: PASS — 5 tests.
+Expected: PASS — 6 tests (5 in the original plan; Work Item E splits the
+single dry-run test into a real-mutation `--json` test and an upstream-bug
+tripwire).
 
 - [ ] **Step 5: Commit**
 
