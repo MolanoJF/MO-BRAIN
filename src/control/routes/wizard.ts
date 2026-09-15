@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
-import { callOps, patchFilePlaneConfig, seedSpace } from '../opsClient.ts';
+import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema } from '../opsClient.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
@@ -215,11 +215,24 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     return r;
   };
 
-  // GBRAIN_DATABASE_URL is already in the ops container's environment, so the
-  // connection string never passes through the control plane (S2, V3).
+  // Worker cold-start templates vector(1280) before any wizard init. Drop that
+  // empty schema so init can create openai:text-embedding-3-small at 1536.
+  // GBRAIN_DATABASE_URL stays inside ops (S2, V3) — control plane never sees it.
+  await resetBrainSchema();
   await run('init', 'init', {
-    nonInteractive: true, embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
+    nonInteractive: true,
+    force: true,
+    embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
   });
+  // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
+  // recorded in the control DB during /space (git repos on disk survive).
+  const spaces = await getDb().select().from(schema.spaces)
+    .where(eq(schema.spaces.organizationId, orgId));
+  for (const s of spaces) {
+    await run(`sources.add:${s.sourceId}`, 'sources.add', {
+      id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: s.name,
+    }, 300_000);
+  }
   if (brain.searchMode) await run('search-mode', 'config.set', { key: 'search.mode', value: brain.searchMode });
   await run('sync', 'sync', { all: true });
   await run('embed', 'embed', { stale: true });

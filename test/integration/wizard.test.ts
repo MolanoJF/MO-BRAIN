@@ -25,6 +25,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
+  resetBrainSchema: async () => {},
   opsHealthy: async () => true,
 }));
 
@@ -149,9 +150,11 @@ describe('wizard', () => {
     const byOp = Object.fromEntries(callOpsCalls.map((c) => [c.op, c.opts]));
     expect(byOp.init?.json).not.toBe(true);
     expect(byOp['config.set']?.json).not.toBe(true);
+    expect(byOp['sources.add']?.json).not.toBe(true);
     expect(byOp.sync?.json).toBe(true);
     expect(byOp.embed?.json).toBe(true);
     expect(byOp.doctor?.json).toBe(true);
+    expect(callOpsCalls.some((c) => c.op === 'sources.add')).toBe(true);
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.lifecycle).toBe('ready');
   });

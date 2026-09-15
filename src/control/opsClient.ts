@@ -41,6 +41,11 @@ export async function seedSpace(sourceId: string): Promise<void> {
   await post('/fileplane/seed-space', { sourceId }, 60_000);
 }
 
+/** Clear worker cold-start schema so wizard init can choose embedding dims. */
+export async function resetBrainSchema(): Promise<void> {
+  await post('/fileplane/reset-brain-schema', {}, 120_000);
+}
+
 export async function opsHealthy(): Promise<boolean> {
   try { return (await fetch(`${OPS_URL}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
   catch { return false; }

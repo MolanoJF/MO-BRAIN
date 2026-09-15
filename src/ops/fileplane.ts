@@ -5,8 +5,11 @@ import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
 
 const GBRAIN_HOME = process.env.GBRAIN_HOME ?? '/srv/gbrain-home';
-export const CONFIG_PATH = join(GBRAIN_HOME, 'config.json');
-export const SCHEMA_PACK_DIR = join(GBRAIN_HOME, 'schema-packs');
+// gbrain's configDir() always appends `.gbrain` under GBRAIN_HOME
+// (`GBRAIN_HOME=/srv/x` → `/srv/x/.gbrain/config.json`). Match that exactly
+// or patchFilePlaneConfig writes a file init/embed never read.
+export const CONFIG_PATH = join(GBRAIN_HOME, '.gbrain', 'config.json');
+export const SCHEMA_PACK_DIR = join(GBRAIN_HOME, '.gbrain', 'schema-packs');
 
 /** Same shape the wizard enforces — lowercase, digits, hyphens; no path separators. */
 const SOURCE_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;

@@ -11,6 +11,7 @@ import { loadOperations, validateRequest } from './dispatch.ts';
 import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { patchConfig, writeSchemaPack, seedSpaceRepo } from './fileplane.ts';
+import { resetBrainSchema } from './brainSchema.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
 const TOKEN = process.env.OPS_RPC_TOKEN;
@@ -76,6 +77,12 @@ Bun.serve({
         if (!sourceId || typeof sourceId !== 'string') return json({ error: 'sourceId required' }, 400);
         const dir = await seedSpaceRepo(sourceId, { sql });
         return json({ ok: true, sourceId, path: dir });
+      }
+
+      // First intentional init: clear the worker's cold-start 1280-d template.
+      if (url.pathname === '/fileplane/reset-brain-schema') {
+        await resetBrainSchema();
+        return json({ ok: true });
       }
 
       if (url.pathname === '/rpc') {

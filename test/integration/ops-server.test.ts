@@ -3,7 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const BASE = 'http://127.0.0.1:3140';
+// Not 3140: the production compose.dev override publishes gbrain-ops there,
+// and hitting the stack's server with this test token yields false 401s.
+const PORT = '13140';
+const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'integration-token-not-a-real-secret';
 const CONTROL_DATABASE_URL =
   process.env.CONTROL_DATABASE_URL ?? 'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
@@ -19,7 +22,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       OPS_RPC_TOKEN: TOKEN,
-      OPS_RPC_PORT: '3140',
+      OPS_RPC_PORT: PORT,
       CONTROL_DATABASE_URL,
       GBRAIN_HOME: homeDir,
     },

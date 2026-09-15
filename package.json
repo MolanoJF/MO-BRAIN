@@ -8,6 +8,7 @@
   "scripts": {
     "test:unit": "bun test test/unit",
     "test:contract": "bun test test/contract",
+    "test:e2e": "bun test --parallel=1 test/e2e",
     "test:build": "bash test/build/pin.test.sh",
     "lint:forbidden": "bun run scripts/lint-forbidden.ts",
     "stack:up": "docker compose -f compose/docker-compose.slice0.yml up -d --wait",
