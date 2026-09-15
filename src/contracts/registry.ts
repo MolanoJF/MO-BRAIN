@@ -166,6 +166,22 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * V15: `gbrain auth revoke-client <client_id>` is a bare positional with
+   * no flags and no `--json`. Exit 1 on missing-arg and not-found. Prose
+   * output only. V16: CLI revoke is unconditional DELETE (cascades tokens
+   * and codes). Rotation is not revocation (honesty rule 4).
+   */
+  'auth.revokeClient': {
+    id: 'auth.revokeClient',
+    argv: ['auth', 'revoke-client'],
+    params: [{ name: 'clientId', flag: '', kind: 'value', required: true }], // positional
+    supportsJson: false,   // V15 — requesting --json throws in buildArgv
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
   // V12: `gbrain sources add <id> --path <path>` — rejected over MCP by design.
   //
   // Plan defect (Work Item N, found building Task 12): `sources add` does
@@ -263,6 +279,23 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       { name: 'timeoutMs', flag: '--timeout-ms', kind: 'value' },
     ],
     supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * V17: `gbrain mcp profiles` exists and returns JSON on stdout
+   * (`{profiles, default:'memory-writer', ...}`). supportsJson is false
+   * because the command IS json — there is no `--json` flag we pass.
+   * The connection builder needs the authoritative profile list and its
+   * `default`.
+   */
+  'mcp.profiles': {
+    id: 'mcp.profiles',
+    argv: ['mcp', 'profiles'],
+    params: [],
+    supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],

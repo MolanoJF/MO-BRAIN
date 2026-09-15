@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.0.0",
-  "generatedAt": "2026-09-15T04:14:37.758Z",
+  "generatedAt": "2026-09-15T21:24:27.923Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -196,6 +196,27 @@
         }
       ],
       "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "auth.revokeClient",
+      "argv": [
+        "auth",
+        "revoke-client"
+      ],
+      "params": [
+        {
+          "name": "clientId",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
       "supportsDryRun": false,
       "privilege": "brain-db",
       "okExitCodes": [
@@ -573,6 +594,20 @@
       ],
       "supportsJson": true,
       "supportsDryRun": true,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "mcp.profiles",
+      "argv": [
+        "mcp",
+        "profiles"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
       "privilege": "brain-db",
       "okExitCodes": [
         0

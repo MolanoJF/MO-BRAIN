@@ -3,6 +3,8 @@ import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 
+const VERSION = process.env.GBRAIN_VERSION ?? '0.50.0.0';
+
 describe('registry invariants', () => {
   test('every operation id matches its key', () => {
     for (const [key, spec] of Object.entries(OPERATIONS)) expect(spec.id).toBe(key);
@@ -55,5 +57,15 @@ describe('registry invariants', () => {
     for (const spec of Object.values(OPERATIONS)) {
       expect(['brain-db', 'read-only']).toContain(spec.privilege);
     }
+  });
+
+  // The ops RPC allowlist is the JSON artifact, not this module. An operation added
+  // here without re-running `bun run operations:emit` is a control-plane feature that
+  // 400s at the RPC boundary with "unknown operation" — a revoke button that does
+  // nothing. Nothing caught this before; this test is the seam.
+  test('operations.json matches registry.ts', () => {
+    const emitted = JSON.parse(readFileSync(`contracts/v${VERSION}/operations.json`, 'utf8'));
+    const fromJson = Object.fromEntries(emitted.operations.map((o: any) => [o.id, o]));
+    expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
   });
 });
