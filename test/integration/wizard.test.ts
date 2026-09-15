@@ -45,7 +45,7 @@ let orgId = '';
 beforeAll(async () => {
   await runMigrations();
   for (const t of [
-    schema.spaces, schema.secrets, schema.auditLog,
+    schema.claimLinks, schema.connections, schema.spaces, schema.secrets, schema.auditLog,
     schema.sessions, schema.accounts, schema.verifications,
     schema.memberships, schema.brains, schema.organizations, schema.users,
   ]) {

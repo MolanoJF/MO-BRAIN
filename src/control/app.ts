@@ -6,6 +6,9 @@ import { health } from './routes/health.ts';
 import { authRoutes } from './routes/auth.ts';
 import { wizard } from './routes/wizard.ts';
 import { backup } from './routes/backup.ts';
+import { members } from './routes/members.ts';
+import { connectionRoutes } from './routes/connections.ts';
+import { claimRoutes } from './routes/claim.ts';
 import { runMigrations } from './db/client.ts';
 
 const app = new Hono();
@@ -20,6 +23,9 @@ app.route('/api', health);
 app.route('/api', authRoutes);
 app.route('/api/wizard', wizard);
 app.route('/api', backup);
+app.route('/api', members);
+app.route('/api', connectionRoutes);
+app.route('/api', claimRoutes);
 
 // Live collisions with gbrain-serve. Caddy routes these away in production;
 // refuse them here so a direct hit never returns the SPA.

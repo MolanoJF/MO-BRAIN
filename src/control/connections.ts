@@ -124,6 +124,20 @@ export async function provisionConnection(
   return { connectionId, credentials: r.json };
 }
 
+/** Admin POST /api/connections: persist pending, provision later at claim (A3). */
+export async function createPendingConnection(
+  input: ConnectionInput,
+): Promise<{ connectionId: string; compiled: CompiledConnection }> {
+  await assertMembership(input.organizationId, input.membershipId);
+  const { write, reads } = await loadSpaces(input.organizationId, input.writeSpaceId, input.readSpaceIds);
+  const compiled = compileFrom(input, write, reads);
+  const name = clientName(input.membershipId, write.sourceId);
+  await assertNoCollision(input.organizationId, name);
+  const connectionId = randomUUID();
+  await insertPending(connectionId, input, name, compiled);
+  return { connectionId, compiled };
+}
+
 export async function revokeConnection(connectionId: string, actor: string): Promise<void> {
   const row = await loadConnection(connectionId);
   if (row.state === 'revoked') return;
