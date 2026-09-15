@@ -1478,6 +1478,55 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `OPERATIONS['mcp.grant']`, `OPERATIONS['mcp.verify']`.
 
+> **Plan defect found during execution (Work Item F, 2026-09-14):** as
+> originally written, `mcp.grant`'s param list had no positional `NAME`, and
+> the test's `execOperation` calls never supplied one. Upstream v0.50.0.0
+> requires it unconditionally — `parseMcpGrant` in the read-only reference
+> checkout: `if (args[0] !== 'grant' || !args[1] || args[1].startsWith('-'))
+> throw new Error('Usage: gbrain mcp grant NAME [options]')`
+> (`src/commands/mcp.ts:46`). Without it every grant call failed at
+> arg-parsing before reaching the dry-run or DB-access logic this task exists
+> to prove — including the V8 "without brain DB access" test, which would
+> then "pass" for the wrong reason (a usage error, not a DB error). Fixed by
+> adding `{ name: 'name', flag: '', kind: 'value', required: true }` as the
+> first param of `mcp.grant` and passing a distinct `name` in every grant
+> call (shown below); the V8 test also gained a `NAME` in its raw argv so its
+> failure is provably the DB-access path (manually confirmed: with a `NAME`
+> and a bogus `GBRAIN_DATABASE_URL`, gbrain prints `GBRAIN_DB_ACCESS
+> conn_refused ... Cannot connect to database`).
+
+> **Plan defect found during execution (Work Item G, 2026-09-14):** as
+> originally written, no call to `mcp.grant` — dry-run included — supplied
+> `--url`, and the registry did not mark it `required`. Upstream v0.50.0.0
+> requires `--url` unconditionally: `parseMcpGrant` reads `url:
+> value('--url') ?? ''` (`src/commands/mcp.ts:68`, reference checkout) and
+> `provisionHarnessGrant` immediately validates it with `normalizeMcpUrl(...)`
+> then `assertSecureEndpoint(...)` (`src/commands/mcp-provision.ts:22-24`)
+> before any dry-run branch runs — an empty url always fails with
+> `{"status":"error","reason":"mcp_setup_failed","message":"Pass a valid MCP
+> endpoint URL"}`, dry-run or not. Neither check contacts the URL — they only
+> validate scheme and shape (https, or http on a loopback host) — so a
+> syntactically valid loopback URL is accepted with no `gbrain serve` running
+> anywhere in this slice. Fixed by marking `url` `required: true` on
+> `mcp.grant` and passing `url: 'http://127.0.0.1:3131/mcp'` in both the
+> dry-run-preview and the real-grant test calls (shown below). The V8
+> "without brain DB access" test is unaffected either way: manually confirmed
+> that the DB-engine acquisition gbrain performs ahead of any command-specific
+> argument handling fails first, so that test's raw argv gets the same
+> `GBRAIN_DB_ACCESS` error whether or not `--url` is present.
+
+> **Plan defect found during execution (2026-09-14):** Task 7 already found
+> that `sources add --path` requires a git-initialized repo with a committed
+> file (Work Item D) — the same bare `mkdir -p` this task originally used has
+> the identical problem, so `beforeAll` below uses `seedGitSource` (Task 7,
+> `test/helpers/stack.ts`) instead. Also, `auth clients --json` emits an
+> OBJECT (`{ window_days, usage_included, clients: [...], legacy_tokens:
+> [...] }`), never a bare array (`src/commands/auth.ts`, `clientsCmd`,
+> reference checkout) — `'a dry-run grant creates no client'` unwraps
+> `.clients` and asserts its length is exactly zero, rather than the original
+> `Array.isArray(before.json ?? [])`, which passed trivially on any falsy
+> `json` without proving anything about mutation.
+
 - [ ] **Step 1: Write the failing contract test**
 
 `test/contract/mcp-grant.contract.test.ts`:
@@ -1485,7 +1534,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
-import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
+import { composeUp, composeDown, composeExec, resetBrain, seedGitSource, BRAIN_DB_URL } from '../helpers/stack.ts';
 
 beforeAll(async () => {
   await composeUp();
@@ -1494,8 +1543,10 @@ beforeAll(async () => {
     nonInteractive: true, force: true, url: BRAIN_DB_URL,
     embeddingModel: 'openai:text-embedding-3-small',
   }, { timeoutMs: 600_000 }));
-  await composeExec('gbrain-ops', ['mkdir', '-p', '/srv/brain-repos/shared', '/srv/brain-repos/customers']);
+  // Work Item D: `sources add --path` requires a git-initialized repo with a
+  // committed file, not a bare dir (see Task 7's defect note).
   for (const id of ['shared', 'customers']) {
+    await seedGitSource(id);
     assertOk(OPERATIONS['sources.add']!, await execOperation(OPERATIONS['sources.add']!, {
       id, path: `/srv/brain-repos/${id}`,
     }));
@@ -1503,13 +1554,18 @@ beforeAll(async () => {
 }, 900_000);
 afterAll(async () => { await composeDown(); }, 120_000);
 
+// Work Item G: every `mcp.grant` call — dry-run included — requires --url.
+const MCP_URL = 'http://127.0.0.1:3131/mcp';
+
 // V2: --dry-run --json is the "machine-readable redacted receipt" that becomes
 // our before/after confirm screen in Slice 2.
 test('mcp grant --dry-run --json previews a grant without creating it', async () => {
   const spec = OPERATIONS['mcp.grant']!;
   const r = await execOperation(spec, {
+    name: 'alice-preview',
     harness: 'claude-code', profile: 'memory-writer',
     source: 'customers', federatedRead: ['customers', 'shared'],
+    url: MCP_URL,
   }, { json: true, dryRun: true });
 
   assertOk(spec, r);
@@ -1518,26 +1574,33 @@ test('mcp grant --dry-run --json previews a grant without creating it', async ()
   expect(body?.grant).toBeDefined();
 });
 
+// Work Item: auth clients --json emits an object, not a bare array — see the
+// defect note above. Unwrap .clients and assert the count is actually zero.
 test('a dry-run grant creates no client', async () => {
   const before = await execOperation(OPERATIONS['auth.clients']!, {}, { json: true });
-  const list = (before.json ?? []) as unknown[];
-  expect(Array.isArray(list)).toBe(true);
+  const body = (before.json ?? {}) as { clients?: unknown[] };
+  expect(Array.isArray(body.clients)).toBe(true);
+  expect(body.clients!.length).toBe(0);
 });
 
 // V8: mcp grant needs a local engine OR --admin-token-file. This is the whole
-// reason gbrain-ops exists as a separate privilege boundary (S2).
+// reason gbrain-ops exists as a separate privilege boundary (S2). Work Item F:
+// the raw argv needs a NAME or this fails at arg-parsing, not at DB-access.
 test('mcp grant without brain DB access fails with the documented guidance', async () => {
   const r = await composeExec('gbrain-ops', [
-    'gbrain', 'mcp', 'grant', '--harness', 'claude-code', '--source', 'customers', '--json',
+    'gbrain', 'mcp', 'grant', 'probe-client', '--harness', 'claude-code', '--source', 'customers', '--json',
   ], { env: { GBRAIN_DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/none' } });
   expect(r.exitCode).not.toBe(0);
+  expect(r.stderr + r.stdout).toMatch(/GBRAIN_DB_ACCESS|Cannot connect to database|connect ECONNREFUSED/);
 });
 
 test('a real grant emits a client_id and a credentials receipt', async () => {
   const spec = OPERATIONS['mcp.grant']!;
   const r = await execOperation(spec, {
+    name: 'alice-generic',
     harness: 'generic', profile: 'memory-writer',
     source: 'customers', federatedRead: ['customers', 'shared'],
+    url: MCP_URL,
     credentialsOut: '/srv/gbrain-home/.probe-credentials.json',
     tokenTtl: '300',
   }, { json: true });
@@ -1579,6 +1642,10 @@ Expected: FAIL — `OPERATIONS['mcp.grant'] is undefined`.
     id: 'mcp.grant',
     argv: ['mcp', 'grant'],
     params: [
+      // Work Item F: the positional NAME gbrain requires ("Usage: gbrain mcp
+      // grant NAME [options]", src/commands/mcp.ts parseMcpGrant) — omitted
+      // from the original plan, so every grant call failed at arg-parsing.
+      { name: 'name', flag: '', kind: 'value', required: true },
       { name: 'harness', flag: '--harness', kind: 'value' },
       { name: 'profile', flag: '--profile', kind: 'value' },
       { name: 'client', flag: '--client', kind: 'value' },
@@ -1597,7 +1664,12 @@ Expected: FAIL — `OPERATIONS['mcp.grant'] is undefined`.
       { name: 'adminTokenFile', flag: '--admin-token-file', kind: 'value', secret: true },
       { name: 'ifVersion', flag: '--if-version', kind: 'value' },
       { name: 'resume', flag: '--resume', kind: 'flag' },
-      { name: 'url', flag: '--url', kind: 'value', secret: true },
+      // Work Item G: required, not optional. parseMcpGrant defaults an absent
+      // --url to '', and provisionHarnessGrant validates it unconditionally —
+      // including on --dry-run — before any dry-run branch runs
+      // (mcp-provision.ts:22-24, reference checkout). An empty url always
+      // fails with reason "mcp_setup_failed": "Pass a valid MCP endpoint URL".
+      { name: 'url', flag: '--url', kind: 'value', required: true, secret: true },
     ],
     supportsJson: true,
     supportsDryRun: true,
@@ -1628,7 +1700,8 @@ Expected: FAIL — `OPERATIONS['mcp.grant'] is undefined`.
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `bun test test/contract/mcp-grant.contract.test.ts`
-Expected: PASS — 6 tests.
+Expected: PASS — 5 tests (the plan originally said 6 here; the file only
+ever defines 5 `test()` blocks).
 
 - [ ] **Step 5: Commit**
 

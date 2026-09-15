@@ -155,4 +155,69 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     privilege: 'brain-db',
     okExitCodes: [0],
   },
+
+  /**
+   * V8: needs a local engine or --admin-token-file. Whatever runs this holds
+   * DATABASE_URL, which is why it lives in gbrain-ops and never in the
+   * control plane (S2).
+   */
+  'mcp.grant': {
+    id: 'mcp.grant',
+    argv: ['mcp', 'grant'],
+    params: [
+      // Plan defect (Work Item F): the plan's params list omitted the
+      // positional NAME gbrain requires ("Usage: gbrain mcp grant NAME
+      // [options]", src/commands/mcp.ts parseMcpGrant) — every grant call
+      // failed at arg-parsing before this was added.
+      { name: 'name', flag: '', kind: 'value', required: true },
+      { name: 'harness', flag: '--harness', kind: 'value' },
+      { name: 'profile', flag: '--profile', kind: 'value' },
+      { name: 'client', flag: '--client', kind: 'value' },
+      { name: 'source', flag: '--source', kind: 'value' },
+      { name: 'federatedRead', flag: '--federated-read', kind: 'list' },
+      { name: 'boundTools', flag: '--bound-tools', kind: 'list' },
+      { name: 'boundSource', flag: '--bound-source', kind: 'value' },
+      { name: 'boundBrain', flag: '--bound-brain', kind: 'value' },
+      { name: 'boundSlugPrefixes', flag: '--bound-slug-prefixes', kind: 'value' },
+      { name: 'boundMaxConcurrent', flag: '--bound-max-concurrent', kind: 'value' },
+      { name: 'budgetUsdPerDay', flag: '--budget-usd-per-day', kind: 'value' },
+      { name: 'delegatedSlugPrefixes', flag: '--delegated-slug-prefixes', kind: 'value' },
+      { name: 'delegatedNamespace', flag: '--delegated-namespace', kind: 'value' },
+      { name: 'tokenTtl', flag: '--token-ttl', kind: 'value' },
+      { name: 'credentialsOut', flag: '--credentials-out', kind: 'value' },
+      { name: 'adminTokenFile', flag: '--admin-token-file', kind: 'value', secret: true },
+      { name: 'ifVersion', flag: '--if-version', kind: 'value' },
+      { name: 'resume', flag: '--resume', kind: 'flag' },
+      // Plan defect (Work Item G): required, not optional. `parseMcpGrant`
+      // defaults absent --url to '', and `provisionHarnessGrant` validates it
+      // with normalizeMcpUrl/assertSecureEndpoint unconditionally — including
+      // on --dry-run — before any dry-run branch runs (mcp-provision.ts:22-24
+      // in the read-only reference checkout). An empty url always fails with
+      // reason "mcp_setup_failed": "Pass a valid MCP endpoint URL".
+      { name: 'url', flag: '--url', kind: 'value', required: true, secret: true },
+    ],
+    supportsJson: true,
+    supportsDryRun: true,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Exit 2 = 'partial': server stages passed but harness evidence is missing.
+   * NEVER render that green (honesty rule 5). Note every adapter carries
+   * evidence.runtimeTestedAt: null (V10).
+   */
+  'mcp.verify': {
+    id: 'mcp.verify',
+    argv: ['mcp', 'verify'],
+    params: [
+      { name: 'client', flag: '--client', kind: 'value' },
+      { name: 'harness', flag: '--harness', kind: 'value' },
+      { name: 'timeoutMs', flag: '--timeout-ms', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
 };
