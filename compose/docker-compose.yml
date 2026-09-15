@@ -1,0 +1,130 @@
+# brainstand production stack. Caddy is the sole ingress; nothing else
+# publishes a host port.
+name: brainstand
+
+x-gbrain-env: &gbrain-env
+  GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain
+  GBRAIN_HOME: /srv/gbrain-home
+  GBRAIN_SELF_UPGRADE_MODE: "off"
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [gbrain-serve, control-plane]
+    networks: [brain-net, control-net]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gbrain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: postgres
+    # No published host port.
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gbrain -d gbrain"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [brain-net, control-net]
+
+  gbrain-serve:
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    restart: unless-stopped
+    environment:
+      <<: *gbrain-env
+      # Required behind Caddy: the default is `loopback`, and in compose the
+      # proxy is a peer container, so without this every client IP collapses
+      # to Caddy's and the pre-auth rate limiter mis-buckets.
+      GBRAIN_HTTP_TRUST_PROXY: "1"
+    command: ["gbrain", "serve", "--http", "--bind", "0.0.0.0", "--port", "3131",
+              "--public-url", "https://${DOMAIN}"]
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+      - brain-repos:/srv/brain-repos
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [brain-net]
+
+  gbrain-worker:
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    restart: unless-stopped
+    environment: *gbrain-env
+    command: ["gbrain", "jobs", "supervisor", "--concurrency", "${WORKER_CONCURRENCY:-2}"]
+    # V5: SIGTERM drains; `stop` waits up to 40s. Give it room plus margin.
+    stop_grace_period: 60s
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+      - brain-repos:/srv/brain-repos
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [brain-net]
+
+  # S2: the privilege boundary. Holds brain DB creds (required by V8) and RW
+  # GBRAIN_HOME; exposes only the allowlisted RPC on the private network.
+  gbrain-ops:
+    image: brainstand/control-plane:${BRAINSTAND_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: docker/control-plane.Dockerfile
+      args:
+        GBRAIN_VERSION: ${GBRAIN_VERSION:-0.50.0.0}
+    restart: unless-stopped
+    environment:
+      <<: *gbrain-env
+      OPS_RPC_TOKEN: ${OPS_RPC_TOKEN:?required}
+      # The advisory lock for the file plane lives in the CONTROL database.
+      CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
+    command: ["bun", "run", "/app/src/ops/server.ts"]
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+      - brain-repos:/srv/brain-repos
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [brain-net, ops-net]
+
+  control-plane:
+    image: brainstand/control-plane:${BRAINSTAND_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      # S2: control DB only. No GBRAIN_DATABASE_URL, no DATABASE_URL.
+      CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
+      OPS_RPC_URL: http://gbrain-ops:3140
+      OPS_RPC_TOKEN: ${OPS_RPC_TOKEN:?required}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?required}
+      PUBLIC_URL: https://${DOMAIN}
+      GBRAIN_HOME: /srv/gbrain-home
+    command: ["bun", "run", "/app/src/control/app.ts"]
+    volumes:
+      # Read-only: the control plane reads config state, never writes it (S3).
+      - gbrain-home:/srv/gbrain-home:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [control-net, ops-net]
+
+networks:
+  brain-net: { driver: bridge }
+  control-net: { driver: bridge }
+  # Carries only control-plane → gbrain-ops RPC.
+  ops-net: { driver: bridge }
+
+volumes:
+  pg-data:
+  gbrain-home:
+  brain-repos:
+  caddy-data:
+  caddy-config:

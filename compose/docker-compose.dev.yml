@@ -1,0 +1,17 @@
+# Local override: publish Caddy on high ports and use its internal CA so
+# `docker compose up` works without a real domain. NEVER used in production.
+services:
+  caddy:
+    ports:
+      - "8443:443"
+      - "8080:80"
+    environment:
+      DOMAIN: localhost
+
+  # Host-run tests and scripts/backup.ts reach the RPC over localhost. In
+  # production nothing but control-plane can reach :3140, on ops-net only.
+  # The Task 1 invariant test reads docker-compose.yml alone, so this override
+  # does not weaken it.
+  gbrain-ops:
+    ports:
+      - "3140:3140"
