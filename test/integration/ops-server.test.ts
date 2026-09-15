@@ -95,4 +95,31 @@ describe('ops rpc', () => {
     expect(r.status).toBe(400);
     expect((await r.json() as { error: string }).error).toMatch(/invalid sourceId/);
   });
+
+  test('take-grant-credentials reads then deletes a .creds file under GBRAIN_HOME', async () => {
+    const credsPath = join(homeDir, '.creds-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json');
+    const secret = { client_id: 'gbrain_cl_ops', client_secret: 'sk-ops-once' };
+    await Bun.write(credsPath, JSON.stringify(secret));
+
+    const r = await fetch(`${BASE}/fileplane/take-grant-credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ path: credsPath }),
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { credentials?: unknown };
+    expect(body.credentials).toEqual(secret);
+    expect(await Bun.file(credsPath).exists()).toBe(false);
+  });
+
+  test('take-grant-credentials rejects path traversal', async () => {
+    const r = await fetch(`${BASE}/fileplane/take-grant-credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ path: join(homeDir, '..', 'etc', 'passwd') }),
+    });
+    expect(r.status).toBe(400);
+    const body = await r.json() as { error: string };
+    expect(body.error).toMatch(/invalid path|not under GBRAIN_HOME/i);
+  });
 });

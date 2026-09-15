@@ -10,7 +10,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { loadOperations, validateRequest } from './dispatch.ts';
 import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
-import { patchConfig, writeSchemaPack, seedSpaceRepo } from './fileplane.ts';
+import { patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
@@ -83,6 +83,13 @@ Bun.serve({
       if (url.pathname === '/fileplane/reset-brain-schema') {
         await resetBrainSchema();
         return json({ ok: true });
+      }
+
+      // A3: claim takes the ops-side --credentials-out file once, then deletes it.
+      if (url.pathname === '/fileplane/take-grant-credentials') {
+        const path = (body as { path?: unknown }).path;
+        const credentials = await takeGrantCredentialsFile(path);
+        return json({ credentials });
       }
 
       if (url.pathname === '/rpc') {

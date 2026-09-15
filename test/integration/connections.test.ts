@@ -57,6 +57,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   putSchemaPack: async () => {},
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
+  takeGrantCredentials: async () => ({}),
   opsHealthy: async () => true,
 }));
 

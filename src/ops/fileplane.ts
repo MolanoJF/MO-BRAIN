@@ -1,5 +1,5 @@
-import { rename, writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { rename, writeFile, readFile, mkdir, chmod, unlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
@@ -13,6 +13,41 @@ export const SCHEMA_PACK_DIR = join(GBRAIN_HOME, '.gbrain', 'schema-packs');
 
 /** Same shape the wizard enforces — lowercase, digits, hyphens; no path separators. */
 const SOURCE_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const CREDS_NAME = /^\.creds-[A-Za-z0-9._-]+\.json$/;
+
+/**
+ * Read-then-delete a single `.creds-*.json` under GBRAIN_HOME. Path must
+ * resolve inside the home root — no traversal, no subdirectories, no
+ * passthrough cat of arbitrary files (S2).
+ */
+export async function takeGrantCredentialsFile(requested: unknown): Promise<unknown> {
+  if (typeof requested !== 'string' || requested.length === 0) {
+    throw new Error('path required');
+  }
+  if (requested.includes('\0') || requested.includes('..')) {
+    throw new Error('invalid path');
+  }
+  const home = resolve(process.env.GBRAIN_HOME ?? '/srv/gbrain-home');
+  const resolved = resolve(requested);
+  const rel = relative(home, resolved);
+  if (rel.startsWith('..') || isAbsolute(rel) || rel.length === 0) {
+    throw new Error('path not under GBRAIN_HOME');
+  }
+  if (dirname(resolved) !== home) {
+    throw new Error('path not under GBRAIN_HOME');
+  }
+  const name = basename(resolved);
+  if (!CREDS_NAME.test(name)) {
+    throw new Error('invalid credentials file');
+  }
+  const raw = await readFile(resolved, 'utf8');
+  await unlink(resolved);
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error('credentials file was not json');
+  }
+}
 
 function reposRoot(): string {
   return process.env.BRAIN_REPOS ?? '/srv/brain-repos';

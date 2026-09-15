@@ -10,6 +10,11 @@ import {
   type CompiledConnection,
 } from '../contracts/compile.ts';
 
+/** Ops-side --credentials-out path. Claim takes (reads+deletes) this file once. */
+export function grantCredentialsOutPath(connectionId: string): string {
+  return `/srv/gbrain-home/.creds-${connectionId}.json`;
+}
+
 export type ConnectionInput = {
   organizationId: string;
   membershipId: string;
@@ -96,7 +101,7 @@ export async function provisionConnection(
   const connectionId = existing ? existing.id : randomUUID();
   if (!existing) await insertPending(connectionId, input, name, compiled);
 
-  const credentialsOut = `/srv/gbrain-home/.creds-${connectionId}.json`;
+  const credentialsOut = grantCredentialsOutPath(connectionId);
   const r = await callOps(
     'mcp.grant',
     grantParams(name, input.harness, compiled, credentialsOut),

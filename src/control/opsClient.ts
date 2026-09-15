@@ -46,6 +46,15 @@ export async function resetBrainSchema(): Promise<void> {
   await post('/fileplane/reset-brain-schema', {}, 120_000);
 }
 
+/**
+ * Read-then-delete one ops-side --credentials-out file. The secret crosses
+ * the RPC once; the control plane must not log the body (S3c).
+ */
+export async function takeGrantCredentials(path: string): Promise<unknown> {
+  const payload = await post<{ credentials?: unknown }>('/fileplane/take-grant-credentials', { path }, 30_000);
+  return payload.credentials;
+}
+
 export async function opsHealthy(): Promise<boolean> {
   try { return (await fetch(`${OPS_URL}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
   catch { return false; }
