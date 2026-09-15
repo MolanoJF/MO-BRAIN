@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { randomUUID, createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { callOps } from '../src/control/opsClient.ts';
@@ -14,10 +15,13 @@ export type BackupManifest = {
   warning: string;
 };
 
-// --project-directory . so Compose loads the repo-root .env (with -f alone
-// the project dir becomes compose/ and required vars fail interpolation).
+// --env-file .env when present (local); CI supplies the same vars in the job
+// env. Project dir stays compose/ so ./Caddyfile and ./initdb resolve.
+// (--project-directory . would break those relative mounts.)
 const COMPOSE = [
-  'docker', 'compose', '--project-directory', '.', '-f', 'compose/docker-compose.yml',
+  'docker', 'compose',
+  ...(existsSync('.env') ? ['--env-file', '.env'] as const : []),
+  '-f', 'compose/docker-compose.yml',
 ];
 
 /** Posted by the control-plane when docker compose is unavailable in-process (Ruling 31). */

@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, readdir, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,8 @@ const SKIP_BACKUP_INTEGRATION_ENV = 'BRAINSTAND_ALLOW_SKIP_BACKUP_INTEGRATION';
 async function probeBackupStack(): Promise<boolean> {
   const p = Bun.spawn(
     [
-      'docker', 'compose', '--project-directory', '.',
+      'docker', 'compose',
+      ...(existsSync('.env') ? ['--env-file', '.env'] : []),
       '-f', 'compose/docker-compose.yml',
       'ps', '--status', 'running', '-q', 'postgres', 'gbrain-ops',
     ],
@@ -142,8 +144,8 @@ describe('backup', () => {
         'so the four-component backup integration tests were skipped rather than run. ' +
         'Bring the stack up, then rerun:\n\n' +
         '  bun run stack:up\n' +
-        '  # or: docker compose --project-directory . -f compose/docker-compose.yml ' +
-        '-f compose/docker-compose.dev.yml --env-file .env up -d --wait\n\n' +
+        '  # or: docker compose --env-file .env -f compose/docker-compose.yml ' +
+        '-f compose/docker-compose.dev.yml up -d --wait\n\n' +
         `If skipping is genuinely intended for this run, set ${SKIP_BACKUP_INTEGRATION_ENV}=1 ` +
         'to acknowledge it explicitly.',
     );
