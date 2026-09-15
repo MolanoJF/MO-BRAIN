@@ -9,6 +9,7 @@ process.env.CONTROL_DATABASE_URL ??=
 // boundary so wizard control-plane logic (lifecycle, secrets, Space=source)
 // is exercised without a live gbrain binary.
 const callOpsCalls: { op: string; opts?: { json?: boolean; timeoutMs?: number } }[] = [];
+let resetBrainSchemaCalls = 0;
 
 mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async (op: string, _params?: Record<string, unknown>, opts?: { json?: boolean; timeoutMs?: number }) => {
@@ -25,7 +26,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
-  resetBrainSchema: async () => {},
+  resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
   opsHealthy: async () => true,
 }));
 
@@ -145,8 +146,11 @@ describe('wizard', () => {
   // init and config.set (supportsJson: false) in buildArgv / ops RPC.
   test('finish does not pass json:true for init or config.set', async () => {
     callOpsCalls.length = 0;
+    resetBrainSchemaCalls = 0;
     const res = await call('/api/wizard/finish', {});
     expect(res.status).toBe(200);
+    // Worker cold-start compensation: wipe before init (must not be a silent no-op).
+    expect(resetBrainSchemaCalls).toBe(1);
     const byOp = Object.fromEntries(callOpsCalls.map((c) => [c.op, c.opts]));
     expect(byOp.init?.json).not.toBe(true);
     expect(byOp['config.set']?.json).not.toBe(true);
