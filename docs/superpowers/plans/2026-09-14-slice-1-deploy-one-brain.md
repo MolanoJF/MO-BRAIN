@@ -86,7 +86,11 @@ import { test, expect, describe } from 'bun:test';
 import { parse } from 'yaml';
 import { readFileSync } from 'node:fs';
 
-const compose = parse(readFileSync('compose/docker-compose.yml', 'utf8')) as any;
+// `merge: true` expands `<<` YAML merge keys (the x-gbrain-env anchor). The
+// `yaml` package disables merge-key support by default (YAML-1.2-strict);
+// without it every service that merges the anchor keeps a literal "<<" key
+// instead of the merged fields, which does not match real Compose behavior.
+const compose = parse(readFileSync('compose/docker-compose.yml', 'utf8'), { merge: true }) as any;
 const svc = (n: string) => compose.services[n];
 
 describe('compose invariants', () => {
@@ -130,6 +134,7 @@ describe('compose invariants', () => {
 
   test('gbrain-ops is not on control-net and control-plane is not on brain-net', () => {
     expect(svc('gbrain-ops').networks).toContain('brain-net');
+    expect(svc('gbrain-ops').networks).not.toContain('control-net');
     expect(svc('control-plane').networks).not.toContain('brain-net');
   });
 
@@ -152,9 +157,13 @@ Expected: FAIL — `ENOENT: compose/docker-compose.yml`.
 #!/bin/bash
 set -e
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-SQL
-  CREATE DATABASE gbrain;
-  CREATE DATABASE control;
+# CREATE DATABASE has no IF NOT EXISTS in Postgres. This directory is also
+# mounted by compose/docker-compose.slice0.yml, whose POSTGRES_DB=gbrain makes
+# the postgres entrypoint pre-create "gbrain" before any initdb.d script runs.
+# Guard both so this script is safe whichever compose file it runs under.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-'SQL'
+  SELECT 'CREATE DATABASE gbrain'  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'gbrain')\gexec
+  SELECT 'CREATE DATABASE control' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'control')\gexec
 SQL
 
 for db in gbrain control; do
@@ -165,6 +174,14 @@ for db in gbrain control; do
 SQL
 done
 ```
+
+> **Corrected 2026-09-15 — the unguarded `CREATE DATABASE` broke the Slice 0 stack.**
+> `compose/initdb/` is mounted by *both* compose files. `docker-compose.slice0.yml` sets
+> `POSTGRES_DB=gbrain`, so the postgres entrypoint pre-creates that database before any
+> `initdb.d` script runs; a bare `CREATE DATABASE gbrain` then aborts the whole init under
+> `ON_ERROR_STOP=1` with "database gbrain already exists". Verified: `docker compose -f
+> compose/docker-compose.slice0.yml up postgres` exited 3 with that error on a fresh volume.
+> The `\gexec` guard above is idempotent and safe under either compose file.
 
 - [ ] **Step 4: Write `compose/docker-compose.yml`**
 
@@ -304,15 +321,20 @@ volumes:
 - [ ] **Step 5: Write `compose/docker-compose.dev.yml`**
 
 ```yaml
-# Local override: publish Caddy on high ports and use its internal CA so
-# `docker compose up` works without a real domain. NEVER used in production.
+# Local override: publishes Caddy on high ports so `docker compose up` is
+# reachable without binding 80/443. NEVER used in production.
+#
+# This does NOT supply DOMAIN. `${DOMAIN:?required}` in the base compose file
+# is interpolated BEFORE this override is merged in, so a value set only here
+# can never satisfy it -- Compose still fails fast if DOMAIN is unset, by
+# design. Export DOMAIN=localhost yourself (shell env or .env) before bringing
+# this stack up; when Caddy sees a non-public DOMAIN like `localhost` it issues
+# certificates from its own internal CA instead of trying ACME.
 services:
   caddy:
     ports:
       - "8443:443"
       - "8080:80"
-    environment:
-      DOMAIN: localhost
 
   # Host-run tests and scripts/backup.ts reach the RPC over localhost. In
   # production nothing but control-plane can reach :3140, on ops-net only.
@@ -322,6 +344,21 @@ services:
     ports:
       - "3140:3140"
 ```
+
+> **Corrected 2026-09-15 — the override could never supply `DOMAIN`.**
+> This file originally set `environment: { DOMAIN: localhost }` under `caddy` and claimed in
+> its header that `docker compose up` "works without a real domain." Both were false. Compose
+> interpolates `${DOMAIN:?required}` in the base file *before* merging any override, so the
+> override's value cannot satisfy it. Verified: with `DOMAIN` unset,
+> `docker compose -f docker-compose.yml -f docker-compose.dev.yml config` fails with
+> `required variable DOMAIN is missing a value: required`. It only failed to bite because
+> `.env.example` ships a non-empty `DOMAIN=brain.example.com` while every secret beside it
+> ships blank.
+>
+> `${DOMAIN:?required}` is deliberately **kept** — it is a production guard that fails early
+> with an explicit message naming the variable. The fix was to stop the override implying it
+> supplies `DOMAIN` and to state the real dev path (`DOMAIN=localhost` in the environment or
+> `.env`). Step 7's test suite pins this.
 
 > **Running host-side scripts and tests.** `scripts/backup.ts`, `scripts/restore.ts` and the integration suites import `callOps`, which defaults to `http://gbrain-ops:3140` — a name that resolves only inside compose. When running from the host, set:
 >
@@ -351,7 +388,10 @@ BETTER_AUTH_SECRET=
 - [ ] **Step 7: Run the test to verify it passes**
 
 Run: `bun test test/integration/compose-invariants.test.ts`
-Expected: PASS — 8 tests.
+Expected: PASS — 10 tests (8 as originally drafted, plus two added when the `DOMAIN`
+interpolation defect was corrected: one pinning that the dev override does not rely on a
+service-level `DOMAIN`, one exercising the documented dev invocation through the real
+Compose CLI).
 
 - [ ] **Step 8: Commit**
 
@@ -453,8 +493,11 @@ Expected: FAIL — `ENOENT: compose/Caddyfile`.
 	# Break-glass is `docker compose exec gbrain-ops gbrain …` over SSH.
 	# See docs/runbooks/break-glass.md.
 	# ---------------------------------------------------------------------
+	# MUST be a `handle` block, not a bare `respond`. See the note below.
 	@admin_denied path /admin /admin/* /admin/api/* /admin/events
-	respond @admin_denied 404
+	handle @admin_denied {
+		respond 404
+	}
 
 	# ---------------------------------------------------------------------
 	# Reserved paths owned by gbrain-serve. /health and /metrics are LIVE
@@ -479,10 +522,40 @@ Expected: FAIL — `ENOENT: compose/Caddyfile`.
 }
 ```
 
+> **Corrected 2026-09-15 — the `/admin` seal was decorative as originally drafted (S1 violation).**
+> This block first read `respond @admin_denied 404` at the top level. Caddy's default
+> directive order sorts `respond` *after* `handle`, so compiling the original Caddyfile
+> verbatim (`caddy adapt`, `caddy:2`) produced this route order inside the host subroute:
+>
+> ```
+> 1  path /mcp,/authorize,...  -> reverse_proxy gbrain-serve
+> 2  path /api/*               -> reverse_proxy control-plane
+> 3  match=None (catch-all)    -> reverse_proxy control-plane
+> 4  path /admin,/admin/*      -> static_response 404
+> ```
+>
+> `handle` is terminal and route 3 matches **every** request, so route 4 was unreachable
+> dead config: `/admin` would have been proxied to the control plane and answered 200 with
+> the console SPA instead of 404. gbrain's real admin is on `gbrain-serve:3131` and is not
+> proxied on this path, so this was not a direct god-rights exposure — but S1 and the Slice 1
+> exit gate were both unmet, and the seal did nothing.
+>
+> Wrapping it in `handle` makes it participate in `handle`'s written-order evaluation.
+> Re-compiled, `/admin` is route 1, ahead of the catch-all. Verified with real Caddy before
+> the task was dispatched.
+
+> **Consequence for Step 1's test — it would have passed against the broken config.**
+> A test that parses the Caddyfile *text* finds the `respond @admin_denied 404` line present
+> and goes green while the compiled behavior does the opposite. The routing test must assert
+> **compiled** behavior: run `caddy adapt` and assert on the route order in the resulting JSON
+> (or assert against a live request), so the `/admin` rule is proven to precede the catch-all.
+> Asserting on file contents alone is not sufficient for this invariant.
+
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `bun test test/integration/routing.test.ts`
-Expected: PASS — 15 tests (10 parameterized + 5).
+Expected: PASS. The count will exceed the originally-drafted 15 once the compiled-order
+assertions above are added; report the actual count.
 
 - [ ] **Step 5: Validate the Caddyfile syntactically**
 
