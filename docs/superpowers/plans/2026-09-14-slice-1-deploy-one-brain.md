@@ -694,17 +694,29 @@ export async function withAdvisoryLock<T>(
   const lockId = lockKeyToBigint(key);
   const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
 
-  for (;;) {
-    const [row] = await sql`select pg_try_advisory_lock(${lockId}::bigint) as got`;
-    if (row?.got) break;
-    if (Date.now() > deadline) throw new Error(`timed out acquiring advisory lock ${key}`);
-    await Bun.sleep(100);
-  }
-
+  // pg_advisory_lock is SESSION-scoped and re-entrant WITHIN a session, while
+  // `sql` is a connection POOL. Reserve one connection so the acquire, the
+  // critical section and the release provably share a single backend. On a
+  // bare pooled handle two things can go wrong silently: the unlock lands on a
+  // different connection (returns false, lock leaks until that backend dies),
+  // and two concurrent callers handed the same connection BOTH acquire the
+  // lock — mutual exclusion gone, with no error anywhere. S3 depends on this.
+  const conn = await sql.reserve();
   try {
-    return await fn();
+    for (;;) {
+      const [row] = await conn`select pg_try_advisory_lock(${lockId}::bigint) as got`;
+      if (row?.got) break;
+      if (Date.now() > deadline) throw new Error(`timed out acquiring advisory lock ${key}`);
+      await Bun.sleep(100);
+    }
+
+    try {
+      return await fn();
+    } finally {
+      await conn`select pg_advisory_unlock(${lockId}::bigint)`;
+    }
   } finally {
-    await sql`select pg_advisory_unlock(${lockId}::bigint)`;
+    conn.release();
   }
 }
 
@@ -725,6 +737,24 @@ export function mergeConfigJson(current: string | null, patch: Record<string, un
   return JSON.stringify({ ...base, ...patch }, null, 2) + '\n';
 }
 ```
+
+> **Hardened 2026-09-15 — the lock now reserves its connection.**
+> As first drafted, `withAdvisoryLock` issued `pg_try_advisory_lock` and `pg_advisory_unlock`
+> against the pooled `sql` handle. Probed against real Postgres (`pgvector/pgvector:pg16`,
+> Bun 1.3.14), that version did **not** misbehave — 12 sequential sections with concurrent
+> churn leaked nothing, and 4 concurrent callers never overlapped — because Bun's pool reuses
+> the most-recently-idle connection, so lock and unlock happened to share a backend in 6/6
+> measured sections. But the pool genuinely opens multiple backends (4 distinct PIDs under 8
+> concurrent queries), so that correctness was **incidental, not guaranteed**.
+>
+> Reserving the connection makes it guaranteed. Verified with the same harness:
+> reserved backend stable across pool churn; 6 concurrent callers → 0 overlaps, 0 timeouts;
+> 0 advisory locks left held; pool still usable after every reserve/release cycle.
+>
+> **Step 6's integration test must include a concurrency case** asserting mutual exclusion —
+> two or more callers contending for one key, asserting no two are ever inside the critical
+> section simultaneously. A lock tested only single-threaded proves nothing about the one
+> property it exists to provide.
 
 - [ ] **Step 4: Run the unit test to verify it passes**
 
