@@ -26,6 +26,38 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * Task 12 — the honest half of the isolation check. `gbrain init
+   * --mcp-only` writes a `remote_mcp` config field under whatever
+   * GBRAIN_HOME the caller sets and runs three LIVE pre-flight smokes
+   * (OAuth discovery, a client_credentials token round-trip, an MCP
+   * `initialize`) against a reachable `gbrain serve` — it never opens a
+   * local engine and never touches GBRAIN_DATABASE_URL. That is exactly
+   * what makes it the mechanism a Slice 1 control-plane container (which
+   * never holds brain-db credentials, S2) can run on behalf of a scoped
+   * end user: give each simulated teammate their own GBRAIN_HOME and this
+   * operation, plus the `mcp.grant` credentials it consumes, and `search`/
+   * `whoami` afterward are transparently routed over MCP as that OAuth
+   * client — never as gbrain-ops's own local admin identity. Confirmed
+   * empirically against the pinned container (no --dry-run support exists
+   * in the reference checkout's cli-flag-registry 'init' entry).
+   */
+  'init.mcpOnly': {
+    id: 'init.mcpOnly',
+    argv: ['init', '--mcp-only'],
+    params: [
+      { name: 'issuerUrl', flag: '--issuer-url', kind: 'value', required: true },
+      { name: 'mcpUrl', flag: '--mcp-url', kind: 'value', required: true },
+      { name: 'oauthClientId', flag: '--oauth-client-id', kind: 'value', required: true },
+      { name: 'oauthClientSecret', flag: '--oauth-client-secret', kind: 'value', required: true, secret: true },
+      { name: 'force', flag: '--force', kind: 'flag' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'read-only',
+    okExitCodes: [0],
+  },
+
   // V4: the search-mode cost matrix is a post-init config set.
   // V11: upstream already routes vendor *_api_key writes away from the DB plane.
   'config.set': {
@@ -406,6 +438,45 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     supportsJson: true,
     supportsDryRun: false,
     privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Task 12: free-text retrieval. Dispatched through the shared op table
+   * (not the `search modes|stats|tune` dashboard subcommands), so on a
+   * thin-client GBRAIN_HOME (see `init.mcpOnly`) this call is transparently
+   * routed over MCP as whatever OAuth client owns that config — no
+   * GBRAIN_DATABASE_URL needed. Confirmed empirically: querying the same
+   * text as two different members' thin clients returns disjoint
+   * `source_id` sets that exactly match each member's federated-read grant.
+   */
+  search: {
+    id: 'search',
+    argv: ['search'],
+    params: [
+      { name: 'query', flag: '', kind: 'value', required: true },
+      { name: 'limit', flag: '--limit', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'read-only',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Task 12: identity/scope introspection — works both as gbrain-ops's own
+   * local admin (`{"transport":"local","scopes":[]}`) and as a thin client
+   * (`{"transport":"oauth","client_id":...,"source_id":...,
+   * "federated_read":[...],...}`). Confirmed empirically in both modes
+   * against the pinned container; needs no brain-db access either way.
+   */
+  whoami: {
+    id: 'whoami',
+    argv: ['whoami'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'read-only',
     okExitCodes: [0],
   },
 
