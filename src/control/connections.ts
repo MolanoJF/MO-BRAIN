@@ -266,11 +266,18 @@ function mcpUrl(): string {
 
 function grantedClientId(json: unknown): string {
   if (!json || typeof json !== 'object') throw new Error('mcp.grant json did not include a client id');
-  const body = json as {
-    grant?: { clientId?: unknown; client_id?: unknown };
-    credentials?: { client_id?: unknown };
-  };
-  for (const v of [body.grant?.clientId, body.grant?.client_id, body.credentials?.client_id]) {
+  const body = json as Record<string, unknown>;
+  const grant = body.grant && typeof body.grant === 'object' ? body.grant as Record<string, unknown> : undefined;
+  // Pin receipt (credentialReceipt) has top-level client_id and credentials:'private-file'
+  // (a string). Only treat credentials as nested if it is an object.
+  const creds = body.credentials && typeof body.credentials === 'object'
+    ? body.credentials as Record<string, unknown>
+    : undefined;
+  for (const v of [
+    body.client_id, body.clientId,
+    grant?.clientId, grant?.client_id,
+    creds?.client_id, creds?.clientId,
+  ]) {
     if (typeof v === 'string' && v.length > 0) return v;
   }
   throw new Error('mcp.grant json did not include a client id');

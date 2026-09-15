@@ -20,11 +20,17 @@ function grantJson(dryRun: boolean): unknown {
   if (dryRun) {
     return { status: 'preview', grant: { profile: 'memory-writer', sourceId: 'customers' } };
   }
+  // Pin receipt (credentialReceipt): top-level client_id, credentials is the
+  // string 'private-file' — not { client_id } and not grant.clientId.
   return {
-    status: 'granted',
-    grant: { clientId: 'gbrain_cl_mock' },
-    credentials: { client_id: 'gbrain_cl_mock', credentials: 'private-file', mcp_url: 'http://127.0.0.1:3131/mcp' },
-    credential_file: '/srv/gbrain-home/.creds-mock.json',
+    client_id: 'gbrain_cl_mock',
+    mcp_url: 'http://127.0.0.1:3131/mcp',
+    profile: 'memory-writer',
+    harness: 'generic',
+    source_id: 'customers',
+    expires_at: null,
+    renewable: true,
+    credentials: 'private-file',
   };
 }
 
