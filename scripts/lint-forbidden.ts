@@ -23,6 +23,16 @@ const RULES: { rule: string; re: RegExp; why: string }[] = [
     re: /garrytan\/gbrain#(latest|latest-stable|main|master|HEAD)\b/,
     why: 'G1 requires an exact semver pin; a moving ref is non-reproducible',
   },
+  {
+    rule: 'log-request-body',
+    re: /console\.(log|info|debug|error)\([^)]*\b(req\.body|await\s+req\.json\(\)|body)\b/,
+    why: 'S3c: a control plane that logs the body of "add source" undoes the upstream invariant',
+  },
+  {
+    rule: 'secret-column-name',
+    re: /\b(plaintext|api_key_plain|secret_value)\s*:\s*text\(/,
+    why: 'S3b: secrets are envelope-encrypted; a plaintext column makes a pg_dump a credential dump',
+  },
 ];
 
 // 'docs' is skipped deliberately: this guard protects CODE, and planning

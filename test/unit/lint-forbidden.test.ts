@@ -102,4 +102,16 @@ describe('lintForbidden', () => {
     expect(v.map((x) => x.rule)).toContain('autopilot-install');
     await rm(root, { recursive: true, force: true });
   });
+
+  test('flags logging a request body', async () => {
+    await writeFile(join(dir, 'a', 'log.ts'), `console.log("add source", req.body);\n`);
+    const v = await lintForbidden(dir);
+    expect(v.map((x) => x.rule)).toContain('log-request-body');
+  });
+
+  test('flags a plaintext secret column', async () => {
+    await writeFile(join(dir, 'a', 'sch.ts'), `plaintext: text('plaintext'),\n`);
+    const v = await lintForbidden(dir);
+    expect(v.map((x) => x.rule)).toContain('secret-column-name');
+  });
 });
