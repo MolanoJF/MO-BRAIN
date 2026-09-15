@@ -2,6 +2,8 @@
 
 **Resume here.** Single source of truth for what is done, blocked, and next.
 
+**New session? Start with [HANDOFF.md](../../../HANDOFF.md).**
+
 **Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md)
 **Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — the risk register Slice 0 existed to produce.
 **Branch:** `main` · **Executor:** Sonnet subagents, one task per dispatch, every result verified independently by the orchestrator.
