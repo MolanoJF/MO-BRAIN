@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Written 2026-09-15, end of the session that completed Slice 0.
+Written 2026-09-15, mid-Slice-1. Supersedes the Slice-0 handoff of the same day.
 
 ---
 
@@ -16,121 +16,156 @@ The whole strategy rests on one bet: **gbrain is a pinned upstream dependency dr
 
 ## Where things stand
 
-**Slice 0 is COMPLETE.** 25 commits on `main`, clean tree, HEAD `5ec3602`.
+**Slice 0: COMPLETE** (25 commits, on `main`, HEAD `fbd0e95`).
 
-Slice 0's job was to prove — in Docker, against real Postgres, at an exact pin, with zero human interaction — that every control-plane operation the product needs is actually reachable. It does. The headline: `gbrain init --non-interactive` works headlessly against Postgres (this was make-or-break), and the whole 90-minute company-brain tutorial now runs unattended in **39 seconds**.
+**Slice 1: IN PROGRESS** on branch **`slice-1-deploy-one-brain`** (13 commits, base `fbd0e95`, tree clean).
 
-**Slice 1 has not started. Its entry gate is met.**
+| Task | State |
+|---|---|
+| 1 — two-database Postgres + production compose | **complete** (`2c1a7ac..37fbe14`, review clean) |
+| 2 — Caddyfile, `/admin` sealed | **complete** (`4fff74a..b58faf9`, review clean) |
+| 3 — advisory lock + file-plane writer | **code done and controller-verified; scoped re-review NOT yet run** |
+| 4–15 | not started |
 
-Read these two before doing anything:
+### ⚠️ Resume exactly here
 
-1. [`docs/superpowers/plans/PROGRESS.md`](docs/superpowers/plans/PROGRESS.md) — task-by-task state, exit-gate results, environment notes.
-2. [`docs/slice-0-findings.md`](docs/slice-0-findings.md) — **the risk register Slice 0 existed to produce.** 13 verified constraints with evidence, and the ones that change later slices.
+Task 3's fix rounds 1 and 2 are committed (`a1c1989`, `3a5a360`) and I verified all three required states myself. **The scoped re-review was never dispatched** — I was about to generate it when the session ended. Do that first:
 
-Then [`docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md`](docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md) — 15 tasks, already patched with three Slice-0 findings.
+```bash
+bash "C:/Users/juanp/.claude/plugins/cache/superpowers-dev/superpowers/6.3.0/skills/subagent-driven-development/scripts/review-package" "docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md" e48f751 3a5a360
+```
+
+Then dispatch `re-review-prompt.md` with the four findings from the Task 3 review (they are in the ledger), the brief, the report, and that diff path. Only after it comes back clean is Task 3 complete.
+
+**Do not re-dispatch Tasks 1, 2, or Task 3's implementation.** They are done and in git.
+
+### The working ledger is the real record
+
+`.superpowers/sdd/2026-09-14-slice-1-deploy-one-brain/progress.md`
+
+It is **git-ignored scratch**, so it does not survive `git clean -fdx`. It holds every ruling with its reasoning and cost-if-wrong, per-task state, deferred minors, and the verification evidence behind each claim. **Read it before resuming and trust it over any summary, including this one.** Task briefs, agent reports and review packages live beside it.
 
 ---
 
-## First moves in a new session
+## Verified state as of this writing
 
-**1. Start Docker Desktop.** Its daemon does not survive a reboot and must be launched manually. Until it is, every Docker command fails with `failed to connect to the docker API at npipe:...`.
-
-**2. Check whether you need the PATH workaround.**
-
-```bash
-docker compose version
+```
+bun test test/unit          52 pass
+bun test test/integration   37 pass, 1 skip, 0 fail   (needs Postgres — see below)
+bun run lint:forbidden      clean
+bunx tsc --noEmit           clean
+bun test test/contract      NOT re-run since Task 2; needs `bun run stack:up` first
 ```
 
-If that fails but Docker Desktop is running, your session's environment predates the Docker install. Prefix every Docker-touching shell call with:
+The 1 skip is deliberate: the `config.json is written 0600` assertion cannot be expressed on NTFS. It **runs and passes for real** in a Linux container — verified this session.
+
+---
+
+## Environment
+
+**Docker Desktop must be started manually** after a reboot. This session needed **no** PATH workaround (`docker compose version` → v5.5.1 directly). If yours fails but Docker is running, your session predates the install:
 
 ```bash
 export PATH="/c/Users/juanp/AppData/Local/Programs/DockerDesktop/resources/bin:$PATH"
 ```
 
-A freshly started session should not need this — the directory is already in the user PATH. **Subagents inherit the parent session's environment, so if you need it, they do too — put it in their prompt.**
+Subagents inherit the parent session's environment — if you need it, put it in their prompts too.
 
-**3. Bring the stack up and confirm the baseline still holds.**
+**Container state right now:** a scratch Postgres named `bs-fp-pg` is **running** on host port 5432 (user `gbrain`, password `ci-not-a-real-secret`, db `control`). `test/integration/fileplane.test.ts` needs it. Remove it when you no longer do:
+
+```bash
+docker rm -f bs-fp-pg
+```
+
+**The Slice 0 stack is DOWN.** The contract suite's own teardown stops it. Bring it back before running contract tests:
 
 ```bash
 bun run stack:up
 ```
 
-```bash
-bun run lint:forbidden && bun test test/unit && bunx tsc --noEmit && bun test test/contract
-```
-
-Expect: lint clean · 41 unit · 45 contract across 9 files · `tsc` clean. The contract suite takes ~3 minutes; that's normal, each `beforeAll` resets and re-inits the brain.
-
-If the contract suite is red, **diagnose before touching anything** — the stack's Postgres volume persists between sessions, so state drift is the first thing to suspect.
+Expect this to be slow on a fresh volume. Note that `compose/initdb/` is now **shared by both compose files**, so `bun run stack:up` also exercises Task 1's `\gexec` guard.
 
 ---
 
-## Working conventions established this session
+## Rulings I made on your behalf
 
-These were set by the user and proved their worth. Keep them.
+These were mine to make, not yours. Each names what it costs if I got it wrong. Rework whatever you disagree with — full reasoning is in the ledger.
 
-**Execution goes to Sonnet subagents; the main session orchestrates and verifies.** One task per dispatch. The Agent tool has a `model` parameter but **no reasoning-effort parameter** — effort comes from the agent definition's frontmatter, so compensate with tightly-specified prompts.
+1. **Branch, not worktree.** Slice 1 is on `slice-1-deploy-one-brain` in the primary directory. A git worktree would lack the gitignored `.env` and start a second compose project. *Cost: must merge at the end rather than committing straight to `main`.*
+2. **Task 9's `/space` gap** → add `seedSpaceRepo` to `fileplane.ts`, expose as `POST /fileplane/seed-space`, call before `sources.add`. Lands in **Task 9**, not Task 4. *Cost: if a later slice needs seeding outside the wizard, it's a move, not a rewrite.* **Still unimplemented — this is the known blocker.**
+3. **Tasks 10 ↔ 11 mount order.** Task 11 must mount `app.route('/api', backup)` **above** Task 10's SPA catch-all, or `GET /api/backup` returns index.html. *Cost: none identified; it's the only ordering satisfying both tests.*
+4. **Code blocks beat Interfaces summaries** wherever a task's prose contradicts its own code. *Cost: a stale planning-doc line.*
+5. **Task 8's commented-out wizard route is deliberate**; Task 9 must uncomment it, and Task 9 Step 9 is the proof. *Cost: a review round re-flagging an intentional comment.*
+6. **`lint:forbidden` exemptions narrowed scope, never rules** — `.superpowers/` skipped, root `HANDOFF.md` exempt by name. *Cost: a forbidden pattern could land in HANDOFF.md unnoticed; every code file and other markdown still linted, with tests pinning that.*
+7. **Kept `${DOMAIN:?required}`** in the base compose and fixed the dev override's false claim instead. Rejected the reviewer's suggestion to relax it. *Cost: a blank `DOMAIN` gives an explicit compose error instead of a working localhost stack.*
+8. **`/admin` seal must be a `handle` block** (see below). *Cost: none; both forms were compiled and compared.*
+9. **Task 3's lock reserves its connection.** *Cost: a few lines of connection management that weren't strictly required.*
+10. **Silently-skipped gates must fail loudly** unless explicitly opted out — rejected `console.warn`. Scope widened to fix the precedent in Task 1's file. *Cost: one extra always-on test per suite.*
+11. **`mergeConfigJson` moved to `fileplane.ts`.** The plan contradicts itself: its File Structure table binds `lock.ts` to "pure lock mechanics, no gbrain knowledge". The constraint won. *Cost: it lives in a different file than Task 3's text says; consumers import by name, so nothing downstream breaks.*
+12. **Fixed `atomicWrite`'s docstring rather than adding fsync.** S3 requires atomicity, which `rename` gives; durability is a claim S3 doesn't make and secrets' source of truth is the control DB. *Cost: a crash between rename and flush loses the latest `config.json` write — recoverable, no key lost.*
+13. **A guard must not fire for a categorical impossibility.** I first told Task 3 to apply the fail-unless-opted-out convention to the Windows 0600 check; that left the suite **permanently red**, so I reversed it. Fail on POSIX where a skip is anomalous; skip visibly on win32 where it can never pass. *Cost: a Windows-only dev never sees the 0600 check locally; Linux/CI enforces it.*
 
-**Verify every subagent claim independently.** This is not ceremony. One agent reported a build fix as working when its own first attempt would have produced a permanently-passing fake gate; it caught that only by testing the failure path. Another's test count didn't match what its file actually contained. Re-run the command yourself.
+---
 
-**Subagents start cold.** Give them: project root, plan file path, the PATH export, what's already done (so they don't redo it), what's explicitly out of scope, and the secret-handling rules. A vague prompt costs a full round trip.
+## The most important lesson, now confirmed twice
 
-**Tell subagents to stop rather than weaken a gate.** The single most valuable moment this session: an agent hit a failing lint rule, and instead of quietly adding an exclusion, it halted and reported — which kept the judgment call where it belonged. Put that instruction in every prompt.
+**Executing the plan finds defects in the plan.** Slice 0 found ~20. Slice 1 has found **ten in three tasks**, all patched back into the plan file with evidence blockquotes (`4fff74a`, `de648f6`, `1841f50`) so a fresh run hits none of them.
 
-**Commit per task, with honest annotations.** When a step was skipped, say so in the commit message.
+Two are worth internalizing, because in both cases **the test would have certified the bug**:
 
-**Attribution:** the main session signs `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`. Subagents sign as whatever their own session reminder specifies (Sonnet). Don't copy attribution lines out of the plan files — those examples are stale.
+- **The `/admin` seal was decorative.** A bare top-level `respond @admin_denied 404` compiles *behind* the catch-all, because Caddy sorts `respond` after `handle`. Real `caddy adapt` put the 404 at route 4, behind a route-3 catch-all matching everything — unreachable dead config. S1 and a Slice 1 exit-gate item both unmet. **And the drafted test parsed Caddyfile *text*,** so it found the `respond` line present and went green. Now a `handle` block (route 1), and the test asserts compiled route *order*.
+- **The advisory lock proved nothing.** It passed single-threaded while saying nothing about mutual exclusion — the one property it exists to provide. The test now runs 4 concurrent callers asserting `maxActive === 1`.
+
+The generalisation: **a test that reads the artifact is not a test of the artifact's behavior**, and **a concurrency primitive tested serially is untested**. Ask of every gate: would this fail if the thing it guards were broken?
+
+---
+
+## Working conventions that earned their keep
+
+**Execution goes to Sonnet subagents; the main session orchestrates and verifies.** One task per dispatch.
+
+**Verify every subagent claim independently — this paid off repeatedly this session.** Task 3's report described one problem; running the suite myself found two. An "Approved" review carried an Important finding in its own body. Re-run the command yourself, and prefer testing the artifact over reading the report.
+
+**Make agents prove a guard by exercising its failure path.** Ask for the red run, not just the green one. Every guard added this session was verified failing before being trusted.
+
+**Tell subagents to stop rather than weaken a gate.** This keeps producing the session's best moments — Task 1's agent found `lint:forbidden` already broken and refused to touch it, which is exactly right.
+
+**Give reviewers verified facts, never verdicts.** Handing over "I ran X and got Y, judge its significance" got sharper reviews than pre-judging would have. Never tell a reviewer what not to flag.
+
+**Commit per task, with honest annotations.** Patch plan defects back into the plan file with a blockquote citing the evidence.
+
+**Attribution:** main session signs `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`. Subagents sign as their own session reminder specifies (Sonnet). Commit examples inside the plan files are stale — ignore their attribution lines.
 
 ---
 
 ## Secrets
 
-`.env` holds a **real `OPENAI_API_KEY`**. It is gitignored, was never staged, and no key value appears in any commit — verified. Keep it that way:
+`.env` holds a **real `OPENAI_API_KEY`**. Gitignored, never staged, no key value in any commit — still true.
 
-- Never print, echo, or `cat` its value; never paste the expansion into a command.
-- Never `git add .env`.
-- The compose passes it into `gbrain-ops` as `OPENAI_API_KEY: ${OPENAI_API_KEY:-}`; gbrain reads it ambiently, so it never reaches a command line.
-- Two `sk-` strings DO appear in git history — `sk-contract-test-not-a-real-key` and `sk-should-not-appear`. Both are deliberate fixtures in the plans' own test code. Not leaks.
+- Never print, echo, or `cat` its value; never paste the expansion into a command; never `git add .env`.
+- `sk-`-shaped strings in the repo are deliberate fakes (`sk-contract-test-not-a-real-key`, `sk-should-not-appear`, `sk-alpha`/`sk-beta` in fileplane tests). Not leaks.
+- One open question for Task 4, unanswered: `OpsResponse` returns `stdout` **raw**. `redactArgv` scrubs secret flags from `argv`, but nothing scrubs stdout — and `config.show`/`config.get` are both allowlisted. **If either prints a provider key, it crosses the S2 boundary unredacted.** I could not test it (stack was down). Carry it into Task 4 as a named risk.
 
----
-
-## The most important lesson from Slice 0
-
-**Executing the plan found ~20 defects in the plan.** Not typos — factual errors about how gbrain actually behaves. A sample:
-
-- `gbrain --version` prints `gbrain 0.50.0.0`, not a bare version, which broke the pin gate and three call sites.
-- `gbrain config list` doesn't exist; it's `config show`.
-- `schema list` silently *ignores* `--json` and always prints prose.
-- `sources add` doesn't support `--json` at all.
-- The pinned image has no `curl` or `wget`.
-- `doctor --json` has no `blockers` key in this version — the upgrade gate I designed around it was checking a field that isn't there.
-
-**Every one was fixed in both the repo and the plan file**, so a fresh run from scratch hits none of them. Expect Slice 1 to behave the same way. When reality contradicts the plan: diagnose against the read-only gbrain source, fix the *expectation*, patch the plan file with a short blockquote citing evidence, and report it. Do not bend reality to match the document.
+I did check one adjacent worry and found nothing: Bun's Postgres errors do **not** echo the password (bad host/port → "Connection closed"; bad auth → "password authentication failed for user"), and every `buildArgv` throw carries param *names*, never values. So Task 4's catch-all returning `e.message` is not a confirmed leak. Recorded so nobody redoes it.
 
 ---
 
-## Known open gaps for Slice 1
+## Known open items
 
-**Resolve this one early — it's a guaranteed failure as written:**
-
-> Slice 1 Task 9's `/space` handler calls `sources.add` against a path that was never `git init`'d or committed. V12 proves that fails. It needs a file-plane primitive to seed and commit the repo first. Flagged in the Slice 1 plan, deliberately not silently patched.
-
-Also carried forward into Slice 1's plan already:
-
-- `/api/wizard/schema-packs` must parse prose, not JSON (`schema list` ignores `--json`).
-- Provider-key routing needs to be deliberate — the compose passthrough added in Slice 0 was a Slice-0 expedient; Slice 1 moves keys to the file plane under an advisory lock.
-
-**One caveat on Slice 0's own result:** the wrong-pin tripwire does go red, but the failure fires in `composeUp()`'s Docker build rather than through `version.contract.test.ts`'s runtime assertion, which never gets to run. That assertion only becomes the operative gate when a stale image is already tagged with the wrong pin — a case not yet exercised. Worth closing when convenient.
+- **Task 9's `/space` git-seeding gap** — ruled (see #2 above) but **not implemented**. Still the guaranteed failure if written as drafted.
+- **Task 4's raw-stdout question** — above.
+- **Deferred minors** (ledger has both, final review should triage): `compose/initdb/01-extensions.sh` also installs extensions into the literal `postgres` maintenance DB under the production compose (idempotent, harmless); and no `package.json` script wires `test/integration`, though Task 15 invokes it directly.
+- **Slice 0's wrong-pin nuance** still unclosed: the tripwire fires in `composeUp()`'s Docker build rather than through `version.contract.test.ts`'s runtime assertion.
 
 ---
 
 ## What not to do
 
 - Don't fork gbrain, import past its `exports` map, read its tables directly, or screen-scrape human-readable CLI output.
-- Don't run `gbrain autopilot --install` in a container — `lint:forbidden` will catch it.
-- Don't invoke `gbrain` through a shell string. Argv arrays only; the linter enforces this.
-- Don't weaken a test or gate to make it pass. If it can't pass legitimately, that's a finding.
-- Don't skip the `docs/` exclusion in `lint-forbidden` — planning documents necessarily quote the patterns they forbid.
+- Don't run `gbrain autopilot --install` in a container — `lint:forbidden` catches it.
+- Don't invoke `gbrain` through a shell string. Argv arrays only.
+- **Don't weaken a test or gate to make it pass.** If it can't pass legitimately, that's a finding.
+- Don't add a gate that can never pass on the developer's platform — a permanently-red gate trains people to ignore red.
 - Don't trust an agent's report over the repo. Check `git log`, run the tests.
 
 ---
@@ -141,8 +176,12 @@ Also carried forward into Slice 1's plan already:
 |---|---|
 | Project root | `C:\Users\juanp\Desktop\Company Brain` |
 | gbrain reference (read-only) | `C:\Users\juanp\Desktop\gbrain` |
+| Branch | `slice-1-deploy-one-brain` (base `fbd0e95`) |
+| Working ledger (git-ignored) | `.superpowers/sdd/2026-09-14-slice-1-deploy-one-brain/progress.md` |
+| Slice 1 plan (patched) | `docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md` |
+| Progress doc | `docs/superpowers/plans/PROGRESS.md` |
+| Slice 0 risk register | `docs/slice-0-findings.md` |
 | Original spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
 | gbrain pin | `v0.50.0.0` (exact, never a moving tag) |
 | Stack | `bun run stack:up` / `stack:down` |
-| Contract artifacts | `contracts/v0.50.0.0/{operations.json,capability.json}` |
-| Slice 1 entry gate | **MET** |
+| Scratch PG for fileplane tests | `docker run -d --name bs-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret -e POSTGRES_DB=control -p 5432:5432 pgvector/pgvector:pg16` |
