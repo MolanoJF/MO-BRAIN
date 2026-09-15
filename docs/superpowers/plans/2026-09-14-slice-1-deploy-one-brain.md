@@ -428,7 +428,7 @@ const caddyfile = readFileSync('compose/Caddyfile', 'utf8');
 // Paths gbrain-serve owns. /health and /metrics are LIVE COLLISIONS with a
 // naive console mount — the console uses /api/health instead.
 const GBRAIN_PATHS = [
-  '/mcp', '/authorize', '/token', '/register', '/revoke',
+  '/mcp', '/mcp/*', '/authorize', '/authorize/*', '/token', '/register', '/revoke',
   '/.well-known/*', '/ingest', '/webhooks/*', '/health', '/metrics',
 ];
 
@@ -447,7 +447,10 @@ describe('Caddyfile routing contract', () => {
 
   test('/admin is explicitly refused rather than falling through to the SPA', () => {
     expect(caddyfile).toMatch(/@admin_denied/);
-    expect(caddyfile).toMatch(/respond @admin_denied 404/);
+    // Must match the `handle`-wrapped form. A bare `respond @admin_denied 404`
+    // compiles BEHIND the catch-all and is unreachable — see the Step 3 note.
+    expect(caddyfile).toMatch(/handle @admin_denied\s*\{\s*
+\s*respond 404/);
   });
 
   test('/api/* routes to control-plane', () => {
@@ -460,10 +463,29 @@ describe('Caddyfile routing contract', () => {
 
   test('security headers are set on every response', () => {
     expect(caddyfile).toMatch(/Strict-Transport-Security/);
-    expect(caddyfile).toMatch(/X-Content-Type-Options\s+nosniff/);
+    expect(caddyfile).toMatch(/X-Content-Type-Options\s+"nosniff"/);
   });
 });
 ```
+
+> **Corrected 2026-09-15 — three defects in this test block, all found by running it.**
+> 1. The `/admin` assertion matched the literal `respond @admin_denied 404`, which **cannot**
+>    appear in the corrected `handle`-wrapped Caddyfile of Step 3. It now pins the corrected
+>    shape instead.
+> 2. `X-Content-Type-Options\s+nosniff` never matches: the Caddyfile writes the value quoted,
+>    so there is a `"` between the whitespace and `nosniff`.
+> 3. `GBRAIN_PATHS` omitted `/mcp/*` and `/authorize/*`, which the Caddyfile's own `@gbrain`
+>    matcher does list. Not a false pass (the `/mcp` substring also matches inside `/mcp/*`),
+>    but a regression dropping the wildcards — breaking gbrain's OAuth subpaths — would have
+>    been caught by nothing here.
+
+> **These text assertions are necessary but NOT sufficient — none of them checks route
+> POSITION.** A regression that moves the `handle @admin_denied` block *after* the catch-all
+> `handle {}` passes every assertion above while re-opening the S1 hole. The compiled-output
+> tests required by Step 3's note are the only proof of ordering, so they must not be able to
+> disappear quietly: gate them on Docker if you must, but add an **always-running** test that
+> FAILS when the compiled suite would be skipped, unless an explicit opt-out env var is set.
+> A silently skipped gate is indistinguishable from a passing one.
 
 - [ ] **Step 2: Run it to verify it fails**
 
