@@ -12,6 +12,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY src ./src
+COPY scripts ./scripts
 COPY contracts ./contracts
 
 RUN test -s "contracts/v${GBRAIN_VERSION}/operations.json" \
