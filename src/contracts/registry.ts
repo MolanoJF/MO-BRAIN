@@ -220,4 +220,82 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     privilege: 'brain-db',
     okExitCodes: [0],
   },
+
+  /**
+   * V6: exits non-zero on blockers (1, and 2 on the unreachable-target path).
+   * okExitCodes is [0] deliberately — a blocker IS a failure for our gate.
+   */
+  doctor: {
+    id: 'doctor',
+    argv: ['doctor'],
+    params: [
+      { name: 'remediate', flag: '--remediate', kind: 'flag' },
+      { name: 'yes', flag: '--yes', kind: 'flag' },
+      { name: 'targetScore', flag: '--target-score', kind: 'value' },
+      { name: 'maxUsd', flag: '--max-usd', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * V5 exit codes (start): 0 clean shutdown (SIGTERM/SIGINT, worker drained),
+   * 1 max crashes exceeded, 2 another supervisor holds the PID lock,
+   * 3 PID file unwritable. `stop` waits up to 40s for graceful drain.
+   *
+   * Confirmed against the reference checkout (src/commands/jobs.ts, the
+   * 'supervisor' case): with --detach, the PARENT forks a fully detached,
+   * unref'd child (spawnDetachedSupervisor) and exits 0 immediately, BEFORE
+   * a MinionSupervisor is constructed — so exit 2 (LOCK_HELD) is never
+   * observable from a --detach invocation's own exit code, only from a
+   * FOREGROUND second start. See Work Item H in the test file.
+   */
+  'jobs.supervisor': {
+    id: 'jobs.supervisor',
+    argv: ['jobs', 'supervisor', 'start'],
+    params: [
+      { name: 'concurrency', flag: '--concurrency', kind: 'value' },
+      { name: 'detach', flag: '--detach', kind: 'flag' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  'jobs.supervisorStatus': {
+    id: 'jobs.supervisorStatus',
+    argv: ['jobs', 'supervisor', 'status'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    // 0 = running, 1 = not running. Both are valid answers, not failures.
+    okExitCodes: [0, 1],
+  },
+
+  'jobs.supervisorStop': {
+    id: 'jobs.supervisorStop',
+    argv: ['jobs', 'supervisor', 'stop'],
+    params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  applyMigrations: {
+    id: 'applyMigrations',
+    argv: ['apply-migrations'],
+    params: [
+      { name: 'yes', flag: '--yes', kind: 'flag' },
+      { name: 'nonInteractive', flag: '--non-interactive', kind: 'flag' },
+    ],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
 };

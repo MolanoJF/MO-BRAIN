@@ -1725,6 +1725,35 @@ These two exit-code contracts are what make the upgrade gate and quiesce-before-
 **Interfaces:**
 - Produces: `OPERATIONS.doctor`, `OPERATIONS['jobs.supervisor']`, `OPERATIONS['jobs.supervisorStatus']`, `OPERATIONS['jobs.supervisorStop']`, `OPERATIONS['applyMigrations']`.
 
+> **Plan defect found during execution (Work Item H, 2026-09-14):** as
+> originally written, the "second supervisor" test issued a SECOND `gbrain
+> jobs supervisor start --detach --json` and expected exit 2. Confirmed
+> against the reference checkout that this can never observe LOCK_HELD:
+> with `--detach`, the invoking process forks a fully detached, unref'd
+> child (`spawnDetachedSupervisor`, `src/core/minions/detached-stderr.ts`)
+> and calls `process.exit(0)` immediately after printing the start payload
+> (`src/commands/jobs.ts`, the `case 'supervisor'` dispatcher's `if (detach)
+> { ...; process.exit(0); }` branch) — this happens BEFORE a
+> `MinionSupervisor` is even constructed. `acquirePidLock()` /
+> `tryAcquireDbLock()`, where exit 2 (`ExitCodes.LOCK_HELD`) is decided
+> (`src/core/minions/supervisor.ts:686-693,768-774`), run only inside the
+> detached child, whose exit code the parent never waits for or observes.
+> Manually confirmed by direct invocation: issuing a second `--detach` start
+> while the first is running exits 0 every time (three for three), and
+> `jobs supervisor status --json` immediately afterward still shows only the
+> original PID — the second child failed silently in the background,
+> invisible to the caller. The lock collision IS synchronously observable
+> from a FOREGROUND second start (no `--detach`): `acquirePidLock()` finds
+> the first supervisor's live PID already in the pidfile and calls
+> `process.exit(ExitCodes.LOCK_HELD)` immediately, without blocking
+> (confirmed: `Supervisor already running (PID: N). Exiting.`, exit 2, in
+> under a second — safe to run with a short timeout). Fixed by dropping
+> `--detach` from the second call (shown below); everything else in this
+> task matched observed reality on the first try (doctor's `[0,1,2]` exit
+> range, the `--detach` start + immediate `status` sequence — confirmed
+> race-free across three repeated trials — the 40s/60s stop budget, and
+> apply-migrations idempotency).
+
 - [ ] **Step 1: Write the failing contract test**
 
 `test/contract/lifecycle.contract.test.ts`:
@@ -1732,7 +1761,7 @@ These two exit-code contracts are what make the upgrade gate and quiesce-before-
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
-import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
+import { composeUp, composeDown, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
 
 beforeAll(async () => {
   await composeUp();
@@ -1773,12 +1802,15 @@ test('jobs supervisor starts detached and reports running', async () => {
   expect(status.exitCode).toBe(0); // 0 if running, 1 if not
 }, 180_000);
 
+// Work Item H: a FOREGROUND second start, not another --detach — see the
+// defect note above. --detach always exits 0 from the caller's own
+// perspective; only a foreground attempt observes LOCK_HELD synchronously.
 test('a second supervisor exits 2 because the first holds the PID lock', async () => {
-  const second = await composeExec('gbrain-ops', [
-    'gbrain', 'jobs', 'supervisor', 'start', '--detach', '--json',
-  ], { timeoutMs: 60_000 });
+  const second = await execOperation(OPERATIONS['jobs.supervisor']!, {
+    concurrency: '2',
+  }, { timeoutMs: 30_000 });
   expect(second.exitCode).toBe(2);
-}, 90_000);
+}, 60_000);
 
 test('jobs supervisor stop drains cleanly within the 40s window', async () => {
   const t0 = Date.now();
