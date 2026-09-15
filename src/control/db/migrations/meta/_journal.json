@@ -15,6 +15,13 @@
       "when": 1789491644432,
       "tag": "0001_concerned_skaar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789504880786,
+      "tag": "0002_graceful_sauron",
+      "breakpoints": true
     }
   ]
 }

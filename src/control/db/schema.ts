@@ -24,6 +24,8 @@ export const sessions = pgTable('sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   // Better Auth 1.7.5 — required on createSession (Ruling 26).
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // Better Auth organization plugin — active org for the session.
+  activeOrganizationId: text('active_organization_id'),
 });
 
 export const accounts = pgTable('accounts', {
@@ -152,3 +154,46 @@ export const auditLog = pgTable('audit_log', {
   after: jsonb('after'),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('audit_log_at_idx').on(t.at)]);
+
+/** S4: a Connection is the unit of access. Exactly one write Space, N read Spaces. */
+export const connections = pgTable('connections', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  membershipId: text('membership_id').notNull().references(() => memberships.id, { onDelete: 'cascade' }),
+  // Singular and NOT NULL. Two write Spaces means two Connections — structurally,
+  // not by convention. This column is the enforcement of S4.
+  writeSpaceId: text('write_space_id').notNull().references(() => spaces.id),
+  readSpaceIds: jsonb('read_space_ids').notNull().default(sql`'[]'::jsonb`),
+  harness: text('harness').notNull(),
+  // A4: deterministic bs-<memberId8>-<spaceSlug>. Upstream refuses duplicate client
+  // names, so mirror that here and fail fast before the CLI does.
+  clientName: text('client_name').notNull(),
+  // Null until provisioned. A3 provisions at claim time, so an unclaimed invite
+  // never corresponds to a live OAuth client.
+  gbrainClientId: text('gbrain_client_id'),
+  profile: text('profile').notNull(),
+  tokenTtl: integer('token_ttl').notNull(),
+  budgetUsdPerDay: text('budget_usd_per_day'),
+  boundSlugPrefixes: jsonb('bound_slug_prefixes'),
+  state: text('state').notNull().default('pending'),
+  provisionedAt: timestamp('provisioned_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('connections_org_client_name_uq').on(t.organizationId, t.clientName),
+  index('connections_membership_idx').on(t.membershipId),
+  check('connection_state_valid', sql`${t.state} in ('pending','active','revoked')`),
+]);
+
+/** A3: one link per member. Hash only — the token itself is never stored. */
+export const claimLinks = pgTable('claim_links', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  membershipId: text('membership_id').notNull().references(() => memberships.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('claim_links_membership_idx').on(t.membershipId)]);

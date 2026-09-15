@@ -70,6 +70,7 @@ describe('control schema', () => {
   test.skipIf(!postgresAvailable).each([
     'organizations', 'memberships', 'brains', 'spaces', 'secrets',
     'capability_snapshots', 'playbook_ledger', 'audit_log',
+    'connections', 'claim_links',
   ])('%s exists', async (t) => {
     const [row] = await sql`select to_regclass(${'public.' + t}) as r`;
     expect(row.r).not.toBeNull();
@@ -130,6 +131,7 @@ describe('control schema', () => {
   // Ruling 26: Better Auth 1.7.5 columns added in 0001 — dropping them is red.
   test.skipIf(!postgresAvailable)('Better Auth 1.7.5 columns exist on sessions/accounts/verifications', async () => {
     expect(await cols('sessions')).toContain('updated_at');
+    expect(await cols('sessions')).toContain('active_organization_id');
     const accounts = await cols('accounts');
     expect(accounts).toContain('updated_at');
     expect(accounts).toContain('id_token');
@@ -139,5 +141,62 @@ describe('control schema', () => {
     const verifications = await cols('verifications');
     expect(verifications).toContain('created_at');
     expect(verifications).toContain('updated_at');
+  });
+
+  // S4: Connection state is structural — pending|active|revoked only.
+  test.skipIf(!postgresAvailable)('connection_state_valid CHECK rejects an unknown state', async () => {
+    // Parents first so FK does not fire before CHECK (same pattern as lifecycle).
+    await sql`delete from connections where id = 'c-bad'`;
+    await sql`delete from spaces where id = 's-conn'`;
+    await sql`delete from memberships where id = 'm-conn'`;
+    await sql`delete from organizations where id = 'o-conn'`;
+    await sql`delete from users where id = 'u-conn'`;
+    await sql`
+      insert into users (id, email, email_verified)
+      values ('u-conn', 'conn@example.com', false)
+    `;
+    await sql`
+      insert into organizations (id, name, slug)
+      values ('o-conn', 'Conn', 'conn')
+    `;
+    await sql`
+      insert into memberships (id, user_id, organization_id, role)
+      values ('m-conn', 'u-conn', 'o-conn', 'member')
+    `;
+    await sql`
+      insert into spaces (id, organization_id, source_id, name, kind)
+      values ('s-conn', 'o-conn', 'src-conn', 'Conn Space', 'local-git')
+    `;
+    let err: any;
+    try {
+      await sql`
+        insert into connections (
+          id, organization_id, membership_id, write_space_id,
+          harness, client_name, profile, token_ttl, state
+        ) values (
+          'c-bad', 'o-conn', 'm-conn', 's-conn',
+          'claude-code', 'bs-uconnxxx-conn', 'default', 3600, 'not-a-state'
+        )
+      `;
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(String(err.message)).toContain('connection_state_valid');
+    expect(err.errno).toBe('23514');
+  });
+
+  // A3: claim_links stores hash only — the token itself is never stored.
+  test.skipIf(!postgresAvailable)('claim_links has token_hash and no token column', async () => {
+    const c = await cols('claim_links');
+    expect(c).toContain('token_hash');
+    expect(c).not.toContain('token');
+  });
+
+  test.skipIf(!postgresAvailable)('connections is unique on (organization_id, client_name)', async () => {
+    const [row] = await sql`
+      select count(*)::int as n from pg_indexes
+      where tablename = 'connections' and indexname = 'connections_org_client_name_uq'`;
+    expect(row.n).toBeGreaterThan(0);
   });
 });
