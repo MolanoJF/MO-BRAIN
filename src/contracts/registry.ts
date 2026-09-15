@@ -298,4 +298,115 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     privilege: 'brain-db',
     okExitCodes: [0],
   },
+
+  // V14: the public CLI tool-catalog contract. Data-plane half of the snapshot.
+  toolsJson: {
+    id: 'toolsJson',
+    argv: ['--tools-json'],
+    params: [],
+    supportsJson: false, // the command IS the json
+    supportsDryRun: false,
+    privilege: 'read-only',
+    okExitCodes: [0],
+  },
+
+  // Plan defect (Work Item K): `schema list`'s handler ignores --json
+  // entirely (runList(_args) in src/commands/schema.ts never reads its
+  // argument) and always prints human prose. Confirmed empirically.
+  // supportsJson is false, not true, so a caller can't silently ask for a
+  // structured response this command will never give it.
+  'schema.list': {
+    id: 'schema.list',
+    argv: ['schema', 'list'],
+    params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  'schema.lint': {
+    id: 'schema.lint',
+    argv: ['schema', 'lint'],
+    params: [
+      { name: 'withDb', flag: '--with-db', kind: 'flag' },
+      { name: 'pack', flag: '--pack', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  'schema.sync': {
+    id: 'schema.sync',
+    argv: ['schema', 'sync'],
+    params: [
+      { name: 'apply', flag: '--apply', kind: 'flag' },
+      { name: 'pack', flag: '--pack', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: true,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  'sources.list': {
+    id: 'sources.list',
+    argv: ['sources', 'list'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  'sources.status': {
+    id: 'sources.status',
+    argv: ['sources', 'status'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  sync: {
+    id: 'sync',
+    argv: ['sync'],
+    params: [
+      { name: 'all', flag: '--all', kind: 'flag' },
+      { name: 'source', flag: '--source', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  embed: {
+    id: 'embed',
+    argv: ['embed'],
+    params: [{ name: 'stale', flag: '--stale', kind: 'flag' }],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  // Slice 1 runs this as the long-lived gbrain-serve entrypoint, not via RPC.
+  serve: {
+    id: 'serve',
+    argv: ['serve'],
+    params: [
+      { name: 'http', flag: '--http', kind: 'flag' },
+      { name: 'bind', flag: '--bind', kind: 'value' },
+      { name: 'port', flag: '--port', kind: 'value' },
+      { name: 'publicUrl', flag: '--public-url', kind: 'value' },
+    ],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
 };

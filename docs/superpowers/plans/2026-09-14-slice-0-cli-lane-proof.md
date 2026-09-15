@@ -1941,6 +1941,66 @@ These three are the **data-plane** half of G4: what the snapshot captures, and w
 **Interfaces:**
 - Produces: `OPERATIONS.toolsJson`, `OPERATIONS['schema.list']`, `OPERATIONS['sources.list']`, `OPERATIONS.serve`.
 
+> **Plan defect found during execution (Work Item I, 2026-09-14):** the
+> original probe loop shelled out to `curl`. Confirmed empirically (`which
+> curl`, `which wget`) that the pinned `gbrain-ops` image
+> (`docker/gbrain-base.Dockerfile`, Task 1) installs only `git
+> ca-certificates tini postgresql-client` — no HTTP client binary at all.
+> Rather than add a dependency to the already-built, already-tested Task 1
+> base image and force a rebuild for a Task 10 probe, the fix uses `bun`'s
+> built-in `fetch()` instead (`bun` is already on PATH in this image, so
+> this needs no image change): `bun -e 'const r = await fetch(...); if (r
+> && r.ok) console.log(await r.text());'`, invoked as a direct argv element
+> (no shell layer) through the existing `composeExec` helper.
+
+> **Plan defect found during execution (Work Item J, 2026-09-14):** the
+> original test grouped `adapters` by `.connection` and asserted "four
+> connection classes" — but its own assertion array actually listed FIVE
+> (`claude-json`, `codex-toml`, `manual`, `opencode-json`, `thin-cli`), an
+> internal inconsistency in the plan text. More fundamentally, confirmed
+> against the reference checkout that `connection` is not on the public
+> contract at all: both `.well-known/gbrain`'s `adapters` and `gbrain mcp
+> adapters --json` are built from `publicHarnessMetadata()`
+> (`src/core/harness/registry.ts:63-65`), which destructures only `{ id,
+> label, modes, guide→documentation, evidence }` off each
+> `HARNESS_ADAPTER` — `connection` (and `aliases`, `renewable`,
+> `legacyRegister`) is deliberately internal-only. Confirmed empirically:
+> every adapter's `.connection` over the live endpoint is `undefined`.
+> Per G3 we cannot read `HARNESS_ADAPTERS` directly to get the real value.
+> This is a **slice-defining finding**: Slice 1's harness picker cannot
+> group adapters by connection mechanism from live `.well-known` data as
+> the roadmap assumed — that would require either a hardcoded table on our
+> side (defeating "renders FROM THIS, never hard-coded") or an upstream
+> change exposing the field. Fixed by asserting the adapter **ID set**
+> instead (13 ids, confirmed exact against both the reference source count
+> and the live payload) — still a real, observable drift tripwire, just not
+> the connection-class grouping the plan wanted.
+
+> **Plan defect found during execution (Work Item K, 2026-09-14):** `schema
+> list --json` does not emit JSON. `runList`'s own parameter is named
+> `_args` (`src/commands/schema.ts:204`) — the leading underscore marks it
+> unused — and the function unconditionally prints human prose ("Bundled
+> packs:" plus one bundled-pack name per line) regardless of any flag.
+> Confirmed empirically. Fixed `schema.list`'s registry entry to
+> `supportsJson: false` and asserted the stable prose instead, the same
+> non-JSON-command shape Task 6 hit with `config show` (Work Item C).
+
+> **Plan defect found during execution (Work Item L, 2026-09-14):** the
+> original `finally { serve.kill(); }` does not actually stop the remote
+> `gbrain serve` process. `serve` is a LOCAL `Bun.spawn` of `docker compose
+> exec -T ... gbrain serve`; `-T` (no TTY, required for headless exec per
+> G2) means docker never ties the exec session's lifetime to the client's.
+> Confirmed empirically: after killing the local client, scanning `/proc`
+> inside the container still found the real `gbrain serve` process (and a
+> worker fork) alive. In this slice the leak is cosmetic — `afterAll` tears
+> down the whole container (`compose down -v`) moments later — but it is a
+> genuine stray process for the time in between, and would be a real
+> port-3131 leak against any longer-lived container. Fixed by also reaping
+> the remote process directly: a `killRemoteServe()` helper scans `/proc`
+> inside the container for any PID (excluding its own — a self-match guard,
+> since its own argv literally contains the strings "gbrain" and "serve")
+> whose cmdline contains both, and sends it SIGTERM.
+
 - [ ] **Step 1: Write the failing contract test**
 
 `test/contract/discovery.contract.test.ts`:
@@ -1970,6 +2030,33 @@ test('--tools-json emits the tool catalog', async () => {
   expect(count).toBeGreaterThan(50);
 });
 
+// Work Item I: bun's fetch(), not curl — the pinned image has no HTTP
+// client binary. Invoked as a direct argv element; no shell layer needed.
+async function fetchWellKnown(): Promise<Record<string, unknown> | null> {
+  const probe = await composeExec('gbrain-ops', [
+    'bun', '-e',
+    'const r = await fetch("http://127.0.0.1:3131/.well-known/gbrain").catch(() => null); ' +
+    'if (r && r.ok) console.log(await r.text());',
+  ]);
+  const t = probe.stdout.trim();
+  return t.startsWith('{') ? JSON.parse(t) : null;
+}
+
+// Work Item L: `serve.kill()` alone only kills the LOCAL docker-exec client;
+// -T means docker never ties the exec session's lifetime to it. Reap the
+// remote process directly by /proc scan (excluding this scanner's own PID —
+// its own argv literally contains "gbrain" and "serve").
+async function killRemoteServe(): Promise<void> {
+  await composeExec('gbrain-ops', [
+    'bun', '-e',
+    "const fs=require('fs'); for (const pid of fs.readdirSync('/proc')) { " +
+    "if (!/^[0-9]+$/.test(pid) || Number(pid) === process.pid) continue; " +
+    "try { const cmd = fs.readFileSync('/proc/'+pid+'/cmdline','utf8'); " +
+    "if (cmd.indexOf('gbrain') >= 0 && cmd.indexOf('serve') >= 0) process.kill(Number(pid), 'SIGTERM'); " +
+    "} catch (e) {} }",
+  ]);
+}
+
 // V13: GET /.well-known/gbrain returns version, profiles and adapters. The
 // harness picker and profile list render FROM THIS, never hard-coded.
 test('.well-known/gbrain exposes live profiles and harness adapters', async () => {
@@ -1980,26 +2067,31 @@ test('.well-known/gbrain exposes live profiles and harness adapters', async () =
 
   try {
     // Poll rather than sleep blindly.
-    let body: any = null;
+    let body: Record<string, unknown> | null = null;
     for (let i = 0; i < 60; i++) {
-      const probe = await composeExec('gbrain-ops', [
-        'sh', '-c', 'curl -sf http://127.0.0.1:3131/.well-known/gbrain || true',
-      ]);
-      if (probe.stdout.trim().startsWith('{')) { body = JSON.parse(probe.stdout); break; }
+      body = await fetchWellKnown();
+      if (body) break;
       await Bun.sleep(1000);
     }
     expect(body).not.toBeNull();
-    expect(body.version).toBe(PIN);
-    expect(body.protocol).toBe('mcp');
-    expect(Array.isArray(body.adapters)).toBe(true);
-    // V10: 13 adapters at v0.50.0.0, in four connection classes.
-    expect(body.adapters.length).toBe(13);
-    const classes = new Set(body.adapters.map((a: any) => a.connection));
-    expect([...classes].sort()).toEqual(
-      ['claude-json', 'codex-toml', 'manual', 'opencode-json', 'thin-cli']);
-    expect(body.profiles).toBeDefined();
+    expect(body!.version).toBe(PIN);
+    expect(body!.protocol).toBe('mcp');
+    expect(Array.isArray(body!.adapters)).toBe(true);
+    const adapters = body!.adapters as Array<Record<string, unknown>>;
+    // V10: 13 adapters at v0.50.0.0.
+    expect(adapters.length).toBe(13);
+    // Work Item J: `.connection` is not on the public contract at all (see
+    // the defect note above) — assert the adapter ID set instead, which
+    // still catches the registry drift V10 exists to catch.
+    const ids = (adapters.map((a) => a.id) as string[]).sort();
+    expect(ids).toEqual([
+      'chatgpt', 'claude-code', 'claude-desktop', 'codex', 'cursor', 'generic',
+      'grok-bot', 'grok-build', 'muse', 'muse-code', 'openclaw', 'opencode', 'perplexity',
+    ]);
+    expect(body!.profiles).toBeDefined();
   } finally {
     serve.kill();
+    await killRemoteServe();
   }
 }, 180_000);
 
@@ -2011,11 +2103,14 @@ test('hermes is absent and generic is the manual path for it', async () => {
   expect(probe.stdout.toLowerCase()).not.toContain('hermes');
 });
 
-test('schema list --json enumerates bundled packs', async () => {
+// Work Item K: `schema list` ignores --json entirely (runList(_args) never
+// reads its argument, src/commands/schema.ts:204) and always prints prose.
+test('schema list enumerates bundled packs', async () => {
   const spec = OPERATIONS['schema.list']!;
-  const r = await execOperation(spec, {}, { json: true });
+  const r = await execOperation(spec, {});
   assertOk(spec, r);
-  expect(r.json).not.toBeNull();
+  expect(r.stdout).toContain('Bundled packs:');
+  expect(r.stdout).toContain('gbrain-base');
 });
 
 test('sources list --json is parseable', async () => {
@@ -2045,11 +2140,13 @@ Expected: FAIL — `OPERATIONS['schema.list'] is undefined`.
     okExitCodes: [0],
   },
 
+  // Work Item K: supportsJson is false, not true — `schema list` ignores
+  // --json and always prints prose. See the defect note above.
   'schema.list': {
     id: 'schema.list',
     argv: ['schema', 'list'],
     params: [],
-    supportsJson: true,
+    supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],
@@ -2147,6 +2244,8 @@ Run: `bun test test/contract/discovery.contract.test.ts`
 Expected: PASS — 5 tests.
 
 > **If the adapter count is not 13**, upstream changed the registry. Update the assertion to the observed count *and* record it in the findings doc — the harness picker renders from this payload, so a change is product-visible.
+>
+> **Confirmed 2026-09-14: exactly 13**, matching both the reference source (`HARNESS_ADAPTERS`, `src/core/harness/registry.ts`) and the live `.well-known/gbrain` payload. But see Work Item J above — the "four connection classes" half of this check was not just wrong on the count, it was checking a field (`connection`) that the public contract never exposes at all. Report this prominently: it means Slice 1's harness picker cannot group adapters by connection mechanism from live data as the roadmap assumed.
 
 - [ ] **Step 5: Commit**
 
