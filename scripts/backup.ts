@@ -20,6 +20,37 @@ const COMPOSE = [
   'docker', 'compose', '--project-directory', '.', '-f', 'compose/docker-compose.yml',
 ];
 
+/** Posted by the control-plane when docker compose is unavailable in-process (Ruling 31). */
+export const BACKUP_HOST_ONLY_ERROR =
+  'Backup is a host operation. Run scripts/backup.ts on the Docker host — ' +
+  'the control-plane container cannot invoke docker compose.';
+
+/**
+ * True when this process can exec `docker compose` (host CLI / install path).
+ * False inside the production control-plane image (no Docker CLI) — callers
+ * must fail closed with 503 rather than a raw spawn ENOENT 500.
+ */
+export async function dockerComposeUsable(): Promise<boolean> {
+  try {
+    // Pass env explicitly so a test (or caller) that narrows PATH is honoured —
+    // on Windows Bun.spawn otherwise keeps the process's original PATH.
+    // Do not load the project compose file — version alone proves the CLI.
+    const p = Bun.spawn(['docker', 'compose', 'version'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env },
+    });
+    const timer = setTimeout(() => p.kill(), 5_000);
+    try {
+      return (await p.exited) === 0;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return false;
+  }
+}
+
 async function sh(argv: string[], timeoutMs = 900_000): Promise<{ exitCode: number; stderr: string }> {
   const p = Bun.spawn(argv, { stdout: 'inherit', stderr: 'pipe' });
   const timer = setTimeout(() => p.kill(), timeoutMs);

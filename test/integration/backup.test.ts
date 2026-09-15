@@ -1,9 +1,11 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
-import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import app from '../../src/control/app.ts';
-import { runBackup } from '../../scripts/backup.ts';
+import { runBackup, BACKUP_HOST_ONLY_ERROR } from '../../scripts/backup.ts';
+import { runMigrations, getDb, schema, closeDb, pinDb } from '../../src/control/db/client.ts';
+import { bootstrapFirstAdmin } from '../../src/control/bootstrap.ts';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
 process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
@@ -47,12 +49,45 @@ async function probeBackupStack(): Promise<boolean> {
 
 const stackAvailable = await probeBackupStack();
 
+// Pin at module load so a sibling file cannot close the pool before our beforeAll.
+pinDb();
+
 let out: string;
+let cookie = '';
+let emptyPathDir: string;
+
 beforeAll(async () => {
   out = await mkdtemp(join(tmpdir(), 'bs-backup-'));
-}, 30_000);
+  emptyPathDir = await mkdtemp(join(tmpdir(), 'bs-no-docker-'));
+  // Empty dir on PATH so `docker` resolves to nothing (Ruling 31).
+  await mkdir(emptyPathDir, { recursive: true });
+
+  await runMigrations();
+  for (const t of [
+    schema.spaces, schema.secrets, schema.auditLog,
+    schema.sessions, schema.accounts, schema.verifications,
+    schema.memberships, schema.brains, schema.organizations, schema.users,
+  ]) {
+    await getDb().delete(t);
+  }
+  await bootstrapFirstAdmin('backup-admin@example.test', 'a-long-enough-password', 'BackupOrg');
+
+  const res = await app.request('/api/auth/sign-in/email', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: 'backup-admin@example.test',
+      password: 'a-long-enough-password',
+    }),
+  });
+  cookie = res.headers.get('set-cookie') ?? '';
+  expect(cookie).toBeTruthy();
+}, 90_000);
+
 afterAll(async () => {
   if (out) await rm(out, { recursive: true, force: true });
+  if (emptyPathDir) await rm(emptyPathDir, { recursive: true, force: true });
+  await closeDb();
 });
 
 describe('backup routes (no docker)', () => {
@@ -70,6 +105,30 @@ describe('backup routes (no docker)', () => {
     expect(text).not.toMatch(/<!DOCTYPE html>/i);
     expect(text).not.toMatch(/<html/i);
   });
+
+  // Ruling 31: control-plane without docker compose → 503 host-operation, not ENOENT 500.
+  test('POST /api/backup returns 503 when docker compose is unavailable', async () => {
+    const savedPath = process.env.PATH;
+    const savedPathWin = process.env.Path;
+    process.env.PATH = emptyPathDir;
+    process.env.Path = emptyPathDir;
+    try {
+      const res = await app.request('/api/backup', {
+        method: 'POST',
+        headers: { cookie },
+      });
+      expect(res.status).toBe(503);
+      const body = await res.json() as { error?: string };
+      expect(body.error).toBe(BACKUP_HOST_ONLY_ERROR);
+      expect(body.error).toMatch(/scripts\/backup\.ts/);
+      expect(body.error).toMatch(/host/i);
+    } finally {
+      if (savedPath !== undefined) process.env.PATH = savedPath;
+      else delete process.env.PATH;
+      if (savedPathWin !== undefined) process.env.Path = savedPathWin;
+      else delete process.env.Path;
+    }
+  }, 15_000);
 });
 
 describe('backup', () => {
