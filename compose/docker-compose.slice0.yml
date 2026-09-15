@@ -34,6 +34,13 @@ services:
       GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:-change-me-in-a-real-deployment}@postgres:5432/${GBRAIN_DB:-gbrain}
       GBRAIN_HOME: /srv/gbrain-home
       GBRAIN_SELF_UPGRADE_MODE: "off"
+      # Headless `gbrain init` must pick an embedding provider non-interactively,
+      # which requires a real provider credential to be present in the container.
+      # Sourced from the host env / .env, never committed. The ${VAR:-} form
+      # keeps the stack startable even when the key is absent (e.g. CI without
+      # a provider secret). Slice 1 moves provider keys to the file plane under
+      # an advisory lock (V11) — this passthrough is a Slice-0-only shortcut.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - gbrain-home:/srv/gbrain-home
       - brain-repos:/srv/brain-repos

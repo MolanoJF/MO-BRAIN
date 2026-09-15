@@ -1,5 +1,5 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
-import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+import { composeUp, composeDown, composeExec, BRAIN_DB_URL } from '../helpers/stack.ts';
 import { parseGbrainVersion } from '../../src/contracts/capability.ts';
 
 const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
@@ -15,7 +15,7 @@ test('the ops container runs the pinned gbrain version', async () => {
 
 test('postgres has vector, pg_trgm and pgcrypto', async () => {
   const r = await composeExec('gbrain-ops', [
-    'psql', process.env.PGURL_FOR_TEST ?? 'postgres://gbrain:change-me-in-a-real-deployment@postgres:5432/gbrain',
+    'psql', BRAIN_DB_URL,
     '-tAc', "select extname from pg_extension order by extname",
   ]);
   expect(r.exitCode).toBe(0);

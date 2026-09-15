@@ -346,6 +346,13 @@ services:
       GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:-change-me-in-a-real-deployment}@postgres:5432/${GBRAIN_DB:-gbrain}
       GBRAIN_HOME: /srv/gbrain-home
       GBRAIN_SELF_UPGRADE_MODE: "off"
+      # Headless `gbrain init` must pick an embedding provider non-interactively,
+      # which requires a real provider credential to be present in the container.
+      # Sourced from the host env / .env, never committed. The ${VAR:-} form
+      # keeps the stack startable even when the key is absent (e.g. CI without
+      # a provider secret). Slice 1 moves provider keys to the file plane under
+      # an advisory lock (V11) — this passthrough is a Slice-0-only shortcut.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - gbrain-home:/srv/gbrain-home
       - brain-repos:/srv/brain-repos
@@ -366,12 +373,14 @@ volumes:
   brain-repos:
 ```
 
+> **Plan defect found during execution (Work Item A, 2026-09-14):** as originally written, `gbrain-ops` received only `GBRAIN_DATABASE_URL`, `GBRAIN_HOME` and `GBRAIN_SELF_UPGRADE_MODE`. Task 5's headless `gbrain init --non-interactive` must resolve an embedding provider without a prompt, which requires a real provider credential (e.g. `OPENAI_API_KEY`) to be visible inside the container — the compose file as written could never make `init` succeed. Fixed by adding an `OPENAI_API_KEY: ${OPENAI_API_KEY:-}` passthrough to `gbrain-ops` (shown above), sourced from the host env/`.env` and defaulted to empty so the stack still starts without it. Slice 1 moves provider keys to the file plane under an advisory lock (V11); this passthrough is a Slice-0-only shortcut to prove the CLI contract.
+
 - [ ] **Step 3: Write the failing stack test**
 
 `test/contract/stack.contract.test.ts`:
 ```ts
 import { test, expect, beforeAll, afterAll } from 'bun:test';
-import { composeUp, composeDown, composeExec } from '../../src/docker/host.ts';
+import { composeUp, composeDown, composeExec, BRAIN_DB_URL } from '../helpers/stack.ts';
 import { parseGbrainVersion } from '../../src/contracts/capability.ts';
 
 const PIN = process.env.GBRAIN_VERSION ?? '0.50.0.0';
@@ -387,7 +396,7 @@ test('the ops container runs the pinned gbrain version', async () => {
 
 test('postgres has vector, pg_trgm and pgcrypto', async () => {
   const r = await composeExec('gbrain-ops', [
-    'psql', process.env.PGURL_FOR_TEST ?? 'postgres://gbrain:change-me-in-a-real-deployment@postgres:5432/gbrain',
+    'psql', BRAIN_DB_URL,
     '-tAc', "select extname from pg_extension order by extname",
   ]);
   expect(r.exitCode).toBe(0);
@@ -403,6 +412,8 @@ test('GBRAIN_HOME is writable in the ops container', async () => {
   expect(r.stdout.trim()).toBe('ok');
 });
 ```
+
+> **Plan defect found during execution (Work Item B, 2026-09-14):** as originally written, the second test built its own Postgres URL with a hardcoded literal fallback (`process.env.PGURL_FOR_TEST ?? 'postgres://gbrain:change-me-in-a-real-deployment@postgres:5432/gbrain'`) instead of deriving it from the same env-backed constant every other contract test uses. This duplicated the credential outside `test/helpers/stack.ts` and would silently drift out of sync — and fail on a confusing credential error — the moment a real deployment's `.env` sets a non-default `POSTGRES_PASSWORD` (exactly what `.env.example` tells an operator to do). Fixed by importing `BRAIN_DB_URL` from `test/helpers/stack.ts` (Task 4) and dropping the `PGURL_FOR_TEST` escape hatch and the hardcoded literal entirely (shown above). Note this creates a forward dependency on Task 4's `test/helpers/stack.ts`; harmless in practice since this test does not turn green until Task 4 lands anyway (Step 4 below).
 
 - [ ] **Step 4: Run it and watch it fail on the missing helper**
 
