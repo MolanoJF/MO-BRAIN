@@ -241,14 +241,26 @@ export async function runTutorial(): Promise<TutorialReport> {
       // member's OWN federated-read grant — not gbrain-ops's local view.
       const probe = await step(`search:${m.id}`, 'search', { query: PROBE_QUERY }, { json: true, env });
       const results = Array.isArray(probe.json) ? (probe.json as Array<Record<string, unknown>>) : [];
-      const leaked = results
+      const seenSourceIds = results
         .map((r) => (r.source_id ?? r.sourceId) as string | undefined)
-        .filter((sid): sid is string => typeof sid === 'string' && sid.length > 0 && !readSet.has(sid));
-      const scopedOk = leaked.length === 0;
+        .filter((sid): sid is string => typeof sid === 'string' && sid.length > 0);
+      const leaked = seenSourceIds.filter((sid) => !readSet.has(sid));
+      // Absence-of-leak alone would trivially "pass" if scoping were broken
+      // in the OTHER direction (blocks everything, returns nothing for
+      // anyone) — a false sense of security from an empty result set. Since
+      // PROBE_QUERY is crafted to match the 'internal' source's seeded page
+      // by title, a member who CAN read 'internal' must actually see it:
+      // this is the positive half of the proof, not just the negative half.
+      const positiveProofOk = !readSet.has('internal') || seenSourceIds.includes('internal');
+      const scopedOk = leaked.length === 0 && positiveProofOk;
       steps.push({ id: `isolation:${m.id}`, ok: scopedOk, exitCode: 0, ms: 0 });
-      if (!scopedOk) {
+      if (leaked.length > 0) {
         isolationOk = false;
         console.error(`[isolation] ${m.id} saw results from ${[...new Set(leaked)].join(',')}`);
+      }
+      if (!positiveProofOk) {
+        isolationOk = false;
+        console.error(`[isolation] ${m.id} can read 'internal' but the probe query returned no internal hit — scoping may be fail-closed instead of correctly scoped`);
       }
     }
   } finally {
