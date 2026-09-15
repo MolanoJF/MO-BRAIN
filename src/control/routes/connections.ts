@@ -11,12 +11,13 @@ import {
   revokeConnection,
   type ConnectionInput,
 } from '../connections.ts';
+import { annotateAdapters } from '../harness.ts';
 
 export const connectionRoutes = new Hono();
 
 const capability = JSON.parse(
   readFileSync(join(import.meta.dir, '../../../contracts/v0.50.0.0/capability.json'), 'utf8'),
-) as { wellKnown?: { adapters?: unknown; profiles?: unknown } };
+) as { wellKnown?: { adapters?: Array<{ id: string }>; profiles?: unknown } };
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
@@ -69,7 +70,7 @@ async function connectionInputFromBody(orgId: string, body: unknown): Promise<Co
 
 connectionRoutes.get('/harnesses', guard('viewer', async (c) => {
   return c.json({
-    adapters: capability.wellKnown?.adapters ?? [],
+    adapters: annotateAdapters(capability.wellKnown?.adapters ?? []),
     profiles: capability.wellKnown?.profiles ?? [],
   });
 }));
