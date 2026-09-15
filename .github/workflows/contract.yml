@@ -59,6 +59,8 @@ jobs:
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
+      # Host-side e2e: opsClient defaults to http://gbrain-ops:3140 (in-compose DNS).
+      OPS_RPC_URL: http://127.0.0.1:3140
       ENCRYPTION_KEY: ci-encryption-key-at-least-32-characters-long
       BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-chars
     steps:

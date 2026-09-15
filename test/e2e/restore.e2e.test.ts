@@ -1,4 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+// Bind host OPS URL before opsClient (and backup/restore) evaluate — static
+// imports are hoisted; this side-effect module must be first among our deps.
+import './host-ops-env.ts';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,9 +9,6 @@ import { join } from 'node:path';
 import { runBackup } from '../../scripts/backup.ts';
 import { runRestore } from '../../scripts/restore.ts';
 import { callOps, seedSpace } from '../../src/control/opsClient.ts';
-
-// Host-side callOps — container DNS name is unreachable here.
-process.env.OPS_RPC_URL ??= 'http://127.0.0.1:3140';
 
 const SKIP_RESTORE_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_RESTORE_E2E';
 
