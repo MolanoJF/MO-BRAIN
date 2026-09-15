@@ -37,6 +37,10 @@ export async function putSchemaPack(name: string, yaml: string): Promise<void> {
   await post('/fileplane/schema-pack', { name, yaml }, 60_000);
 }
 
+export async function seedSpace(sourceId: string): Promise<void> {
+  await post('/fileplane/seed-space', { sourceId }, 60_000);
+}
+
 export async function opsHealthy(): Promise<boolean> {
   try { return (await fetch(`${OPS_URL}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
   catch { return false; }

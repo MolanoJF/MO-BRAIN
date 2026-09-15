@@ -10,7 +10,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { loadOperations, validateRequest } from './dispatch.ts';
 import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
-import { patchConfig, writeSchemaPack } from './fileplane.ts';
+import { patchConfig, writeSchemaPack, seedSpaceRepo } from './fileplane.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
 const TOKEN = process.env.OPS_RPC_TOKEN;
@@ -69,6 +69,13 @@ Bun.serve({
         if (!name || !yaml) return json({ error: 'name and yaml required' }, 400);
         await writeSchemaPack(name, yaml, { sql });
         return json({ ok: true, name });
+      }
+
+      if (url.pathname === '/fileplane/seed-space') {
+        const { sourceId } = body as { sourceId?: string };
+        if (!sourceId || typeof sourceId !== 'string') return json({ error: 'sourceId required' }, 400);
+        const dir = await seedSpaceRepo(sourceId, { sql });
+        return json({ ok: true, sourceId, path: dir });
       }
 
       if (url.pathname === '/rpc') {

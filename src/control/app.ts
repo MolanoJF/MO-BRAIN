@@ -3,8 +3,7 @@ import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { health } from './routes/health.ts';
 import { authRoutes } from './routes/auth.ts';
-// Task 9: uncomment wizard import + route below.
-// import { wizard } from './routes/wizard.ts';
+import { wizard } from './routes/wizard.ts';
 import { runMigrations } from './db/client.ts';
 
 const app = new Hono();
@@ -17,8 +16,7 @@ app.use('*', logger());
 // live collision.
 app.route('/api', health);
 app.route('/api', authRoutes);
-// Task 9: uncomment — wizard lands then; auth test's 404 becomes 401.
-// app.route('/api/wizard', wizard);
+app.route('/api/wizard', wizard);
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 

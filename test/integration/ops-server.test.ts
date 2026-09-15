@@ -82,4 +82,14 @@ describe('ops rpc', () => {
     expect(text).not.toContain('sk-should-not-appear');
     expect(text).toContain('openai_api_key'); // the key NAME is fine
   });
+
+  test('seed-space rejects an invalid sourceId', async () => {
+    const r = await fetch(`${BASE}/fileplane/seed-space`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ sourceId: '../etc' }),
+    });
+    expect(r.status).toBe(400);
+    expect((await r.json() as { error: string }).error).toMatch(/invalid sourceId/);
+  });
 });

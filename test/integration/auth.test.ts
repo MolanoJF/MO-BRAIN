@@ -70,9 +70,8 @@ describe('single-admin bootstrap', () => {
     expect(JSON.stringify(u)).not.toContain('a-long-enough-password');
   });
 
-  // Ruling 25: wizard route is commented out until Task 9, so this is 404.
-  // Task 9 uncomments the wizard and this becomes 401.
-  test('an unauthenticated wizard call is 404 until Task 9', async () => {
-    expect((await app.request('/api/wizard/state')).status).toBe(404);
+  // Ruling 25 reversal (Task 9): wizard is mounted; unauthenticated → 401.
+  test('an unauthenticated wizard call is 401', async () => {
+    expect((await app.request('/api/wizard/state')).status).toBe(401);
   });
 });
