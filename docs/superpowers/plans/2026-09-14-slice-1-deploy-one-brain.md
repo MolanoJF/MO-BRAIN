@@ -1759,7 +1759,9 @@ Append to the `RULES` array:
 ```ts
   {
     rule: 'log-request-body',
-    re: /console\.(log|info|debug|error)\([^)]*\b(req\.body|await\s+req\.json\(\)|body)\b/,
+    // [^)]* cannot span the ) inside json(), and a trailing \b after json()
+    // never fires () then ; are both non-word). Keep all three arms.
+    re: /console\.(log|info|debug|error)\([^;]*?(?:\b(?:req\.body|body)\b|await\s+req\.json\(\))/,
     why: 'S3c: a control plane that logs the body of "add source" undoes the upstream invariant',
   },
   {
@@ -1778,6 +1780,12 @@ test('flags logging a request body', async () => {
   expect(v.map((x) => x.rule)).toContain('log-request-body');
 });
 
+test('flags logging await req.json()', async () => {
+  await writeFile(join(dir, 'a', 'log-json.ts'), `console.log(await req.json());\n`);
+  const v = await lintForbidden(dir);
+  expect(v.map((x) => x.rule)).toContain('log-request-body');
+});
+
 test('flags a plaintext secret column', async () => {
   await writeFile(join(dir, 'a', 'sch.ts'), `plaintext: text('plaintext'),\n`);
   const v = await lintForbidden(dir);
@@ -1788,7 +1796,14 @@ test('flags a plaintext secret column', async () => {
 - [ ] **Step 6: Run the lint tests and the linter**
 
 Run: `bun test test/unit/lint-forbidden.test.ts`
-Expected: PASS — 6 tests.
+Expected: PASS — existing tests plus the two (now three) new cases. Do not
+force the count back to 6; the file already had 10 tests before this task.
+
+> **Corrected 2026-09-15 — the original `log-request-body` regex never matched
+> `await req.json()`.** `[^)]*` stops at the `)` inside `json()`, and a trailing
+> `\b` after `json()` never fires. The `req.body` test stayed green against a
+> dead arm. Use the corrected pattern above and a positive test for
+> `console.log(await req.json());`.
 
 Run: `bun run lint:forbidden`
 Expected: `lint:forbidden clean`.
@@ -1844,7 +1859,9 @@ describe('/api/health', () => {
 
   test('/api/health reports component status', async () => {
     const res = await app.request('/api/health');
-    expect(res.status).toBeLessThan(500);
+    // 503 is the correct status when a component is down (ops is down
+    // without a sidecar). 5xx crashes are the thing this must not be.
+    expect([200, 503]).toContain(res.status);
     const body = await res.json();
     expect(body).toHaveProperty('ok');
     expect(body.components).toHaveProperty('controlDb');
@@ -1976,6 +1993,12 @@ if (import.meta.main) {
 
 Run: `CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control bun test test/integration/health.test.ts`
 Expected: PASS — 4 tests. `components.ops` reports `down` without a running sidecar; that is correct behavior, and the test asserts the shape, not the value.
+
+> **Corrected 2026-09-15 — status 503 is success for this test.** The handler
+> returns 503 when any component is down. Without a sidecar, `ops` is down, so
+> `expect(res.status).toBeLessThan(500)` would fail against correct behavior.
+> The assertion is `[200, 503]`. Do not change the handler to return 200 when
+> `ok` is false.
 
 - [ ] **Step 8: Commit**
 
