@@ -1444,12 +1444,14 @@ Expected: FAIL — `OPERATIONS['auth.clients'] is undefined`.
       { name: 'tokenEnv', flag: '--token-env', kind: 'value' },
       { name: 'force', flag: '--force', kind: 'flag' },
     ],
-    supportsJson: true,
+    supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],
   },
 ```
+
+> **Plan defect found during execution (Work Item N, 2026-09-14, building Task 12):** as originally written (and as shipped in Task 7's registry entry, `supportsJson: true` above was the pre-fix value), `sources.add` claimed `--json` support. Confirmed against the running pinned container that this is false: `gbrain sources add <id> --path <p> --json` exits 2 with `Unknown flag: --json`, and `sources.ts`'s own `printHelp()` usage line for `add` is `add <id> --path <p> [--name <n>] [--federated|--no-federated] [--force]` — no `--json`, unlike the `list [--json]` / `status [--json]` / `archived [--json]` siblings immediately below it in the same help text. Neither Task 7's nor Task 8's contract tests ever exercised `sources.add` with `json: true` (both pass plain `{ id, path }`), so the wrong `true` went undetected until Task 12's tutorial needed a real per-source receipt. Fixed `supportsJson` to `false` on the registry entry (shown above); the tutorial reads the plain-text confirmation instead.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -2497,6 +2499,62 @@ export async function captureCapability(opts: { serveBaseUrl?: string } = {}): P
 }
 ```
 
+> **Plan defect found during execution (Work Item O, 2026-09-14, finishing Task 11's Docker half):** the code above has two bugs that only surface when actually run against the container, which never happened until now.
+>
+> 1. The well-known probe shells out to `curl`, but Work Item I (Task 10) already established the pinned image (`docker/gbrain-base.Dockerfile`) carries no curl or wget — confirmed again here: `sh -c curl -sf ...` prints nothing and the probe always fell through to `wellKnown = null`. Fixed by reusing the same `bun -e 'fetch(...)'` pattern discovery.contract.test.ts's `fetchWellKnown()` already established for Task 10, invoked as a `bun -e` argv array (not a shell string invoking `gbrain` — stays clear of G2's lint rule).
+> 2. `gbrain schema list --json` is JSON.parsed directly. Work Item K (Task 10) already established `schema list` ignores `--json` entirely and always prints prose — confirmed again here: `JSON.parse()` on that prose doesn't throw a catchable, obvious error, it just returns... no, it THROWS (prose is not valid JSON), which the original code doesn't even catch — `schemaPacks: parse(packsRaw.stdout)` was written assuming a `parse` helper existed for it, but plugging in the same try/catch-wrapped `parse` used for `tools` would have silently produced `schemaPacks: null`, indistinguishable from "this brain has no schema packs." Fixed by dropping `--json` (it changes nothing) and parsing the real prose with a new pure function, `parseSchemaPacksProse()`, that extracts the bundled-pack names between the `Bundled packs:` header and the following blank line and keeps the raw text alongside them — so the snapshot states truthfully what packs exist instead of silently storing `null`.
+>
+> The corrected implementation:
+>
+> ```ts
+> export type SchemaPacksSnapshot = { bundled: string[]; raw: string };
+>
+> export function parseSchemaPacksProse(raw: string): SchemaPacksSnapshot {
+>   const bundled: string[] = [];
+>   let inBundled = false;
+>   for (const line of raw.split('\n')) {
+>     if (/^\s*Bundled packs:\s*$/.test(line)) { inBundled = true; continue; }
+>     if (!inBundled) continue;
+>     const t = line.trim();
+>     if (t === '') break;
+>     bundled.push(t);
+>   }
+>   return { bundled, raw };
+> }
+>
+> export async function captureCapability(opts: { serveBaseUrl?: string } = {}): Promise<CapabilitySnapshot> {
+>   const version = parseGbrainVersion(
+>     (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout,
+>   );
+>   const toolsRaw = await composeExec('gbrain-ops', ['gbrain', '--tools-json']);
+>   const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list']); // --json is a no-op
+>
+>   let wellKnown: CapabilitySnapshot['wellKnown'] = null;
+>   if (opts.serveBaseUrl) {
+>     const probe = await composeExec('gbrain-ops', [
+>       'bun', '-e',
+>       `const r = await fetch(${JSON.stringify(`${opts.serveBaseUrl}/.well-known/gbrain`)}).catch(() => null); ` +
+>       'if (r && r.ok) console.log(await r.text());',
+>     ]);
+>     const body = probe.stdout.trim();
+>     if (body.startsWith('{')) {
+>       const parsed = JSON.parse(body);
+>       wellKnown = { profiles: parsed.profiles ?? null, adapters: parsed.adapters ?? [] };
+>     }
+>   }
+>
+>   const parse = (s: string): unknown => { try { return JSON.parse(s); } catch { return null; } };
+>
+>   return {
+>     gbrainVersion: version,
+>     capturedAt: new Date().toISOString(),
+>     tools: parse(toolsRaw.stdout),
+>     wellKnown,
+>     schemaPacks: parseSchemaPacksProse(packsRaw.stdout),
+>   };
+> }
+> ```
+
 - [ ] **Step 4: Write `scripts/capture-capability.ts`**
 
 ```ts
@@ -2529,6 +2587,82 @@ if (existing) {
 await Bun.write(file, JSON.stringify(snap, null, 2) + '\n');
 console.log(`wrote ${file}`);
 ```
+
+> **Plan defect found during execution (Work Item P, 2026-09-14):** as originally written, this script never started `gbrain serve` — it called `captureCapability({ serveBaseUrl })` assuming something else had already brought a server up on that URL. Nothing did: run standalone (`bun run capability:capture`), the well-known probe always failed closed to `null`. This was the "Docker half was never exercised" gap — Task 11 landed with only the pure unit tests (`diffCapability`/`toolNames`/`parseGbrainVersion`) proven, not a real end-to-end capture. Fixed by having the script own the `gbrain serve` process it needs for its own probe: spawn it the same way test/contract/discovery.contract.test.ts does, poll `.well-known/gbrain` until it answers (bun `fetch()`, not curl — Work Item I), capture, then tear it down in a `finally` — reaping the REMOTE process by `/proc` scan too, since Work Item L already established that `-T` docker-exec means `.kill()` on the local client never reaches the remote `gbrain serve` it spawned. The script also now throws instead of writing a file if `wellKnown` comes back `null`, so a broken probe fails loudly rather than checking in a silently-incomplete snapshot:
+>
+> ```ts
+> #!/usr/bin/env bun
+> import { mkdir } from 'node:fs/promises';
+> import { captureCapability, diffCapability } from '../src/contracts/capability.ts';
+> import type { CapabilitySnapshot } from '../src/contracts/capability.ts';
+> import { composeExec } from '../src/docker/host.ts';
+>
+> const COMPOSE_FILE = 'compose/docker-compose.slice0.yml';
+> const serveBaseUrl = process.env.SERVE_BASE_URL ?? 'http://127.0.0.1:3131';
+>
+> function startServe() {
+>   return Bun.spawn(
+>     ['docker', 'compose', '-f', COMPOSE_FILE, 'exec', '-T', 'gbrain-ops',
+>       'gbrain', 'serve', '--http', '--bind', '127.0.0.1', '--port', '3131'],
+>     { stdout: 'pipe', stderr: 'pipe' },
+>   );
+> }
+>
+> async function waitForServe(): Promise<void> {
+>   for (let i = 0; i < 60; i++) {
+>     const probe = await composeExec('gbrain-ops', [
+>       'bun', '-e',
+>       `const r = await fetch(${JSON.stringify(`${serveBaseUrl}/.well-known/gbrain`)}).catch(() => null); ` +
+>       'if (r && r.ok) console.log("ready");',
+>     ]);
+>     if (probe.stdout.includes('ready')) return;
+>     await Bun.sleep(1000);
+>   }
+>   throw new Error(`gbrain serve did not become ready at ${serveBaseUrl} within 60s`);
+> }
+>
+> async function stopServe(local: ReturnType<typeof startServe>): Promise<void> {
+>   local.kill();
+>   await composeExec('gbrain-ops', [
+>     'bun', '-e',
+>     "const fs=require('fs'); for (const pid of fs.readdirSync('/proc')) { " +
+>     "if (!/^[0-9]+$/.test(pid) || Number(pid) === process.pid) continue; " +
+>     "try { const cmd = fs.readFileSync('/proc/'+pid+'/cmdline','utf8'); " +
+>     "if (cmd.indexOf('gbrain') >= 0 && cmd.indexOf('serve') >= 0) process.kill(Number(pid), 'SIGTERM'); " +
+>     "} catch (e) {} }",
+>   ]);
+> }
+>
+> const serve = startServe();
+> try {
+>   await waitForServe();
+>   const snap = await captureCapability({ serveBaseUrl });
+>   const dir = `contracts/v${snap.gbrainVersion}`;
+>   await mkdir(dir, { recursive: true });
+>   const file = `${dir}/capability.json`;
+>   const existing = await Bun.file(file).exists()
+>     ? (await Bun.file(file).json()) as CapabilitySnapshot
+>     : null;
+>   if (existing) {
+>     const drift = diffCapability(existing, snap);
+>     const changed =
+>       drift.versionChanged || drift.profilesChanged ||
+>       drift.toolsAdded.length > 0 || drift.toolsRemoved.length > 0 ||
+>       drift.adaptersAdded.length > 0 || drift.adaptersRemoved.length > 0;
+>     console.log(changed ? 'DRIFT DETECTED' : 'no drift');
+>     console.log(JSON.stringify(drift, null, 2));
+>   }
+>   if (snap.wellKnown === null) {
+>     throw new Error('captured snapshot has wellKnown: null — the serve probe did not get a reply');
+>   }
+>   await Bun.write(file, JSON.stringify(snap, null, 2) + '\n');
+>   console.log(`wrote ${file}`);
+> } finally {
+>   await stopServe(serve);
+> }
+> ```
+>
+> Verified end to end against the running pinned stack: `bun run capability:capture` now writes `contracts/v0.50.0.0/capability.json` with 136 real tool entries, 6 profiles and 13 adapters from a live `.well-known/gbrain`, and 7 real bundled schema-pack names — no `null` anywhere in the snapshot.
 
 - [ ] **Step 5: Run the unit tests to verify they pass**
 

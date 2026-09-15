@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { diffCapability, toolNames, parseGbrainVersion } from '../../src/contracts/capability.ts';
+import { diffCapability, toolNames, parseGbrainVersion, parseSchemaPacksProse } from '../../src/contracts/capability.ts';
 import type { CapabilitySnapshot } from '../../src/contracts/capability.ts';
 
 const base: CapabilitySnapshot = {
@@ -90,5 +90,38 @@ describe('parseGbrainVersion', () => {
 
   test('takes the last non-empty line of multi-line output', () => {
     expect(parseGbrainVersion('Checking for updates...\n\ngbrain 0.50.0.0\n')).toBe('0.50.0.0');
+  });
+});
+
+// Work Item K: `schema list` ignores --json entirely and always emits this
+// exact prose (confirmed against the pinned container). Parsing it honestly
+// is what keeps a capability snapshot from silently storing null as if it
+// were "gbrain has zero schema packs."
+describe('parseSchemaPacksProse', () => {
+  const REAL_OUTPUT =
+    'Bundled packs:\n' +
+    '  gbrain-base\n' +
+    '  gbrain-recommended\n' +
+    '  gbrain-creator\n' +
+    '  gbrain-investor\n' +
+    '  gbrain-engineer\n' +
+    '  gbrain-everything\n' +
+    '  gbrain-base-v2\n' +
+    '\n' +
+    'No user-installed packs (~/.gbrain/schema-packs/ empty or missing).\n';
+
+  test('extracts the bundled pack names between the header and the blank line', () => {
+    expect(parseSchemaPacksProse(REAL_OUTPUT).bundled).toEqual([
+      'gbrain-base', 'gbrain-recommended', 'gbrain-creator', 'gbrain-investor',
+      'gbrain-engineer', 'gbrain-everything', 'gbrain-base-v2',
+    ]);
+  });
+
+  test('preserves the raw prose alongside the parsed list', () => {
+    expect(parseSchemaPacksProse(REAL_OUTPUT).raw).toBe(REAL_OUTPUT);
+  });
+
+  test('returns an empty list rather than throwing on unrecognized output', () => {
+    expect(parseSchemaPacksProse('nothing recognizable here').bundled).toEqual([]);
   });
 });

@@ -50,6 +50,45 @@ function adapterIds(snap: CapabilitySnapshot): string[] {
   return (snap.wellKnown?.adapters ?? []).map((a) => a.id).sort();
 }
 
+/**
+ * `gbrain schema list` — the shape of `SchemaPacksSnapshot.schemaPacks`.
+ * Work Item K (Task 10, confirmed again while wiring the Docker half of the
+ * capture in Task 11): `runList(_args)` in the reference checkout's
+ * src/commands/schema.ts never reads its argv at all — the leading
+ * underscore marks the parameter unused — so `--json` is silently ignored
+ * and the command always prints the same human prose:
+ *
+ *   Bundled packs:
+ *     gbrain-base
+ *     gbrain-recommended
+ *     ...
+ *
+ *   No user-installed packs (~/.gbrain/schema-packs/ empty or missing).
+ *
+ * Confirmed empirically against the pinned container: `gbrain schema list`
+ * and `gbrain schema list --json` emit byte-identical stdout. registry.ts's
+ * `schema.list` entry already sets supportsJson to false for exactly this
+ * reason (Task 10). JSON.parse-ing that prose does not throw a helpful
+ * error — it just yields `null`, which would silently masquerade in a
+ * capability snapshot as "gbrain has zero schema packs" instead of "we
+ * asked the wrong way." Parse the REAL prose instead, so the snapshot is
+ * honest about what it captured.
+ */
+export type SchemaPacksSnapshot = { bundled: string[]; raw: string };
+
+export function parseSchemaPacksProse(raw: string): SchemaPacksSnapshot {
+  const bundled: string[] = [];
+  let inBundled = false;
+  for (const line of raw.split('\n')) {
+    if (/^\s*Bundled packs:\s*$/.test(line)) { inBundled = true; continue; }
+    if (!inBundled) continue;
+    const t = line.trim();
+    if (t === '') break; // the blank line after the list ends the block
+    bundled.push(t);
+  }
+  return { bundled, raw };
+}
+
 const missing = (from: string[], to: string[]) => from.filter((x) => !to.includes(x));
 
 export function diffCapability(before: CapabilitySnapshot, after: CapabilitySnapshot): CapabilityDrift {
@@ -78,16 +117,28 @@ export async function captureCapability(opts: { serveBaseUrl?: string } = {}): P
     (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout,
   );
   const toolsRaw = await composeExec('gbrain-ops', ['gbrain', '--tools-json']);
-  const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list', '--json']);
+  // No --json here: it is silently ignored (see parseSchemaPacksProse's doc
+  // comment) — asking for it would suggest this reads a machine-readable
+  // reply, when it reads the same prose either way.
+  const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list']);
 
   let wellKnown: CapabilitySnapshot['wellKnown'] = null;
   if (opts.serveBaseUrl) {
+    // Work Item I (Task 10, confirmed again here): the pinned image
+    // (docker/gbrain-base.Dockerfile) has no curl or wget. bun is already
+    // on PATH in the container, so a plain fetch() needs no image change —
+    // same pattern as test/contract/discovery.contract.test.ts's
+    // fetchWellKnown(). This runs as an argv array passed to `bun -e`, not
+    // a shell string invoking gbrain, so it stays clear of the G2 lint rule.
     const probe = await composeExec('gbrain-ops', [
-      'sh', '-c', `curl -sf ${opts.serveBaseUrl}/.well-known/gbrain || true`,
+      'bun', '-e',
+      `const r = await fetch(${JSON.stringify(`${opts.serveBaseUrl}/.well-known/gbrain`)}).catch(() => null); ` +
+      'if (r && r.ok) console.log(await r.text());',
     ]);
-    if (probe.stdout.trim().startsWith('{')) {
-      const body = JSON.parse(probe.stdout);
-      wellKnown = { profiles: body.profiles ?? null, adapters: body.adapters ?? [] };
+    const body = probe.stdout.trim();
+    if (body.startsWith('{')) {
+      const parsed = JSON.parse(body);
+      wellKnown = { profiles: parsed.profiles ?? null, adapters: parsed.adapters ?? [] };
     }
   }
 
@@ -98,6 +149,6 @@ export async function captureCapability(opts: { serveBaseUrl?: string } = {}): P
     capturedAt: new Date().toISOString(),
     tools: parse(toolsRaw.stdout),
     wellKnown,
-    schemaPacks: parse(packsRaw.stdout),
+    schemaPacks: parseSchemaPacksProse(packsRaw.stdout),
   };
 }
