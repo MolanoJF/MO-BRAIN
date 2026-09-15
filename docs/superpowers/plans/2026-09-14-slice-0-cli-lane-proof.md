@@ -1,6 +1,8 @@
 # Slice 0 — Prove the CLI Lane: Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: COMPLETE** on `main`. **Do not re-execute.** Historical plan; defects found during execution were patched in place. Slice 1 is also complete. See [HANDOFF.md](../../../HANDOFF.md) and [PROGRESS.md](./PROGRESS.md).
+
+> **For agentic workers:** If you were asked to *implement* this plan, stop — it is already on `main`. Use this file only as a record of what shipped.
 
 **Goal:** Prove — in Docker, against real Postgres, at an exact pinned gbrain version, with zero human interaction — that every control-plane operation the product needs is reachable through gbrain's CLI contracts, and emit the operation list Slice 1 implements.
 
@@ -40,7 +42,7 @@ If this fails, stop — the whole slice is blocked.
 
 ## File Structure
 
-Project root is `C:\Users\juanp\Desktop\Company Brain` (referred to below as the repo root). It is currently empty and not a git repository.
+Project root is `C:\Users\juanp\Desktop\Company Brain` (referred to below as the repo root). At plan-write time this directory was empty and not a git repository; Task 1 initialized it. **Do not re-run Task 1.**
 
 | Path | Responsibility |
 |---|---|
@@ -3405,4 +3407,4 @@ Do not start Slice 1 until all four hold:
 - [ ] `contracts/v0.50.0.0/operations.json` and `contracts/v0.50.0.0/capability.json` are generated and committed.
 - [ ] `docs/slice-0-findings.md` has a status on every V-row, with each `falsified` or `changed` row carrying its consequence for Slice 1.
 
-**Then:** proceed to [`2026-09-14-slice-1-deploy-one-brain.md`](./2026-09-14-slice-1-deploy-one-brain.md).
+**Then:** Slice 1 is complete on `main`. Next stage is Slice 2 (plan not yet written). Historical Slice 1 plan: [`2026-09-14-slice-1-deploy-one-brain.md`](./2026-09-14-slice-1-deploy-one-brain.md).

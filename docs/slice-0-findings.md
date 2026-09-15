@@ -1,5 +1,7 @@
 # Slice 0 findings — gbrain v0.50.0.0 control lane
 
+> **Historical risk register.** Slice 0 is complete. Slice 1 later shipped on `main` (2026-09-15). Sections below that talk about the “Slice 1 plan draft” describe pre-execution gaps that were patched into the Slice 1 plan and implemented. Do not re-open those as current work.
+
 Every risk this slice priced today instead of in month three.
 Status: `confirmed` (the spec's claim held) | `falsified` | `changed`.
 

@@ -1,6 +1,6 @@
 # brainstand — Staged Delivery Roadmap
 
-> **For agentic workers:** This is the **stage map**, not an executable plan. Each stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents.
+> **For agentic workers:** This is the **stage map**, not an executable plan. **Slice 0 and Slice 1 are COMPLETE on `main` — do not re-execute those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
 
 **Goal:** Turn gbrain (a 415K-LOC CLI/MCP knowledge system) into a product a team deploys with one `docker compose up` and operates from a web console — with gbrain pinned and upgraded, never forked.
 
@@ -89,11 +89,13 @@ Do not re-litigate these. Each was read out of the source, not inferred.
 
 ## Environment prerequisites
 
-**Docker is not installed on this machine** (checked 2026-09-14 — `docker` not found on PATH in either PowerShell or Git Bash). Slice 0 cannot start until Docker Desktop with the Compose v2 plugin is installed and `docker compose version` succeeds.
+**Current (2026-09-15):** Slice 0 and Slice 1 are complete on `main`. Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. Next executable stage is Slice 2 — plan not yet written.
 
-Present and usable: Bun 1.3.14, Git 2.49.0. The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
+The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
 
-**Project root:** `C:\Users\juanp\Desktop\Company Brain`. Not currently a git repository; Slice 0 Task 1 initializes it.
+**Project root:** `C:\Users\juanp\Desktop\Company Brain`.
+
+Historical: when this roadmap was first written (2026-09-14), Docker was absent and the directory was not yet a git repo. That is no longer true.
 
 ---
 
@@ -110,7 +112,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 0 — Prove the CLI lane
 
-**Plan:** [`2026-09-14-slice-0-cli-lane-proof.md`](./2026-09-14-slice-0-cli-lane-proof.md) — **written, ready to execute.**
+**Plan:** [`2026-09-14-slice-0-cli-lane-proof.md`](./2026-09-14-slice-0-cli-lane-proof.md) — **COMPLETE** on `main`.
 
 **Why first:** Every TTY requirement, missing `--json` and prose-parse is a risk priced today rather than in month three. This validates or kills V1–V8 and the S2 boundary in one pass.
 
@@ -124,7 +126,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 1 — Deploy + one brain + one admin
 
-**Plan:** [`2026-09-14-slice-1-deploy-one-brain.md`](./2026-09-14-slice-1-deploy-one-brain.md) — **written, ready to execute.**
+**Plan:** [`2026-09-14-slice-1-deploy-one-brain.md`](./2026-09-14-slice-1-deploy-one-brain.md) — **COMPLETE** on `main` (merged 2026-09-15).
 
 **Why:** *This is already the entire value proposition and it exercises every hard integration.* Caddy, Postgres, serve, worker, ops sidecar, control plane, single admin, the wizard, health, backup + tested restore, break-glass runbook, and git writer-contention detection. No multi-user, no scheduler, no agents.
 

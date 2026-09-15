@@ -1,6 +1,8 @@
 # Slice 1 — Deploy + One Brain + One Admin: Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: COMPLETE.** Merged to `main` at `77a18d1` on 2026-09-15. **Do not re-execute.** This file is the historical plan; defects found during execution were patched in place. Next stage is Slice 2 (plan not yet written). See [HANDOFF.md](../../../HANDOFF.md) and [PROGRESS.md](./PROGRESS.md).
+
+> **For agentic workers:** If you were asked to *implement* this plan, stop — it is already on `main`. Use this file only as a record of what shipped and which plan defects were found.
 
 **Goal:** On a clean VM, `docker compose up` gives a team an HTTPS-terminated brain with a web console that walks one admin from empty to `ready`, backed up and restorable — with `/admin` unreachable from the internet.
 
