@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
+import { serveStatic } from 'hono/bun';
 import { health } from './routes/health.ts';
 import { authRoutes } from './routes/auth.ts';
 import { wizard } from './routes/wizard.ts';
@@ -17,6 +18,17 @@ app.use('*', logger());
 app.route('/api', health);
 app.route('/api', authRoutes);
 app.route('/api/wizard', wizard);
+
+// Live collisions with gbrain-serve. Caddy routes these away in production;
+// refuse them here so a direct hit never returns the SPA.
+app.get('/health', (c) => c.json({ error: 'not_found' }, 404));
+app.get('/metrics', (c) => c.json({ error: 'not_found' }, 404));
+
+// The SPA. Everything not under /api falls through to index.html so client
+// routing works; /health and /metrics never reach here — Caddy sends them to
+// gbrain-serve.
+app.use('/assets/*', serveStatic({ root: './dist/console' }));
+app.get('*', serveStatic({ path: './dist/console/index.html' }));
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 
