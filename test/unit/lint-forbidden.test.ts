@@ -55,4 +55,51 @@ describe('lintForbidden', () => {
     expect(await lintForbidden(root)).toEqual([]);
     await rm(root, { recursive: true, force: true });
   });
+
+  // The gate must still bite for real code: the docs/HANDOFF/.superpowers
+  // exemptions must never leak into an actual shell script.
+  test('still flags autopilot --install in a real .sh file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-sh-'));
+    await writeFile(join(root, 'deploy.sh'), `#!/usr/bin/env bash\ngbrain autopilot --install\n`);
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toContain('autopilot-install');
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // .superpowers/ is the git-ignored SDD scratch directory (ledgers, task
+  // briefs, agent reports). Agent reports routinely quote the rules they are
+  // reporting about, so this must be skipped the same way docs/ is.
+  test('skips the .superpowers tree entirely', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-superpowers-'));
+    await mkdir(join(root, '.superpowers', 'sdd', 'task'), { recursive: true });
+    await writeFile(join(root, '.superpowers', 'sdd', 'task', 'report.md'),
+      'Confirmed: the code does not run `gbrain autopilot --install`.');
+    expect(await lintForbidden(root)).toEqual([]);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // HANDOFF.md is exempt only at the repo root — a named-file exemption, not
+  // a blanket markdown carve-out. A same-named file elsewhere must still be
+  // linted, and it isn't enough to just match the basename.
+  test('exempts root-level HANDOFF.md but still flags a nested HANDOFF.md', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-handoff-'));
+    await writeFile(join(root, 'HANDOFF.md'),
+      "- Don't run `gbrain autopilot --install` in a container — lint:forbidden will catch it.\n");
+    await mkdir(join(root, 'sub'), { recursive: true });
+    await writeFile(join(root, 'sub', 'HANDOFF.md'), 'gbrain autopilot --install\n');
+    const v = await lintForbidden(root);
+    expect(v).toHaveLength(1);
+    expect(v[0]!.file).toBe(join(root, 'sub', 'HANDOFF.md'));
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // The HANDOFF.md exemption must not widen into a blanket root-level
+  // markdown exemption: README.md (and anything else) at the root is still linted.
+  test('does not exempt other root-level markdown files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-readme-'));
+    await writeFile(join(root, 'README.md'), 'gbrain autopilot --install\n');
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toContain('autopilot-install');
+    await rm(root, { recursive: true, force: true });
+  });
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 export type Violation = { file: string; line: number; rule: string; text: string };
 
@@ -27,8 +27,20 @@ const RULES: { rule: string; re: RegExp; why: string }[] = [
 
 // 'docs' is skipped deliberately: this guard protects CODE, and planning
 // documents necessarily quote the very patterns they forbid.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.brainstand-tmp', 'docs']);
+// '.superpowers' is skipped for the same reason: it is the git-ignored
+// scratch directory for the subagent-driven-development process (ledgers,
+// task briefs, agent reports, review packages). It is never shipped, and
+// agent reports routinely quote the rules they are reporting about.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.brainstand-tmp', 'docs', '.superpowers']);
 const EXTS = ['.ts', '.tsx', '.js', '.sh', '.yml', '.yaml', '.Dockerfile', '.md'];
+
+// Root-level HANDOFF.md is a planning document that lives outside docs/ by
+// convention (it's the cold-start entry point, meant to be found immediately).
+// Same rationale as the 'docs' skip above: it quotes forbidden patterns in
+// order to forbid them, not to invoke them. This is a named-file exemption,
+// not a blanket markdown exemption — README.md and everything else at the
+// root is still linted.
+const ROOT_FILE_EXEMPTIONS = new Set(['HANDOFF.md']);
 
 async function* walk(dir: string): AsyncGenerator<string> {
   for (const e of await readdir(dir, { withFileTypes: true })) {
@@ -46,6 +58,8 @@ export async function lintForbidden(root: string): Promise<Violation[]> {
   for await (const file of walk(root)) {
     // The lint rules themselves contain the patterns; skip the linter and its test.
     if (file.includes('lint-forbidden')) continue;
+    // Named-file exemption for root-level planning docs (see ROOT_FILE_EXEMPTIONS above).
+    if (ROOT_FILE_EXEMPTIONS.has(relative(root, file))) continue;
     const lines = (await readFile(file, 'utf8')).split('\n');
     lines.forEach((text, i) => {
       for (const r of RULES) if (r.re.test(text)) out.push({ file, line: i + 1, rule: r.rule, text: text.trim() });
