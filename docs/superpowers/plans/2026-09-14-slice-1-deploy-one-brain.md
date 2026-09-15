@@ -1143,6 +1143,7 @@ console.log(`gbrain-ops rpc listening on :${PORT} with ${Object.keys(ops).length
 # wrapper and gbrain is exactly the bug class the exact pin exists to prevent.
 ARG GBRAIN_VERSION=0.50.0.0
 FROM brainstand/gbrain-base:${GBRAIN_VERSION}
+ARG GBRAIN_VERSION
 
 WORKDIR /app
 COPY package.json bun.lock ./
@@ -1158,6 +1159,15 @@ ENV NODE_ENV=production
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bun", "run", "/app/src/control/app.ts"]
 ```
+
+> **Corrected 2026-09-15 — ARG before FROM is out of stage scope.**
+> `ARG GBRAIN_VERSION=0.50.0.0` before `FROM` is only visible to the `FROM` line.
+> Without a stage-level `ARG GBRAIN_VERSION` after `FROM`, the
+> `RUN test -s "contracts/v${GBRAIN_VERSION}/operations.json"` gate expands to
+> `contracts/v/operations.json`. Compose passing `args.GBRAIN_VERSION` does not
+> help unless the stage redeclares ARG. Verified by an instruction-order unit
+> test: without the redeclaration, `argIdx === -1`. Precedent:
+> `docker/gbrain-base.Dockerfile:8`. Do not "fix" this by deleting the RUN gate.
 
 - [ ] **Step 7: Write the failing ops-server integration test**
 
@@ -1277,7 +1287,11 @@ beforeAll(async () => {
   sql = new SQL(process.env.CONTROL_DATABASE_URL!);
   await runMigrations();
 }, 60_000);
-afterAll(async () => { await sql.end(); });
+afterAll(async () => {
+  await sql.end();
+  const { closeDb } = await import('../../src/control/db/client.ts');
+  await closeDb();
+});
 
 const cols = async (table: string) =>
   (await sql`select column_name from information_schema.columns where table_name = ${table}`)
@@ -1302,9 +1316,15 @@ describe('control schema', () => {
   });
 
   test('the lifecycle check constraint rejects an unknown state', async () => {
+    // Parent row first: without it, FK on organization_id rejects before the
+    // CHECK ever runs, and this test would go green with no lifecycle constraint.
+    await sql`
+      insert into organizations (id, name, slug)
+      values ('o-life', 'Life', 'life')
+    `;
     await expect(sql`
       insert into brains (id, organization_id, gbrain_home, lifecycle)
-      values ('b-bad', 'o-bad', '/srv/gbrain-home', 'not-a-state')
+      values ('b-bad', 'o-life', '/srv/gbrain-home', 'not-a-state')
     `).rejects.toThrow();
   });
 
@@ -1326,6 +1346,20 @@ describe('control schema', () => {
   });
 });
 ```
+
+> **Corrected 2026-09-15 — three test-harness defects found before dispatch.**
+> 1. `afterAll` must call `closeDb()`. `runMigrations()` opens a postgres-js pool
+>    via `getDb()`; leaving it open keeps the bun test process alive after the
+>    bun `SQL` handle is ended.
+> 2. The lifecycle CHECK test must insert a real `organizations` row first.
+>    Inserting `organization_id = 'o-bad'` with no parent fails on FK *before*
+>    the CHECK runs, so `rejects.toThrow()` would go green with no
+>    `lifecycle_valid` constraint at all — the same class of false-green as the
+>    Caddyfile text-parse test.
+> 3. Add the fileplane-style Postgres probe + always-running loud guard
+>    (`BRAINSTAND_ALLOW_SKIP_SCHEMA_INTEGRATION=1` to opt out). Task 15 Step 4
+>    runs `bun test test/integration`; opaque `Connection closed` failures are
+>    not a gate.
 
 - [ ] **Step 3: Run it to verify it fails**
 
