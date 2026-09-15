@@ -1,0 +1,47 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# ---------------------------------------------------------------------
+	# S1: gbrain's embedded /admin SPA is a SECOND control plane with god
+	# rights over the same brain — bootstrap-token auth, in-process sessions,
+	# no audit trail we own. Every decision the permission compiler makes can
+	# be silently overridden there. It is bound to the private network only.
+	#
+	# Break-glass is `docker compose exec gbrain-ops gbrain …` over SSH.
+	# See docs/runbooks/break-glass.md.
+	# ---------------------------------------------------------------------
+	# MUST be a `handle` block, not a bare `respond`. See the note below.
+	@admin_denied path /admin /admin/* /admin/api/* /admin/events
+	handle @admin_denied {
+		respond 404
+	}
+
+	# ---------------------------------------------------------------------
+	# Reserved paths owned by gbrain-serve. /health and /metrics are LIVE
+	# COLLISIONS — the console's health endpoint is /api/health.
+	# ---------------------------------------------------------------------
+	@gbrain path /mcp /mcp/* /authorize /authorize/* /token /register /revoke \
+		/.well-known/* /ingest /webhooks/* /health /metrics
+	handle @gbrain {
+		reverse_proxy gbrain-serve:3131
+	}
+
+	# ---------------------------------------------------------------------
+	# Our control plane: the API and the console SPA.
+	# ---------------------------------------------------------------------
+	handle /api/* {
+		reverse_proxy control-plane:3150
+	}
+
+	handle {
+		reverse_proxy control-plane:3150
+	}
+}
