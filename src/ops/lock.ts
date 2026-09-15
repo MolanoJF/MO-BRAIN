@@ -46,20 +46,3 @@ export async function withAdvisoryLock<T>(
     conn.release();
   }
 }
-
-/**
- * Merge a patch into config.json. Never blind-writes: an unparseable document
- * is a signal something else is mid-write or corrupt, and overwriting it is
- * exactly the API-key-eating failure S3 exists to prevent.
- */
-export function mergeConfigJson(current: string | null, patch: Record<string, unknown>): string {
-  let base: Record<string, unknown> = {};
-  if (current !== null && current.trim() !== '') {
-    try {
-      base = JSON.parse(current) as Record<string, unknown>;
-    } catch {
-      throw new Error('refusing to overwrite unparseable config.json');
-    }
-  }
-  return JSON.stringify({ ...base, ...patch }, null, 2) + '\n';
-}

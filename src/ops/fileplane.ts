@@ -1,13 +1,21 @@
 import { rename, writeFile, readFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { SQL } from 'bun';
-import { withAdvisoryLock, mergeConfigJson } from './lock.ts';
+import { withAdvisoryLock } from './lock.ts';
 
 const GBRAIN_HOME = process.env.GBRAIN_HOME ?? '/srv/gbrain-home';
 export const CONFIG_PATH = join(GBRAIN_HOME, 'config.json');
 export const SCHEMA_PACK_DIR = join(GBRAIN_HOME, 'schema-packs');
 
-/** Atomic write: temp file in the same directory, fsync, rename. */
+/**
+ * Atomic write: write a temp file in the same directory, then rename it over
+ * the target. `rename` within one directory (same filesystem) is atomic, so
+ * a reader never observes a torn or partial file — that is what S3 actually
+ * requires. This does not fsync: durability across a host power loss is a
+ * stronger guarantee S3 does not ask for here. `config.json` is a rewritable
+ * projection, not the durable source of truth for secrets — that will be the
+ * envelope-encrypted control DB arriving in Task 6.
+ */
 async function atomicWrite(path: string, contents: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
@@ -18,6 +26,23 @@ async function atomicWrite(path: string, contents: string, mode = 0o600): Promis
 
 async function readIfExists(path: string): Promise<string | null> {
   try { return await readFile(path, 'utf8'); } catch { return null; }
+}
+
+/**
+ * Merge a patch into config.json. Never blind-writes: an unparseable document
+ * is a signal something else is mid-write or corrupt, and overwriting it is
+ * exactly the API-key-eating failure S3 exists to prevent.
+ */
+export function mergeConfigJson(current: string | null, patch: Record<string, unknown>): string {
+  let base: Record<string, unknown> = {};
+  if (current !== null && current.trim() !== '') {
+    try {
+      base = JSON.parse(current) as Record<string, unknown>;
+    } catch {
+      throw new Error('refusing to overwrite unparseable config.json');
+    }
+  }
+  return JSON.stringify({ ...base, ...patch }, null, 2) + '\n';
 }
 
 /**
