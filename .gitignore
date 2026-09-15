@@ -2,3 +2,6 @@ node_modules/
 .env
 .brainstand-tmp/
 contracts/*/capability.local.json
+
+# SDD scratch workspace (ledger, briefs, review packages)
+.superpowers/
