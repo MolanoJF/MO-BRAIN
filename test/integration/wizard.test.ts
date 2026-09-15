@@ -1,17 +1,27 @@
 import { mock, test, expect, describe, beforeAll, afterAll } from 'bun:test';
 
+process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
+process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
+process.env.CONTROL_DATABASE_URL ??=
+  'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
+
 // Slice 0 stack is down; unit-cover seedSpaceRepo separately. Mock the ops
 // boundary so wizard control-plane logic (lifecycle, secrets, Space=source)
 // is exercised without a live gbrain binary.
+const callOpsCalls: { op: string; opts?: { json?: boolean; timeoutMs?: number } }[] = [];
+
 mock.module('../../src/control/opsClient.ts', () => ({
-  callOps: async (op: string) => ({
-    ok: true,
-    exitCode: 0,
-    argv: ['gbrain', ...op.split('.')],
-    stdout: op === 'schema.list' ? 'Bundled packs:\n  gbrain-base-v2\n' : 'ok',
-    stderr: '',
-    json: null,
-  }),
+  callOps: async (op: string, _params?: Record<string, unknown>, opts?: { json?: boolean; timeoutMs?: number }) => {
+    callOpsCalls.push({ op, opts });
+    return {
+      ok: true,
+      exitCode: 0,
+      argv: ['gbrain', ...op.split('.')],
+      stdout: op === 'schema.list' ? 'Bundled packs:\n  gbrain-base-v2\n' : 'ok',
+      stderr: '',
+      json: null,
+    };
+  },
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
@@ -19,20 +29,17 @@ mock.module('../../src/control/opsClient.ts', () => ({
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
-const { runMigrations, getDb, schema, closeDb } = await import('../../src/control/db/client.ts');
+const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
 const { eq } = await import('drizzle-orm');
+
+// Pin at module load so a sibling file cannot close the pool before our beforeAll.
+pinDb();
 
 let cookie = '';
 let orgId = '';
 
 beforeAll(async () => {
-  process.env.ENCRYPTION_KEY = 'a'.repeat(48);
-  process.env.BETTER_AUTH_SECRET = 'b'.repeat(48);
-  if (!process.env.CONTROL_DATABASE_URL) {
-    process.env.CONTROL_DATABASE_URL =
-      'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
-  }
   await runMigrations();
   for (const t of [
     schema.spaces, schema.secrets, schema.auditLog,
@@ -131,5 +138,21 @@ describe('wizard', () => {
   test('state carries the isolation warning for the space step', async () => {
     const body = await (await call('/api/wizard/state')).json() as WizardState;
     expect(body.isolationNotice).toMatch(/every member with read on that Space/i);
+  });
+
+  // Critical fix: old shared run() always passed json:true, which hard-fails
+  // init and config.set (supportsJson: false) in buildArgv / ops RPC.
+  test('finish does not pass json:true for init or config.set', async () => {
+    callOpsCalls.length = 0;
+    const res = await call('/api/wizard/finish', {});
+    expect(res.status).toBe(200);
+    const byOp = Object.fromEntries(callOpsCalls.map((c) => [c.op, c.opts]));
+    expect(byOp.init?.json).not.toBe(true);
+    expect(byOp['config.set']?.json).not.toBe(true);
+    expect(byOp.sync?.json).toBe(true);
+    expect(byOp.embed?.json).toBe(true);
+    expect(byOp.doctor?.json).toBe(true);
+    const [brain] = await getDb().select().from(schema.brains);
+    expect(brain?.lifecycle).toBe('ready');
   });
 });

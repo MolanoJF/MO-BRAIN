@@ -1,15 +1,16 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import app from '../../src/control/app.ts';
-import { runMigrations, getDb, schema, closeDb } from '../../src/control/db/client.ts';
+import { runMigrations, getDb, schema, closeDb, pinDb } from '../../src/control/db/client.ts';
 import { isBootstrapped } from '../../src/control/bootstrap.ts';
 
+process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
+process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
+process.env.CONTROL_DATABASE_URL ??=
+  'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
+// Pin at module load so a sibling file cannot close the pool before our beforeAll.
+pinDb();
+
 beforeAll(async () => {
-  process.env.ENCRYPTION_KEY = 'a'.repeat(48);
-  process.env.BETTER_AUTH_SECRET = 'b'.repeat(48);
-  if (!process.env.CONTROL_DATABASE_URL) {
-    process.env.CONTROL_DATABASE_URL =
-      'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
-  }
   await runMigrations();
   // Child tables first — FKs to users/orgs.
   await getDb().delete(schema.sessions);

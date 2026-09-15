@@ -7,6 +7,18 @@ import { storeSecret } from '../secrets.ts';
 import { callOps, patchFilePlaneConfig, seedSpace } from '../opsClient.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
+import { OPERATIONS } from '../../contracts/registry.ts';
+
+/**
+ * Json flag for wizard `/finish` callOps. Only request --json when the
+ * contract supports it — blanket `json: true` hard-fails init and config.set
+ * (supportsJson: false) inside buildArgv / ops RPC.
+ */
+export function finishCallOpts(op: string): { json?: boolean } {
+  const spec = OPERATIONS[op];
+  if (!spec) throw new Error(`unknown finish operation ${op}`);
+  return spec.supportsJson ? { json: true } : {};
+}
 
 export const wizard = new Hono();
 
@@ -198,7 +210,7 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
 
   const steps: { id: string; ok: boolean; exitCode: number }[] = [];
   const run = async (id: string, op: string, params: Record<string, unknown>, timeoutMs = 900_000) => {
-    const r = await callOps(op, params, { json: true, timeoutMs });
+    const r = await callOps(op, params, { ...finishCallOpts(op), timeoutMs });
     steps.push({ id, ok: r.ok, exitCode: r.exitCode });
     return r;
   };

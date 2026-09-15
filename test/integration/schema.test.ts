@@ -30,6 +30,9 @@ async function probePostgres(): Promise<boolean> {
 const postgresAvailable = await probePostgres();
 const SKIP_SCHEMA_INTEGRATION_ENV = 'BRAINSTAND_ALLOW_SKIP_SCHEMA_INTEGRATION';
 
+const { pinDb } = await import('../../src/control/db/client.ts');
+if (postgresAvailable) pinDb();
+
 let sql: SQL;
 beforeAll(async () => {
   if (!postgresAvailable) return;
