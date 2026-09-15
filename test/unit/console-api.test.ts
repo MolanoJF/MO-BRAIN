@@ -44,4 +44,25 @@ describe('console api client', () => {
     await api.get('/wizard/state');
     expect(init?.credentials).toBe('same-origin');
   });
+
+  test('delete prefixes the path with /api and uses DELETE', async () => {
+    let seen = '';
+    let method = '';
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      seen = url;
+      method = init?.method ?? '';
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    await api.delete('/members/abc');
+    expect(seen).toBe('/api/members/abc');
+    expect(method).toBe('DELETE');
+  });
+
+  test('delete throws ApiError carrying status and message', async () => {
+    stub(404, { error: 'member not found' });
+    const err = await api.delete('/members/missing').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(404);
+    expect((err as ApiError).message).toMatch(/member not found/);
+  });
 });

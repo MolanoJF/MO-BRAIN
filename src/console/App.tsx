@@ -3,12 +3,24 @@ import { api } from './api.ts';
 import { Bootstrap } from './pages/Bootstrap.tsx';
 import { Wizard } from './pages/Wizard.tsx';
 import { Health } from './pages/Health.tsx';
+import { Members } from './pages/Members.tsx';
+import { Connection } from './pages/Connection.tsx';
+import { Claim } from './pages/Claim.tsx';
+import { Access } from './pages/Access.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'wizard' | 'ready';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access';
+
+function claimTokenFromPath(): string | null {
+  const m = window.location.pathname.match(/^\/claim\/([^/]+)/);
+  if (!m?.[1]) return null;
+  return decodeURIComponent(m[1]);
+}
 
 export function App() {
+  const token = claimTokenFromPath();
   const [phase, setPhase] = useState<Phase>('loading');
-  const [page, setPage] = useState<'health' | 'setup'>('setup');
+  const [page, setPage] = useState<Page>('setup');
 
   const refresh = async () => {
     const { bootstrapped } = await api.get<{ bootstrapped: boolean }>('/bootstrap');
@@ -20,8 +32,9 @@ export function App() {
     } catch { setPhase('bootstrap'); }
   };
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { if (!token) void refresh(); }, []);
 
+  if (token) return <Claim token={token} />;
   if (phase === 'loading') return <div className="p-6 text-muted">Loading…</div>;
   if (phase === 'bootstrap') return <Bootstrap onDone={refresh} />;
 
@@ -31,9 +44,20 @@ export function App() {
         <div className="mb-6 font-semibold">brainstand</div>
         <button className="nav-item" onClick={() => setPage('health')}>Health</button>
         <button className="nav-item" onClick={() => setPage('setup')}>Setup</button>
+        {phase === 'ready' && (
+          <>
+            <button className="nav-item" onClick={() => setPage('members')}>Members</button>
+            <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
+            <button className="nav-item" onClick={() => setPage('access')}>Access</button>
+          </>
+        )}
       </nav>
       <main className="flex-1 p-6">
-        {page === 'health' ? <Health /> : <Wizard onReady={refresh} />}
+        {page === 'health' && <Health />}
+        {page === 'setup' && <Wizard onReady={refresh} />}
+        {page === 'members' && <Members />}
+        {page === 'connection' && <Connection />}
+        {page === 'access' && <Access />}
       </main>
     </div>
   );
