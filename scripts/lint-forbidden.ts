@@ -25,7 +25,9 @@ const RULES: { rule: string; re: RegExp; why: string }[] = [
   },
   {
     rule: 'log-request-body',
-    re: /console\.(log|info|debug|error)\([^)]*\b(req\.body|await\s+req\.json\(\)|body)\b/,
+    // [^)]* cannot span the ) inside json(), and a trailing \b after json()
+    // never fires () then ; are both non-word). Keep all three arms.
+    re: /console\.(log|info|debug|error)\([^;]*?(?:\b(?:req\.body|body)\b|await\s+req\.json\(\))/,
     why: 'S3c: a control plane that logs the body of "add source" undoes the upstream invariant',
   },
   {

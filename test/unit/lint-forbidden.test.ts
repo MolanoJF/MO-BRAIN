@@ -109,6 +109,15 @@ describe('lintForbidden', () => {
     expect(v.map((x) => x.rule)).toContain('log-request-body');
   });
 
+  // Fetch/Bun body path: the old [^)]* arm died on the ) inside json().
+  test('flags logging await req.json()', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-json-'));
+    await writeFile(join(root, 'log.ts'), `console.log(await req.json());\n`);
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toContain('log-request-body');
+    await rm(root, { recursive: true, force: true });
+  });
+
   test('flags a plaintext secret column', async () => {
     await writeFile(join(dir, 'a', 'sch.ts'), `plaintext: text('plaintext'),\n`);
     const v = await lintForbidden(dir);
