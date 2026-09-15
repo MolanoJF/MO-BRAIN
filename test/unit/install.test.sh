@@ -31,4 +31,16 @@ if BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env2" bash scripts/install.s
   echo "FAIL: ran without DOMAIN"; fail=1
 else echo "PASS: required DOMAIN"; fi
 
+# Parse the script source — BRAINSTAND_SKIP_UP must not skip this check.
+# Without --env-file, Compose loads .env from the project dir of the first -f
+# (compose/), so the secrets install.sh just wrote never reach interpolation.
+echo "--- compose up argv includes --env-file (parse script; no Docker)"
+up_line=$(grep -E 'docker[[:space:]]+compose[[:space:]].*up[[:space:]]+-d[[:space:]]+--wait' scripts/install.sh | head -n1)
+if echo "$up_line" | grep -q -- '--env-file'; then
+  echo "PASS: up argv includes --env-file"
+else
+  echo "FAIL: up argv missing --env-file: ${up_line:-<no up line>}"
+  fail=1
+fi
+
 exit $fail

@@ -54,7 +54,9 @@ if [ "${BRAINSTAND_SKIP_UP:-0}" = "1" ]; then
   exit 0
 fi
 
-docker compose -f compose/docker-compose.yml up -d --wait
+# Project dir is compose/ (first -f), so without --env-file Compose would
+# look for compose/.env and miss the secrets we just wrote at $ENV_PATH.
+docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml up -d --wait
 
 cat <<EOF
 

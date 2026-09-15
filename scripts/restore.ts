@@ -2,7 +2,6 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { callOps } from '../src/control/opsClient.ts';
 import type { BackupManifest } from './backup.ts';
 
 export type RestoreReport = {
@@ -27,6 +26,40 @@ async function sh(argv: string[], timeoutMs = 900_000): Promise<{ exitCode: numb
   const [stderr, exitCode] = await Promise.all([new Response(p.stderr).text(), p.exited]);
   clearTimeout(timer);
   return { exitCode, stderr };
+}
+
+/** Capture stdout+stderr — argv array only. Used for in-compose gbrain ops
+ *  (doctor / auth.clients): production publishes no ops host port (S2). */
+async function shCapture(
+  argv: string[],
+  timeoutMs = 900_000,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const p = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe' });
+  const timer = setTimeout(() => p.kill(), timeoutMs);
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(p.stdout).text(),
+      new Response(p.stderr).text(),
+      p.exited,
+    ]);
+    return { exitCode, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Last balanced JSON value on stdout (gbrain may emit progress first). */
+function parseLastJson(stdout: string): unknown | null {
+  const trimmed = stdout.trim();
+  const start = Math.min(
+    ...[trimmed.indexOf('{'), trimmed.indexOf('[')].filter((i) => i >= 0),
+  );
+  if (!Number.isFinite(start) || start < 0) return null;
+  try {
+    return JSON.parse(trimmed.slice(start)) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /** Feed a host file to a command's stdin — argv array only, no shell redirect (S2). */
@@ -104,14 +137,22 @@ export async function runRestore(dir: string, opts: { newDomain?: string } = {})
     600_000,
   );
 
-  const doctor = await callOps('doctor', {}, { json: true, timeoutMs: 900_000 });
+  // Production gbrain-ops publishes no host port (S2). Doctor / auth.clients
+  // must run via compose exec argv — never host callOps / OPS_RPC_URL.
+  const doctor = await shCapture(
+    [...COMPOSE, 'exec', '-T', 'gbrain-ops', 'gbrain', 'doctor', '--json'],
+    900_000,
+  );
 
   // Slice 1 has no Connections yet; Slice 2 fills this list and drives the
   // automatic re-issue. The field ships now so the flow is not bolted on later.
   // auth.clients JSON is typically `{ clients: [...] }` or a bare array depending
   // on pin — accept both shapes.
-  const clients = await callOps<unknown>('auth.clients', {}, { json: true, timeoutMs: 120_000 });
-  const raw = clients.json;
+  const clients = await shCapture(
+    [...COMPOSE, 'exec', '-T', 'gbrain-ops', 'gbrain', 'auth', 'clients', '--json'],
+    120_000,
+  );
+  const raw = parseLastJson(clients.stdout);
   const list: unknown[] = Array.isArray(raw)
     ? raw
     : (raw && typeof raw === 'object' && Array.isArray((raw as { clients?: unknown[] }).clients))
