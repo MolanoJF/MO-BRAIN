@@ -298,6 +298,7 @@ export function Connection() {
           spaces={spaces}
           writeSpaceIds={writeSpaceIds}
           busy={busy}
+          acknowledged={acknowledged}
           onSubmit={() => void submit()}
         />
       )}
@@ -306,13 +307,14 @@ export function Connection() {
 }
 
 function ConfirmScreen({
-  previews, memberEmail, spaces, writeSpaceIds, busy, onSubmit,
+  previews, memberEmail, spaces, writeSpaceIds, busy, acknowledged, onSubmit,
 }: {
   previews: Preview[];
   memberEmail: string;
   spaces: Space[];
   writeSpaceIds: string[];
   busy: boolean;
+  acknowledged: boolean;
   onSubmit: () => void;
 }) {
   return (
@@ -326,7 +328,7 @@ function ConfirmScreen({
           writeLabel={spaceLabel(spaces, writeSpaceIds[i] ?? '')}
         />
       ))}
-      <button className="btn-primary" disabled={busy} onClick={onSubmit}>
+      <button className="btn-primary" disabled={busy || !acknowledged} onClick={onSubmit}>
         {busy ? 'Creating…' : `Create ${previews.length} Connection${previews.length === 1 ? '' : 's'}`}
       </button>
     </section>

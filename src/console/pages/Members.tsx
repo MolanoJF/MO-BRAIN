@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 
 type Role = 'owner' | 'admin' | 'member' | 'viewer';
-const ROLES: Role[] = ['owner', 'admin', 'member', 'viewer'];
+const INVITE_ROLES: Array<'admin' | 'member' | 'viewer'> = ['admin', 'member', 'viewer'];
 
 type Member = {
   id: string;
@@ -73,7 +73,7 @@ export function Members() {
         <input className="field" type="email" placeholder="Email"
                value={email} onChange={(e) => setEmail(e.target.value)} />
         <select className="field" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          {INVITE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <button className="btn-primary" disabled={busy || !email}
                 onClick={() => void invite()}>

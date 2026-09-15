@@ -78,7 +78,7 @@ let writeSpace: { id: string; sourceId: string };
 let writeSpace2: { id: string; sourceId: string };
 let readSpace: { id: string; sourceId: string };
 
-async function insertPending(space: { id: string; sourceId: string }) {
+async function insertPending(space: { id: string; sourceId: string }, harness = 'generic') {
   const id = randomUUID();
   await getDb().insert(schema.connections).values({
     id,
@@ -86,7 +86,7 @@ async function insertPending(space: { id: string; sourceId: string }) {
     membershipId,
     writeSpaceId: space.id,
     readSpaceIds: [readSpace.id],
-    harness: 'generic',
+    harness,
     clientName: clientName(membershipId, space.sourceId),
     gbrainClientId: null,
     profile: 'memory-writer',
@@ -284,7 +284,7 @@ describe('claim', () => {
   });
 
   test('credentials from takeGrantCredentials are on the claim result and not persisted', async () => {
-    const pendingId = await insertPending(writeSpace);
+    const pendingId = await insertPending(writeSpace, 'claude-code');
     const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
     const result = await claim(minted.token, EMAIL);
 
@@ -294,6 +294,8 @@ describe('claim', () => {
       client_id: 'gbrain_cl_taken',
       client_secret: SECRET,
     });
+    expect(result.connections[0]!.harness).toBe('claude-code');
+    expect(result.connections[0]!.mcp_url).toBe('http://127.0.0.1:3131/mcp');
     expect(takes).toEqual([grantCredentialsOutPath(pendingId)]);
 
     const claimRows = await getDb().select().from(schema.claimLinks);

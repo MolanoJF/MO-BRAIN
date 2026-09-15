@@ -250,7 +250,7 @@ describe('POST /api/claim/:token email-in-body', () => {
       membershipId: member.id,
       writeSpaceId: writeSpace.id,
       readSpaceIds: [readSpace.id],
-      harness: 'generic',
+      harness: 'claude-code',
     });
     expect(assigned.status).toBe(200);
 
@@ -290,7 +290,7 @@ describe('POST /api/claim/:token email-in-body', () => {
     expect(ok.status).toBe(200);
     const claimed = await ok.json() as {
       membershipId: string;
-      connections: Array<{ connectionId: string; credentials: unknown }>;
+      connections: Array<{ connectionId: string; credentials: unknown; harness: string; mcp_url: string }>;
     };
     expect(claimed.membershipId).toBe(member.id);
     expect(claimed.connections.length).toBe(1);
@@ -298,6 +298,8 @@ describe('POST /api/claim/:token email-in-body', () => {
       client_id: 'gbrain_cl_taken',
       client_secret: SECRET,
     });
+    expect(claimed.connections[0]!.harness).toBe('claude-code');
+    expect(claimed.connections[0]!.mcp_url).toBe('http://127.0.0.1:3131/mcp');
     const audits = await getDb().select().from(schema.auditLog);
     expect(JSON.stringify(audits)).not.toContain(SECRET);
     expect(JSON.stringify(audits)).not.toContain(token);

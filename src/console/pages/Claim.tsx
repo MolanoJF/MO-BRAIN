@@ -1,33 +1,22 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api.ts';
-import { HARVEST_MAP, wiringSnippet } from '../../control/harness.ts';
+import { wiringSnippet } from '../../control/harness.ts';
 
-type ClaimConnection = { connectionId: string; credentials: unknown };
+type ClaimConnection = {
+  connectionId: string;
+  credentials: unknown;
+  harness: string;
+  mcp_url: string;
+};
 
 type Creds = {
   client_id?: string;
   client_secret?: string;
-  mcp_url?: string;
-  url?: string;
-  harness?: string;
 };
-
-const HARNESS_IDS = Object.keys(HARVEST_MAP);
 
 function asCreds(raw: unknown): Creds {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Creds;
   return {};
-}
-
-function mcpUrl(creds: Creds): string {
-  if (typeof creds.mcp_url === 'string' && creds.mcp_url) return creds.mcp_url;
-  if (typeof creds.url === 'string' && creds.url) return creds.url;
-  return `${window.location.origin}/mcp`;
-}
-
-function defaultHarness(creds: Creds): string {
-  if (creds.harness && creds.harness in HARVEST_MAP) return creds.harness;
-  return 'generic';
 }
 
 export function Claim({ token }: { token: string }) {
@@ -35,7 +24,6 @@ export function Claim({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[] } | null>(null);
-  const [harnessById, setHarnessById] = useState<Record<string, string>>({});
 
   const submit = async () => {
     setBusy(true); setError(null);
@@ -45,11 +33,6 @@ export function Claim({ token }: { token: string }) {
         { email },
       );
       setResult(r);
-      const next: Record<string, string> = {};
-      for (const conn of r.connections) {
-        next[conn.connectionId] = defaultHarness(asCreds(conn.credentials));
-      }
-      setHarnessById(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Claim failed');
     } finally {
@@ -73,12 +56,7 @@ export function Claim({ token }: { token: string }) {
           <p className="text-sm text-muted">No pending connections were provisioned for this member.</p>
         )}
         {result.connections.map((conn) => (
-          <ClaimedConnection
-            key={conn.connectionId}
-            conn={conn}
-            harness={harnessById[conn.connectionId] ?? 'generic'}
-            onHarness={(id) => setHarnessById((prev) => ({ ...prev, [conn.connectionId]: id }))}
-          />
+          <ClaimedConnection key={conn.connectionId} conn={conn} />
         ))}
       </div>
     );
@@ -106,19 +84,15 @@ export function Claim({ token }: { token: string }) {
   );
 }
 
-function ClaimedConnection({
-  conn, harness, onHarness,
-}: {
-  conn: ClaimConnection;
-  harness: string;
-  onHarness: (id: string) => void;
-}) {
+function ClaimedConnection({ conn }: { conn: ClaimConnection }) {
   const creds = asCreds(conn.credentials);
-  const url = mcpUrl(creds);
-  const snippet = useMemo(
-    () => wiringSnippet(harness, { client_id: creds.client_id, mcp_url: url }),
-    [harness, creds.client_id, url],
-  );
+  const snippet = useMemo(() => {
+    try {
+      return wiringSnippet(conn.harness, { client_id: creds.client_id, mcp_url: conn.mcp_url });
+    } catch (e) {
+      return e instanceof Error ? e.message : 'unknown harness';
+    }
+  }, [conn.harness, conn.mcp_url, creds.client_id]);
 
   return (
     <section className="card space-y-3">
@@ -129,16 +103,9 @@ function ClaimedConnection({
       <dl className="space-y-1 text-sm font-mono">
         {creds.client_id != null && <div>client_id: {creds.client_id}</div>}
         {creds.client_secret != null && <div>client_secret: {creds.client_secret}</div>}
-        <div>mcp_url: {url}</div>
+        <div>harness: {conn.harness}</div>
+        <div>mcp_url: {conn.mcp_url}</div>
       </dl>
-      <label className="text-sm">
-        Harness
-        <select className="field mt-1" value={harness} onChange={(e) => onHarness(e.target.value)}>
-          {HARNESS_IDS.map((id) => (
-            <option key={id} value={id}>{id} ({HARVEST_MAP[id] ?? 'unknown'})</option>
-          ))}
-        </select>
-      </label>
       <pre className="field font-mono text-xs whitespace-pre-wrap">{snippet}</pre>
     </section>
   );

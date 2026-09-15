@@ -278,7 +278,7 @@ function rescopeParams(clientId: string, compiled: CompiledConnection): Record<s
   return params;
 }
 
-function mcpUrl(): string {
+export function mcpUrl(): string {
   const base = (process.env.PUBLIC_URL ?? 'http://127.0.0.1:3131').replace(/\/+$/, '');
   return base.endsWith('/mcp') ? base : `${base}/mcp`;
 }

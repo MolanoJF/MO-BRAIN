@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
-import { grantCredentialsOutPath, provisionConnection } from './connections.ts';
+import { grantCredentialsOutPath, mcpUrl, provisionConnection } from './connections.ts';
 import { takeGrantCredentials } from './opsClient.ts';
 import type { Role } from './rbac.ts';
 
@@ -9,7 +9,12 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 
 export type ClaimResult = {
   membershipId: string;
-  connections: Array<{ connectionId: string; credentials: unknown }>;
+  connections: Array<{
+    connectionId: string;
+    credentials: unknown;
+    harness: string;
+    mcp_url: string;
+  }>;
 };
 
 /** Email is case-normalized to lowercase so a leaked link still needs the matching address. */
@@ -125,10 +130,21 @@ export async function claim(token: string, email: string): Promise<ClaimResult> 
       budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
     }, membership.userId);
     const credentials = await takeGrantCredentials(grantCredentialsOutPath(provisioned.connectionId));
-    connections.push({ connectionId: provisioned.connectionId, credentials });
+    connections.push({
+      connectionId: provisioned.connectionId,
+      credentials,
+      harness: row.harness,
+      mcp_url: mcpUrlFromGrant(provisioned.credentials) ?? mcpUrl(),
+    });
   }
 
   return { membershipId, connections };
+}
+
+function mcpUrlFromGrant(json: unknown): string | null {
+  if (!json || typeof json !== 'object') return null;
+  const rec = json as Record<string, unknown>;
+  return typeof rec.mcp_url === 'string' && rec.mcp_url ? rec.mcp_url : null;
 }
 
 async function rejectFailedClaim(hash: string, email: string): Promise<never> {
