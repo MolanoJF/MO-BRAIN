@@ -372,12 +372,29 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * Plan defect (Work Item S, Task 13): `--pack` is NOT how you name a pack
+   * for `schema lint`. `runLintCmd`'s own `parseFlags()` (src/commands/
+   * schema.ts) recognizes only `--json`/`--source`/`--source-id` — every
+   * other token, `--with-db` and `--pack` included, falls through into its
+   * `positional` array untouched, and `name = positional[0]`. Confirmed
+   * empirically: `gbrain schema lint --with-db --json` exits 1 with `Pack
+   * not found: --with-db`, because `--with-db` itself became `positional[0]`
+   * — there is no `--pack` flag to catch a value first. The real grammar is
+   * a POSITIONAL pack name, optional (falls back to the active pack):
+   * `gbrain schema lint [PACK_NAME] [--with-db] [--json]`. Confirmed
+   * working both ways: `gbrain schema lint --json` (active pack) and
+   * `gbrain schema lint gbrain-base --with-db --json` (named pack — the
+   * positional MUST come before --with-db, or the same misparse recurs).
+   * `packName` is listed first in `params` for exactly that reason:
+   * `buildArgv` emits params in array order.
+   */
   'schema.lint': {
     id: 'schema.lint',
     argv: ['schema', 'lint'],
     params: [
+      { name: 'packName', flag: '', kind: 'value' },
       { name: 'withDb', flag: '--with-db', kind: 'flag' },
-      { name: 'pack', flag: '--pack', kind: 'value' },
     ],
     supportsJson: true,
     supportsDryRun: false,
@@ -385,15 +402,32 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * Plan defect (Work Item S, Task 13): two bugs. (1) `--pack` here is
+   * exactly as inert as it is for `schema.lint` above — `runSyncCmd` never
+   * reads a pack selector at all (it always syncs against the engine's
+   * currently active pack) — so the param did nothing and was dropped
+   * rather than kept as dead API surface. (2) `supportsDryRun: true` is
+   * wrong: `schema` is not in cli-flag-registry.generated.ts's per-command
+   * allowlist for `--dry-run` at all. Confirmed empirically: `gbrain schema
+   * sync --dry-run --json` is rejected before dispatch —
+   * `{"status":"error","reason":"invalid_flag","message":"unknown flag
+   * --dry-run for 'gbrain schema'"}`, exit 1. Preview IS the default mode
+   * here — `apply: false` (the absence of `--apply`) already previews
+   * without mutating, confirmed via `gbrain schema sync --json` returning a
+   * `per_prefix`/`total_would_apply` report with `"apply": false` and zero
+   * `applied` counts. `supportsDryRun` fixed to false; our generic
+   * `{ dryRun: true }` mechanism assumes gbrain literally has a `--dry-run`
+   * flag, which this command does not.
+   */
   'schema.sync': {
     id: 'schema.sync',
     argv: ['schema', 'sync'],
     params: [
       { name: 'apply', flag: '--apply', kind: 'flag' },
-      { name: 'pack', flag: '--pack', kind: 'value' },
     ],
     supportsJson: true,
-    supportsDryRun: true,
+    supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],
   },

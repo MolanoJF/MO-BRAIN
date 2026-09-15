@@ -1,0 +1,874 @@
+{
+  "gbrainVersion": "0.50.0.0",
+  "generatedAt": "2026-09-15T04:14:37.758Z",
+  "operations": [
+    {
+      "id": "applyMigrations",
+      "argv": [
+        "apply-migrations"
+      ],
+      "params": [
+        {
+          "name": "yes",
+          "flag": "--yes",
+          "kind": "flag"
+        },
+        {
+          "name": "nonInteractive",
+          "flag": "--non-interactive",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "auth.clients",
+      "argv": [
+        "auth",
+        "clients"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "auth.registerClient",
+      "argv": [
+        "auth",
+        "register-client"
+      ],
+      "params": [
+        {
+          "name": "name",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "grantTypes",
+          "flag": "--grant-types",
+          "kind": "value"
+        },
+        {
+          "name": "scopes",
+          "flag": "--scopes",
+          "kind": "value"
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
+        },
+        {
+          "name": "federatedRead",
+          "flag": "--federated-read",
+          "kind": "list"
+        },
+        {
+          "name": "redirectUri",
+          "flag": "--redirect-uri",
+          "kind": "value"
+        },
+        {
+          "name": "tokenEndpointAuthMethod",
+          "flag": "--token-endpoint-auth-method",
+          "kind": "value"
+        },
+        {
+          "name": "boundTools",
+          "flag": "--bound-tools",
+          "kind": "list"
+        },
+        {
+          "name": "boundSource",
+          "flag": "--bound-source",
+          "kind": "value"
+        },
+        {
+          "name": "boundBrain",
+          "flag": "--bound-brain",
+          "kind": "value"
+        },
+        {
+          "name": "boundSlugPrefixes",
+          "flag": "--bound-slug-prefixes",
+          "kind": "value"
+        },
+        {
+          "name": "boundMaxConcurrent",
+          "flag": "--bound-max-concurrent",
+          "kind": "value"
+        },
+        {
+          "name": "budgetUsdPerDay",
+          "flag": "--budget-usd-per-day",
+          "kind": "value"
+        },
+        {
+          "name": "tokenTtl",
+          "flag": "--token-ttl",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "auth.rescopeClient",
+      "argv": [
+        "auth",
+        "rescope-client"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
+        },
+        {
+          "name": "federatedRead",
+          "flag": "--federated-read",
+          "kind": "list"
+        },
+        {
+          "name": "boundTools",
+          "flag": "--bound-tools",
+          "kind": "list"
+        },
+        {
+          "name": "boundSource",
+          "flag": "--bound-source",
+          "kind": "value"
+        },
+        {
+          "name": "boundBrain",
+          "flag": "--bound-brain",
+          "kind": "value"
+        },
+        {
+          "name": "boundSlugPrefixes",
+          "flag": "--bound-slug-prefixes",
+          "kind": "value"
+        },
+        {
+          "name": "boundMaxConcurrent",
+          "flag": "--bound-max-concurrent",
+          "kind": "value"
+        },
+        {
+          "name": "budgetUsdPerDay",
+          "flag": "--budget-usd-per-day",
+          "kind": "value"
+        },
+        {
+          "name": "surface",
+          "flag": "--surface",
+          "kind": "value"
+        },
+        {
+          "name": "profile",
+          "flag": "--profile",
+          "kind": "value"
+        },
+        {
+          "name": "yes",
+          "flag": "--yes",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "config.get",
+      "argv": [
+        "config",
+        "get"
+      ],
+      "params": [
+        {
+          "name": "key",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "config.set",
+      "argv": [
+        "config",
+        "set"
+      ],
+      "params": [
+        {
+          "name": "key",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "value",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "config.show",
+      "argv": [
+        "config",
+        "show"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "doctor",
+      "argv": [
+        "doctor"
+      ],
+      "params": [
+        {
+          "name": "remediate",
+          "flag": "--remediate",
+          "kind": "flag"
+        },
+        {
+          "name": "yes",
+          "flag": "--yes",
+          "kind": "flag"
+        },
+        {
+          "name": "targetScore",
+          "flag": "--target-score",
+          "kind": "value"
+        },
+        {
+          "name": "maxUsd",
+          "flag": "--max-usd",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "embed",
+      "argv": [
+        "embed"
+      ],
+      "params": [
+        {
+          "name": "stale",
+          "flag": "--stale",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "init",
+      "argv": [
+        "init"
+      ],
+      "params": [
+        {
+          "name": "nonInteractive",
+          "flag": "--non-interactive",
+          "kind": "flag"
+        },
+        {
+          "name": "force",
+          "flag": "--force",
+          "kind": "flag"
+        },
+        {
+          "name": "url",
+          "flag": "--url",
+          "kind": "value",
+          "secret": true
+        },
+        {
+          "name": "embeddingModel",
+          "flag": "--embedding-model",
+          "kind": "value"
+        },
+        {
+          "name": "embeddingDimensions",
+          "flag": "--embedding-dimensions",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "init.mcpOnly",
+      "argv": [
+        "init",
+        "--mcp-only"
+      ],
+      "params": [
+        {
+          "name": "issuerUrl",
+          "flag": "--issuer-url",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "mcpUrl",
+          "flag": "--mcp-url",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "oauthClientId",
+          "flag": "--oauth-client-id",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "oauthClientSecret",
+          "flag": "--oauth-client-secret",
+          "kind": "value",
+          "required": true,
+          "secret": true
+        },
+        {
+          "name": "force",
+          "flag": "--force",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "jobs.supervisor",
+      "argv": [
+        "jobs",
+        "supervisor",
+        "start"
+      ],
+      "params": [
+        {
+          "name": "concurrency",
+          "flag": "--concurrency",
+          "kind": "value"
+        },
+        {
+          "name": "detach",
+          "flag": "--detach",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "jobs.supervisorStatus",
+      "argv": [
+        "jobs",
+        "supervisor",
+        "status"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "jobs.supervisorStop",
+      "argv": [
+        "jobs",
+        "supervisor",
+        "stop"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "mcp.grant",
+      "argv": [
+        "mcp",
+        "grant"
+      ],
+      "params": [
+        {
+          "name": "name",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "harness",
+          "flag": "--harness",
+          "kind": "value"
+        },
+        {
+          "name": "profile",
+          "flag": "--profile",
+          "kind": "value"
+        },
+        {
+          "name": "client",
+          "flag": "--client",
+          "kind": "value"
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
+        },
+        {
+          "name": "federatedRead",
+          "flag": "--federated-read",
+          "kind": "list"
+        },
+        {
+          "name": "boundTools",
+          "flag": "--bound-tools",
+          "kind": "list"
+        },
+        {
+          "name": "boundSource",
+          "flag": "--bound-source",
+          "kind": "value"
+        },
+        {
+          "name": "boundBrain",
+          "flag": "--bound-brain",
+          "kind": "value"
+        },
+        {
+          "name": "boundSlugPrefixes",
+          "flag": "--bound-slug-prefixes",
+          "kind": "value"
+        },
+        {
+          "name": "boundMaxConcurrent",
+          "flag": "--bound-max-concurrent",
+          "kind": "value"
+        },
+        {
+          "name": "budgetUsdPerDay",
+          "flag": "--budget-usd-per-day",
+          "kind": "value"
+        },
+        {
+          "name": "delegatedSlugPrefixes",
+          "flag": "--delegated-slug-prefixes",
+          "kind": "value"
+        },
+        {
+          "name": "delegatedNamespace",
+          "flag": "--delegated-namespace",
+          "kind": "value"
+        },
+        {
+          "name": "tokenTtl",
+          "flag": "--token-ttl",
+          "kind": "value"
+        },
+        {
+          "name": "credentialsOut",
+          "flag": "--credentials-out",
+          "kind": "value"
+        },
+        {
+          "name": "adminTokenFile",
+          "flag": "--admin-token-file",
+          "kind": "value",
+          "secret": true
+        },
+        {
+          "name": "ifVersion",
+          "flag": "--if-version",
+          "kind": "value"
+        },
+        {
+          "name": "resume",
+          "flag": "--resume",
+          "kind": "flag"
+        },
+        {
+          "name": "url",
+          "flag": "--url",
+          "kind": "value",
+          "required": true,
+          "secret": true
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": true,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "mcp.verify",
+      "argv": [
+        "mcp",
+        "verify"
+      ],
+      "params": [
+        {
+          "name": "client",
+          "flag": "--client",
+          "kind": "value"
+        },
+        {
+          "name": "harness",
+          "flag": "--harness",
+          "kind": "value"
+        },
+        {
+          "name": "timeoutMs",
+          "flag": "--timeout-ms",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "schema.lint",
+      "argv": [
+        "schema",
+        "lint"
+      ],
+      "params": [
+        {
+          "name": "packName",
+          "flag": "",
+          "kind": "value"
+        },
+        {
+          "name": "withDb",
+          "flag": "--with-db",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "schema.list",
+      "argv": [
+        "schema",
+        "list"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "schema.sync",
+      "argv": [
+        "schema",
+        "sync"
+      ],
+      "params": [
+        {
+          "name": "apply",
+          "flag": "--apply",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "search",
+      "argv": [
+        "search"
+      ],
+      "params": [
+        {
+          "name": "query",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "flag": "--limit",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "serve",
+      "argv": [
+        "serve"
+      ],
+      "params": [
+        {
+          "name": "http",
+          "flag": "--http",
+          "kind": "flag"
+        },
+        {
+          "name": "bind",
+          "flag": "--bind",
+          "kind": "value"
+        },
+        {
+          "name": "port",
+          "flag": "--port",
+          "kind": "value"
+        },
+        {
+          "name": "publicUrl",
+          "flag": "--public-url",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.add",
+      "argv": [
+        "sources",
+        "add"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "path",
+          "flag": "--path",
+          "kind": "value"
+        },
+        {
+          "name": "url",
+          "flag": "--url",
+          "kind": "value"
+        },
+        {
+          "name": "kind",
+          "flag": "--kind",
+          "kind": "value"
+        },
+        {
+          "name": "name",
+          "flag": "--name",
+          "kind": "value"
+        },
+        {
+          "name": "federated",
+          "flag": "--federated",
+          "kind": "flag"
+        },
+        {
+          "name": "noFederated",
+          "flag": "--no-federated",
+          "kind": "flag"
+        },
+        {
+          "name": "cloneDir",
+          "flag": "--clone-dir",
+          "kind": "value"
+        },
+        {
+          "name": "tokenEnv",
+          "flag": "--token-env",
+          "kind": "value"
+        },
+        {
+          "name": "force",
+          "flag": "--force",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.list",
+      "argv": [
+        "sources",
+        "list"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.status",
+      "argv": [
+        "sources",
+        "status"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sync",
+      "argv": [
+        "sync"
+      ],
+      "params": [
+        {
+          "name": "all",
+          "flag": "--all",
+          "kind": "flag"
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "toolsJson",
+      "argv": [
+        "--tools-json"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "whoami",
+      "argv": [
+        "whoami"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ]
+    }
+  ]
+}

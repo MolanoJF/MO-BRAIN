@@ -1,7 +1,14 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
+import { buildArgv } from '../../src/contracts/argv.ts';
 import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL, PIN } from '../helpers/stack.ts';
+
+// Task 13's registry-coverage test enforces this, but a literal argv-array
+// call needs no separate op — this mirrors the plan's own precedent for
+// pinning `serve`'s shape without ever running the long-lived process.
+const buildArgvFor = (spec: (typeof OPERATIONS)[string]) =>
+  buildArgv(spec, { http: true, bind: '0.0.0.0', port: '3131', publicUrl: 'https://example.test' });
 
 beforeAll(async () => {
   await composeUp();
@@ -19,6 +26,19 @@ test('--tools-json emits the tool catalog', async () => {
   expect(r.exitCode).toBe(0);
   const catalog = JSON.parse(r.stdout);
   expect(catalog).toBeDefined();
+  const count = Array.isArray(catalog) ? catalog.length : Object.keys(catalog).length;
+  expect(count).toBeGreaterThan(50);
+});
+
+// Task 13 registry coverage: the test above hits --tools-json directly via
+// composeExec; this exercises the SAME command through the registered
+// OPERATIONS.toolsJson entry (supportsJson: false because the command IS
+// the json — no --json flag exists or is needed).
+test('the toolsJson operation entry matches the raw --tools-json catalog', async () => {
+  const spec = OPERATIONS.toolsJson!;
+  const r = await execOperation(spec, {});
+  assertOk(spec, r);
+  const catalog = JSON.parse(r.stdout);
   const count = Array.isArray(catalog) ? catalog.length : Object.keys(catalog).length;
   expect(count).toBeGreaterThan(50);
 });
@@ -159,4 +179,45 @@ test('sources list --json is parseable', async () => {
   const r = await execOperation(spec, {}, { json: true });
   assertOk(spec, r);
   expect(r.json).not.toBeNull();
+});
+
+// Work Item S (Task 13): `schema lint`'s real grammar is a POSITIONAL,
+// optional pack name — `--pack` does not exist. Omitting it lints the
+// currently active pack.
+test('schema lint --json reports against the active pack', async () => {
+  const spec = OPERATIONS['schema.lint']!;
+  const r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+  assertOk(spec, r);
+  expect(r.json).not.toBeNull();
+  expect((r.json as { pack?: string }).pack).toBeTruthy();
+}, 330_000);
+
+// Work Item S: --with-db only parses correctly with an EXPLICIT positional
+// pack name ahead of it — passing --with-db alone makes gbrain's own
+// parseFlags() (which does not recognize --with-db) treat the flag text
+// itself as the pack name (confirmed: exits 1, "Pack not found: --with-db").
+test('schema lint <pack> --with-db --json opts into the DB-aware rules', async () => {
+  const spec = OPERATIONS['schema.lint']!;
+  const r = await execOperation(spec, { packName: 'gbrain-base', withDb: true }, { json: true, timeoutMs: 300_000 });
+  assertOk(spec, r);
+  expect((r.json as { pack?: string } | null)?.pack).toBe('gbrain-base');
+}, 330_000);
+
+// Work Item S: schema does not accept --dry-run at all (rejected before
+// dispatch); omitting --apply already previews without mutating.
+test('schema sync --json previews a backfill without --apply mutating anything', async () => {
+  const spec = OPERATIONS['schema.sync']!;
+  const r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+  assertOk(spec, r);
+  const body = r.json as { apply?: boolean; total_applied?: number } | null;
+  expect(body?.apply).toBe(false);
+  expect(body?.total_applied).toBe(0);
+}, 330_000);
+
+// G4 precedent (Task 13's own example): pin serve's argv shape so Slice 1
+// can rely on it without ever running the long-lived process in a test.
+test('serve is registered so Slice 1 can pin its argv', () => {
+  const spec = OPERATIONS.serve!;
+  expect(buildArgvFor(spec)).toEqual(
+    ['serve', '--http', '--bind', '0.0.0.0', '--port', '3131', '--public-url', 'https://example.test']);
 });

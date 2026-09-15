@@ -2979,38 +2979,91 @@ describe('registry invariants', () => {
 Run: `bun test test/unit/registry.test.ts`
 Expected: FAIL on `uncovered` listing any operation added without a contract test (likely `schema.lint`, `schema.sync`, `serve`).
 
+> **Plan defect found during execution (2026-09-14):** actually running this against the registry as it stood after Tasks 11–12 reported six uncovered operations, not the three predicted above: `toolsJson`, `schema.lint`, `schema.sync`, `sources.status`, `sync`, `embed` — and `serve` was NOT among them (its id happens to already appear as a quoted argv literal inside discovery.contract.test.ts's well-known-probe spawn call, `['docker', 'compose', ..., 'gbrain', 'serve', '--http', ...]`, which satisfies the check's plain string-match even though nothing there asserts anything about the `serve` OPERATION). The extra three beyond the predicted `schema.lint`/`schema.sync` — `toolsJson`, `sync`, `embed`, plus `sources.status` — are uncovered because Tasks 11 and 12 exercise them for real, but only from `scripts/capture-capability.ts` and `scripts/tutorial.ts`; the coverage check only scans `test/contract/*.ts` file TEXT, so real usage from `scripts/` doesn't count. Covered anyway below (Step 3), plus `serve` gets a real assertion rather than relying on the coincidental match.
+
 - [ ] **Step 3: Cover the gaps**
 
-For each id the test names, either add an assertion referencing it to the matching `test/contract/*.contract.test.ts`, or remove it from the registry. Example for `schema.lint` and `schema.sync`, appended to `test/contract/discovery.contract.test.ts`:
+For each id the test names, either add an assertion referencing it to the matching `test/contract/*.contract.test.ts`, or remove it from the registry.
 
-```ts
-test('schema lint --with-db --json reports against the live brain', async () => {
-  const spec = OPERATIONS['schema.lint']!;
-  const r = await execOperation(spec, { withDb: true }, { json: true, timeoutMs: 300_000 });
-  expect([0, 1]).toContain(r.exitCode);
-  expect(r.json).not.toBeNull();
-}, 330_000);
-
-test('schema sync --dry-run --json previews a backfill without applying it', async () => {
-  const spec = OPERATIONS['schema.sync']!;
-  const r = await execOperation(spec, {}, { json: true, dryRun: true, timeoutMs: 300_000 });
-  expect([0, 1]).toContain(r.exitCode);
-}, 330_000);
-
-test('serve is registered so Slice 1 can pin its argv', () => {
-  const spec = OPERATIONS.serve!;
-  expect(buildArgvFor(spec)).toEqual(
-    ['serve', '--http', '--bind', '0.0.0.0', '--port', '3131', '--public-url', 'https://example.test']);
-});
-```
-
-Add this import and helper at the top of that file:
-
-```ts
-import { buildArgv } from '../../src/contracts/argv.ts';
-const buildArgvFor = (spec: typeof OPERATIONS[string]) =>
-  buildArgv(spec, { http: true, bind: '0.0.0.0', port: '3131', publicUrl: 'https://example.test' });
-```
+> **Plan defect found during execution (Work Item S, 2026-09-14) — both example invocations below are wrong, and so were the registry entries they were meant to test.** Running `gbrain schema lint --with-db --json` against the pinned container exits 1 with `Pack not found: --with-db`, and `gbrain schema sync --dry-run --json` exits 1 with `{"status":"error","reason":"invalid_flag","message":"unknown flag --dry-run for 'gbrain schema'"}`. Diagnosed against the reference checkout (`src/commands/schema.ts`):
+>
+> - `schema lint`'s own `parseFlags()` recognizes only `--json`/`--source`/`--source-id` — every other token, `--with-db` included, falls through into a `positional` array, and the pack name is `positional[0]`. There never was a `--pack` flag for either `schema lint` or `schema sync` to catch a value; passing `--with-db` with no positional pack name ahead of it means `--with-db` itself becomes `positional[0]`, which is why it read as the (nonexistent) pack name `--with-db`. The real grammar is `gbrain schema lint [PACK_NAME] [--with-db] [--json]` — a positional, optional pack name (falls back to the active pack when omitted) that MUST precede `--with-db` in argv or the same misparse recurs. Confirmed working both ways: `gbrain schema lint --json` (active pack) and `gbrain schema lint gbrain-base --with-db --json` (named pack, positional first).
+> - `schema` is not in `cli-flag-registry.generated.ts`'s per-command allowlist for `--dry-run` at all — every `gbrain schema * --dry-run` is rejected before dispatch, the same class of bug as Work Item E's `auth --dry-run`. Preview is the DEFAULT for `schema sync`: omitting `--apply` (`apply: false`) already returns a `per_prefix`/`total_would_apply` report with zero `applied` counts and mutates nothing. Confirmed: `gbrain schema sync --json` (no `--apply`) returns `"apply": false` with `total_applied: 0`.
+> - `--pack` on `schema.sync` was inert either way — `runSyncCmd` never reads a pack selector; it always operates on the engine's currently active pack. Dropped rather than kept as dead API surface.
+>
+> Fixed both registry entries (`src/contracts/registry.ts`): `schema.lint` replaces the bogus `--pack` value-flag with a `packName` POSITIONAL param, ordered BEFORE `withDb` (argv order matters here — `buildArgv` emits params in array order); `schema.sync` drops `pack` entirely and flips `supportsDryRun` to `false`. The corrected coverage tests (below, and the `toolsJson`/`sync`/`embed`/`sources.status` tests Step 2's expanded uncovered-list needs) assert the REAL invocations:
+>
+> ```ts
+> // test/contract/discovery.contract.test.ts
+> test('schema lint --json reports against the active pack', async () => {
+>   const spec = OPERATIONS['schema.lint']!;
+>   const r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+>   assertOk(spec, r);
+>   expect((r.json as { pack?: string }).pack).toBeTruthy();
+> }, 330_000);
+>
+> test('schema lint <pack> --with-db --json opts into the DB-aware rules', async () => {
+>   const spec = OPERATIONS['schema.lint']!;
+>   const r = await execOperation(spec, { packName: 'gbrain-base', withDb: true }, { json: true, timeoutMs: 300_000 });
+>   assertOk(spec, r);
+>   expect((r.json as { pack?: string } | null)?.pack).toBe('gbrain-base');
+> }, 330_000);
+>
+> test('schema sync --json previews a backfill without --apply mutating anything', async () => {
+>   const spec = OPERATIONS['schema.sync']!;
+>   const r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+>   assertOk(spec, r);
+>   const body = r.json as { apply?: boolean; total_applied?: number } | null;
+>   expect(body?.apply).toBe(false);
+>   expect(body?.total_applied).toBe(0);
+> }, 330_000);
+>
+> test('serve is registered so Slice 1 can pin its argv', () => {
+>   const spec = OPERATIONS.serve!;
+>   expect(buildArgvFor(spec)).toEqual(
+>     ['serve', '--http', '--bind', '0.0.0.0', '--port', '3131', '--public-url', 'https://example.test']);
+> });
+>
+> // test/contract/discovery.contract.test.ts — real coverage for the
+> // registry entry itself, alongside the pre-existing raw --tools-json test.
+> test('the toolsJson operation entry matches the raw --tools-json catalog', async () => {
+>   const spec = OPERATIONS.toolsJson!;
+>   const r = await execOperation(spec, {});
+>   assertOk(spec, r);
+>   const catalog = JSON.parse(r.stdout);
+>   expect(Array.isArray(catalog) ? catalog.length : Object.keys(catalog).length).toBeGreaterThan(50);
+> });
+>
+> // test/contract/lifecycle.contract.test.ts — this file's beforeAll
+> // registers no sources, so these pin the graceful-no-op contract: neither
+> // command should error just because there is nothing to sync/embed yet.
+> test('sync --all --json exits cleanly with no sources registered', async () => {
+>   const spec = OPERATIONS.sync!;
+>   assertOk(spec, await execOperation(spec, { all: true }, { json: true, timeoutMs: 120_000 }));
+> }, 150_000);
+>
+> test('embed --stale --json exits cleanly with nothing stale', async () => {
+>   const spec = OPERATIONS.embed!;
+>   assertOk(spec, await execOperation(spec, { stale: true }, { json: true, timeoutMs: 120_000 }));
+> }, 150_000);
+>
+> test('sources status --json reports the implicit default source', async () => {
+>   const spec = OPERATIONS['sources.status']!;
+>   const r = await execOperation(spec, {}, { json: true });
+>   assertOk(spec, r);
+>   expect(r.json).not.toBeNull();
+> });
+> ```
+>
+> Add this import and helper at the top of `discovery.contract.test.ts`:
+>
+> ```ts
+> import { buildArgv } from '../../src/contracts/argv.ts';
+> const buildArgvFor = (spec: (typeof OPERATIONS)[string]) =>
+>   buildArgv(spec, { http: true, bind: '0.0.0.0', port: '3131', publicUrl: 'https://example.test' });
+> ```
+>
+> Verified: `bun test test/unit/registry.test.ts` now reports `uncovered: []` (8/8 pass); `bun test test/contract/discovery.contract.test.ts` (10/10 pass) and `bun test test/contract/lifecycle.contract.test.ts` (9/9 pass) both green against the running pinned stack.
 
 - [ ] **Step 4: Write `scripts/emit-operations.ts`**
 
@@ -3039,6 +3092,8 @@ console.log(`wrote ${dir}/operations.json — ${payload.operations.length} opera
 
 Run: `bun run operations:emit`
 Expected: `wrote contracts/v0.50.0.0/operations.json — N operations` (N is roughly 20).
+
+> **Observed (2026-09-14):** N = 27 — the 24 operations Tasks 5–10 registered, plus `init.mcpOnly`, `search` and `whoami`, the three Task 12 added for the real per-member isolation check (see Task 12's Work Item Q).
 
 Run: `bun test test/unit/registry.test.ts`
 Expected: PASS — 8 tests, `uncovered: []`.

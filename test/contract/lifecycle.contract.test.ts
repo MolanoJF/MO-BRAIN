@@ -84,3 +84,27 @@ test('apply-migrations is non-interactive and idempotent', async () => {
   assertOk(spec, await execOperation(spec, { yes: true, nonInteractive: true }, { timeoutMs: 300_000 }));
   assertOk(spec, await execOperation(spec, { yes: true, nonInteractive: true }, { timeoutMs: 300_000 }));
 }, 660_000);
+
+// Task 13 registry coverage: sync/embed/sources.status were previously
+// exercised only from scripts/ (capture-capability.ts, tutorial.ts against
+// real seeded sources) -- never from a literal OPERATIONS reference inside
+// test/contract, which is what the registry invariant test's (purely
+// textual) coverage check actually looks for. This file's beforeAll
+// registers no sources, so these assert the graceful-no-op contract:
+// neither command should error just because there is nothing to do yet.
+test('sync --all --json exits cleanly with no sources registered', async () => {
+  const spec = OPERATIONS.sync!;
+  assertOk(spec, await execOperation(spec, { all: true }, { json: true, timeoutMs: 120_000 }));
+}, 150_000);
+
+test('embed --stale --json exits cleanly with nothing stale', async () => {
+  const spec = OPERATIONS.embed!;
+  assertOk(spec, await execOperation(spec, { stale: true }, { json: true, timeoutMs: 120_000 }));
+}, 150_000);
+
+test('sources status --json reports the implicit default source', async () => {
+  const spec = OPERATIONS['sources.status']!;
+  const r = await execOperation(spec, {}, { json: true });
+  assertOk(spec, r);
+  expect(r.json).not.toBeNull();
+});
