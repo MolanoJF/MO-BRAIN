@@ -5,6 +5,7 @@
 # wrapper and gbrain is exactly the bug class the exact pin exists to prevent.
 ARG GBRAIN_VERSION=0.50.0.0
 FROM brainstand/gbrain-base:${GBRAIN_VERSION}
+ARG GBRAIN_VERSION
 
 WORKDIR /app
 COPY package.json bun.lock ./
