@@ -135,6 +135,21 @@ export const OPERATIONS: Record<string, OperationSpec> = {
   },
 
   // V12: `gbrain sources add <id> --path <path>` — rejected over MCP by design.
+  //
+  // Plan defect (Work Item N, found building Task 12): `sources add` does
+  // NOT support --json, unlike its siblings `list`/`status`/`archived`.
+  // Confirmed two ways against the running pinned container: (1) `gbrain
+  // sources add <id> --path <p> --json` exits 2 with "Unknown flag: --json"
+  // — the per-command flag allowlist in cli-flag-registry.generated.ts's
+  // 'sources' entry does carry '--json', but sources.ts's own `printHelp()`
+  // usage line only lists --json for `list`/`status`/`archived`, and (2)
+  // that usage line's shape for `add` is exactly `add <id> --path <p>
+  // [--name <n>] [--federated|--no-federated] [--force]` — no --json.
+  // Neither existing contract test (auth, mcp-grant) ever passed
+  // `json: true` to this operation, so the wrong `true` here went
+  // undetected until the tutorial script needed a real receipt to read
+  // `source_id` off of. Fixed to false; the tutorial reads sources.add's
+  // plain-text confirmation instead of parsing JSON from it.
   'sources.add': {
     id: 'sources.add',
     argv: ['sources', 'add'],
@@ -150,7 +165,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       { name: 'tokenEnv', flag: '--token-env', kind: 'value' },
       { name: 'force', flag: '--force', kind: 'flag' },
     ],
-    supportsJson: true,
+    supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],
