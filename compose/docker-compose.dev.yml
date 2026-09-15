@@ -1,12 +1,19 @@
-# Local override: publish Caddy on high ports and use its internal CA so
-# `docker compose up` works without a real domain. NEVER used in production.
+# Local override: publishes Caddy on high ports so `docker compose up` is
+# reachable without binding 80/443. NEVER used in production.
+#
+# This does NOT supply DOMAIN. `${DOMAIN:?required}` in the base compose
+# file (docker-compose.yml) is interpolated BEFORE this override is merged
+# in, so a value set only here can never satisfy it -- Compose still fails
+# fast if DOMAIN is unset, by design (see Task 1 controller ruling: that
+# early, explicit failure is intentional and must not be relaxed). Export
+# DOMAIN=localhost yourself (shell env or .env) before bringing this stack
+# up; when Caddy sees a non-public DOMAIN like `localhost` it issues
+# certificates from its own internal CA instead of trying ACME.
 services:
   caddy:
     ports:
       - "8443:443"
       - "8080:80"
-    environment:
-      DOMAIN: localhost
 
   # Host-run tests and scripts/backup.ts reach the RPC over localhost. In
   # production nothing but control-plane can reach :3140, on ops-net only.

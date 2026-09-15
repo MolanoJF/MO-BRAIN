@@ -10,6 +10,9 @@ import { readFileSync } from 'node:fs';
 const compose = parse(readFileSync('compose/docker-compose.yml', 'utf8'), { merge: true }) as any;
 const svc = (n: string) => compose.services[n];
 
+const devOverride = parse(readFileSync('compose/docker-compose.dev.yml', 'utf8')) as any;
+const dockerAvailable = Bun.which('docker') !== null;
+
 describe('compose invariants', () => {
   test('caddy is the only service publishing host ports', () => {
     const publishers = Object.entries(compose.services)
@@ -51,6 +54,7 @@ describe('compose invariants', () => {
 
   test('gbrain-ops is not on control-net and control-plane is not on brain-net', () => {
     expect(svc('gbrain-ops').networks).toContain('brain-net');
+    expect(svc('gbrain-ops').networks).not.toContain('control-net');
     expect(svc('control-plane').networks).not.toContain('brain-net');
   });
 
@@ -59,4 +63,43 @@ describe('compose invariants', () => {
       expect(svc(n).environment.GBRAIN_SELF_UPGRADE_MODE).toBe('off');
     }
   });
+
+  // Finding 1 (Task 1 review): docker-compose.dev.yml used to set
+  // caddy.environment.DOMAIN=localhost, which looked like it supplied the
+  // dev DOMAIN but never could: Compose interpolates each file's `${...}`
+  // expressions against the shell/.env context as it parses that file,
+  // BEFORE merging in any override, so a value set only in the override
+  // arrives too late to satisfy the base file's `${DOMAIN:?required}`. Pin
+  // the fix structurally: the dev override must never again carry a
+  // service-level DOMAIN meant to rescue that interpolation.
+  test('the dev override does not set DOMAIN on caddy (cannot satisfy the base file\'s required check)', () => {
+    const caddyEnv = devOverride.services.caddy.environment;
+    expect(caddyEnv?.DOMAIN).toBeUndefined();
+  });
+
+  // Same finding, proved end-to-end against the real Compose CLI: the
+  // documented dev path (export DOMAIN=localhost, bring up both files)
+  // must actually resolve. Skipped cleanly when docker isn't on PATH.
+  test.skipIf(!dockerAvailable)(
+    'the documented dev invocation resolves DOMAIN from the environment',
+    () => {
+      const proc = Bun.spawnSync(
+        ['docker', 'compose', '-f', 'compose/docker-compose.yml', '-f', 'compose/docker-compose.dev.yml', 'config'],
+        {
+          env: {
+            ...process.env,
+            DOMAIN: 'localhost',
+            POSTGRES_PASSWORD: 'x',
+            OPS_RPC_TOKEN: 'x',
+            ENCRYPTION_KEY: 'x',
+            BETTER_AUTH_SECRET: 'x',
+          },
+        },
+      );
+      const stdout = proc.stdout.toString();
+      const stderr = proc.stderr.toString();
+      expect(proc.exitCode, `docker compose config failed: ${stderr}`).toBe(0);
+      expect(stdout).toContain('DOMAIN: localhost');
+    },
+  );
 });
