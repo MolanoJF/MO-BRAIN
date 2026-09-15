@@ -16,26 +16,27 @@ function throwStatus(status: 401 | 403, error: 'unauthorized' | 'forbidden'): ne
   });
 }
 
-type SessionPayload = {
-  user?: { id?: string };
-  session?: { activeOrganizationId?: string | null };
-} | null;
-
 /** Throws a Response on 401/403 — callers use the `guard` wrapper from routes/wizard.ts:60. */
 export async function requireRole(c: Context, min: Role): Promise<{ userId: string; orgId: string; role: Role }> {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers }) as SessionPayload;
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const userId = session?.user?.id;
   if (!userId) throwStatus(401, 'unauthorized');
 
-  const activeOrgId = session?.session?.activeOrganizationId ?? null;
-  const db = getDb();
+  // Read from our column, not Better Auth's session payload (organization
+  // plugin was dropped; getSession does not carry activeOrganizationId).
+  const sessionId = session.session.id;
+  const [sess] = await getDb()
+    .select({ activeOrganizationId: schema.sessions.activeOrganizationId })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId));
+  const activeOrgId = sess?.activeOrganizationId ?? null;
 
   const memberships = activeOrgId
-    ? await db.select().from(schema.memberships).where(and(
+    ? await getDb().select().from(schema.memberships).where(and(
       eq(schema.memberships.userId, userId),
       eq(schema.memberships.organizationId, activeOrgId),
     ))
-    : await db.select().from(schema.memberships).where(eq(schema.memberships.userId, userId));
+    : await getDb().select().from(schema.memberships).where(eq(schema.memberships.userId, userId));
 
   const m = activeOrgId
     ? memberships[0]

@@ -183,13 +183,18 @@ describe('roles', () => {
     expect(`${String(err)} ${String(cause ?? '')}`).toContain('role_valid');
   });
 
-  test('after exercising the organization plugin, no undeclared tables exist', async () => {
+  test('the organization plugin invitation surface is not mounted', async () => {
     const listed = await app.request('/api/auth/organization/list', {
       headers: { cookie: ownerCookie },
     });
-    expect(listed.status).toBe(200);
-    const orgs = await listed.json() as { id?: string }[];
-    expect(orgs.some((o) => o.id === orgId)).toBe(true);
+    expect(listed.status).toBe(404);
+
+    const invite = await app.request('/api/auth/organization/invite-member', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: ownerCookie },
+      body: JSON.stringify({ email: 'invitee@example.test', role: 'member' }),
+    });
+    expect(invite.status).toBe(404);
 
     const rows = await getDb().execute(
       sql`select table_name from information_schema.tables
@@ -199,23 +204,44 @@ describe('roles', () => {
       .map((r) => String((r as { table_name: string }).table_name))
       .filter((t) => !DECLARED_TABLES.has(t));
     expect(extras).toEqual([]);
-    expect(extras).not.toContain('invitation');
-    expect(extras).not.toContain('invitations');
   });
 
-  test('multiple memberships with no active org is 403, not an arbitrary pick', async () => {
-    const otherId = randomUUID();
+  test('active organization id selects among multiple memberships', async () => {
+    const orgB = randomUUID();
     await getDb().insert(schema.organizations).values({
-      id: otherId, name: 'Second', slug: `second-${otherId.slice(0, 8)}`,
+      id: orgB, name: 'ViewerOrg', slug: `viewer-${orgB.slice(0, 8)}`,
     });
-    const [owner] = await getDb().select().from(schema.users)
-      .where(eq(schema.users.email, 'admin@example.test'));
+
+    const email = 'dual-role@example.test';
+    const signed = await app.request('/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: PASS, name: email }),
+    });
+    expect(signed.status).toBe(200);
+    const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
     await getDb().insert(schema.memberships).values({
-      id: randomUUID(), userId: owner!.id, organizationId: otherId, role: 'owner',
+      id: randomUUID(), userId: u!.id, organizationId: orgId, role: 'admin',
     });
-    await getDb().update(schema.sessions).set({ activeOrganizationId: null });
-    const cookie = await signIn('admin@example.test', PASS);
-    await getDb().update(schema.sessions).set({ activeOrganizationId: null });
+    await getDb().insert(schema.memberships).values({
+      id: randomUUID(), userId: u!.id, organizationId: orgB, role: 'viewer',
+    });
+
+    const cookie = await signIn(email, PASS);
+
+    await getDb().update(schema.sessions)
+      .set({ activeOrganizationId: orgId })
+      .where(eq(schema.sessions.userId, u!.id));
+    expect((await wizardState(cookie)).status).toBe(200);
+
+    await getDb().update(schema.sessions)
+      .set({ activeOrganizationId: orgB })
+      .where(eq(schema.sessions.userId, u!.id));
+    expect((await wizardState(cookie)).status).toBe(403);
+
+    await getDb().update(schema.sessions)
+      .set({ activeOrganizationId: null })
+      .where(eq(schema.sessions.userId, u!.id));
     expect((await wizardState(cookie)).status).toBe(403);
   });
 });
