@@ -123,4 +123,18 @@ describe('control schema', () => {
       where tablename = 'spaces' and indexdef ilike '%unique%source_id%'`;
     expect(row.n).toBeGreaterThan(0);
   });
+
+  // Ruling 26: Better Auth 1.7.5 columns added in 0001 — dropping them is red.
+  test.skipIf(!postgresAvailable)('Better Auth 1.7.5 columns exist on sessions/accounts/verifications', async () => {
+    expect(await cols('sessions')).toContain('updated_at');
+    const accounts = await cols('accounts');
+    expect(accounts).toContain('updated_at');
+    expect(accounts).toContain('id_token');
+    expect(accounts).toContain('access_token_expires_at');
+    expect(accounts).toContain('refresh_token_expires_at');
+    expect(accounts).toContain('scope');
+    const verifications = await cols('verifications');
+    expect(verifications).toContain('created_at');
+    expect(verifications).toContain('updated_at');
+  });
 });
