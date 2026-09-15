@@ -40,4 +40,28 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     privilege: 'brain-db',
     okExitCodes: [0],
   },
+
+  'config.get': {
+    id: 'config.get',
+    argv: ['config', 'get'],
+    params: [{ name: 'key', flag: '', kind: 'value', required: true }],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  // Plan defect (Work Item C): the plan specified a `config list` subcommand
+  // that does not exist upstream. gbrain's own usage line is
+  // `gbrain config [show|get|set|unset] <key> [value]` (src/commands/config.ts,
+  // runConfig dispatcher) — the read-all-config verb is `show`, not `list`.
+  'config.show': {
+    id: 'config.show',
+    argv: ['config', 'show'],
+    params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
 };

@@ -1075,12 +1075,23 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 The spec described a live trap here. It is **fixed in v0.50.0.0** — so we assert the current behavior, and the test becomes the tripwire if a version bump reintroduces it.
 
 **Files:**
-- Modify: `src/contracts/registry.ts` (add `config.get`, `config.list`)
+- Modify: `src/contracts/registry.ts` (add `config.get`, `config.show`)
 - Create: `test/contract/config.contract.test.ts`
 
 **Interfaces:**
 - Consumes: `OPERATIONS.init` (Task 5) — the brain must be initialized first.
-- Produces: `OPERATIONS['config.get']`, `OPERATIONS['config.list']`.
+- Produces: `OPERATIONS['config.get']`, `OPERATIONS['config.show']`.
+
+> **Plan defect found during execution (Work Item C, 2026-09-14):** as
+> originally written, this task specified a `config list` / `gbrain config
+> list` operation. Upstream v0.50.0.0 has no `list` subcommand — the CLI's
+> own usage line is `gbrain config [show|get|set|unset] <key> [value]`
+> (`src/commands/config.ts`, the `runConfig` dispatcher, confirmed against the
+> read-only reference checkout). The read-all-config verb is `show`, which
+> prints `GBrain config:` followed by `  key: value` lines (redacting
+> sensitive keys) and takes no arguments. Fixed by renaming the operation and
+> the test to `config.show` / `gbrain config show` throughout this task
+> (shown below); no other task or script referenced `config.list`.
 
 - [ ] **Step 1: Write the failing contract test**
 
@@ -1139,10 +1150,11 @@ test('config set openai_api_key does not silently land in the DB plane', async (
   }
 });
 
-test('config list emits a parseable inventory', async () => {
-  const r = await execOperation(OPERATIONS['config.list']!, {});
-  assertOk(OPERATIONS['config.list']!, r);
+test('config show emits a parseable inventory', async () => {
+  const r = await execOperation(OPERATIONS['config.show']!, {});
+  assertOk(OPERATIONS['config.show']!, r);
   expect(r.stdout.length).toBeGreaterThan(0);
+  expect(r.stdout).toContain('GBrain config:');
 });
 ```
 
@@ -1166,9 +1178,10 @@ Insert into the `OPERATIONS` object, after `'config.set'`:
     okExitCodes: [0],
   },
 
-  'config.list': {
-    id: 'config.list',
-    argv: ['config', 'list'],
+  // Work Item C: `list` renamed to `show` — see the defect note above.
+  'config.show': {
+    id: 'config.show',
+    argv: ['config', 'show'],
     params: [],
     supportsJson: false,
     supportsDryRun: false,
