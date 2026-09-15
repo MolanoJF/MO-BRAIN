@@ -6,7 +6,7 @@
 
 **Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md)
 **Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — the risk register Slice 0 existed to produce.
-**Branch:** `main` · **Executor:** Sonnet subagents, one task per dispatch, every result verified independently by the orchestrator.
+**Branch:** Slice 0 landed on `main`; Slice 1 is on `slice-1-deploy-one-brain` (base `fbd0e95`). · **Executor:** Sonnet subagents, one task per dispatch, every result verified independently by the orchestrator.
 
 ---
 
@@ -63,13 +63,29 @@ A freshly started session won't need this.
 
 ---
 
-## Slice 1 — NOT STARTED
+## Slice 1 — IN PROGRESS
 
 **Entry gate: MET.** Slice 0 exit gate green, `contracts/v0.50.0.0/operations.json` committed.
 
-15 tasks. See [the Slice 1 plan](./2026-09-14-slice-1-deploy-one-brain.md). Three Slice-0 findings are already propagated into it (schema-packs prose parsing, provider-key routing, and the `/space` git-seeding gap).
+15 tasks, executed with `superpowers:subagent-driven-development`. Working ledger (rulings, per-task state, deferred minors): `.superpowers/sdd/2026-09-14-slice-1-deploy-one-brain/progress.md` — git-ignored scratch, so **read it before resuming, and treat it as authoritative over memory**.
 
-**Known open gap to resolve early:** Slice 1 Task 9's `/space` handler calls `sources.add` against a path that was never `git init`'d or committed. V12 proves that fails. Needs a file-plane primitive to seed and commit the repo first.
+| Task | State |
+|---|---|
+| 1 — two-database Postgres + production compose | **complete** (`2c1a7ac..37fbe14`, review clean) |
+| 2 — Caddyfile, `/admin` sealed | **complete** (`4fff74a..b58faf9`, review clean) |
+| 3 — advisory lock + file-plane writer | in progress |
+| 4–15 | not started |
+
+**Executing the plan is again finding defects in the plan — ten so far**, all patched back into the plan file with evidence blockquotes (commits `4fff74a`, `de648f6`, `1841f50`).
+
+The two that matter most:
+
+- **Task 2's `/admin` seal was decorative.** A bare top-level `respond @admin_denied 404` compiles *behind* the catch-all, because Caddy sorts `respond` after `handle`. Verified with real `caddy adapt`: the 404 landed at route 4, behind a catch-all at route 3 that matches everything, making it unreachable dead config. S1 and a Slice 1 exit-gate item were both unmet. Now a `handle` block, which recompiles to route 1. **And the drafted test would have passed against the broken config** — it parsed Caddyfile *text*, so it found the `respond` line present and went green. The routing test now asserts compiled route *order*.
+- **Task 1's `01-databases.sh` broke the Slice 0 stack.** `compose/initdb/` is shared by both compose files, and slice0's `POSTGRES_DB=gbrain` pre-creates that database, so a bare `CREATE DATABASE gbrain` aborted init under `ON_ERROR_STOP=1`. Now `\gexec`-guarded — re-proved on a fresh volume.
+
+**Known open gap, still unresolved (Task 9):** the `/space` handler calls `sources.add` against a path that was never `git init`'d or committed. V12 proves that fails. **Controller ruling:** add a `seedSpaceRepo` primitive to `src/ops/fileplane.ts`, expose it as `POST /fileplane/seed-space`, call it from `/space` before `sources.add`. Lands in Task 9, not Task 4, so it is test-driven at its point of use.
+
+**Also carried forward:** Task 3's advisory lock now reserves its connection (`sql.reserve()`). The pooled version was correct only incidentally — Bun's pool happens to reuse the most-recently-idle connection — and `pg_advisory_lock` is session-scoped and re-entrant, so a pooled handle can leak the lock or hand it to two callers at once.
 
 ---
 
@@ -81,3 +97,4 @@ A freshly started session won't need this.
 - 2026-09-14 — Tasks 6–10 done (one agent hit a usage limit mid-Task-8; resumed from repo state, not from its report).
 - 2026-09-14 — Tasks 11–13 done. Isolation check rebuilt from theatre into a real per-member OAuth proof.
 - 2026-09-14 — Findings doc filled, wrong-pin tripwire verified, consequences propagated. **SLICE 0 COMPLETE.**
+- 2026-09-15 — Slice 1 started on `slice-1-deploy-one-brain`. Tasks 1–2 complete. Ten plan defects found and patched back, including a decorative `/admin` seal whose own test would have certified it. A pre-existing `lint:forbidden` break (introduced by HANDOFF.md quoting the pattern it forbids) repaired by narrowing scope, never rules. Docker-gated suites can no longer skip silently.
