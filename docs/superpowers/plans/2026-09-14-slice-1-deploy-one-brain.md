@@ -2401,6 +2401,20 @@ wizard.get('/state', guard(async (c, { orgId }) => {
  * Step 1 — provider key. Two destinations, neither of them gbrain's DB plane
  * (V11): our encrypted secrets table (source of truth) and the file plane
  * (what gbrain actually reads), written under the advisory lock (S3).
+ *
+ * Slice 0 finding carried forward (docs/slice-0-findings.md V3/V11,
+ * Work Item A, 2026-09-15): Slice 0 confirmed `gbrain config set
+ * <vendor>_api_key` itself avoids the DB plane, and this route's design
+ * (write the key here, BEFORE `/finish` ever calls `init`) is the right
+ * shape — it is what makes headless `init` resolvable without Slice 0's
+ * own env-var passthrough shortcut (which is Slice-0-only and must not be
+ * copied into this compose). One assumption is still UNVERIFIED, though:
+ * Slice 0 only validated gbrain's own `config set` CLI path — it never
+ * validated that `patchFilePlaneConfig`'s direct file write lands in the
+ * same file, in the same format, that `gbrain init`/`gbrain config show`
+ * actually read. Before relying on this in Task 9's tests, add a
+ * round-trip check: call this route, then `gbrain config show` inside
+ * gbrain-ops, and confirm the key name actually appears.
  */
 wizard.post('/provider', guard(async (c, { userId, orgId }) => {
   const { provider, apiKey, embeddingModel } = await c.req.json();
@@ -2430,10 +2444,34 @@ wizard.post('/search-mode', guard(async (c, { userId, orgId }) => {
   return c.json({ ok: true, lifecycle: 'mode-selected', mode });
 }));
 
-/** Step 3 — schema pack, rendered from `gbrain schema list --json`. */
+/**
+ * Step 3 — schema pack, rendered from `gbrain schema list`.
+ *
+ * Slice 0 finding carried forward (docs/slice-0-findings.md V2, Work Item K,
+ * 2026-09-15): `schema list` accepts `--json` on the command line without
+ * erroring, but silently IGNORES it and always prints human prose —
+ * `runList()`'s own handler never reads its argument. Slice 0's registry
+ * marks this operation `supportsJson: false`, so requesting `{ json: true }`
+ * as originally drafted here either throws inside the exec layer's
+ * `buildArgv` ("schema.list does not support --json") or, if gbrain-ops's
+ * RPC server swallows that into a non-throwing response, silently yields
+ * `json: null` — an empty pack list shown to the user with no visible
+ * error. Fixed: call it WITHOUT `json`, and parse the stable
+ * `Bundled packs:` prose block the same way Slice 0's own
+ * `parseSchemaPacksProse()` (src/contracts/capability.ts) already does.
+ */
 wizard.get('/schema-packs', guard(async (c) => {
-  const r = await callOps<unknown>('schema.list', {}, { json: true, timeoutMs: 60_000 });
-  return c.json({ packs: r.json ?? [] });
+  const r = await callOps<never>('schema.list', {}, { timeoutMs: 60_000 });
+  const bundled: string[] = [];
+  let inBundled = false;
+  for (const line of (r.stdout ?? '').split('\n')) {
+    if (/^\s*Bundled packs:\s*$/.test(line)) { inBundled = true; continue; }
+    if (!inBundled) continue;
+    const t = line.trim();
+    if (t === '') break;
+    bundled.push(t);
+  }
+  return c.json({ packs: bundled });
 }));
 
 wizard.post('/schema', guard(async (c, { userId, orgId }) => {
@@ -2460,10 +2498,29 @@ wizard.post('/space', guard(async (c, { userId, orgId }) => {
   const brain = await loadBrain(orgId);
   const localPath = `/srv/brain-repos/${sourceId}`;
 
-  // sources add --path is rejected over MCP by design (V12) — CLI lane only.
+  // Slice 0 finding carried forward (docs/slice-0-findings.md V12,
+  // Work Item D, 2026-09-15): `sources add --path` unconditionally refuses
+  // any path that is not a git repository with at least one COMMITTED,
+  // TRACKED file — an empty commit or an untracked file is not enough, and
+  // this is undocumented upstream. As drafted, this handler called
+  // `sources.add` directly on `localPath` without ever creating, seeding or
+  // committing anything there — every real call would fail. THIS IS AN
+  // OPEN GAP, not yet fixed here: gbrain-ops's ops RPC server has no
+  // exposed primitive for "git-init + seed + commit a directory" the way it
+  // already has dedicated `/fileplane/config` and `/fileplane/schema-pack`
+  // endpoints for direct file-plane writes (see opsClient.ts). Before this
+  // route can work, add an equivalent file-plane primitive (e.g. a
+  // `/fileplane/seed-space` endpoint, or extend `sources.add`'s own
+  // handling in the RPC server) that mirrors what Slice 0's
+  // `test/helpers/stack.ts` `seedGitSource()` and `scripts/tutorial.ts` do
+  // today: mkdir, `git init`, set a commit identity, write at least one
+  // file, `git add -A`, `git commit`, THEN call `sources.add` — and drop
+  // `json: true` from the call below, since `sources add` does not support
+  // `--json` at all (exit 2, "Unknown flag: --json" — Work Item N); read
+  // its plain-text confirmation instead.
   const r = await callOps('sources.add', {
     id: sourceId, path: localPath, name: name ?? sourceId,
-  }, { json: true, timeoutMs: 300_000 });
+  }, { timeoutMs: 300_000 });
   if (!r.ok) return c.json({ error: `sources add failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
 
   await getDb().insert(schema.spaces).values({
