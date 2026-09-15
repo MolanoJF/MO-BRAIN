@@ -1,9 +1,8 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { eq } from 'drizzle-orm';
 import { auth } from '../auth.ts';
-import { getDb, schema } from '../db/client.ts';
 import { isBootstrapped, bootstrapFirstAdmin } from '../bootstrap.ts';
+import { requireRole } from '../rbac.ts';
 
 export const authRoutes = new Hono();
 
@@ -24,18 +23,6 @@ authRoutes.post('/bootstrap', async (c) => {
 });
 
 /** Resolve the caller's session and their org, or throw a 401/403 response. */
-export async function requireAdmin(c: Context): Promise<{ userId: string; orgId: string }> {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  const userId = (session as { user?: { id?: string } } | null)?.user?.id;
-  if (!userId) throw new Response(JSON.stringify({ error: 'unauthorized' }), {
-    status: 401, headers: { 'content-type': 'application/json' },
-  });
-
-  const [m] = await getDb().select().from(schema.memberships).where(eq(schema.memberships.userId, userId));
-  if (!m || !['owner', 'admin'].includes(m.role)) {
-    throw new Response(JSON.stringify({ error: 'forbidden' }), {
-      status: 403, headers: { 'content-type': 'application/json' },
-    });
-  }
-  return { userId, orgId: m.organizationId };
+export async function requireAdmin(c: Context) {
+  return requireRole(c, 'admin');
 }

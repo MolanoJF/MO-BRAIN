@@ -1,4 +1,6 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { eq, sql } from 'drizzle-orm';
 import app from '../../src/control/app.ts';
 import { runMigrations, getDb, schema, closeDb, pinDb } from '../../src/control/db/client.ts';
 import { isBootstrapped } from '../../src/control/bootstrap.ts';
@@ -10,13 +12,46 @@ process.env.CONTROL_DATABASE_URL ??=
 // Pin at module load so a sibling file cannot close the pool before our beforeAll.
 pinDb();
 
+const PASS = 'a-long-enough-password';
+
+/** Tables declared in src/control/db/schema.ts, plus drizzle's migrator ledger. */
+const DECLARED_TABLES = new Set([
+  'users', 'sessions', 'accounts', 'verifications',
+  'organizations', 'memberships', 'brains', 'spaces', 'secrets',
+  'capability_snapshots', 'playbook_ledger', 'audit_log',
+  'connections', 'claim_links',
+  '__drizzle_migrations',
+]);
+
+function pgCode(e: unknown): string | undefined {
+  const err = e as { code?: string; errno?: string; cause?: { code?: string; errno?: string } };
+  return err.errno ?? err.code ?? err.cause?.errno ?? err.cause?.code;
+}
+
+async function signIn(email: string, password: string): Promise<string> {
+  const res = await app.request('/api/auth/sign-in/email', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  expect(res.status).toBe(200);
+  return res.headers.get('set-cookie') ?? '';
+}
+
+async function wizardState(cookie: string) {
+  return app.request('/api/wizard/state', { headers: { cookie } });
+}
+
 beforeAll(async () => {
   await runMigrations();
-  // Child tables first — FKs to users/orgs.
+  // Child tables first — FKs to users/orgs. claim_links and connections
+  // reference memberships/orgs (Task 1); delete them before those parents.
   await getDb().delete(schema.sessions);
   await getDb().delete(schema.accounts);
   await getDb().delete(schema.verifications);
   await getDb().delete(schema.auditLog);
+  await getDb().delete(schema.claimLinks);
+  await getDb().delete(schema.connections);
   await getDb().delete(schema.memberships);
   await getDb().delete(schema.brains);
   await getDb().delete(schema.organizations);
@@ -74,5 +109,113 @@ describe('single-admin bootstrap', () => {
   // Ruling 25 reversal (Task 9): wizard is mounted; unauthenticated → 401.
   test('an unauthenticated wizard call is 401', async () => {
     expect((await app.request('/api/wizard/state')).status).toBe(401);
+  });
+});
+
+describe('roles', () => {
+  let orgId = '';
+  let ownerCookie = '';
+  let adminCookie = '';
+  let memberCookie = '';
+  let viewerCookie = '';
+
+  beforeAll(async () => {
+    const [org] = await getDb().select().from(schema.organizations);
+    orgId = org!.id;
+
+    for (const { email, role } of [
+      { email: 'role-admin@example.test', role: 'admin' as const },
+      { email: 'role-member@example.test', role: 'member' as const },
+      { email: 'role-viewer@example.test', role: 'viewer' as const },
+    ]) {
+      const signed = await app.request('/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password: PASS, name: email }),
+      });
+      expect(signed.status).toBe(200);
+      const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
+      await getDb().insert(schema.memberships).values({
+        id: randomUUID(), userId: u!.id, organizationId: orgId, role,
+      });
+    }
+
+    ownerCookie = await signIn('admin@example.test', PASS);
+    adminCookie = await signIn('role-admin@example.test', PASS);
+    memberCookie = await signIn('role-member@example.test', PASS);
+    viewerCookie = await signIn('role-viewer@example.test', PASS);
+  });
+
+  test('a viewer gets 403 from an admin route', async () => {
+    expect((await wizardState(viewerCookie)).status).toBe(403);
+  });
+
+  test('a member gets 403 from an admin route', async () => {
+    expect((await wizardState(memberCookie)).status).toBe(403);
+  });
+
+  test('an owner passes an admin route', async () => {
+    expect((await wizardState(ownerCookie)).status).toBe(200);
+  });
+
+  test('an admin passes an admin route', async () => {
+    expect((await wizardState(adminCookie)).status).toBe(200);
+  });
+
+  test('a comma-joined role string is rejected by the role_valid CHECK', async () => {
+    const otherId = randomUUID();
+    await getDb().insert(schema.organizations).values({
+      id: otherId, name: 'Comma', slug: `comma-${otherId.slice(0, 8)}`,
+    });
+    const [owner] = await getDb().select().from(schema.users)
+      .where(eq(schema.users.email, 'admin@example.test'));
+    let err: unknown;
+    try {
+      await getDb().insert(schema.memberships).values({
+        id: randomUUID(), userId: owner!.id, organizationId: otherId, role: 'admin,member',
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(pgCode(err)).toBe('23514');
+    const cause = (err as { cause?: unknown }).cause;
+    expect(`${String(err)} ${String(cause ?? '')}`).toContain('role_valid');
+  });
+
+  test('after exercising the organization plugin, no undeclared tables exist', async () => {
+    const listed = await app.request('/api/auth/organization/list', {
+      headers: { cookie: ownerCookie },
+    });
+    expect(listed.status).toBe(200);
+    const orgs = await listed.json() as { id?: string }[];
+    expect(orgs.some((o) => o.id === orgId)).toBe(true);
+
+    const rows = await getDb().execute(
+      sql`select table_name from information_schema.tables
+          where table_schema = 'public' and table_type = 'BASE TABLE'`,
+    );
+    const extras = [...rows]
+      .map((r) => String((r as { table_name: string }).table_name))
+      .filter((t) => !DECLARED_TABLES.has(t));
+    expect(extras).toEqual([]);
+    expect(extras).not.toContain('invitation');
+    expect(extras).not.toContain('invitations');
+  });
+
+  test('multiple memberships with no active org is 403, not an arbitrary pick', async () => {
+    const otherId = randomUUID();
+    await getDb().insert(schema.organizations).values({
+      id: otherId, name: 'Second', slug: `second-${otherId.slice(0, 8)}`,
+    });
+    const [owner] = await getDb().select().from(schema.users)
+      .where(eq(schema.users.email, 'admin@example.test'));
+    await getDb().insert(schema.memberships).values({
+      id: randomUUID(), userId: owner!.id, organizationId: otherId, role: 'owner',
+    });
+    await getDb().update(schema.sessions).set({ activeOrganizationId: null });
+    const cookie = await signIn('admin@example.test', PASS);
+    await getDb().update(schema.sessions).set({ activeOrganizationId: null });
+    expect((await wizardState(cookie)).status).toBe(403);
   });
 });
