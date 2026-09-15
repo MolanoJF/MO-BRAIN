@@ -1985,6 +1985,17 @@ These three are the **data-plane** half of G4: what the snapshot captures, and w
 > `supportsJson: false` and asserted the stable prose instead, the same
 > non-JSON-command shape Task 6 hit with `config show` (Work Item C).
 
+> **Plan defect found during execution (Work Item M, 2026-09-14):** the
+> "hermes is absent" test's raw argv was `['sh', '-c', 'gbrain mcp grant
+> --help 2>&1 || true']` — a shell STRING that invokes `gbrain`, exactly
+> what this repo's own `bun run lint:forbidden` (the `shell-string-gbrain`
+> rule, `scripts/lint-forbidden.ts`, enforcing G2) exists to reject, and it
+> does: running the lint gate against the plan's own literal test code
+> fails it. `--help` prints via `console.log` in `runMcp`
+> (`src/commands/mcp.ts`) — plain stdout — so no `sh -c` / `2>&1` merge is
+> needed. Fixed by using a plain argv array, `['gbrain', 'mcp', 'grant',
+> '--help']`, and checking `stdout + stderr` defensively (shown below).
+
 > **Plan defect found during execution (Work Item L, 2026-09-14):** the
 > original `finally { serve.kill(); }` does not actually stop the remote
 > `gbrain serve` process. `serve` is a LOCAL `Bun.spawn` of `docker compose
@@ -2096,11 +2107,10 @@ test('.well-known/gbrain exposes live profiles and harness adapters', async () =
 }, 180_000);
 
 // V10: never promise auto-install for a manual-class adapter.
+// Work Item M: a plain argv array, not `sh -c` — see the defect note above.
 test('hermes is absent and generic is the manual path for it', async () => {
-  const probe = await composeExec('gbrain-ops', [
-    'sh', '-c', 'gbrain mcp grant --help 2>&1 || true',
-  ]);
-  expect(probe.stdout.toLowerCase()).not.toContain('hermes');
+  const probe = await composeExec('gbrain-ops', ['gbrain', 'mcp', 'grant', '--help']);
+  expect((probe.stdout + probe.stderr).toLowerCase()).not.toContain('hermes');
 });
 
 // Work Item K: `schema list` ignores --json entirely (runList(_args) never

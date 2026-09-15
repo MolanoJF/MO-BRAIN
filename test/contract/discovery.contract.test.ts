@@ -127,11 +127,15 @@ test('.well-known/gbrain exposes live profiles and harness adapters', async () =
 }, 180_000);
 
 // V10: never promise auto-install for a manual-class adapter.
+// Plan defect (Work Item M): the original raw argv was `['sh', '-c', 'gbrain
+// mcp grant --help 2>&1 || true']` — a shell string invoking `gbrain`, which
+// this repo's own `bun run lint:forbidden` (G2: argv arrays, never shell
+// strings) correctly rejects. `--help` prints via `console.log` (`runMcp`,
+// src/commands/mcp.ts), i.e. stdout, so no `2>&1` merge is needed; a plain
+// argv array works and stays lint-clean.
 test('hermes is absent and generic is the manual path for it', async () => {
-  const probe = await composeExec('gbrain-ops', [
-    'sh', '-c', 'gbrain mcp grant --help 2>&1 || true',
-  ]);
-  expect(probe.stdout.toLowerCase()).not.toContain('hermes');
+  const probe = await composeExec('gbrain-ops', ['gbrain', 'mcp', 'grant', '--help']);
+  expect((probe.stdout + probe.stderr).toLowerCase()).not.toContain('hermes');
 });
 
 // Plan defect (Work Item K): `schema list`'s handler ignores its args
