@@ -39,3 +39,12 @@ describe('commitArgs', () => {
       .toThrow('invalid git identity');
   });
 });
+
+describe('commitAs sourceId', () => {
+  test('refuses a traversing sourceId before spawning git', async () => {
+    const { commitAs } = await import('../../src/ops/git.ts');
+    await expect(commitAs('../etc', { name: 'A', email: 'a@b.test' }, 'm', {
+      sql: {} as never,
+    })).rejects.toThrow(/invalid sourceId/);
+  });
+});

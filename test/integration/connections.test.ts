@@ -59,6 +59,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   resetBrainSchema: async () => {},
   takeGrantCredentials: async () => ({}),
   opsHealthy: async () => true,
+  commitAsMember: async () => ({ committed: false, sha: null }),
+  inspectRepos: async () => [],
 }));
 
 const { previewConnection, provisionConnection, revokeConnection } =

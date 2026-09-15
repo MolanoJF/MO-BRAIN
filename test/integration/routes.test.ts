@@ -16,6 +16,7 @@ type OpsResult = {
 
 const calls: Call[] = [];
 const takes: string[] = [];
+const commits: Array<{ sourceId: string; actor: { name: string; email: string }; message: string }> = [];
 const SECRET = 'sk-secret-once';
 const PASS = 'a-long-enough-password';
 
@@ -63,6 +64,15 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return { client_id: 'gbrain_cl_taken', client_secret: SECRET };
   },
   opsHealthy: async () => true,
+  commitAsMember: async (
+    sourceId: string,
+    actor: { name: string; email: string },
+    message: string,
+  ) => {
+    commits.push({ sourceId, actor, message });
+    return { committed: true, sha: 'abc123' };
+  },
+  inspectRepos: async () => [],
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
@@ -153,6 +163,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   calls.length = 0;
   takes.length = 0;
+  commits.length = 0;
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
 });
 
@@ -177,6 +188,7 @@ const ROUTE_TABLE: {
   { method: 'POST', path: '/api/connections', unauth: 401, viewer: 403, member: 403, admin: 400 },
   { method: 'POST', path: '/api/connections/preview', unauth: 401, viewer: 403, member: 403, admin: 400 },
   { method: 'POST', path: '/api/connections/not-a-real-id/revoke', unauth: 401, viewer: 403, member: 403, admin: 404 },
+  { method: 'POST', path: '/api/connections/not-a-real-id/commit', body: { message: 'x' }, unauth: 401, viewer: 404, member: 404, admin: 404 },
   { method: 'GET', path: '/api/harnesses', unauth: 401, viewer: 200, member: 200, admin: 200 },
   { method: 'GET', path: '/api/access-overview', unauth: 401, viewer: 200, member: 200, admin: 200 },
   { method: 'POST', path: '/api/claim/not-a-real-token', body: { email: 'claim-table@example.test' }, unauth: 400, viewer: 400, member: 400, admin: 400 },
@@ -359,5 +371,69 @@ describe('DELETE /api/members/:id offboard', () => {
     expect(revoke).toBeDefined();
     expect(revoke!.opts?.json).not.toBe(true);
     expect(revoke!.params?.clientId).toBe('gbrain_cl_live');
+  });
+});
+
+describe('POST /api/connections/:id/commit', () => {
+  async function connectionFor(email: string) {
+    const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
+    const [m] = await getDb().select().from(schema.memberships)
+      .where(eq(schema.memberships.userId, u!.id));
+    const spaceId = randomUUID();
+    const sourceId = `desk-${spaceId.slice(0, 8)}`;
+    await getDb().insert(schema.spaces).values({
+      id: spaceId, organizationId: orgId, sourceId, name: 'Desk', kind: 'local-git',
+    });
+    const res = await hit('POST', '/api/connections', adminCookie, {
+      membershipId: m!.id,
+      writeSpaceId: spaceId,
+      readSpaceIds: [readSpace.id],
+      harness: 'generic',
+    });
+    expect(res.status).toBe(200);
+    return { id: (await res.json() as { id: string }).id, email, sourceId };
+  }
+
+  test('resolves actor from membership user, never the request body', async () => {
+    const conn = await connectionFor('rt-member@example.test');
+    const res = await hit('POST', `/api/connections/${conn.id}/commit`, memberCookie, {
+      message: 'add page',
+      actor: { name: 'Hacker', email: 'evil@example.test' },
+      sourceId: 'evil',
+    });
+    expect(res.status).toBe(200);
+    expect(commits).toEqual([{
+      sourceId: conn.sourceId,
+      actor: { name: 'rt-member@example.test', email: 'rt-member@example.test' },
+      message: 'add page',
+    }]);
+  });
+
+  test('a viewer cannot commit as another member', async () => {
+    const conn = await connectionFor('rt-member@example.test');
+    const res = await hit('POST', `/api/connections/${conn.id}/commit`, viewerCookie, {
+      message: 'nope',
+    });
+    expect(res.status).toBe(403);
+    expect(commits).toEqual([]);
+  });
+
+  test('the connection owner can commit, and admin commits as that member', async () => {
+    const conn = await connectionFor('rt-viewer@example.test');
+    const asOwner = await hit('POST', `/api/connections/${conn.id}/commit`, viewerCookie, {
+      message: 'from owner',
+    });
+    expect(asOwner.status).toBe(200);
+
+    const asAdmin = await hit('POST', `/api/connections/${conn.id}/commit`, adminCookie, {
+      message: 'from admin',
+      actor: { name: 'Admin Spoof', email: 'rt-admin@example.test' },
+    });
+    expect(asAdmin.status).toBe(200);
+    expect(commits.map((c) => c.actor.email)).toEqual([
+      'rt-viewer@example.test',
+      'rt-viewer@example.test',
+    ]);
+    expect(commits.map((c) => c.message)).toEqual(['from owner', 'from admin']);
   });
 });

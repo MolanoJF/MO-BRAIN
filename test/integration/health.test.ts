@@ -21,11 +21,13 @@ describe('/api/health', () => {
       ok: unknown;
       components: { controlDb?: unknown; ops?: unknown };
       gbrainVersion: unknown;
+      repos: unknown;
     };
     expect(body).toHaveProperty('ok');
     expect(body.components).toHaveProperty('controlDb');
     expect(body.components).toHaveProperty('ops');
     expect(body).toHaveProperty('gbrainVersion');
+    expect(Array.isArray(body.repos)).toBe(true);
   });
 
   test('/api/health never leaks a connection string', async () => {

@@ -59,6 +59,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
   opsHealthy: async () => true,
+  commitAsMember: async () => ({ committed: false, sha: null }),
+  inspectRepos: async () => [],
 }));
 
 const { mintClaimLink, claim } = await import('../../src/control/claim.ts');

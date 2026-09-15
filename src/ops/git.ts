@@ -4,6 +4,8 @@ import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
 
 const REPOS_ROOT = process.env.BRAIN_REPOS ?? '/srv/brain-repos';
+/** Same shape seedSpaceRepo enforces — no path separators, no traversal. */
+const SOURCE_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** A lock held longer than this is a crashed writer, not a concurrent one. */
 const STALE_LOCK_SECONDS = 120;
@@ -89,6 +91,7 @@ export async function commitAs(
   message: string,
   opts: { sql: SQL; root?: string },
 ): Promise<{ committed: boolean; sha: string | null }> {
+  if (!SOURCE_ID_RE.test(sourceId)) throw new Error(`invalid sourceId: ${sourceId}`);
   const cwd = join(opts.root ?? REPOS_ROOT, sourceId);
   return withRepoLock(opts.sql, sourceId, async () => {
     await git(cwd, ['add', '-A']);

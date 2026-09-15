@@ -12,6 +12,7 @@ import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
+import { commitAs, inspectRepos } from './git.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
 const TOKEN = process.env.OPS_RPC_TOKEN;
@@ -90,6 +91,26 @@ Bun.serve({
         const path = (body as { path?: unknown }).path;
         const credentials = await takeGrantCredentialsFile(path);
         return json({ credentials });
+      }
+
+      // Actor is identity data fed to `git -c`; never interpolated into a shell (G2).
+      if (url.pathname === '/git/commit') {
+        const { sourceId, actor, message } = body as {
+          sourceId?: unknown;
+          actor?: { name?: unknown; email?: unknown };
+          message?: unknown;
+        };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof message !== 'string' || !message) return json({ error: 'message required' }, 400);
+        if (!actor || typeof actor.name !== 'string' || typeof actor.email !== 'string') {
+          return json({ error: 'actor name and email required' }, 400);
+        }
+        const result = await commitAs(sourceId, { name: actor.name, email: actor.email }, message, { sql });
+        return json(result);
+      }
+
+      if (url.pathname === '/git/inspect') {
+        return json({ repos: await inspectRepos() });
       }
 
       if (url.pathname === '/rpc') {

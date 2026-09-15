@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 
+type RepoStatus = {
+  sourceId: string;
+  staleLock: boolean;
+  lockAgeSeconds: number | null;
+  uncommittedFiles: number;
+  unpushedCommits: number;
+  branch: string | null;
+};
+
 type Health = {
   ok: boolean; components: Record<string, string>;
-  gbrainVersion: string | null; at: string;
+  gbrainVersion: string | null; repos?: RepoStatus[]; at: string;
 };
 
 export function Health() {
@@ -17,6 +26,8 @@ export function Health() {
   }, []);
 
   if (!health) return <div className="text-muted">Checking…</div>;
+
+  const repos = health.repos ?? [];
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -36,6 +47,37 @@ export function Health() {
               <td className="font-mono">{health.gbrainVersion ?? 'unknown'}</td></tr>
         </tbody>
       </table>
+      <h2 className="text-lg font-semibold">Space repos</h2>
+      {repos.length === 0 ? (
+        <p className="text-sm text-muted">No Space repos reported.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-subtle text-left">
+              <th className="py-2 pr-3">source</th>
+              <th className="py-2 pr-3">branch</th>
+              <th className="py-2 pr-3">lock</th>
+              <th className="py-2 pr-3">uncommitted</th>
+              <th className="py-2">unpushed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {repos.map((r) => (
+              <tr key={r.sourceId} className="border-b border-subtle">
+                <td className="py-2 pr-3 font-mono">{r.sourceId}</td>
+                <td className="py-2 pr-3 font-mono">{r.branch ?? '—'}</td>
+                <td className={`py-2 pr-3 ${r.staleLock ? 'text-danger' : 'text-ok'}`}>
+                  {r.staleLock ? `stale (${r.lockAgeSeconds ?? '?'}s)` : 'ok'}
+                </td>
+                <td className={`py-2 pr-3 ${r.uncommittedFiles > 0 ? 'text-warning' : ''}`}>
+                  {r.uncommittedFiles}
+                </td>
+                <td className={r.unpushedCommits > 0 ? 'text-warning' : ''}>{r.unpushedCommits}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <p className="text-xs text-muted">Checked {new Date(health.at).toLocaleString()}</p>
     </div>
   );

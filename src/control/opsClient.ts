@@ -1,4 +1,7 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
+import type { RepoStatus } from '../ops/git.ts';
+
+export type { RepoStatus };
 
 const OPS_URL = process.env.OPS_RPC_URL ?? 'http://gbrain-ops:3140';
 const TOKEN = process.env.OPS_RPC_TOKEN ?? '';
@@ -31,6 +34,21 @@ export async function callOps<T = unknown>(
 
 export async function patchFilePlaneConfig(patch: Record<string, unknown>): Promise<void> {
   await post('/fileplane/config', { patch }, 60_000);
+}
+
+/** Commit AS the member. Caller must pass membership→user identity, not a request-body actor. */
+export async function commitAsMember(
+  sourceId: string,
+  actor: { name: string; email: string },
+  message: string,
+): Promise<{ committed: boolean; sha: string | null }> {
+  return post('/git/commit', { sourceId, actor, message }, 60_000);
+}
+
+/** Stale-lock and uncommitted/unpushed drift from gbrain-ops (S2). */
+export async function inspectRepos(): Promise<RepoStatus[]> {
+  const payload = await post<{ repos?: RepoStatus[] }>('/git/inspect', {}, 30_000);
+  return Array.isArray(payload.repos) ? payload.repos : [];
 }
 
 export async function putSchemaPack(name: string, yaml: string): Promise<void> {

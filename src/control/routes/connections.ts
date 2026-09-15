@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
-import { requireRole, type Role } from '../rbac.ts';
+import { requireRole, ROLE_RANK, type Role } from '../rbac.ts';
 import {
   createPendingConnection,
   previewConnection,
@@ -12,6 +12,7 @@ import {
   type ConnectionInput,
 } from '../connections.ts';
 import { annotateAdapters } from '../harness.ts';
+import { commitAsMember } from '../opsClient.ts';
 
 export const connectionRoutes = new Hono();
 
@@ -106,4 +107,42 @@ connectionRoutes.post('/connections/:id/revoke', guard('admin', async (c, { user
   if (!row || row.organizationId !== orgId) return c.json({ error: 'connection not found' }, 404);
   await revokeConnection(id, userId);
   return c.json({ ok: true });
+}));
+
+connectionRoutes.post('/connections/:id/commit', guard('viewer', async (c, { userId, orgId, role }) => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const message = typeof (body as { message?: unknown })?.message === 'string'
+    ? (body as { message: string }).message.trim()
+    : '';
+  if (!message) return c.json({ error: 'message required' }, 400);
+
+  const [row] = await getDb()
+    .select({
+      id: schema.connections.id,
+      organizationId: schema.connections.organizationId,
+      sourceId: schema.spaces.sourceId,
+      memberUserId: schema.memberships.userId,
+      name: schema.users.name,
+      email: schema.users.email,
+    })
+    .from(schema.connections)
+    .innerJoin(schema.spaces, eq(schema.connections.writeSpaceId, schema.spaces.id))
+    .innerJoin(schema.memberships, eq(schema.connections.membershipId, schema.memberships.id))
+    .innerJoin(schema.users, eq(schema.memberships.userId, schema.users.id))
+    .where(eq(schema.connections.id, id));
+  if (!row || row.organizationId !== orgId) return c.json({ error: 'connection not found' }, 404);
+  if (ROLE_RANK[role] < ROLE_RANK.admin && row.memberUserId !== userId) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  // Actor is the Connection's member, never name/email from the request body.
+  const actor = { name: (row.name && row.name.trim()) || row.email, email: row.email };
+  const result = await commitAsMember(row.sourceId, actor, message);
+  await audit(orgId, userId, 'connection.commit', id, {
+    sourceId: row.sourceId,
+    committed: result.committed,
+    sha: result.sha,
+  });
+  return c.json(result);
 }));

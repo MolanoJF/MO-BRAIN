@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../db/client.ts';
-import { opsHealthy, callOps } from '../opsClient.ts';
+import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
 
 export const health = new Hono();
 
@@ -32,14 +32,12 @@ health.get('/health', async (c) => {
     } catch { /* version stays null */ }
   }
 
-  // Show uncommitted drift rather than pretending a saved page is indexed:
-  // sync imports commits, not the working tree.
+  // inspectRepos: stale index.lock plus uncommitted/unpushed drift. Sync
+  // imports commits, not the working tree, so uncommitted files are pages
+  // the brain cannot see yet.
   let repos: unknown[] = [];
   if (components.ops === 'ok') {
-    try {
-      const r = await callOps<unknown>('sources.status', {}, { json: true, timeoutMs: 30_000 });
-      repos = reposFromSourcesStatus(r.json);
-    } catch { repos = []; }
+    try { repos = await inspectRepos(); } catch { repos = []; }
   }
 
   const ok = Object.values(components).every((s) => s === 'ok');

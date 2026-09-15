@@ -29,6 +29,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
   takeGrantCredentials: async () => ({}),
   opsHealthy: async () => true,
+  commitAsMember: async () => ({ committed: false, sha: null }),
+  inspectRepos: async () => [],
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
