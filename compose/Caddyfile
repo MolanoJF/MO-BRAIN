@@ -18,7 +18,9 @@
 	# Break-glass is `docker compose exec gbrain-ops gbrain …` over SSH.
 	# See docs/runbooks/break-glass.md.
 	# ---------------------------------------------------------------------
-	# MUST be a `handle` block, not a bare `respond`. See the note below.
+	# MUST be a `handle` block: Caddy's default directive order sorts a bare
+	# top-level `respond` after `handle`, which would put this 404 behind the
+	# catch-all `handle {}` below and make it unreachable.
 	@admin_denied path /admin /admin/* /admin/api/* /admin/events
 	handle @admin_denied {
 		respond 404

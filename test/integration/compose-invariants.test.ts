@@ -13,6 +13,14 @@ const svc = (n: string) => compose.services[n];
 const devOverride = parse(readFileSync('compose/docker-compose.dev.yml', 'utf8')) as any;
 const dockerAvailable = Bun.which('docker') !== null;
 
+// If Docker is unavailable, the Docker-dependent test below vanishes
+// silently (test.skipIf emits no failure), and it is the only proof that
+// the documented dev invocation actually resolves DOMAIN via real Compose.
+// This guard converts that silent hole into a loud, deliberate one: it
+// always runs, and fails unless either Docker ran the real check, or a
+// human explicitly opted into skipping it.
+const SKIP_COMPOSE_DOCKER_CHECK_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPOSE_DOCKER_CHECK';
+
 describe('compose invariants', () => {
   test('caddy is the only service publishing host ports', () => {
     const publishers = Object.entries(compose.services)
@@ -102,4 +110,17 @@ describe('compose invariants', () => {
       expect(stdout).toContain('DOMAIN: localhost');
     },
   );
+
+  // Always runs — see the block comment above `SKIP_COMPOSE_DOCKER_CHECK_ENV`.
+  test('the Docker-dependent dev-invocation check above is not silently skipped', () => {
+    if (dockerAvailable) return; // the real check above actually ran
+    if (process.env[SKIP_COMPOSE_DOCKER_CHECK_ENV] === '1') return; // explicit human opt-out
+
+    throw new Error(
+      'Docker is unavailable, so "the documented dev invocation resolves DOMAIN from the ' +
+        'environment" was skipped rather than run against real Compose. If skipping is ' +
+        'genuinely intended for this run (e.g. a Docker-less CI runner), set ' +
+        `${SKIP_COMPOSE_DOCKER_CHECK_ENV}=1 to acknowledge it explicitly.`,
+    );
+  });
 });

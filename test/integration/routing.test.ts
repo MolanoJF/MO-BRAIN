@@ -5,11 +5,20 @@ import { resolve } from 'node:path';
 const caddyfile = readFileSync('compose/Caddyfile', 'utf8');
 
 // Paths gbrain-serve owns. /health and /metrics are LIVE COLLISIONS with a
-// naive console mount — the console uses /api/health instead.
+// naive console mount — the console uses /api/health instead. Includes the
+// wildcard variants (/mcp/*, /authorize/*) as their own entries — a plain
+// substring check on '/mcp' would still pass even if '/mcp/*' were dropped
+// from the Caddyfile, since '/mcp' is also a substring of '/mcp/*'.
 const GBRAIN_PATHS = [
-  '/mcp', '/authorize', '/token', '/register', '/revoke',
+  '/mcp', '/mcp/*', '/authorize', '/authorize/*', '/token', '/register', '/revoke',
   '/.well-known/*', '/ingest', '/webhooks/*', '/health', '/metrics',
 ];
+
+// The full expected path sets for the other two matchers, used below to
+// assert compiled route *identity* by exact path-array equality rather than
+// by checking that some single representative path is present.
+const ADMIN_PATHS = ['/admin', '/admin/*', '/admin/api/*', '/admin/events'];
+const API_PATHS = ['/api/*'];
 
 describe('Caddyfile routing contract (text)', () => {
   test.each(GBRAIN_PATHS)('%s routes to gbrain-serve', (p) => {
@@ -75,6 +84,22 @@ describe('Caddyfile routing contract (text)', () => {
 // ---------------------------------------------------------------------------
 const dockerAvailable = Bun.which('docker') !== null;
 
+// If Docker is unavailable, the three tests below vanish silently
+// (test.skipIf emits no failure) — and they are the *only* tests in this
+// file that prove route ordering; every text test above checks presence,
+// not position. A regression that moves `handle @admin_denied {...}` after
+// the catch-all `handle {}` — exactly the defect class this task exists to
+// prevent — would still pass every text test (/admin is still present,
+// still `handle`-wrapped, still says `respond 404`) and be caught only by
+// these compiled tests. This guard converts that silent hole into a loud,
+// deliberate one: it always runs, and it fails unless either Docker ran the
+// real checks, or a human explicitly opted into skipping them.
+const SKIP_COMPILED_ROUTING_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPILED_ROUTING';
+
+function pathsEqual(a: string[] | undefined, b: string[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 function adaptCaddyfile(): any {
   // Resolved to an absolute host path and handed straight to Bun's
   // spawnSync (not through a shell), so Git Bash's MSYS path-mangling
@@ -96,6 +121,21 @@ function adaptCaddyfile(): any {
 }
 
 describe('Caddyfile compiled routing contract (real caddy adapt)', () => {
+  // Always runs — see the block comment above `SKIP_COMPILED_ROUTING_ENV`.
+  test('compiled-routing tests are not silently skipped', () => {
+    if (dockerAvailable) return; // the real tests below actually ran
+    if (process.env[SKIP_COMPILED_ROUTING_ENV] === '1') return; // explicit human opt-out
+
+    throw new Error(
+      'Docker is unavailable, so the compiled-output tests proving the /admin seal and route ' +
+        "ordering (this task's CRITICAL invariant) were skipped rather than run. A regression " +
+        'that reorders `handle @admin_denied {...}` after the catch-all `handle {}` would pass ' +
+        'every remaining text-only test in this file undetected. If skipping is genuinely ' +
+        `intended for this run (e.g. a Docker-less CI runner), set ${SKIP_COMPILED_ROUTING_ENV}=1 ` +
+        'to acknowledge it explicitly.',
+    );
+  });
+
   test.skipIf(!dockerAvailable)('the Caddyfile adapts cleanly to valid Caddy JSON', () => {
     expect(() => adaptCaddyfile()).not.toThrow();
   });
@@ -140,9 +180,13 @@ describe('Caddyfile compiled routing contract (real caddy adapt)', () => {
 
       const kinds = hostRoutes.map((r) => {
         const paths = pathsOf(r);
-        if (paths?.includes('/admin')) return 'admin';
-        if (paths?.includes('/api/*')) return 'api';
-        if (paths?.includes('/mcp')) return 'gbrain';
+        // Exact path-array equality, not mere membership: a route is only
+        // "gbrain" if it carries the FULL reserved path set, so dropping a
+        // single wildcard variant (e.g. /mcp/* while keeping /mcp) shows up
+        // as a mismatch here instead of silently still counting as gbrain.
+        if (pathsEqual(paths, ADMIN_PATHS)) return 'admin';
+        if (pathsEqual(paths, GBRAIN_PATHS)) return 'gbrain';
+        if (pathsEqual(paths, API_PATHS)) return 'api';
         if (!r.match && dialOf(r) === 'control-plane:3150') return 'catch-all';
         return 'other'; // the header/encode setup route, which has no path match
       });
