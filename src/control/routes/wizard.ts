@@ -184,9 +184,14 @@ wizard.post('/space', guard(async (c, { userId, orgId }) => {
 
   // Ruling 1: seed a committed git repo BEFORE sources.add (V12 / Work Item D).
   // Drop json: true — sources add does not support --json (Work Item N).
+  // --federated: a Space is the brain's own corpus, so an UNQUALIFIED read must
+  // span it. Left unset, gbrain's inclusion check (`isSourceFederated`, literal
+  // true) treats the source as isolated, and the sole-non-default resolver tier
+  // only rescues a single-Space brain — with 2+ Spaces the anchor falls back to
+  // 'default' and `gbrain search` (no --source) sees no Space at all.
   await seedSpace(sourceId);
   const r = await callOps('sources.add', {
-    id: sourceId, path: localPath, name: name ?? sourceId,
+    id: sourceId, path: localPath, name: name ?? sourceId, federated: true,
   }, { timeoutMs: 300_000 });
   if (!r.ok) return c.json({ error: `sources add failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
 
@@ -226,11 +231,15 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   });
   // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
   // recorded in the control DB during /space (git repos on disk survive).
+  // --federated again: this IS the row that survives, so the flag must be set
+  // here too (see /space for why an unset flag hides every Space from an
+  // unqualified read on a multi-Space brain).
   const spaces = await getDb().select().from(schema.spaces)
     .where(eq(schema.spaces.organizationId, orgId));
   for (const s of spaces) {
     await run(`sources.add:${s.sourceId}`, 'sources.add', {
       id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: s.name,
+      federated: true,
     }, 300_000);
   }
   if (brain.searchMode) await run('search-mode', 'config.set', { key: 'search.mode', value: brain.searchMode });

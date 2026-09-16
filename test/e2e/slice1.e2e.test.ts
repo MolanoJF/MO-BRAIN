@@ -62,8 +62,23 @@ let cookie = '';
 beforeAll(async () => {
   if (!dockerAvailable) return;
   await compose('up', '-d', '--wait');
+  // Two DIFFERENT containers answer these two URLs behind the same proxy:
+  // /api/health is the console (boots first), /.well-known/gbrain is
+  // gbrain-serve. Waiting only on the console let the reserved-path assertions
+  // race gbrain-serve's boot — observed as a 502 on a cold stack right after
+  // restore.e2e's `down -v`. Wait on the surface those assertions read, bounded
+  // (Ruling 30) so a genuinely dead gbrain-serve still fails the assertion
+  // instead of hanging the suite. Real time, not fake timers: the thing being
+  // awaited is a container binding a port, which no clock can advance — same
+  // as every other readiness poll in this file.
   for (let i = 0; i < 120; i++) {
-    try { if ((await fetchInsecure('/api/health')).status < 500) return; } catch {}
+    try {
+      const [consoleHealth, serveDiscovery] = await Promise.all([
+        fetchInsecure('/api/health'),
+        fetchInsecure('/.well-known/gbrain'),
+      ]);
+      if (consoleHealth.status < 500 && serveDiscovery.status === 200) return;
+    } catch {}
     await Bun.sleep(2000);
   }
   throw new Error('stack did not become reachable');
