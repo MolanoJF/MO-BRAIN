@@ -501,7 +501,67 @@ export const OPERATIONS: Record<string, OperationSpec> = {
   embed: {
     id: 'embed',
     argv: ['embed'],
-    params: [{ name: 'stale', flag: '--stale', kind: 'flag' }],
+    params: [
+      { name: 'stale', flag: '--stale', kind: 'flag' },
+      // Slice 3: a Connection-scoped embed needs a source fence. Upstream's
+      // per-command flag allowlist carries '--source' for `embed`
+      // (src/core/cli-flag-registry.generated.ts, 'embed' entry).
+      { name: 'source', flag: '--source', kind: 'value' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * The shipped nightly maintenance cycle: lint, backlinks, extract, sync,
+   * embed, synthesize (docs/guides/cron-schedule.md — "schedule THIS instead of
+   * hand-rolling the dream cycle"). `--dry-run` previews with no writes and no
+   * spend; a real run makes provider calls, so the schedule that owns it
+   * carries a --max-usd ceiling.
+   */
+  dream: {
+    id: 'dream',
+    argv: ['dream'],
+    params: [
+      { name: 'source', flag: '--source', kind: 'value' },
+      { name: 'phase', flag: '--phase', kind: 'value' },
+      { name: 'maxUsd', flag: '--max-usd', kind: 'value' },
+      { name: 'yes', flag: '--yes', kind: 'flag' },
+    ],
+    supportsJson: true,
+    supportsDryRun: true,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * The scheduled git-push reconcile deferred from Slice 1. Scan-gated
+   * add -> commit -> pull -> push of a Space's workspace repo.
+   *
+   * Upstream signature (src/commands/sources.ts, runPush): the source id is a
+   * POSITIONAL, and --path is its mutually exclusive alternative — passing both
+   * is a usage error (exit 2). We only ever pass the id.
+   *
+   * Exit codes, from the same function's own header comment:
+   *   0  pushed, or skipped because a push was already in flight
+   *   5  blocked (secrets / tracked deny-glob / unscannable) or refused
+   *      (remote not verifiably private)
+   *   1  pull conflict / push failure (this is the non-fast-forward path)
+   *   2  usage, 4  source not found
+   * okExitCodes is [0]: everything else raises an alert. A rejected
+   * non-fast-forward is never silently swallowed.
+   */
+  'sources.push': {
+    id: 'sources.push',
+    argv: ['sources', 'push'],
+    params: [
+      { name: 'id', flag: '', kind: 'value', required: true }, // positional
+      { name: 'branch', flag: '--branch', kind: 'value' },
+      { name: 'message', flag: '--message', kind: 'value' },
+      { name: 'allowUnverifiedRemote', flag: '--allow-unverified-remote', kind: 'flag' },
+    ],
     supportsJson: true,
     supportsDryRun: false,
     privilege: 'brain-db',

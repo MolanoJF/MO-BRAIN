@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.0.0",
-  "generatedAt": "2026-09-15T21:24:27.923Z",
+  "generatedAt": "2026-09-16T02:28:14.330Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -320,6 +320,40 @@
       ]
     },
     {
+      "id": "dream",
+      "argv": [
+        "dream"
+      ],
+      "params": [
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
+        },
+        {
+          "name": "phase",
+          "flag": "--phase",
+          "kind": "value"
+        },
+        {
+          "name": "maxUsd",
+          "flag": "--max-usd",
+          "kind": "value"
+        },
+        {
+          "name": "yes",
+          "flag": "--yes",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": true,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "embed",
       "argv": [
         "embed"
@@ -329,6 +363,11 @@
           "name": "stale",
           "flag": "--stale",
           "kind": "flag"
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
         }
       ],
       "supportsJson": true,
@@ -834,6 +873,42 @@
         "list"
       ],
       "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.push",
+      "argv": [
+        "sources",
+        "push"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "branch",
+          "flag": "--branch",
+          "kind": "value"
+        },
+        {
+          "name": "message",
+          "flag": "--message",
+          "kind": "value"
+        },
+        {
+          "name": "allowUnverifiedRemote",
+          "flag": "--allow-unverified-remote",
+          "kind": "flag"
+        }
+      ],
       "supportsJson": true,
       "supportsDryRun": false,
       "privilege": "brain-db",
