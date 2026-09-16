@@ -22,6 +22,13 @@
       "when": 1789504880786,
       "tag": "0002_graceful_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789525703920,
+      "tag": "0003_kind_lightspeed",
+      "breakpoints": true
     }
   ]
 }
