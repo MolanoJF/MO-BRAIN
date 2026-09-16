@@ -161,7 +161,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 3 — Scheduler, `gbrain_command` only
 
-**Plan:** to be written at this gate, from the spec's *Scheduler* section.
+**Plan:** [`2026-09-15-slice-3-scheduler.md`](./2026-09-15-slice-3-scheduler.md) — **COMPLETE** on `main` (2026-09-15; Gates A/B/C green). Findings: [`docs/slice-3-findings.md`](../../slice-3-findings.md). Runbook: [`docs/runbooks/scheduler.md`](../../runbooks/scheduler.md).
 
 **Why:** replaces the crontab hack; it is the gap every operator notices first. No agents yet — low risk.
 
@@ -194,7 +194,10 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 **The flow:**
 ```
 1. Detect     gbrain check-update --json → banner with the changelog
-2. Quiesce    stop worker + runner; SIGTERM drains (V5: up to 40s); drain in-flight jobs
+2. Quiesce    stop the scheduler (Slice 3 now exists: one leader loop on a Postgres advisory
+              lock, a `schedule_runs` ledger, quiet-hours hold — nothing is lost, materialization
+              resumes from the watermark), then worker + runner; SIGTERM drains (V5: up to 40s);
+              drain in-flight jobs
 3. Snapshot   ONE consistent point-in-time set (volume/VM-layer snapshot preferred)
 4. Swap       pull the new pinned tag; recreate serve + worker + ops
 5. Schema     gbrain apply-migrations --yes --non-interactive; gbrain post-upgrade
