@@ -20,6 +20,8 @@ const DECLARED_TABLES = new Set([
   'organizations', 'memberships', 'brains', 'spaces', 'secrets',
   'capability_snapshots', 'playbook_ledger', 'audit_log',
   'connections', 'claim_links',
+  // Slice 3 scheduler.
+  'schedules', 'schedule_runs', 'schedule_alerts', 'held_notifications',
   '__drizzle_migrations',
 ]);
 

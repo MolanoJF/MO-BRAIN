@@ -9,6 +9,13 @@ import { MAX_RUNS_PER_PASS, WORKER_ID, tickOnce } from '../../src/scheduler/main
 const CONTROL_DATABASE_URL =
   process.env.CONTROL_DATABASE_URL ?? 'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 
+// `getDb()` reads the variable lazily but never falls back on its own, so with
+// nothing exported (bare `bun test test/unit`) the suite died on
+// `CONTROL_DATABASE_URL is required` before the probe below could decide whether
+// a Postgres is even there. Install the same default the other control-DB suites
+// do at module load, ahead of `pinDb()` in beforeAll.
+process.env.CONTROL_DATABASE_URL ??= CONTROL_DATABASE_URL;
+
 const SCRATCH_PG_CMD =
   'docker run -d --name bs-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
   '-e POSTGRES_DB=control -p 5432:5432 pgvector/pgvector:pg16';
