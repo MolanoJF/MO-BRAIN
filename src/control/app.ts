@@ -8,6 +8,7 @@ import { wizard } from './routes/wizard.ts';
 import { backup } from './routes/backup.ts';
 import { members } from './routes/members.ts';
 import { connectionRoutes } from './routes/connections.ts';
+import { scheduleRoutes } from './routes/schedules.ts';
 import { claimRoutes } from './routes/claim.ts';
 import { runMigrations } from './db/client.ts';
 
@@ -25,6 +26,7 @@ app.route('/api/wizard', wizard);
 app.route('/api', backup);
 app.route('/api', members);
 app.route('/api', connectionRoutes);
+app.route('/api', scheduleRoutes);
 app.route('/api', claimRoutes);
 
 // Live collisions with gbrain-serve. Caddy routes these away in production;

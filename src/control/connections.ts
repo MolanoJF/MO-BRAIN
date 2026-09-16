@@ -163,6 +163,26 @@ export async function revokeConnection(connectionId: string, actor: string): Pro
       clientName: retiredClientName(connectionId),
     })
     .where(eq(schema.connections.id, connectionId));
+
+  // Honesty rule 3: scope removals are immediate. Disable, never delete — the
+  // operator's schedule configuration survives so a re-grant can re-enable it.
+  // Runs last on purpose: if the ops revoke above failed, nothing is disabled
+  // and no alert is raised, so the alert can never describe a non-revocation.
+  const disabled = await getDb().update(schema.schedules)
+    .set({ enabled: false, disabledReason: 'connection_revoked' })
+    .where(and(
+      eq(schema.schedules.connectionId, connectionId),
+      eq(schema.schedules.enabled, true),
+    ))
+    .returning({ id: schema.schedules.id });
+
+  if (disabled.length > 0) {
+    await getDb().insert(schema.scheduleAlerts).values(disabled.map((s) => ({
+      id: randomUUID(), organizationId: row.organizationId, scheduleId: s.id, runId: null,
+      kind: 'connection_revoked',
+      detail: { connectionId, clientName: row.clientName },
+    })));
+  }
 }
 
 export function retiredClientName(connectionId: string): string {

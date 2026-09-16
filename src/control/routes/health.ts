@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { sql } from 'drizzle-orm';
-import { getDb } from '../db/client.ts';
+import { desc, isNull, sql } from 'drizzle-orm';
+import { getDb, schema } from '../db/client.ts';
 import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
 
 export const health = new Hono();
@@ -16,6 +16,36 @@ export function reposFromSourcesStatus(json: unknown): unknown[] {
     return (json as { sources: unknown[] }).sources;
   }
   return [];
+}
+
+/**
+ * Unacknowledged schedule alerts, KINDS ONLY.
+ *
+ * `/api/health` is reachable without a session — it is the compose healthcheck
+ * — so `detail` must never appear here: a `push_blocked` detail can name a file
+ * path that matched a secret scan, and a `connection_revoked` detail names a
+ * client. Kinds and counts are what a healthcheck needs; the operators get the
+ * details from the authenticated `/api/schedule-alerts`.
+ */
+async function openAlerts(): Promise<
+  Array<{ id: string; kind: string; scheduleId: string | null; at: Date }>
+> {
+  try {
+    return await getDb()
+      .select({
+        id: schema.scheduleAlerts.id,
+        kind: schema.scheduleAlerts.kind,
+        scheduleId: schema.scheduleAlerts.scheduleId,
+        at: schema.scheduleAlerts.at,
+      })
+      .from(schema.scheduleAlerts)
+      .where(isNull(schema.scheduleAlerts.acknowledgedAt))
+      .orderBy(desc(schema.scheduleAlerts.at))
+      .limit(20);
+  } catch {
+    // A health endpoint reports; it never 500s because one probe failed.
+    return [];
+  }
 }
 
 health.get('/health', async (c) => {
@@ -41,6 +71,10 @@ health.get('/health', async (c) => {
   }
 
   const ok = Object.values(components).every((s) => s === 'ok');
+  const scheduleAlerts = components.controlDb === 'ok' ? await openAlerts() : [];
   // Never include a connection string, a token or an env dump here.
-  return c.json({ ok, components, gbrainVersion, repos, at: new Date().toISOString() }, ok ? 200 : 503);
+  return c.json(
+    { ok, components, gbrainVersion, repos, scheduleAlerts, at: new Date().toISOString() },
+    ok ? 200 : 503,
+  );
 });
