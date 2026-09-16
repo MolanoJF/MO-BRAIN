@@ -63,6 +63,8 @@ bite in this slice — each a live bug if violated:
 bun run lint:forbidden && bun run test:unit && bun test test/e2e/slice2.e2e.test.ts && echo ENTRY-GATE-OK
 ```
 
+> **Corrected 2026-09-15 — the plan's `...@127.0.0.1:5433/control` does not exist in this environment.** The dev override publishes no host Postgres port here (`BRAINSTAND_DEV_EXPOSE_PG=0`), so host-side integration suites cannot reach `127.0.0.1:5433`; every one runs against the scratch Postgres at `postgres://gbrain:ci-not-a-real-secret@localhost:5432/control` (container `bs-fp-pg`), exactly as `test/integration/schema.test.ts:5-6` does — including every `export CONTROL_DATABASE_URL=...` line below.
+
 **Exit gate (roadmap, verbatim):** a 5-minute `sync + embed --stale` schedule runs on time **across a
 DST boundary**; downtime longer than one interval honors the catch-up policy; an overlapping run
 honors the overlap policy. Encoded as **Seam Gate C**, Task 17.
@@ -548,6 +550,8 @@ Expected: PASS, all tests. If `isValidTimeZone('Not/AZone')` returns `true`, the
 lenient — record it in `docs/slice-3-findings.md` and tighten with an
 `Intl.supportedValuesOf('timeZone')` membership check rather than deleting the assertion.
 
+> **Corrected 2026-09-15 — the ICU note's premise was half right.** Bun 1.3.14 rejects `Not/AZone` (`RangeError`) and also rejects `PST8PDT`; only `EST` is accepted by ICU, and that one is refused by the region/city guard — so all three assertions hold without tightening. No `Intl.supportedValuesOf('timeZone')` membership check was needed; the doc comment's claim that Intl "happily accepts `PST8PDT`" is inaccurate on this runtime but harmless.
+
 - [ ] **Step 5: Type-check and commit**
 
 ```bash
@@ -935,6 +939,8 @@ export function applyCatchup(
 Run: `bun test test/unit/scheduler-occurrences.test.ts`
 Expected: PASS.
 
+> **Corrected 2026-09-15 — the plan's cap contradicted the plan's test.** `applyCatchup` capped only the missed set and then appended *all* on-time occurrences, so the 80-occurrence fixture yielded `run.length = 52`, not the asserted 50 (observed: `Expected 50, Received 52`). The cap must budget across the whole run set — on-time entries always run, the backlog absorbs the cap — giving exactly the most recent `maxRunAll` runs and the total-preserving 50/30 split. The test was kept verbatim; the implementation was corrected.
+
 Two assertions are worth reading twice if they fail, because they encode the DST contract rather
 than an implementation detail: `26` occurrences across the fall-back window (exclusive of `from`),
 and `12` of them carrying `#2`. If the counts differ, the bug is in `slotLabel`/`ambiguousPass`, not
@@ -1181,6 +1187,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test**
 
 `test/integration/scheduler-schema.test.ts`:
+
+> **Corrected 2026-09-15 — `expect(...).rejects.toThrow()` HANGS here under bun 1.3.14.** Against a drizzle result `getDb().execute()` returns a non-Promise `PgRaw` thenable: bun aborts with "Expected promise", the result is never consumed, the pooled connection wedges, and `closeDb()`/`client.end()` never returns. The six constraint assertions were rewritten as a try/catch helper pinning SQLSTATE + constraint name (`23505` / `23514`), following `test/integration/schema.test.ts:98` — same contract, stronger, still 5/5 green. Every later task that asserts a DB constraint must use that form.
+
 ```ts
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -1528,6 +1537,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing contract test**
 
 `test/contract/scheduler.contract.test.ts`:
+
+> **Corrected 2026-09-15 — the container-backed fixture is insufficient as written and was extended.** After `resetBrain()` the contract tests must re-run `gbrain init` with a keyed embedding model, then register the source with `gbrain sources add`. Two reasons, both observed: (a) a brain auto-created from the dropped schema uses the default `zeroentropyai:zembed-1` model, so `embed` exits 1 in the preflight ("requires ZEROENTROPY_API_KEY"); (b) `seedGitSource(id)` only creates the git repo on disk — it does NOT register the source — so `dream` exits 1 with `Source "slice3-probe" not found or is archived` and `sources push` exits 4 with no receipt. No assertion was changed.
+
 ```ts
 import { test, expect, describe, beforeAll } from 'bun:test';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
@@ -1701,6 +1713,8 @@ bun run operations:emit
 Expected: `wrote contracts/v0.50.0.0/operations.json — 30 operations` (27 before + `dream` +
 `sources.push`; `embed` gained a param, not an entry).
 
+> **Corrected 2026-09-15 — the emit printed `31 operations`, not 30.** The registry already held 29 operations (earlier slices added several beyond the 27 assumed here); `embed` still gained a param, not an entry, and no assertion depends on the count.
+
 > **This step is not optional plumbing.** `gbrain-ops` loads the JSON, not the module
 > (`src/ops/dispatch.ts:18`). A registry entry without an emit is a scheduler that 400s with
 > "unknown operation" at the RPC boundary — a schedule button that does nothing.
@@ -1814,6 +1828,8 @@ Run: `bun test test/unit/scheduler-report-path.test.ts`
 Expected: FAIL — `Cannot find module '../../src/ops/reports.ts'`.
 
 - [ ] **Step 3: Write `src/ops/reports.ts`**
+
+> **Corrected 2026-09-15 — the ordering caveat did not produce a real collision.** The concurrent test uses different job names, so the two writers resolve different paths; the exposure needs an identical resolved path. Observed: `job-a` → `committed:false`, `job-b` → `committed:true` (the repo lock swept the first writer's file in), and `git status --porcelain` was empty afterwards — the tree ends clean, which is the invariant that matters.
 
 ```ts
 import { access, mkdir } from 'node:fs/promises';
@@ -2239,6 +2255,9 @@ Expected: FAIL — `Cannot find module '../../src/scheduler/leader.ts'`.
 - [ ] **Step 3: Write the implementation**
 
 `src/scheduler/leader.ts`:
+
+> **Corrected 2026-09-15 — `postgres.js` will not bind the JS `bigint` the way the draft did.** The template-tag binding was refused; the fix is `lockKeyToBigint(key).toString()`, leaving the SQL text and its `::bigint` cast untouched (one token per call site). Everything else is verbatim; 7/7 green.
+
 ```ts
 import type { Sql } from 'postgres';
 import { lockKeyToBigint } from '../ops/lock.ts';
@@ -2350,6 +2369,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test**
 
 `test/integration/scheduler-materialize.test.ts`:
+
+> **Corrected 2026-09-15 — three fixture corrections; no assertion weakened.** (1) "creates one run per occurrence" assumed the 120s default `misfireGraceSeconds` would leave all three occurrences `pending`, but this plan's own catch-up test pins that grace, so the fixture sets an explicit generous grace — with the default it observed `Expected 3, Received 1`. (2) The stale-watermark fixture uses a 600s interval so the clamped 7-day lookback stays under `MAX_OCCURRENCES_PER_TICK` (at 300s it threw `too many occurrences in window (cap 2000)`). (3) `shape_matches_kind` REFUSES the intended corruption (`23514`) — the CHECK working — so the fallback in the note below was used (`organizations.timezone = 'Not/AZone'`), with the isolation property additionally asserted (the broken schedule errors `invalid timezone` and writes no runs). `.onConflictDoNothing({ target: [...] })` did narrow correctly in drizzle-orm 0.45.2; the bare form was not needed.
+
 ```ts
 import { test, expect, describe, beforeAll, beforeEach, afterAll } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -2730,6 +2752,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test**
 
 `test/integration/scheduler-claim.test.ts` (abridged to the assertions that carry the contract; the
+
+> **Corrected 2026-09-15 — claim/reclaim scan `schedule_runs` GLOBALLY, so the suite's clock must be pinned globally.** `claimNextRun`/`reclaimExpiredLeases` take no org parameter to scope them, so the suite pins a fixed injected clock strictly earlier than every sibling suite's fixtures — otherwise a concurrently running suite's rows win the claim race. The depth-cap fixture also staggers waiter `fire_at` values, because the plan's identical timestamps leave "the OLDEST waiter is dropped" undefined among ties.
+
 suite's `beforeAll`/helpers mirror Task 8's file exactly):
 
 ```ts
@@ -2845,6 +2870,9 @@ Expected: FAIL — `Cannot find module '../../src/scheduler/claim.ts'`.
 - [ ] **Step 3: Write the implementation**
 
 `src/scheduler/claim.ts`:
+
+> **Corrected 2026-09-15 — the `= any(${ids})` array form is rejected through postgres.js.** The driver binds the JS array as one scalar, so Postgres refuses it — observed `22P02: malformed array literal: "620fa855-…"` / `Array value must start with "{" or dimension information`. Both bulk-update sites use `inArray(column, ids)` instead; `SKIP LOCKED` semantics are untouched. `.for('update', { skipLocked: true })` IS supported in drizzle-orm 0.45.2, so the raw-SQL fallback was not needed — proved by holding the row in another transaction: the claim returned `none` in 8ms instead of blocking.
+
 ```ts
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, lt, lte, ne, sql } from 'drizzle-orm';
@@ -3230,6 +3258,9 @@ Expected: FAIL — `Cannot find module '../../src/scheduler/commands.ts'`.
 - [ ] **Step 3: Write the implementation**
 
 `src/scheduler/commands.ts`:
+
+> **Corrected 2026-09-15 — the `dream` change-count guess was tightened to the OBSERVED payload; it must not stay a guess.** `dream --dry-run --json` returns `{schema_version, timestamp, duration_ms, status, brain_dir, phases, totals}`, where `status` is `'partial'` WITH exit 0, and `totals` carries 19 numeric tallies; the extractor now requires that exact 19-key set, every value a finite number, and returns their sum — any drift returns `null`, so the report is written. `phases.length` would have returned >0 on every run, including a dry run with 23 phases of which 18 were skipped, permanently degenerating `report_policy: on_change_or_failure` into `always` (the draft extractor read 23 on the real payload).
+
 ```ts
 import { OPERATIONS } from '../contracts/registry.ts';
 
@@ -3675,6 +3706,8 @@ export function renderReport(input: ReportInput): string {
 ```
 
 - [ ] **Step 5: Write `src/scheduler/execute.ts`**
+
+> **Corrected 2026-09-15 — four `executeRun` corrections.** (1) `validateParams` must run before `fenceParams` inside the try/catch, or a stored param the allowlist refuses throws into the worker loop and leaves the row `running` until lease expiry (`commands.ts` documents "never instead of it"). (2) A run whose `cancelRequested` is set must classify `cancelled` — `classifyExit` has no path to `cancelled` (a SIGTERM'd child is 143 → `timeout`), so a `kill_previous` victim would be overwritten to `timeout` and raise a spurious alert. (3) The combined two-step (`live-sync` = `sync` then, on `ok`, `embed --stale`) renders both steps in ONE run row and ONE report — `Command: <step1> && <step2>` plus a `## Steps` section — and a failing `sync` does not proceed to `embed`. (4) Quiet hours are evaluated on the FINISH instant; Step 6's comment says "fire at 03:00 local", and the test's injected clock is pinned so both readings agree.
 
 ```ts
 import { randomUUID } from 'node:crypto';
@@ -4250,6 +4283,8 @@ export async function systemPresetsFor(orgId: string): Promise<string[]> {
 
 - [ ] **Step 3: Write `src/scheduler/briefing.ts` and its integration test**
 
+> **Corrected 2026-09-15 — the short-circuit must keep the Connection context check.** A briefing whose Connection is revoked still REFUSES and releases nothing — the held rows keep their null `releasedAt`, so the next briefing picks them up; draining first would stamp rows released with nowhere for the body to land. Also, `schedules.operation` is NOT NULL and the routes store `preset.operation ?? preset.id`, so an installed briefing row carries `operation = 'morning-briefing'`.
+
 ```ts
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../control/db/client.ts';
@@ -4358,6 +4393,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `DELETE /api/schedules/:id` · `GET /api/schedules/:id/runs` · `POST /api/schedules/:id/run-now` ·
   `GET /api/schedule-presets` · `GET /api/schedule-alerts` ·
   `POST /api/schedule-alerts/:id/ack` · `PATCH /api/org/schedule-settings`.
+
+> **Corrected 2026-09-15 — two routes this list omits were required by the plan's own later gates and console.** `GET /api/schedules/:id` (Task 17 C1 and Task 18 read it) and `GET /api/org/schedule-settings` (Task 15 requirement 8 must display the org's IANA zone and quiet-hours window, but only a PATCH existed). Both are viewer-visible; the settings GET returns `{ settings: { timezone, quietHoursStart, quietHoursEnd } }` and PATCH reuses the same projection.
 
 - [ ] **Step 1: Write the failing route test**
 
@@ -4686,6 +4723,8 @@ Add `SCHEDULER_TICK_MS=15000` to `.env.example` with a comment.
 
 - [ ] **Step 3: Write `src/scheduler/main.ts`**
 
+> **Corrected 2026-09-15 — `MAX_RUNS_PER_PASS` ships as `export const`, and compose needs no functional entry.** Step 4 says to test the constant "via export", but the Step 3 snippet declares it unexported; it is `export const`. `compose/docker-compose.dev.yml` gained only a comment forbidding a future `ports:` block — the scheduler publishes nothing and reaches postgres on `control-net` and gbrain-ops on `ops-net` unchanged.
+
 ```ts
 #!/usr/bin/env bun
 /**
@@ -4924,6 +4963,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `test/contract/scheduler.contract.test.ts` (extend the Task 5 file)
+
+> **Corrected 2026-09-15 — Gate A targets the MAIN product stack (`localhost:3140`, published by the dev override), not the slice0 harness stack every other contract test uses.** The slice0 stack runs the pinned `brainstand/gbrain-base:0.50.0.0` image, which is never rebuilt from the working tree, so `/fileplane/report`, `/rpc/cancel` and the regenerated `operations.json` do not exist there and the seam would be untestable; the container is recreated from the current tree first. The probe source was seeded and registered in the main stack's brain (a git repo with one committed file, then `gbrain sources add slice3-probe --path …`), and no `ports:` entry was added to the base compose file.
 
 **What this gate proves that unit and integration tests cannot:** the new ops endpoints work
 *through the RPC boundary*, in the real container, with the real allowlist artifact — the seam
