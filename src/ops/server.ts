@@ -13,6 +13,7 @@ import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { commitAs, inspectRepos } from './git.ts';
+import { writeReport } from './reports.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
 const TOKEN = process.env.OPS_RPC_TOKEN;
@@ -30,15 +31,26 @@ function authorized(req: Request): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function runGbrain(argv: string[], timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+/** runId -> live child. gbrain-ops is a single container, so an in-process map
+ *  is the whole truth; a restart kills the children with it. */
+const liveRuns = new Map<string, ReturnType<typeof spawn>>();
+
+function runGbrain(
+  argv: string[], timeoutMs: number, runId?: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     // argv array, no shell: no value can inject an argument (G2).
     const child = spawn('gbrain', argv, { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (runId) liveRuns.set(runId, child);
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
     const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-    child.on('close', (code) => { clearTimeout(timer); resolve({ exitCode: code ?? -1, stdout, stderr }); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (runId) liveRuns.delete(runId);
+      resolve({ exitCode: code ?? -1, stdout, stderr });
+    });
   });
 }
 
@@ -113,11 +125,45 @@ Bun.serve({
         return json({ repos: await inspectRepos() });
       }
 
+      // Overlap policy 'kill_previous'. Aborting the control-plane fetch does
+      // NOT kill the ops-side child, so cancellation needs its own door.
+      if (url.pathname === '/rpc/cancel') {
+        const runId = (body as { runId?: unknown }).runId;
+        if (typeof runId !== 'string' || !runId) return json({ error: 'runId required' }, 400);
+        const child = liveRuns.get(runId);
+        if (!child) return json({ cancelled: false });
+        child.kill('SIGTERM');
+        return json({ cancelled: true });
+      }
+
+      // Report writes are file-plane writes: advisory-locked, atomic, and
+      // committed as the member who owns the Connection (S3, S4).
+      if (url.pathname === '/fileplane/report') {
+        const { sourceId, job, stamp, reportBody, actor } = body as {
+          sourceId?: unknown; job?: unknown; stamp?: unknown; reportBody?: unknown;
+          actor?: { name?: unknown; email?: unknown };
+        };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof job !== 'string' || !job) return json({ error: 'job required' }, 400);
+        if (typeof stamp !== 'string' || !stamp) return json({ error: 'stamp required' }, 400);
+        if (typeof reportBody !== 'string') return json({ error: 'reportBody required' }, 400);
+        if (!actor || typeof actor.name !== 'string' || typeof actor.email !== 'string') {
+          return json({ error: 'actor name and email required' }, 400);
+        }
+        const result = await writeReport(
+          { sourceId, job, stamp, body: reportBody, actor: { name: actor.name, email: actor.email } },
+          { sql },
+        );
+        return json(result);
+      }
+
       if (url.pathname === '/rpc') {
         const { spec, values, json: wantJson, dryRun } = validateRequest(ops, body);
         const argv = buildArgv(spec, values, { json: wantJson, dryRun });
         const timeoutMs = Number((body as { timeoutMs?: number }).timeoutMs ?? 600_000);
-        const r = await runGbrain(argv, timeoutMs);
+        const runId = typeof (body as { runId?: unknown }).runId === 'string'
+          ? (body as { runId: string }).runId : undefined;
+        const r = await runGbrain(argv, timeoutMs, runId);
 
         let parsed: unknown = null;
         if (wantJson) {

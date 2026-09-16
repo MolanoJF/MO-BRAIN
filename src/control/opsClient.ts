@@ -26,10 +26,24 @@ async function post<T>(path: string, body: unknown, timeoutMs = 600_000): Promis
 export async function callOps<T = unknown>(
   op: string,
   params: Record<string, unknown> = {},
-  opts: { json?: boolean; dryRun?: boolean; timeoutMs?: number } = {},
+  opts: { json?: boolean; dryRun?: boolean; timeoutMs?: number; runId?: string } = {},
 ): Promise<OpsResponse & { json: T | null }> {
-  return post('/rpc', { op, params, json: opts.json, dryRun: opts.dryRun, timeoutMs: opts.timeoutMs },
-    opts.timeoutMs);
+  return post('/rpc', {
+    op, params, json: opts.json, dryRun: opts.dryRun, timeoutMs: opts.timeoutMs, runId: opts.runId,
+  }, opts.timeoutMs);
+}
+
+/** Write + commit a run report into a Space repo. Ops holds the repos; we do not (S2). */
+export async function writeReport(args: {
+  sourceId: string; job: string; stamp: string; reportBody: string;
+  actor: { name: string; email: string };
+}): Promise<{ relPath: string; committed: boolean; sha: string | null }> {
+  return post('/fileplane/report', args, 120_000);
+}
+
+/** Overlap policy 'kill_previous'. Idempotent: an already-finished run reports false. */
+export async function cancelRun(runId: string): Promise<{ cancelled: boolean }> {
+  return post('/rpc/cancel', { runId }, 15_000);
 }
 
 export async function patchFilePlaneConfig(patch: Record<string, unknown>): Promise<void> {
