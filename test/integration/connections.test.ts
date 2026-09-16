@@ -63,7 +63,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   inspectRepos: async () => [],
 }));
 
-const { previewConnection, provisionConnection, revokeConnection } =
+const { previewConnection, provisionConnection, revokeConnection, createPendingConnection, retiredClientName } =
   await import('../../src/control/connections.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
@@ -279,6 +279,27 @@ describe('revokeConnection', () => {
       .where(eq(schema.connections.id, existing.id));
     expect(row?.state).toBe('revoked');
     expect(row?.revokedAt).toBeTruthy();
+    expect(row?.clientName).toBe(retiredClientName(existing.id));
+  });
+
+  test('revoke frees client_name so the same membership+write Space can be re-created', async () => {
+    const result = await provisionConnection(input(), actor);
+    await revokeConnection(result.connectionId, actor);
+
+    const [revoked] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, result.connectionId));
+    expect(revoked?.state).toBe('revoked');
+    expect(revoked?.clientName).toBe(retiredClientName(result.connectionId));
+    expect(revoked?.clientName).not.toBe(clientName(membershipId, writeSpace.sourceId));
+
+    const created = await createPendingConnection(input());
+    expect(created.connectionId).not.toBe(result.connectionId);
+
+    const [pending] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, created.connectionId));
+    expect(pending?.state).toBe('pending');
+    expect(pending?.clientName).toBe(clientName(membershipId, writeSpace.sourceId));
+    expect(calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
   });
 
   test('audit row exists before the revoke call', async () => {

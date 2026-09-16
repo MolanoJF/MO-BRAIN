@@ -1,7 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
-import { grantCredentialsOutPath, mcpUrl, provisionConnection } from './connections.ts';
+import {
+  compensateGrantedConnection,
+  grantCredentialsOutPath,
+  mcpUrl,
+  provisionConnection,
+} from './connections.ts';
 import { takeGrantCredentials } from './opsClient.ts';
 import type { Role } from './rbac.ts';
 
@@ -102,43 +107,57 @@ export async function claim(token: string, email: string): Promise<ClaimResult> 
 
   const membershipId = burned.membership_id;
   const organizationId = burned.organization_id;
-  const [membership] = await getDb().select().from(schema.memberships)
-    .where(eq(schema.memberships.id, membershipId));
-  if (!membership) throw new Error(`membership ${membershipId} not found`);
-  const memberRole = asRole(membership.role);
+  const granted: Array<{ id: string; clientName: string }> = [];
+  try {
+    const [membership] = await getDb().select().from(schema.memberships)
+      .where(eq(schema.memberships.id, membershipId));
+    if (!membership) throw new Error(`membership ${membershipId} not found`);
+    const memberRole = asRole(membership.role);
 
-  const pending = await getDb().select().from(schema.connections).where(and(
-    eq(schema.connections.membershipId, membershipId),
-    eq(schema.connections.state, 'pending'),
-  ));
+    const pending = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.membershipId, membershipId),
+      eq(schema.connections.state, 'pending'),
+    ));
 
-  const connections: ClaimResult['connections'] = [];
-  for (const row of pending) {
-    const prefixes = Array.isArray(row.boundSlugPrefixes)
-      ? row.boundSlugPrefixes.filter((x): x is string => typeof x === 'string')
-      : undefined;
-    const provisioned = await provisionConnection({
-      organizationId,
-      membershipId,
-      writeSpaceId: row.writeSpaceId,
-      readSpaceIds: asStringArray(row.readSpaceIds),
-      harness: row.harness,
-      memberRole,
-      connectionId: row.id,
-      boundSlugPrefixes: prefixes,
-      tokenTtl: row.tokenTtl,
-      budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
-    }, membership.userId);
-    const credentials = await takeGrantCredentials(grantCredentialsOutPath(provisioned.connectionId));
-    connections.push({
-      connectionId: provisioned.connectionId,
-      credentials,
-      harness: row.harness,
-      mcp_url: mcpUrlFromGrant(provisioned.credentials) ?? mcpUrl(),
-    });
+    const connections: ClaimResult['connections'] = [];
+    for (const row of pending) {
+      const prefixes = Array.isArray(row.boundSlugPrefixes)
+        ? row.boundSlugPrefixes.filter((x): x is string => typeof x === 'string')
+        : undefined;
+      const provisioned = await provisionConnection({
+        organizationId,
+        membershipId,
+        writeSpaceId: row.writeSpaceId,
+        readSpaceIds: asStringArray(row.readSpaceIds),
+        harness: row.harness,
+        memberRole,
+        connectionId: row.id,
+        boundSlugPrefixes: prefixes,
+        tokenTtl: row.tokenTtl,
+        budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
+      }, membership.userId);
+      granted.push({ id: provisioned.connectionId, clientName: row.clientName });
+      const credentials = await takeGrantCredentials(grantCredentialsOutPath(provisioned.connectionId));
+      connections.push({
+        connectionId: provisioned.connectionId,
+        credentials,
+        harness: row.harness,
+        mcp_url: mcpUrlFromGrant(provisioned.credentials) ?? mcpUrl(),
+      });
+    }
+
+    return { membershipId, connections };
+  } catch (e) {
+    for (const g of granted) {
+      try {
+        await compensateGrantedConnection(g.id, g.clientName, burned.created_by);
+      } catch {
+        // Keep compensating the rest so remint is not blocked by one failure.
+      }
+    }
+    const cause = e instanceof Error ? e.message : String(e);
+    throw new Error(`claim provision failed; remint to retry (${cause})`);
   }
-
-  return { membershipId, connections };
 }
 
 function mcpUrlFromGrant(json: unknown): string | null {

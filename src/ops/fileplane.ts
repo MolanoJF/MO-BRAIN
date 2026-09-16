@@ -41,12 +41,14 @@ export async function takeGrantCredentialsFile(requested: unknown): Promise<unkn
     throw new Error('invalid credentials file');
   }
   const raw = await readFile(resolved, 'utf8');
-  await unlink(resolved);
+  let parsed: unknown;
   try {
-    return JSON.parse(raw) as unknown;
+    parsed = JSON.parse(raw) as unknown;
   } catch {
     throw new Error('credentials file was not json');
   }
+  await unlink(resolved);
+  return parsed;
 }
 
 function reposRoot(): string {

@@ -154,8 +154,40 @@ export async function revokeConnection(connectionId: string, actor: string): Pro
     if (!r.ok) throw new Error(`auth.revokeClient failed (exit ${r.exitCode})`);
   }
 
+  // Free the live A4 name so the same membership+write Space can be re-granted.
+  // The unique index stays a live-collision tripwire; never --reissue.
   await getDb().update(schema.connections)
-    .set({ state: 'revoked', revokedAt: new Date() })
+    .set({
+      state: 'revoked',
+      revokedAt: new Date(),
+      clientName: retiredClientName(connectionId),
+    })
+    .where(eq(schema.connections.id, connectionId));
+}
+
+export function retiredClientName(connectionId: string): string {
+  return `revoked:${connectionId}`;
+}
+
+/** After a failed claim grant, restore a just-revoked row so remint can retry. */
+export async function compensateGrantedConnection(
+  connectionId: string,
+  liveClientName: string,
+  actor: string,
+): Promise<void> {
+  try {
+    await revokeConnection(connectionId, actor);
+  } catch {
+    // Ops may already be down; still free the live name so remint can retry.
+  }
+  await getDb().update(schema.connections)
+    .set({
+      state: 'pending',
+      clientName: liveClientName,
+      gbrainClientId: null,
+      provisionedAt: null,
+      revokedAt: null,
+    })
     .where(eq(schema.connections.id, connectionId));
 }
 

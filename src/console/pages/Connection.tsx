@@ -148,6 +148,11 @@ export function Connection() {
     await load();
   });
 
+  const revoke = (id: string) => step(async () => {
+    await api.post(`/connections/${id}/revoke`);
+    await load();
+  });
+
   const grouped = useMemo(() => {
     const map = new Map<string, ConnectionRow[]>();
     for (const c of connections) {
@@ -184,9 +189,17 @@ export function Connection() {
               <h3 className="text-sm font-medium">{m?.email ?? mid}</h3>
               {rows.map((row) => (
                 <div key={row.id} className="card space-y-1">
-                  <div className="flex justify-between gap-2">
+                  <div className="flex justify-between gap-2 items-start">
                     <span className="font-medium">Write: {spaceLabel(spaces, row.writeSpaceId)}</span>
-                    <span className="font-mono text-sm text-muted">{row.state}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-sm text-muted">{row.state}</span>
+                      {row.state !== 'revoked' && (
+                        <button className="nav-item text-danger" disabled={busy}
+                                onClick={() => void revoke(row.id)}>
+                          Revoke
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="text-sm text-muted">
                     Read: {asStringArray(row.readSpaceIds).map((id) => spaceLabel(spaces, id)).join(', ') || 'none'}

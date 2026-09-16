@@ -236,6 +236,42 @@ describe('POST /api/connections is pending (A3)', () => {
     expect(row?.gbrainClientId).toBeNull();
     expect(calls.some((c) => c.op === 'mcp.grant' && c.opts?.dryRun !== true)).toBe(false);
   });
+
+  test('revoke frees client_name so POST can recreate the same membership+write Space', async () => {
+    const email = `rt-recreate-${randomUUID().slice(0, 8)}@example.test`;
+    const created = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(created.status).toBe(200);
+    const member = await created.json() as { id: string };
+
+    const first = await hit('POST', '/api/connections', adminCookie, {
+      membershipId: member.id,
+      writeSpaceId: writeSpace.id,
+      readSpaceIds: [readSpace.id],
+      harness: 'generic',
+    });
+    expect(first.status).toBe(200);
+    const conn = await first.json() as { id: string };
+
+    const revoked = await hit('POST', `/api/connections/${conn.id}/revoke`, adminCookie);
+    expect(revoked.status).toBe(200);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, conn.id));
+    expect(row?.state).toBe('revoked');
+    expect(row?.clientName).toBe(`revoked:${conn.id}`);
+
+    const second = await hit('POST', '/api/connections', adminCookie, {
+      membershipId: member.id,
+      writeSpaceId: writeSpace.id,
+      readSpaceIds: [readSpace.id],
+      harness: 'generic',
+    });
+    expect(second.status).toBe(200);
+    const recreated = await second.json() as { id: string; state: string };
+    expect(recreated.id).not.toBe(conn.id);
+    expect(recreated.state).toBe('pending');
+    expect(calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
+  });
 });
 
 describe('GET /api/harnesses', () => {

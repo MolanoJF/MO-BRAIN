@@ -18,6 +18,13 @@ const calls: Call[] = [];
 const takes: string[] = [];
 const SECRET = 'sk-secret-once';
 
+function defaultTake(path: string) {
+  takes.push(path);
+  return { client_id: 'gbrain_cl_taken', client_secret: SECRET };
+}
+
+let takeHandler: (path: string) => Promise<unknown> | unknown = defaultTake;
+
 function grantJson(clientId: string): unknown {
   return {
     client_id: clientId,
@@ -50,10 +57,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
     calls.push({ op, params, opts });
     return callOpsHandler(op, params, opts);
   },
-  takeGrantCredentials: async (path: string) => {
-    takes.push(path);
-    return { client_id: 'gbrain_cl_taken', client_secret: SECRET };
-  },
+  takeGrantCredentials: async (path: string) => takeHandler(path),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
@@ -129,6 +133,7 @@ beforeEach(async () => {
   calls.length = 0;
   takes.length = 0;
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
+  takeHandler = defaultTake;
   await getDb().delete(schema.claimLinks);
   await getDb().delete(schema.connections);
   await getDb().delete(schema.auditLog);
@@ -307,5 +312,98 @@ describe('claim', () => {
     expect(JSON.stringify(connRows)).not.toContain(SECRET);
     expect(JSON.stringify(audits)).not.toContain(SECRET);
     expect(JSON.stringify(claimRows)).not.toContain(minted.token);
+  });
+
+  test('grant failure after burn compensates pending and remint retries', async () => {
+    const pendingId = await insertPending(writeSpace);
+    const liveName = clientName(membershipId, writeSpace.sourceId);
+    const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
+
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'mcp.grant' && !opts?.dryRun) {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'mcp', 'grant'],
+          stdout: '', stderr: 'grant failed', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try {
+      await claim(minted.token, EMAIL);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/claim provision failed; remint to retry/i);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, pendingId));
+    expect(row?.state).toBe('pending');
+    expect(row?.clientName).toBe(liveName);
+    expect(row?.gbrainClientId).toBeNull();
+
+    let replay: unknown;
+    try {
+      await claim(minted.token, EMAIL);
+    } catch (e) {
+      replay = e;
+    }
+    expect(String(replay)).toMatch(/used|claimed|burned/i);
+
+    callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
+    const reminted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
+    const result = await claim(reminted.token, EMAIL);
+    expect(result.connections.length).toBe(1);
+    expect(result.connections[0]!.connectionId).toBe(pendingId);
+
+    const [active] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, pendingId));
+    expect(active?.state).toBe('active');
+  });
+
+  test('take failure after grant revokes, restores pending client_name, remint retries', async () => {
+    const pendingId = await insertPending(writeSpace);
+    const liveName = clientName(membershipId, writeSpace.sourceId);
+    const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
+
+    takeHandler = async () => {
+      throw new Error('take exploded');
+    };
+
+    let err: unknown;
+    try {
+      await claim(minted.token, EMAIL);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/claim provision failed; remint to retry/i);
+    expect(String(err)).toMatch(/take exploded/);
+
+    const revoke = calls.find((c) => c.op === 'auth.revokeClient');
+    expect(revoke).toBeDefined();
+    expect(revoke!.params).not.toHaveProperty('reissue');
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, pendingId));
+    expect(row?.state).toBe('pending');
+    expect(row?.clientName).toBe(liveName);
+    expect(row?.gbrainClientId).toBeNull();
+    expect(row?.revokedAt).toBeNull();
+
+    takeHandler = defaultTake;
+    const reminted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
+    const result = await claim(reminted.token, EMAIL);
+    expect(result.connections.length).toBe(1);
+    expect(result.connections[0]!.connectionId).toBe(pendingId);
+    expect(result.connections[0]!.credentials).toEqual({
+      client_id: 'gbrain_cl_taken',
+      client_secret: SECRET,
+    });
+
+    const [active] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, pendingId));
+    expect(active?.state).toBe('active');
+    expect(active?.clientName).toBe(liveName);
   });
 });
