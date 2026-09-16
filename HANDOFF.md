@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Written 2026-09-15. **Slice 0 and Slice 1 are complete on `main`.**
+Written 2026-09-15. **Slice 0 and Slice 1 are complete on `main`.** **Slice 2 is complete on `slice-2-members-connections` (not yet merged).** Next is Slice 3.
 
 This file is the cold-start entry point. Historical mid-task resume notes (including “resume at Task 3 re-review” and branch `slice-1-deploy-one-brain`) are obsolete and were removed.
 
@@ -22,9 +22,10 @@ The strategy rests on one bet: **gbrain is a pinned upstream dependency driven o
 |---|---|
 | 0 — prove the CLI lane | **complete** on `main` |
 | 1 — deploy + one brain + one admin | **complete** on `main` (merged 2026-09-15, HEAD `77a18d1` at merge) |
-| 2 — members + connections | **not started** — next stage |
+| 2 — members + connections | **complete** on `slice-2-members-connections` (Gates A/B/C green; not yet merged) |
+| 3 — scheduler, `gbrain_command` only | **not started** — next stage |
 
-Do **not** re-execute the Slice 0 or Slice 1 plan files. They are historical records (defects found during execution were patched into those files in place).
+Do **not** re-execute the Slice 0, Slice 1, or Slice 2 plan/gate work. Those are historical records.
 
 **Progress tracker:** [`docs/superpowers/plans/PROGRESS.md`](docs/superpowers/plans/PROGRESS.md)
 
@@ -59,11 +60,12 @@ Slice 0 contract stack: `bun run stack:up` / `stack:down`.
 
 | | |
 |---|---|
-| Branch | `main` |
+| Branch | `slice-2-members-connections` (Slice 2 complete; merge before starting Slice 3) |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
 | Slice 0 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md`](docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md) |
 | Slice 1 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md`](docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md) |
 | Slice 0 risk register | [`docs/slice-0-findings.md`](docs/slice-0-findings.md) |
+| Slice 2 scale probe | [`docs/slice-2-findings.md`](docs/slice-2-findings.md) |
 | Break-glass | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) |
 | Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
 | gbrain pin | `v0.50.0.0` (exact, never a moving tag) |

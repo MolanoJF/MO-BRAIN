@@ -3,8 +3,8 @@
 **New session? Start with [HANDOFF.md](../../../HANDOFF.md).**
 
 **Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical)
-**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — the risk register Slice 0 existed to produce.
-**Branch:** `main` (Slice 0 and Slice 1 merged). Next executable stage is Slice 2 — plan not yet written.
+**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe.
+**Branch:** `slice-2-members-connections` (Slice 2 complete, not yet merged). Next executable stage is Slice 3 — Scheduler, `gbrain_command` only.
 
 ---
 
@@ -79,6 +79,28 @@ Carried into Slice 2 (not blockers for Slice 1):
 
 ---
 
+## Slice 2 — COMPLETE ✅
+
+Members + Connections on `slice-2-members-connections`. Not yet merged to `main`.
+
+| Gate | Result |
+|---|---|
+| A — compiler pairing, scoped search, revoke, audit, doctor (headless) | **PASS** — `test/contract/connection.contract.test.ts` |
+| B — HTTP e2e: wizard, members, claim, thin-client whoami/search, revoke, `/admin` 404 | **PASS** — 8 steps in `test/e2e/slice2.e2e.test.ts` |
+| C — Slice 2 exit: disjoint three-member grants, two-Connection per-token scope, revoke-one-other-survives, audit-before-delete, doctor | **PASS** — `bun test test/e2e/slice2.e2e.test.ts` 17 pass / 0 fail (46.69s) |
+
+**Exit gate (roadmap, verbatim):** three Spaces, three Members with disjoint grants; as each Connection, thin-client `whoami` + `search` with every hit's `source_id` in that Connection's read set; a member with two write Spaces proving the two-Connection flow.
+
+Carried into Slice 3 (not blockers for Slice 2):
+
+- gbrain search with a non-empty `--federated-read` uses that list as the **full** scope, not write ∪ extras. Compile still stores extras only; write-source hits are guaranteed when `federated_read` is empty (disjoint internal member) or when the unique source is in extras (two-Connection case).
+- Claim `POST /api/claim/:token` is 20 hits / 15 min in-process; OAuth `/token` is 50 / 15 min on gbrain-serve. Repeated e2e runs need a control-plane + serve restart, not `down -v`.
+- Open Q1 25-Space probe held C5 thresholds; do not treat it as a scale-out proof.
+
+**Next:** Slice 3 — Scheduler, `gbrain_command` only. Entry gate is this Slice 2 exit.
+
+---
+
 ## Session log
 
 - 2026-09-14 — Plans written (roadmap + Slice 0 + Slice 1). Self-review found 3 gaps before execution.
@@ -90,3 +112,4 @@ Carried into Slice 2 (not blockers for Slice 1):
 - 2026-09-15 — Slice 1 started on `slice-1-deploy-one-brain`. Tasks 1–2 complete. Ten plan defects found and patched back, including a decorative `/admin` seal whose own test would have certified it. A pre-existing `lint:forbidden` break (introduced by HANDOFF.md quoting the pattern it forbids) repaired by narrowing scope, never rules. Docker-gated suites can no longer skip silently.
 - 2026-09-15 — Slice 1 Tasks 3–15 complete, whole-branch review, merge-blocking install `--env-file` + restore `compose exec` fixes. Fast-forwarded to `main` (`77a18d1`). Feature branch deleted.
 - 2026-09-15 — Retired mid-Slice-1 resume notes (`HANDOFF.md`, plan banners, roadmap environment block) so a new session does not re-execute Slice 0/1.
+- 2026-09-15 — Slice 2 executed on `slice-2-members-connections`. Gates A/B/C green. **SLICE 2 COMPLETE.** Next: Slice 3.
