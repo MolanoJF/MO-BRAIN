@@ -7,9 +7,21 @@ import { Members } from './pages/Members.tsx';
 import { Connection } from './pages/Connection.tsx';
 import { Claim } from './pages/Claim.tsx';
 import { Access } from './pages/Access.tsx';
+import { Schedules } from './pages/Schedules.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'connection' | 'access';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules';
+
+/**
+ * The SPA's only real route. Everything else is a page switch, but a schedule
+ * alert arrives as a link (from the Health page, a runbook, or an operator's
+ * clipboard), so `/schedules` has to survive a cold load.
+ */
+function pageFromPath(): Page | null {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  if (path === '/schedules') return 'schedules';
+  return null;
+}
 
 function claimTokenFromPath(): string | null {
   const m = window.location.pathname.match(/^\/claim\/([^/]+)/);
@@ -19,8 +31,9 @@ function claimTokenFromPath(): string | null {
 
 export function App() {
   const token = claimTokenFromPath();
+  const requested = pageFromPath();
   const [phase, setPhase] = useState<Phase>('loading');
-  const [page, setPage] = useState<Page>('setup');
+  const [page, setPage] = useState<Page>(requested ?? 'setup');
 
   const refresh = async () => {
     const { bootstrapped } = await api.get<{ bootstrapped: boolean }>('/bootstrap');
@@ -28,7 +41,10 @@ export function App() {
     try {
       const state = await api.get<{ lifecycle: string }>('/wizard/state');
       setPhase(state.lifecycle === 'ready' ? 'ready' : 'wizard');
-      if (state.lifecycle === 'ready') setPage('health');
+      // Never clobber a page the operator asked for by URL.
+      if (state.lifecycle === 'ready') {
+        setPage((current) => (current === 'setup' ? (requested ?? 'health') : current));
+      }
     } catch { setPhase('bootstrap'); }
   };
 
@@ -48,6 +64,7 @@ export function App() {
           <>
             <button className="nav-item" onClick={() => setPage('members')}>Members</button>
             <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
+            <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
             <button className="nav-item" onClick={() => setPage('access')}>Access</button>
           </>
         )}
@@ -57,6 +74,7 @@ export function App() {
         {page === 'setup' && <Wizard onReady={refresh} />}
         {page === 'members' && <Members />}
         {page === 'connection' && <Connection />}
+        {page === 'schedules' && <Schedules />}
         {page === 'access' && <Access />}
       </main>
     </div>
