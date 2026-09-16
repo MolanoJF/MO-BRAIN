@@ -746,8 +746,10 @@ describe('Slice 2 seam gate C', () => {
     for (const spec of DISJOINT) {
       const row = connections[spec.key]![0]!;
       const compiled = compiledOf(row);
+      const home = thinHomes[homeKey(spec.key, compiled.sourceId)];
+      if (!home) throw new Error(`missing thin home for ${spec.key}:${compiled.sourceId}`);
       const who = await gbrain(OPERATIONS.whoami!, {}, {
-        json: true, env: { GBRAIN_HOME: thinHomes[homeKey(spec.key, compiled.sourceId)] },
+        json: true, env: { GBRAIN_HOME: home },
       });
       if (who.exitCode !== 0) {
         throw new Error(`whoami ${spec.key} exit ${who.exitCode}: ${who.stderr || who.stdout}`);
@@ -772,8 +774,10 @@ describe('Slice 2 seam gate C', () => {
       const row = connections[spec.key]![0]!;
       const compiled = compiledOf(row);
       const allowed = allowedSources(compiled);
+      const home = thinHomes[homeKey(spec.key, compiled.sourceId)];
+      if (!home) throw new Error(`missing thin home for ${spec.key}:${compiled.sourceId}`);
       const search = await gbrain(OPERATIONS.search!, { query: PROBE_QUERY, limit: '20' }, {
-        json: true, env: { GBRAIN_HOME: thinHomes[homeKey(spec.key, compiled.sourceId)] },
+        json: true, env: { GBRAIN_HOME: home },
       });
       expect(search.exitCode).toBe(0);
       const sources = hitSourceIds(searchHits(search.json));
