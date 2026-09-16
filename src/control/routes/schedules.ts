@@ -379,6 +379,24 @@ scheduleRoutes.post('/schedule-alerts/:id/ack', guard('member', async (c, { user
   return c.json({ ok: true });
 }));
 
+const orgScheduleSettings = {
+  timezone: schema.organizations.timezone,
+  quietHoursStart: schema.organizations.quietHoursStart,
+  quietHoursEnd: schema.organizations.quietHoursEnd,
+};
+
+/**
+ * The org's scheduling window, readable by anyone who can read a schedule: the
+ * console renders quiet hours in org-local time with the IANA zone named, and a
+ * viewer who cannot read them cannot explain why a job's output was held.
+ */
+scheduleRoutes.get('/org/schedule-settings', guard('viewer', async (c, { orgId }) => {
+  const [row] = await getDb().select(orgScheduleSettings)
+    .from(schema.organizations).where(eq(schema.organizations.id, orgId));
+  if (!row) return c.json({ error: 'not_found' }, 404);
+  return c.json({ settings: row });
+}));
+
 scheduleRoutes.patch('/org/schedule-settings', guard('admin', async (c, { userId, orgId }) => {
   const body = asObject(await c.req.json());
   const patch: Record<string, unknown> = {};
@@ -409,11 +427,8 @@ scheduleRoutes.patch('/org/schedule-settings', guard('admin', async (c, { userId
   await getDb().update(schema.organizations).set(patch).where(eq(schema.organizations.id, orgId));
   await audit(orgId, userId, 'org.schedule_settings', orgId, patch);
 
-  const [row] = await getDb().select({
-    timezone: schema.organizations.timezone,
-    quietHoursStart: schema.organizations.quietHoursStart,
-    quietHoursEnd: schema.organizations.quietHoursEnd,
-  }).from(schema.organizations).where(eq(schema.organizations.id, orgId));
+  const [row] = await getDb().select(orgScheduleSettings)
+    .from(schema.organizations).where(eq(schema.organizations.id, orgId));
   return c.json({ settings: row });
 }));
 

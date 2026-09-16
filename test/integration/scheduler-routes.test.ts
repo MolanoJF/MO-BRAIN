@@ -261,6 +261,7 @@ describe('RBAC', () => {
     { method: 'GET', path: '/api/schedule-presets' },
     { method: 'GET', path: '/api/schedule-alerts' },
     { method: 'POST', path: `/api/schedule-alerts/${NOPE}/ack`, body: {} },
+    { method: 'GET', path: '/api/org/schedule-settings' },
     { method: 'PATCH', path: '/api/org/schedule-settings', body: { timezone: 'UTC' } },
   ];
 
@@ -437,6 +438,37 @@ describe('validation', () => {
     const [org] = await getDb().select().from(schema.organizations)
       .where(eq(schema.organizations.id, ORG));
     expect(org!.timezone).toBe('America/New_York');
+  });
+
+  test('the org settings are readable by a viewer, and a PATCH is observable through the GET', async () => {
+    const before = await hit('GET', '/api/org/schedule-settings', viewerCookie);
+    expect(before.status).toBe(200);
+    const [org] = await getDb().select().from(schema.organizations)
+      .where(eq(schema.organizations.id, ORG));
+    expect(await before.json()).toEqual({
+      settings: {
+        timezone: org!.timezone,
+        quietHoursStart: org!.quietHoursStart,
+        quietHoursEnd: org!.quietHoursEnd,
+      },
+    });
+
+    // The window the console renders in org-local time: write it, read it back.
+    const patched = await hit('PATCH', '/api/org/schedule-settings', adminCookie,
+      { timezone: 'America/Chicago', quietHoursStart: 21, quietHoursEnd: 7 });
+    expect(patched.status).toBe(200);
+    const settings = { timezone: 'America/Chicago', quietHoursStart: 21, quietHoursEnd: 7 };
+    expect(await patched.json()).toEqual({ settings });
+
+    const after = await hit('GET', '/api/org/schedule-settings', viewerCookie);
+    expect(after.status).toBe(200);
+    expect(await after.json()).toEqual({ settings });
+    // ...and it is the row, not an echo of the request body.
+    const [stored] = await getDb().select().from(schema.organizations)
+      .where(eq(schema.organizations.id, ORG));
+    expect(stored!.timezone).toBe('America/Chicago');
+    expect(stored!.quietHoursStart).toBe(21);
+    expect(stored!.quietHoursEnd).toBe(7);
   });
 
   test('quiet hours must be whole hours in range', async () => {
