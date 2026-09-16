@@ -56,9 +56,16 @@ function block(label: string, text: string): string {
 const commandLine = (argv: string[]): string => scrubOutput(argv.join(' '));
 
 export function renderReport(input: ReportInput): string {
+  // Honesty rule 1, in the artifact the member actually reads: the Connection is
+  // a control-plane argv fence, NOT a gbrain-enforced OAuth scope. The report is
+  // committed into the member's own Space, so it must say so in plain words. A
+  // brain-wide run swaps the disclosure for the whole-brain warning rather than
+  // adding to it: the warning is strictly the stronger statement.
   const banner = input.scope === 'brain-wide'
     ? `\n> **This job reads the whole brain, not just \`${input.connection.writeSpace}\`.**\n`
-    : '';
+    : "\n> Runs on gbrain's control lane as the ops service account — the Connection decides the"
+      + ' Space, the report location and the commit identity; it is not a permission gbrain'
+      + ' enforces for this command.\n';
 
   // A two-step run shows BOTH commands on the Command line: a report that names
   // only the step that happened to fail hides half of what ran.

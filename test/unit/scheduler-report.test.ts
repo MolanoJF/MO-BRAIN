@@ -37,6 +37,12 @@ describe('report rendering', () => {
     expect(md).toContain('reads the whole brain, not just');
   });
 
+  test('a source-scoped run carries the control-lane disclosure, never the whole-brain banner', () => {
+    const md = renderReport(base);
+    expect(md).toContain('not a permission gbrain enforces');
+    expect(md).not.toContain('reads the whole brain, not just');
+  });
+
   test('argv is REDACTED, and secrets never reach the repo', () => {
     const md = renderReport({
       ...base,
