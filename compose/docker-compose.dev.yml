@@ -22,3 +22,9 @@ services:
   gbrain-ops:
     ports:
       - "3140:3140"
+
+  # The scheduler deliberately has NO entry here: it is a background loop with
+  # no HTTP surface, so there is nothing to publish and nothing to make
+  # reachable from the host. It reaches gbrain-ops over ops-net and postgres
+  # over control-net exactly as in production. Do not add a `ports:` block for
+  # it — `caddy` is the only host-port publisher in the stack.

@@ -116,6 +116,29 @@ services:
       postgres: { condition: service_healthy }
     networks: [control-net, ops-net]
 
+  # The scheduler. Strictly less privileged than the control plane: control-DB
+  # creds and the ops bearer token, nothing else — no brain DB, no GBRAIN_HOME,
+  # no brain-repos. It reaches gbrain only through the allowlisted ops RPC (S2).
+  # Replicas are safe: one wins the leader advisory lock, the rest are workers.
+  scheduler:
+    image: brainstand/control-plane:${BRAINSTAND_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
+      OPS_RPC_URL: http://gbrain-ops:3140
+      OPS_RPC_TOKEN: ${OPS_RPC_TOKEN:?required}
+      PUBLIC_URL: https://${DOMAIN}
+      SCHEDULER_TICK_MS: ${SCHEDULER_TICK_MS:-15000}
+    command: ["bun", "run", "/app/src/scheduler/main.ts"]
+    # Slice 0 measured a clean gbrain drain at 1150ms. The scheduler hosts no
+    # gbrain supervisor at all, so 20s is generous; the worker's 60s is not
+    # a precedent to copy.
+    stop_grace_period: 20s
+    depends_on:
+      postgres: { condition: service_healthy }
+      gbrain-ops: { condition: service_started }
+    networks: [control-net, ops-net]
+
 networks:
   brain-net: { driver: bridge }
   control-net: { driver: bridge }

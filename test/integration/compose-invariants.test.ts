@@ -124,3 +124,49 @@ describe('compose invariants', () => {
     );
   });
 });
+
+describe('scheduler service invariants', () => {
+  test('caddy is STILL the only service publishing host ports', () => {
+    const publishers = Object.entries(compose.services)
+      .filter(([, s]: [string, any]) => Array.isArray(s.ports) && s.ports.length > 0)
+      .map(([n]) => n);
+    expect(publishers).toEqual(['caddy']);
+  });
+
+  // S2, tightened: the scheduler is strictly less privileged than the control
+  // plane. It reaches gbrain only through the ops RPC.
+  test('scheduler holds no brain credentials of any kind', () => {
+    const env = svc('scheduler').environment as Record<string, string>;
+    expect(env.GBRAIN_DATABASE_URL).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.CONTROL_DATABASE_URL).toBeDefined();
+    expect(env.OPS_RPC_URL).toBeDefined();
+    expect(env.OPS_RPC_TOKEN).toBeDefined();
+  });
+
+  test('scheduler mounts NO volumes — not GBRAIN_HOME, not brain-repos', () => {
+    expect(svc('scheduler').volumes).toBeUndefined();
+  });
+
+  test('scheduler is on control-net and ops-net, never brain-net', () => {
+    expect(svc('scheduler').networks).toEqual(['control-net', 'ops-net']);
+  });
+
+  test('scheduler drains fast — a clean gbrain drain is ~1150ms, not 40s', () => {
+    // Slice 0 measured `jobs supervisor stop` at 1150ms. The worker keeps its
+    // 60s grace because it hosts gbrain's own supervisor; the scheduler does
+    // not, so a long grace only delays every deploy.
+    expect(svc('scheduler').stop_grace_period).toBe('20s');
+    expect(svc('gbrain-worker').stop_grace_period).toBe('60s');
+  });
+
+  test('scheduler runs the scheduler entrypoint, not the control-plane app', () => {
+    expect(svc('scheduler').command).toEqual(['bun', 'run', '/app/src/scheduler/main.ts']);
+  });
+
+  test('self-upgrade stays off everywhere gbrain env is merged', () => {
+    for (const name of ['gbrain-serve', 'gbrain-worker', 'gbrain-ops']) {
+      expect(svc(name).environment.GBRAIN_SELF_UPGRADE_MODE).toBe('off');
+    }
+  });
+});
