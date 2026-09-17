@@ -1017,8 +1017,15 @@ describe('Slice 3.5 seam gate C', () => {
     const q = await journalEvent(realRunId, 'quiesced');
     expect(q).toBeTruthy();
     console.log(`MEASURED QUIESCE(real leg): ${q!.data.drainMs}ms supervisor drain`);
-    // D3: the stop order IS the atomicity guarantee.
-    expect(q!.data.stopped).toEqual(['scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops']);
+    // D3: the stop order IS the atomicity guarantee. D13 (Slice 4 Task 14) puts
+    // the agent runner first: it is the one consumer that keeps writing to the
+    // brain after the scheduler stops materializing. The runner ships behind
+    // the `runner` profile (D12), so on a stack without it the stop is a no-op
+    // — the lane still records it, because the proof is that every writer in
+    // the order is down and one that was never up is trivially down.
+    expect(q!.data.stopped).toEqual([
+      'agent-runner', 'scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops',
+    ]);
     const proof = q!.data.drainProof;
     // U9 / honesty rule 3: classified from POSITIVE in-window evidence, never
     // `reason:'drained'` alone. At this pin a clean stop writes shutting_down

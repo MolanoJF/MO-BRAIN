@@ -13,7 +13,7 @@ import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
   SNAPSHOT_DATABASES, SNAPSHOT_VOLUMES, dockerVolumeDriver, type SnapshotContext,
 } from '../src/upgrade/snapshot.ts';
-import { QUIESCE_ORDER, quiesce } from '../src/upgrade/quiesce.ts';
+import { QUIESCE_ORDER, composeModel, quiesce, restoreLane } from '../src/upgrade/quiesce.ts';
 import { hasPlaybook, playbooksFor, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
 import { canTransition, resumeFrom, type UpgradeRunState } from '../src/upgrade/state.ts';
 import { compareDigests, compareDoctor, rollback, stateDigest, type StateDigest } from '../src/upgrade/digest.ts';
@@ -45,7 +45,7 @@ const COMPOSE = [
 export class UsageError extends Error {}
 
 export type PreflightCode =
-  | 'SAME_VERSION' | 'NO_PLAYBOOK' | 'PENDING_CHECKLIST' | 'REPO_DRIFT'
+  | 'SAME_VERSION' | 'NO_PLAYBOOK' | 'PENDING_CHECKLIST' | 'RUN_IN_FLIGHT' | 'REPO_DRIFT'
   | 'DISK_UNMEASURABLE' | 'INSUFFICIENT_DISK' | 'NO_BASELINE';
 
 export class PreflightRefusal extends Error {
@@ -272,8 +272,20 @@ export type PendingDecision = {
   decidedBy?: string | null; decidedAt?: string | null;
 };
 
+/**
+ * A run a worker is holding RIGHT NOW — `schedule_runs.state = 'running'`,
+ * either lane (an `agent_prompt` run is claimed through the same ledger, so one
+ * query covers both). `pending` is deliberately not in this type: it is a
+ * materialized future occurrence, and every enabled schedule has those all day.
+ */
+export type InFlightRun = {
+  id: string; scheduleId: string; jobType?: string; state?: string;
+  startedAt?: string | null; claimedBy?: string | null;
+};
+
 export type PreflightDeps = {
   pendingDecisions(): Promise<PendingDecision[]>;
+  inFlightRuns(): Promise<InFlightRun[]>;
   resolvePlaybooks(from: string, to: string): PlaybookSpec[];
   inspectRepos(): Promise<RepoStatus[]>;
   measureSnapshotBytes(): Promise<number>;
@@ -317,6 +329,42 @@ export async function preflight(ctx: UpgradeContext, deps: PreflightDeps): Promi
       `${pending.length} checklist item(s) from a previous run are still undecided: ` +
       `${pending.map((p) => `${p.version}/${p.key}`).join(', ')}. Decide them in the console first — ` +
       'stacking an upgrade on an unresolved judgement call makes both unattributable.',
+    );
+  }
+
+  // D13 / Task 14: the check quiesce.ts's own stop-grace doc block claimed Task
+  // 11 preflight already made, and did not — PreflightDeps had no in-flight-run
+  // dependency at all. It sits BEFORE the repo inspection on purpose: a run that
+  // is in flight is writing to a Space as this runs, so inspecting first would
+  // report the run's own uncommitted files as REPO_DRIFT and refuse the upgrade
+  // with the wrong code for the wrong reason.
+  //
+  // One query covers both lanes: an agent run is claimed through the same
+  // `schedule_runs` ledger (`claimNextRun`'s jobTypes filter), so its row is
+  // `running` for as long as its harness is.
+  let inFlight: InFlightRun[];
+  try {
+    inFlight = await deps.inFlightRuns();
+  } catch (e) {
+    // A check that never ran is not a pass (the DISK_UNMEASURABLE rule): the
+    // ledger is exactly where quiesce.ts sends the question of whether it is
+    // safe to freeze the brain, so an unreadable ledger refuses.
+    throw new PreflightRefusal(
+      'RUN_IN_FLIGHT',
+      `the run ledger could not be read (${(e as Error).message}); refusing rather than snapshotting ` +
+      'a brain a run may be mid-write on',
+    );
+  }
+  if (inFlight.length > 0) {
+    throw new PreflightRefusal(
+      'RUN_IN_FLIGHT',
+      `${inFlight.length} scheduled run(s) are in flight right now: ` +
+      `${inFlight.map((r) => `${r.id}${r.jobType ? ` (${r.jobType})` : ''}` +
+        ` since ${r.startedAt ?? 'unknown'}`).join(', ')}. ` +
+      'A run that is mid-write would be frozen half-written by the snapshot, which is the ' +
+      'inconsistency the quiesce drain proof exists to prevent. Wait for it to finish — a dead ' +
+      "worker's row is reclaimed to `lease_expired` by the scheduler leader — or cancel it in the " +
+      'console first.',
     );
   }
 
@@ -674,6 +722,27 @@ async function pendingDecisions(ctx: UpgradeContext): Promise<PendingDecision[]>
   return JSON.parse(r.stdout.trim() || '[]') as PendingDecision[];
 }
 
+/** D13/Task 14: the rows a worker is holding, either lane. Exported because the
+ *  contract suite runs THIS query against the real control schema — a column
+ *  that does not exist is the L9/F3 class of defect, and a stub cannot catch
+ *  it. */
+export const IN_FLIGHT_RUNS_SQL =
+  'select coalesce(json_agg(json_build_object(' +
+  "'id', r.id, 'scheduleId', r.schedule_id, 'jobType', s.job_type, 'state', r.state, " +
+  "'startedAt', r.started_at, 'claimedBy', r.claimed_by) order by r.started_at), '[]') " +
+  'from schedule_runs r left join schedules s on s.id = r.schedule_id ' +
+  "where r.state = 'running'";
+
+async function inFlightRuns(ctx: UpgradeContext): Promise<InFlightRun[]> {
+  const r = await shCapture(
+    [...ctx.compose, 'exec', '-T', 'postgres', 'psql', '-U', 'gbrain', '-d', 'control', '-tAc',
+      IN_FLIGHT_RUNS_SQL],
+    30_000,
+  );
+  if (r.exitCode !== 0) throw new Error(`in-flight run query failed: ${r.stderr}`);
+  return JSON.parse(r.stdout.trim() || '[]') as InFlightRun[];
+}
+
 async function inspectReposFromOps(ctx: UpgradeContext): Promise<RepoStatus[]> {
   const payload = await relayOps(ctx, '/git/inspect', {}, 30_000) as { repos?: RepoStatus[] };
   return Array.isArray(payload.repos) ? payload.repos : [];
@@ -806,11 +875,16 @@ async function defaultRecreate(ctx: UpgradeContext, services: readonly string[])
  * recreate gbrain-serve/worker/control-plane at the OLD pin and silently undo
  * the swap (C8's cross-check catches exactly that). This re-issues the same
  * `up -d --no-deps` through `sh`, whose children carry no stale GBRAIN_VERSION.
+ *
+ * The lane it walks is `restoreLane`'s, the same one `quiesce.ts` uses: the
+ * ACTIVE profile model, so a service the operator never enabled (`agent-runner`
+ * is behind the `runner` profile, D12) is not started by an upgrade. Only the
+ * spawn path differs here, and that difference is the pin.
  */
 async function resumeAtCurrentPin(
   ctx: UpgradeContext, services: readonly string[] = QUIESCE_ORDER,
 ): Promise<void> {
-  const order = [...QUIESCE_ORDER].reverse().filter((svc) => services.includes(svc));
+  const order = restoreLane(await composeModel(ctx.compose), services);
   for (const svc of order) {
     const r = await sh([...ctx.compose, 'up', '-d', '--no-deps', svc], 120_000);
     if (r.exitCode !== 0) throw new Error(`resume: starting ${svc} failed: ${r.stderr}`);
@@ -852,6 +926,7 @@ async function defaultDeps(ctx: UpgradeContext): Promise<RunDeps> {
   };
   return {
     pendingDecisions: () => pendingDecisions(ctx),
+    inFlightRuns: () => inFlightRuns(ctx),
     resolvePlaybooks: (from, to) => playbooksFor(from, to),
     inspectRepos: () => inspectReposFromOps(ctx),
     measureSnapshotBytes: () => measureSnapshotBytes(ctx),

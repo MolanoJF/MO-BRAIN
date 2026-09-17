@@ -49,11 +49,20 @@ export type StateDigest = {
  * the gate, which rollback does not promise. Measured: +6 `schedule_runs`
  * between a pre-upgrade digest and the post-rollback digest of an otherwise
  * identical control DB (docs/slice-3.5-findings.md, F3).
+ *
+ * `agent_runs`/`agent_run_events`/`agent_run_usage` (Slice 4 Task 14, L9): the
+ * same class, from the runner's own ledger — a run in flight appends events,
+ * appends usage rows and rewrites its own rollup (`costUsd`, which C3 asserts
+ * equals `SUM(agent_run_usage.costUsd)`, so these three move together). Run
+ * history, not content, and the snapshot restores all three the same way. A
+ * digest that counted them would compare two observations of a moving ledger
+ * and break the parity gate exactly as F3's row growth did.
  */
-const UNCOUNTED_TABLES = [
+export const UNCOUNTED_TABLES = [
   'audit_log', 'capability_snapshots', 'playbook_ledger',
   'upgrade_checklist_items', 'upgrade_events', 'upgrade_runs',
   'schedule_runs', 'schedule_alerts',
+  'agent_runs', 'agent_run_events', 'agent_run_usage',
 ] as const;
 
 /** Exact counts per public table. n_live_tup is an estimate and will not do. */

@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { compareDigests, compareDoctor, type StateDigest } from '../../src/upgrade/digest.ts';
+import { UNCOUNTED_TABLES, compareDigests, compareDoctor, type StateDigest } from '../../src/upgrade/digest.ts';
 
 const part = (name: string, sha256: string, items = 1) => ({ name, sha256, items, scope: 'test' });
 
@@ -112,5 +112,29 @@ describe('compareDoctor', () => {
   test('a schema_version check that vanished is not a pass', () => {
     const r = compareDoctor(report([check('schema_version', 'ok')]), report([check('other', 'ok')]));
     expect(r.schemaVersionOk).toBe(false);
+  });
+});
+
+// L9 / Slice 3.5 F3. A control table the digest still counts makes the rollback
+// parity gate assert that NOTHING happened during the gate: the runner writes
+// these three while it runs, so counting them compares two observations of a
+// moving ledger, exactly the way `schedule_runs` did (F3 measured +6 rows
+// between a pre-upgrade digest and the post-rollback digest of an otherwise
+// identical control DB).
+describe('the digest does not count the runner ledger (L9)', () => {
+  const uncounted = UNCOUNTED_TABLES as readonly string[];
+
+  test('the three tables the agent runner writes are uncounted', () => {
+    for (const table of ['agent_runs', 'agent_run_events', 'agent_run_usage']) {
+      expect(uncounted).toContain(table);
+    }
+  });
+
+  test('the boundary holds: content tables are still counted', () => {
+    // The opposite failure — widening the list until every difference is
+    // "excused" — is what makes the parity gate vacuous.
+    for (const table of ['connections', 'users', 'schedules']) {
+      expect(uncounted).not.toContain(table);
+    }
   });
 });

@@ -23,6 +23,7 @@ const cleanRepo = (sourceId: string): RepoStatus => ({
 function fakeDeps(over: Partial<PreflightDeps> = {}): PreflightDeps {
   return {
     pendingDecisions: async () => [],
+    inFlightRuns: async () => [],
     resolvePlaybooks: () => [
       { version: '0.50.1.0', noPlaybookRequired: true, evidence: 'no upstream file' },
     ],
@@ -95,6 +96,38 @@ describe('preflight refusals', () => {
     expect(code).toBe('PENDING_CHECKLIST');
   });
 
+  // D13 / Task 14. This check is the one quiesce.ts's own stop-grace doc block
+  // claimed Task 11 preflight already made, and did not: preflight had no
+  // in-flight-run dependency at all. It matters most for the agent lane, where
+  // one run is a 20-minute harness writing pages — and a snapshot taken
+  // mid-write freezes a half-written brain, which is the inconsistency the
+  // quiesce drain proof exists to prevent in the first place.
+  test('a run held right now refuses, before the repos are inspected', async () => {
+    let reposInspected = false;
+    const code = await refusalCode(() => preflight(fakeCtx(), fakeDeps({
+      inFlightRuns: async () => [
+        { id: 'run-held', scheduleId: 'sch-1', jobType: 'agent_prompt', state: 'running',
+          startedAt: '2026-09-17T03:00:00.000Z', claimedBy: 'runner-1' },
+      ],
+      // A live run is writing to a Space AS preflight runs, so inspecting the
+      // repos first would report the run's own uncommitted files as REPO_DRIFT
+      // and refuse the upgrade for the wrong reason with the wrong code.
+      inspectRepos: async () => {
+        reposInspected = true;
+        return [{ ...cleanRepo('handbook'), uncommittedFiles: 1 }];
+      },
+    })));
+    expect(code).toBe('RUN_IN_FLIGHT');
+    expect(reposInspected).toBe(false);
+  });
+
+  test('a run ledger that cannot be read refuses, and never passes vacuously', async () => {
+    const code = await refusalCode(() => preflight(fakeCtx(), fakeDeps({
+      inFlightRuns: async () => { throw new Error('psql exited 1'); },
+    })));
+    expect(code).toBe('RUN_IN_FLIGHT');
+  });
+
   test('a version with no playbook refuses before anything is touched', async () => {
     let baselineCaptured = false;
     const code = await refusalCode(() => preflight(fakeCtx(), fakeDeps({
@@ -164,5 +197,19 @@ describe('preflight success', () => {
       pushSources: async () => { throw new Error('remote unreachable'); },
     }));
     expect(report.sourcesPushed).toBe(false);
+  });
+
+  // The other half of D13's refusal: it fires on a HELD claim and on nothing
+  // else. An idle ledger is the normal state between runs — `pending` rows are
+  // materialized future occurrences that every enabled schedule has all day, so
+  // a refusal keyed on "any row exists" would refuse every upgrade forever.
+  test('an idle run ledger is not a refusal', async () => {
+    let asked = 0;
+    const report = await preflight(fakeCtx(), fakeDeps({
+      inFlightRuns: async () => { asked += 1; return []; },
+    }));
+    expect(asked).toBe(1);
+    expect(report.fromVersion).toBe('0.50.0.0');
+    expect(report.baseline.status).toBe('healthy');
   });
 });
