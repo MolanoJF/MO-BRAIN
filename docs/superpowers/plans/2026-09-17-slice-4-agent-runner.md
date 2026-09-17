@@ -519,6 +519,79 @@ the network in D6 makes the exclusion structural.
 
 ---
 
+## Corrections made during execution
+
+> **Corrected 2026-09-17 — U6 is contradicted: an MCP write produces no commit. (D9, Task 6, Task 9)**
+> Task 1's P8 probe measured it against the live stack: a `put_page` over `/mcp` leaves an **untracked
+> file** (`?? probe-runner/`), `HEAD` unmoved more than fifteen minutes later with a 5-minute
+> `live-sync` enabled, and the write-through commit gated on `gbrain sources harden`, which this stack
+> does not do. gbrain also supplies no author identity, so the commit it *would* make fails on
+> `Author identity unknown` (exit 128).
+>
+> Consequence, and it is a change to the finish path rather than to `diffForRun`: **the run's own
+> finish path commits its writes** — `commitAs(spaceId, runMember, "agent run <runId>")` — **before**
+> capturing the after-head. The range is then real, non-empty, and authored by us, which is a better
+> attribution story than the plan assumed. D9's `concurrentWriters` keeps its purpose for a different
+> reason than the plan gave: every commit observed in these Spaces was authored by *our* writers
+> (`commitAs` passes `-c user.name -c user.email`), so a foreign author in the range is another
+> brainstand writer — `live-sync`, a member's own agent — never gbrain. The console hedge must be
+> worded for that case.
+
+> **Corrected 2026-09-17 — U5 is contradicted: there is no revocable token id. (D8, Task 5)**
+> The `mcp grant --json` receipt carries a **client** id and never a token id, and `gbrain auth
+> revoke --id <uuid>` targets the legacy `access_tokens` table while `oauth_tokens` is keyed by
+> `token_hash` with no id column at all. `gbrain auth revoke-client <client_id>` is the kill switch
+> (exit 0, cascade purge, token then 401), and RFC 7009 `POST /revoke` is the only per-token kill.
+> **`auth.revokeToken` is not added to the registry** — there is nothing for it to accept. Task 5
+> establishes which of the two working mechanisms it takes, on evidence, and records it.
+> Two further measured costs of the revoke path: a grant refuses a plaintext `--url`
+> (mint against `https://${DOMAIN}/mcp`, never the internal `http://gbrain-serve:3131`), and every
+> grant retains a private credential journal at
+> `GBRAIN_HOME/.gbrain/credential-deliveries/<client_id>.json` that `revoke-client` does **not**
+> delete — 38 such journals already exist. Deleting it is part of the revoke path.
+
+> **Corrected 2026-09-17 — the price table needs five rates, and the gateway token cannot be a stored hash. (D7, Task 7)**
+> Claude Code writes the **1-hour** cache by default, so a four-rate table prices it at the 5-minute
+> rate and undercounts by 33.5% on a single-request run. `MODEL_PRICING` carries input, output,
+> cache-read, cache-write-5m and cache-write-1h, with `pricedAt` 2026-09-17.
+> The plan's "gateway token stored hashed, the same shape `claim_links` uses" has no column —
+> `agent_runs` was already migrated — so the token is a stateless HMAC over `runId`+expiry, and
+> "burned at run end" is enforced by the `agent_runs` lookup the budget check already performs.
+> Also: the harness sends `HEAD /api/hello` to the base URL before `POST /v1/messages?beta=true`, so
+> the gateway must answer or tolerate it; the runner→gateway leg is `Authorization: Bearer` (F5); and
+> the harness's own `total_cost_usd` is 8.8% high on a two-request run (F9), so our meter — not the
+> frame — is the ledger.
+
+> **Corrected 2026-09-17 — the runner's writable set is `/tmp` alone, and `RUNNER_TOKEN` cannot be a required interpolation. (Task 2, Task 3, Task 8)**
+> `--read-only` works and the minimal writable set is `/tmp` alone; `$HOME` is not required and is
+> actively harmful, because a tmpfs at `$HOME` hides a harness installed there. `bun install -g` as
+> root lands under `/root/.bun`, which is mode 0700 — `ENV BUN_INSTALL=/opt/harness` plus `PATH` is
+> mandatory for a non-root `USER`. And `claude --version` prints `2.1.274 (Claude Code)`, so the
+> build-time gate must match the version as a token, not as `$NF` the way `gbrain-base.Dockerfile`
+> does.
+> The per-run workspace therefore lives at **`/tmp/agent-run/<runId>/`**; there is no `/workspace`
+> tmpfs. Compose interpolates the whole file before profiles resolve, so `${RUNNER_TOKEN:?required}`
+> on a profile-gated service would make the token mandatory for `docker compose stop scheduler` on
+> every runner-less deployment, contradicting D12. It is `${RUNNER_TOKEN:-}`, and the *runtime* owns
+> the refusal: the control plane answers `503 runner_disabled` when the token is empty (two empty
+> strings would otherwise pass `timingSafeEqual`), and the runner exits non-zero without it.
+
+> **Corrected 2026-09-17 — quiesce must be profile-aware, and the reclaimer must be extended. (Task 6, Task 11, Task 14)**
+> `SWAP_SERVICES` lives in `scripts/upgrade.ts:30`, not in `src/upgrade/quiesce.ts`. On Compose
+> v5.5.1 `stop` of a service the project does not define exits 1 ("no such service"), while `up -d
+> --no-deps agent-runner` **does** start a profile-gated service — so a bare `QUIESCE_ORDER` addition
+> breaks quiesce today and a bare `resume()` would start a runner the operator turned off. Both lanes
+> are filtered through a real compose profile model.
+> D2's "everything else in `src/scheduler/claim.ts` is untouched" narrows to the claim select:
+> `reclaimExpiredLeases` must classify an agent run `infra_failed` (not `failed`), must know the
+> row's job type, and must revoke the dead run's gbrain token — honesty rule 5. That needs the run's
+> client id on the row, so Task 4's schema gains `agent_runs.gbrain_client_id` in a `0006` migration
+> (owned by Task 5).
+> `classifyAgentExit` is a **separate mapper** returning a `FailureClass`; `Classification` and its
+> `SEVERITY` map in `src/scheduler/execute.ts` are total over each other and must not be widened.
+
+---
+
 ## Task index and interface map
 
 Tasks are executed in order. Dependencies are expressed only through `Consumes:` / `Produces:`.
