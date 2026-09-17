@@ -381,12 +381,15 @@ describe('Slice 3 seam gate B', () => {
     expect((await readJson<{ error: string }>(refused, 'PATCH EST')).error).toBe('invalid_timezone');
   });
 
-  test.skipIf(!dockerAvailable)("B3. presets list includes three user presets and the org's system ones", async () => {
+  test.skipIf(!dockerAvailable)("B3. presets list includes the user presets and the org's system ones", async () => {
     const body = await readJson<{ presets: Array<{ id: string; system?: true }>; system: string[] }>(
       await get('/api/schedule-presets'), 'GET /api/schedule-presets',
     );
+    // Slice 4 added the fourth user preset (the one agent_prompt shape). The
+    // system ones stay conditional, so they are asserted by membership below
+    // rather than by count.
     expect(body.presets.filter((p) => !p.system).map((p) => p.id).sort())
-      .toEqual(['live-sync', 'nightly-dream', 'weekly-health']);
+      .toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
     for (const id of body.system) {
       expect(body.presets.find((p) => p.id === id)?.system).toBe(true);
     }

@@ -47,6 +47,7 @@ Presets, from the catalogue the console offers:
 | `weekly-health` | Mondays 06:10 | `doctor --remediate` | Reads the WHOLE brain (`maxUsd` 5), so it needs an admin Connection. |
 | `push-reconcile` | daily 04:15 | `sources push` | System preset. Installs only when the org has a Space with a git remote. |
 | `morning-briefing` | daily 08:05 | none | System preset. Releases everything quiet hours held. Installs only when some schedule sets `notifies`. |
+| `nightly-agent-briefing` | daily 03:05 | none — `agent_prompt` | Slice 4. The runner runs the pinned harness on this prompt; the run spends the org's API budget, capped at USD 2 per run, on `claude-haiku-4-5`. Needs a connected runner. |
 
 Rules that bite:
 

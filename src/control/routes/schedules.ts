@@ -13,6 +13,18 @@
  *      `scope: 'brain-wide'` so the console renders its banner, not a generic
  *      error.
  *
+ * The agent lane (Slice 4, D2/D5/D12) adds three more, all at CREATION:
+ *
+ *   3. Honesty rule 3 — a model we cannot price is refused here, not at 3am.
+ *      `agent_model` must be priced by `rateFor`, so an unpriced model can never
+ *      become a run whose cost is unknowable.
+ *   4. D5 — the agent payload's key set is closed. There is no field for a tool
+ *      allowlist, a permission mode or a shell, so a payload carrying one is an
+ *      unknown field and dies here. That IS the enforcement.
+ *   5. Honesty rule 8 — no consumer, no schedule. An `agent_prompt` create is
+ *      refused with `409 runner_not_enabled` unless `runnerStatus()` reports a
+ *      claim inside its lease.
+ *
  * A schedule's name becomes the `reports/<job-name>/` directory, so it is
  * validated against the slug shape and REFUSED, never sanitized.
  */
@@ -21,12 +33,15 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, lt, ne } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, ROLE_RANK, type Role } from '../rbac.ts';
-import { PRESETS, systemPresetsFor } from '../../scheduler/presets.ts';
+import { PRESETS, systemPresetsFor, type Preset } from '../../scheduler/presets.ts';
 import { SCHEDULER_COMMANDS, validateParams } from '../../scheduler/commands.ts';
 import {
   assignSlot, isSubHourly, SUB_HOURLY_SECONDS, type CalendarFootprint,
 } from '../../scheduler/stagger.ts';
 import { isValidTimeZone } from '../../scheduler/time.ts';
+import { runnerStatus } from '../../agent/runners.ts';
+import { HARNESS_PIN } from '../../runner/pin.ts';
+import { MODEL_PRICING, rateFor } from '../../gateway/pricing.ts';
 
 export const scheduleRoutes = new Hono();
 
@@ -332,6 +347,204 @@ const NO_PRESET_DEFAULTS: PolicyFallbacks = {
   reportPolicy: undefined,
 };
 
+// --- the agent payload (D2, D5, D12; honesty rules 3 and 8) ------------------
+
+/**
+ * A run's budget is capped at the same 100 USD ceiling the command lane's
+ * `--max-usd` tunable uses, and it must be positive: a zero cap is not a cap
+ * (honesty rule 4's cousin), and a negative one is a bug, not a policy. Money is
+ * a decimal string, never a float — the column is text for exactly that reason —
+ * so a budget with more than six decimal places is refused rather than rounded
+ * into something the operator did not ask for.
+ */
+export const AGENT_BUDGET_MAX_USD = 100;
+const AGENT_BUDGET_RE = /^\d+(\.\d{1,6})?$/;
+
+/**
+ * The output cap. Under 256 tokens is not a run worth scheduling, and 64000 is
+ * the largest output any model in the pinned table emits — a bigger number would
+ * be a promise no model keeps.
+ */
+export const AGENT_MAX_TOKENS_MIN = 256;
+export const AGENT_MAX_TOKENS_MAX = 64_000;
+
+/** "Thin — a pointer at a skill, not an inlined essay" (Task 4's schema note). */
+const AGENT_PROMPT_MAX_CHARS = 4000;
+
+/**
+ * The agent payload's exact key set, and the rest of a create body's. Everything
+ * else is refused by name.
+ *
+ * This IS how D5's "refuse Bash-enabling options outright" is enforced: there is
+ * no column, no field and no pass-through for a tool allowlist, a permission mode
+ * or a shell, so a payload that carries one is an unknown field and dies here
+ * before it can reach a row. `params` is refused for the same reason `--source`
+ * is fenced on the command lane — and `operation` with it, because
+ * `shape_matches_job_type` forbids an operation on an agent row.
+ *
+ * `agentHarnessVersion` is refused too: it is DERIVED from `HARNESS_PIN`, exactly
+ * as `--source` is derived from the Connection, so a caller cannot pin a build
+ * this deployment is not running.
+ */
+const AGENT_CREATE_KEYS: Record<string, true> = {
+  // the schedule's timing and policy keys, unchanged from the command lane
+  name: true, connectionId: true, preset: true, jobType: true,
+  kind: true, intervalSeconds: true, calendarHour: true, calendarMinute: true,
+  calendarDaysOfWeek: true,
+  gapPolicy: true, ambiguousPolicy: true, catchupPolicy: true, overlapPolicy: true,
+  reportPolicy: true, timeoutSeconds: true, misfireGraceSeconds: true, notifies: true,
+  // the payload itself, and nothing else
+  agentPrompt: true, agentModel: true, agentMaxTokens: true, agentBudgetUsd: true,
+};
+
+type AgentPayload = {
+  prompt: string;
+  model: string;
+  maxTokens: number;
+  budgetUsd: string;
+};
+
+type AgentPayloadResult =
+  | { ok: true; payload: AgentPayload }
+  | { ok: false; status: 400; body: Record<string, unknown> };
+
+/**
+ * Validate the agent payload the way `validateParams` validates command params:
+ * against a closed key set, with every refusal named. Preset values fill the
+ * gaps, so `{ preset: 'nightly-agent-briefing' }` is a complete payload.
+ *
+ * Every rule here is enforced at CREATION, not at 3am: an unpriced model is
+ * honesty rule 3's "a cost we could not price is not a cost of zero", discovered
+ * while an operator is looking at the form rather than by a run that ends
+ * budget-unknowable.
+ */
+function validateAgentPayload(
+  body: Record<string, unknown>, preset: Preset | undefined,
+): AgentPayloadResult {
+  for (const key of Object.keys(body)) {
+    if (Object.hasOwn(AGENT_CREATE_KEYS, key)) continue;
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'unknown_agent_field',
+        field: key,
+        detail: 'An agent schedule stores a prompt, a model, an output cap and a budget — '
+          + 'nothing else. A tool allowlist or a shell option does not exist here, '
+          + 'so this field is refused rather than ignored.',
+      },
+    };
+  }
+
+  const fallback = preset?.agent;
+  const rawPrompt = body.agentPrompt ?? fallback?.prompt;
+  if (typeof rawPrompt !== 'string') {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'incomplete_agent_payload',
+        field: 'agentPrompt',
+        detail: `a non-empty prompt of at most ${AGENT_PROMPT_MAX_CHARS} characters`,
+      },
+    };
+  }
+  if (rawPrompt.trim() === '' || rawPrompt.length > AGENT_PROMPT_MAX_CHARS) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalid_agent_prompt',
+        field: 'agentPrompt',
+        detail: `a non-empty prompt of at most ${AGENT_PROMPT_MAX_CHARS} characters — a pointer `
+          + 'at what to do, not an inlined essay',
+      },
+    };
+  }
+
+  const rawModel = body.agentModel ?? fallback?.model;
+  if (typeof rawModel !== 'string' || rawModel === '') {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'incomplete_agent_payload',
+        field: 'agentModel',
+        detail: 'a model id from the pinned price table',
+      },
+    };
+  }
+  // Honesty rule 3: a model we cannot price is refused HERE. `rateFor` also
+  // accepts the dated form of a priced id (`claude-haiku-4-5-20251001`), because
+  // the meter prices by that same function — so this is "is it priced", not
+  // "is it spelled the way the table spells it".
+  if (rateFor(rawModel) === null) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'unpriced_model',
+        model: rawModel,
+        pricedAt: MODEL_PRICING.pricedAt,
+        detail: `Not in the price table pinned on ${MODEL_PRICING.pricedAt}, so a run on it `
+          + 'would have an unknowable cost. Pick a priced model.',
+      },
+    };
+  }
+
+  const rawTokens = body.agentMaxTokens ?? fallback?.maxTokens;
+  const maxTokens = intOf(rawTokens);
+  if (maxTokens === null || maxTokens < AGENT_MAX_TOKENS_MIN || maxTokens > AGENT_MAX_TOKENS_MAX) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalid_agent_max_tokens',
+        field: 'agentMaxTokens',
+        detail: `an integer in [${AGENT_MAX_TOKENS_MIN}, ${AGENT_MAX_TOKENS_MAX}]`,
+      },
+    };
+  }
+
+  // A JSON number is accepted and normalized to text on the way in: the column
+  // is text so money never becomes a float, and neither does it here.
+  const rawBudget = body.agentBudgetUsd ?? fallback?.budgetUsd;
+  const budgetUsd = typeof rawBudget === 'number' && Number.isFinite(rawBudget)
+    ? String(rawBudget)
+    : rawBudget;
+  if (typeof budgetUsd !== 'string' || !AGENT_BUDGET_RE.test(budgetUsd)
+    || !(Number(budgetUsd) > 0) || Number(budgetUsd) > AGENT_BUDGET_MAX_USD) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalid_agent_budget_usd',
+        field: 'agentBudgetUsd',
+        detail: `a decimal greater than 0 and at most ${AGENT_BUDGET_MAX_USD} USD, `
+          + 'with at most six decimal places',
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    payload: { prompt: rawPrompt, model: rawModel, maxTokens, budgetUsd },
+  };
+}
+
+/**
+ * What the 409 tells the operator to do about it. Never "the runner is enabled"
+ * (honesty rule 8): each state names the fact, and the fix.
+ */
+const RUNNER_NOT_ENABLED_DETAIL: Record<string, string> = {
+  disabled:
+    'This deployment has no agent runner — RUNNER_TOKEN is empty, so no process exists to '
+    + 'claim a run. Enable the runner profile, or drop the agent schedule.',
+  never_claimed:
+    'No agent runner is connected: nothing has claimed any agent run. Start the runner '
+    + '(docker compose --profile runner up -d agent-runner) and try again.',
+};
+
 scheduleRoutes.get('/schedules', guard('viewer', async (c, { orgId }) => {
   const rows = await scheduleQuery()
     .where(eq(schema.schedules.organizationId, orgId))
@@ -446,11 +659,58 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
   const preset = presetId ? PRESETS[presetId] : undefined;
   if (presetId && !preset) return c.json({ error: 'unknown_preset' }, 400);
 
+  // D2: `job_type` is the PAYLOAD shape. A preset carries it, an explicit body
+  // may state it, and the default is the command lane this route always had.
+  const jobType = body.jobType ?? preset?.jobType ?? 'gbrain_command';
+  if (jobType !== 'gbrain_command' && jobType !== 'agent_prompt') {
+    return c.json({
+      error: 'invalid_job_type',
+      detail: "expected 'gbrain_command' or 'agent_prompt'",
+    }, 400);
+  }
+  // A preset that disagrees with an explicit jobType is a refusal, not a silent
+  // drop: a command preset's params are the command lane's payload, and they
+  // would vanish into a row that has no operation to carry them.
+  const presetJobType = preset ? (preset.jobType ?? 'gbrain_command') : null;
+  if (presetJobType !== null && presetJobType !== jobType) {
+    return c.json({
+      error: 'preset_job_type_mismatch',
+      preset: preset!.id,
+      jobType,
+      detail: `preset ${preset!.id} is a ${presetJobType} schedule`,
+    }, 400);
+  }
+
+  // --- the agent lane (D5, D12; honesty rules 3 and 8) ----------------------
+  let agent: AgentPayload | null = null;
+  if (jobType === 'agent_prompt') {
+    const validated = validateAgentPayload(body, preset);
+    if (!validated.ok) return c.json(validated.body, validated.status);
+
+    // Honesty rule 8 and D12: an operator cannot schedule work no consumer
+    // exists to run. This 409 is the same shape as `slot_taken` — the refusal
+    // carries the context the console needs, here the state and the last claim
+    // rather than a next free slot.
+    const status = await runnerStatus();
+    if (status.state !== 'connected') {
+      return c.json({
+        error: 'runner_not_enabled',
+        state: status.state,
+        lastSeenAt: status.lastSeenAt,
+        detail: RUNNER_NOT_ENABLED_DETAIL[status.state],
+      }, 409);
+    }
+    agent = validated.payload;
+  }
+
   // The briefing preset runs no gbrain command — it is internal to the
-  // scheduler, so there is no allowlist entry to validate against.
-  const runsCommand = !(preset && preset.operation === null);
-  const operation = preset ? (preset.operation ?? preset.id) : String(body.operation ?? '');
-  const command = runsCommand ? (SCHEDULER_COMMANDS[operation] ?? null) : null;
+  // scheduler, so there is no allowlist entry to validate against. Neither does
+  // an agent schedule: `shape_matches_job_type` requires a null operation.
+  const runsCommand = !agent && !(preset && preset.operation === null);
+  const operation = agent
+    ? null
+    : (preset ? (preset.operation ?? preset.id) : String(body.operation ?? ''));
+  const command = runsCommand && operation ? (SCHEDULER_COMMANDS[operation] ?? null) : null;
   if (runsCommand && !command) return c.json({ error: 'unknown_operation' }, 400);
 
   // Honesty rule 2: a brain-wide job is not fenceable to a Space.
@@ -489,12 +749,24 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
     connectionId: connection.id,
     name,
     preset: preset?.id ?? null,
+    jobType,
     operation,
     params,
     kind,
     createdBy: userId,
     ...tunables.values,
   };
+
+  if (agent) {
+    values.agentPrompt = agent.prompt;
+    values.agentModel = agent.model;
+    values.agentMaxTokens = agent.maxTokens;
+    values.agentBudgetUsd = agent.budgetUsd;
+    // Derived, never carried: the pin this schedule is written against. A runner
+    // whose own pin differs refuses the claim rather than running an unknown
+    // binary, so this value is the whole handshake.
+    values.agentHarnessVersion = HARNESS_PIN;
+  }
 
   if (kind === 'interval') {
     const intervalSeconds = intOf(body.intervalSeconds, preset?.defaults.intervalSeconds);
@@ -545,7 +817,7 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
   }
 
   await audit(orgId, userId, 'schedule.create', id, {
-    name, operation, kind, preset: preset?.id ?? null,
+    name, operation, kind, jobType, preset: preset?.id ?? null,
     connectionId: connection.id, slotMinute: values.slotMinute ?? null,
   });
 

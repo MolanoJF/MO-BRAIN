@@ -4,9 +4,9 @@ import { SCHEDULER_COMMANDS, validateParams } from '../../src/scheduler/commands
 import { ASSIGNABLE_SLOTS, isSubHourly } from '../../src/scheduler/stagger.ts';
 
 describe('the preset catalog', () => {
-  test('ships exactly three user presets — start with three', () => {
+  test('ships four user presets: three commands and one agent run', () => {
     const user = Object.values(PRESETS).filter((p) => !p.system).map((p) => p.id).sort();
-    expect(user).toEqual(['live-sync', 'nightly-dream', 'weekly-health']);
+    expect(user).toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
   });
 
   test('and exactly two conditional system schedules', () => {
@@ -14,8 +14,20 @@ describe('the preset catalog', () => {
     expect(system).toEqual(['morning-briefing', 'push-reconcile']);
   });
 
-  test('every preset names a schedulable command (the briefing is internal)', () => {
+  test('exactly one of them is an agent run — don\'t over-cron, and don\'t over-spend', () => {
+    const agent = Object.values(PRESETS).filter((p) => p.jobType === 'agent_prompt');
+    expect(agent.map((p) => p.id)).toEqual(['nightly-agent-briefing']);
+    // An agent preset carries a payload and no operation: shape_matches_job_type
+    // allows exactly one payload shape per row, and this is the other one.
+    expect(agent[0]!.agent).toBeDefined();
+    expect(agent[0]!.operation).toBeNull();
+  });
+
+  test('every preset names a schedulable command (the internal drains do not)', () => {
     for (const p of Object.values(PRESETS)) {
+      // An agent preset stores a prompt, not an argv: there is no allowlist
+      // entry to name, and the row's operation is NULL by CHECK.
+      if (p.jobType === 'agent_prompt') { expect(p.operation).toBeNull(); continue; }
       if (p.id === 'morning-briefing') { expect(p.operation).toBeNull(); continue; }
       expect(SCHEDULER_COMMANDS[p.operation!]).toBeDefined();
     }

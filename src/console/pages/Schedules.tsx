@@ -26,7 +26,7 @@ const TONE_CLASS: Record<Tone, string> = {
 const ADMIN_RANK = 2;
 const RANK: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
 
-export type CommandScope = 'source' | 'brain-wide';
+export type CommandScope = 'source' | 'brain-wide' | 'agent';
 
 /**
  * Honesty rule 1, in the operator's words. The scope is a control-plane argv
@@ -38,6 +38,39 @@ export const CONTROL_LANE_DISCLOSURE =
   + 'The Connection you pick decides which Space is synced, where the report is written, '
   + "and whose name is on the commit — it is not a permission gbrain enforces for these commands.";
 
+/**
+ * D12's plain words, for the OTHER lane. An agent run does not go through the
+ * ops service account and is not a command at all, so the disclosure above would
+ * be a lie here: it is a model-written run, executed by the runner, spending the
+ * organization's budget with nobody watching.
+ */
+export const AGENT_LANE_DISCLOSURE =
+  'An agent schedule hands this prompt to the runner, which runs the pinned Claude Code harness '
+  + "against your brain with your organization's API key. It can call only the gbrain tools your "
+  + 'Connection is allowed — no shell, no file writes, no other network — and every run costs real '
+  + 'money against a per-run budget, with nobody watching it.';
+
+/** Mirrors `PresetAgent` in src/scheduler/presets.ts without importing it. */
+export type AgentPayload = {
+  prompt: string;
+  model: string;
+  maxTokens: number;
+  /** Text, like the column: money never becomes a float. */
+  budgetUsd: string;
+};
+
+/**
+ * The preset as the API actually sends it: `PresetRow` (src/console/api.ts) plus
+ * the agent lane's two fields, which that type does not declare yet. Structural
+ * rather than imported for the same reason `RANK` mirrors `ROLE_RANK` by hand —
+ * the console must not pull the scheduler's db stack into the browser bundle.
+ */
+export type PresetShape = {
+  operation?: string | null;
+  jobType?: string;
+  agent?: AgentPayload;
+};
+
 /** The scheduler allowlist is the single source of truth for scope. */
 export function commandScope(operation: string | null | undefined): CommandScope | null {
   if (!operation) return null;
@@ -45,18 +78,35 @@ export function commandScope(operation: string | null | undefined): CommandScope
 }
 
 /**
- * The briefing preset runs no gbrain command at all, so it reads no brain and
- * is fenceable like any source-scoped job.
+ * The two internal drains run no gbrain command at all, so they read no brain
+ * and are fenceable like any source-scoped job. The agent lane is its own scope:
+ * it runs a model, not a command, and its banner says so.
  */
-export function presetScope(preset: { operation?: string | null }): CommandScope {
+export function presetScope(preset: PresetShape): CommandScope {
+  if (preset.jobType === 'agent_prompt') return 'agent';
   return commandScope(preset.operation ?? null) ?? 'source';
 }
 
 /**
+ * The agent run a preset buys, or null when the preset is a command. The form
+ * renders these instead of editing them: the preset IS the payload, the harness
+ * pin is derived at creation, and the server refuses an unpriced model.
+ */
+export function agentPayloadOf(preset: PresetShape | null | undefined): AgentPayload | null {
+  return preset && preset.jobType === 'agent_prompt' && preset.agent ? preset.agent : null;
+}
+
+/**
  * Honesty rule 2: a brain-wide command cannot be fenced to a Space. Picking one
- * swaps the disclosure for the whole-brain warning rather than adding to it.
+ * swaps the disclosure for the whole-brain warning rather than adding to it. An
+ * agent run is fenceable (its tools come from the Connection), so it keeps its
+ * own disclosure and names the Space it can reach.
  */
 export function bannerFor(input: { scope?: string | null; writeSpace?: string | null }): string {
+  if (input.scope === 'agent') {
+    return `${AGENT_LANE_DISCLOSURE} The Connection you pick decides which Space it can `
+      + `reach — ${input.writeSpace || 'no Space'} — and whose name is on the commit.`;
+  }
   if (input.scope === 'source') return CONTROL_LANE_DISCLOSURE;
   const space = input.writeSpace;
   const tail = "gbrain's control lane cannot fence a brain-wide command to a Space, so it needs "
@@ -70,7 +120,9 @@ export function bannerFor(input: { scope?: string | null; writeSpace?: string | 
 export function confirmBlockedFor(
   input: { scope?: string | null; memberRole?: string | null },
 ): boolean {
-  if (input.scope === 'source') return false;
+  // The agent lane needs no admin: its tool surface is the Connection's own
+  // compiled scoping. The brain-wide lane is the one that reads everything.
+  if (input.scope === 'source' || input.scope === 'agent') return false;
   if (input.scope === 'brain-wide') {
     return (RANK[input.memberRole ?? ''] ?? 0) < ADMIN_RANK;
   }
@@ -610,6 +662,9 @@ export function Schedules() {
     () => presets.find((p) => p.id === presetId) ?? null,
     [presets, presetId],
   );
+  // D12/honesty rule 3: an agent schedule spends money, so the run the operator
+  // is buying is on screen before the Create button, not discovered on a bill.
+  const agentPayload = useMemo(() => agentPayloadOf(preset), [preset]);
   const chosen = connections.find((c) => c.id === connectionId) ?? null;
   const scope = preset
     ? presetScope(preset)
@@ -869,11 +924,30 @@ export function Schedules() {
         {preset && <p className="text-sm text-muted">{preset.description}</p>}
         {preset && preset.defaults && (
           <p className="text-xs text-muted font-mono">
-            {preset.kind} · operation {preset.operation ?? 'none (internal drain)'}
+            {preset.kind} · operation {preset.operation ?? (agentPayload ? 'agent_prompt' : 'none (internal drain)')}
             {preset.params && Object.keys(preset.params).length > 0
               ? ` · params ${JSON.stringify(preset.params)}`
               : ''}
           </p>
+        )}
+
+        {/* The agent payload. Read-only on purpose: the preset IS the run, the
+            harness pin is derived at creation, and an unpriced model is refused
+            by the server rather than by a run at 3am. */}
+        {agentPayload && (
+          <div className="card space-y-2">
+            <p className="text-sm font-medium">What this run will do</p>
+            <p className="text-sm text-muted font-mono">
+              {`model ${agentPayload.model} · up to ${agentPayload.maxTokens} output tokens `
+                + `· capped at $${agentPayload.budgetUsd} per run`}
+            </p>
+            <p className="text-sm">{agentPayload.prompt}</p>
+            <p className="text-xs text-muted">
+              Prompt, model, cap and budget come from the preset and are fixed when the schedule
+              is created. The harness version is this deployment's pin: a runner whose own pin
+              differs refuses the run instead of running an unknown binary.
+            </p>
+          </div>
         )}
 
         <label className="text-sm">Name (becomes reports/&lt;name&gt;/)

@@ -3,10 +3,11 @@ import {
   bannerFor, confirmBlockedFor, connectionLine, conflictMessage, slotHolder,
   subHourlyMessage, laneHolderId, commandScope, runStateLabel, runStateTone,
   runReason, alertLabel, alertTone, pinnedAlerts, isPinnedAlert, quietHoursBadge,
-  holdBadge, hhmm,
+  holdBadge, hhmm, presetScope, agentPayloadOf, AGENT_LANE_DISCLOSURE,
 } from '../../src/console/pages/Schedules.tsx';
 import { api, ApiError, scheduleApi } from '../../src/console/api.ts';
 import { AGENT_ALERT_KINDS } from '../../src/agent/alerts.ts';
+import { PRESETS } from '../../src/scheduler/presets.ts';
 
 const STATES = [
   'pending', 'running', 'succeeded', 'failed', 'blocked', 'cancelled',
@@ -67,6 +68,48 @@ describe('the Connection mental model', () => {
     const line = connectionLine(null);
     expect(line).toContain('no Connection');
     expect(line).not.toContain('runs as');
+  });
+});
+
+describe('the agent lane says what it is, in the operator\'s words', () => {
+  const agentPreset = PRESETS['nightly-agent-briefing']!;
+
+  test('an agent preset is its own scope — not the control-lane disclosure', () => {
+    expect(presetScope({ operation: null })).toBe('source');
+    expect(presetScope({ operation: 'dream' })).toBe('source');
+    expect(presetScope(agentPreset)).toBe('agent');
+  });
+
+  test('the agent banner never claims the ops service account runs it', () => {
+    const banner = bannerFor({ scope: 'agent', writeSpace: 'customers' });
+    expect(banner).toContain(AGENT_LANE_DISCLOSURE);
+    // The control lane really does run commands as the ops identity; an agent
+    // run does not, so that sentence must not appear here.
+    expect(banner).not.toContain('ops service account');
+    expect(banner).not.toContain('not a permission gbrain enforces');
+    expect(banner).toMatch(/costs real money/);
+    expect(banner).toMatch(/no shell/);
+    expect(banner).toMatch(/customers/);
+  });
+
+  test('the agent lane is fenceable to the Connection\'s Space, so no admin is required', () => {
+    expect(confirmBlockedFor({ scope: 'agent', memberRole: 'member' })).toBe(false);
+    // ...and the unknown-scope guard is untouched by the new word.
+    expect(confirmBlockedFor({ scope: 'something-new', memberRole: 'owner' })).toBe(true);
+  });
+
+  test('the preset\'s fields are the run the operator is buying', () => {
+    expect(agentPayloadOf(agentPreset)).toEqual({
+      prompt: agentPreset.agent!.prompt,
+      model: 'claude-haiku-4-5',
+      maxTokens: 16384,
+      budgetUsd: '2',
+    });
+    // A command preset has no agent payload, and neither has "nothing picked".
+    expect(agentPayloadOf(PRESETS['nightly-dream']!)).toBe(null);
+    expect(agentPayloadOf(null)).toBe(null);
+    // ...and the preset carries NO operation: shape_matches_job_type forbids it.
+    expect(agentPreset.operation).toBeNull();
   });
 });
 

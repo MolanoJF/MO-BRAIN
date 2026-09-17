@@ -3,6 +3,7 @@ import { desc, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
 import { GBRAIN_PIN, verifyRuntimePin, type PinVerification } from '../../contracts/pin.ts';
+import { runnerStatus, runnerTokenConfigured, type RunnerStatus } from '../../agent/runners.ts';
 
 export const health = new Hono();
 
@@ -49,6 +50,30 @@ async function openAlerts(): Promise<
   }
 }
 
+/**
+ * The runner lane's three states (honesty rule 8), KINDS ONLY — the same
+ * discipline `openAlerts()` follows and for the same reason: `/api/health` is
+ * unauthenticated, so no token, no client id and no connection detail may
+ * appear here. `state`, `lastSeenAt` and `version` are the whole vocabulary
+ * D12 defines, and there is nothing else to leak.
+ *
+ * A ledger this probe cannot read is not a connected runner: the fallback is the
+ * env-only reading, which is never green, and `components.controlDb` already
+ * reports the failure that caused it.
+ */
+async function safeRunnerStatus(dbReadable: boolean): Promise<RunnerStatus> {
+  if (!dbReadable) return { state: 'never_claimed', lastSeenAt: null, version: null };
+  try {
+    return await runnerStatus();
+  } catch {
+    return {
+      state: runnerTokenConfigured() ? 'never_claimed' : 'disabled',
+      lastSeenAt: null,
+      version: null,
+    };
+  }
+}
+
 health.get('/health', async (c) => {
   const components: Record<string, 'ok' | 'down'> = { controlDb: 'down', ops: 'down' };
 
@@ -76,9 +101,13 @@ health.get('/health', async (c) => {
 
   const ok = Object.values(components).every((s) => s === 'ok');
   const scheduleAlerts = components.controlDb === 'ok' ? await openAlerts() : [];
+  const runner = await safeRunnerStatus(components.controlDb === 'ok');
   // Never include a connection string, a token or an env dump here.
   return c.json(
-    { ok, components, gbrainVersion: GBRAIN_PIN, pin, repos, scheduleAlerts, at: new Date().toISOString() },
+    {
+      ok, components, gbrainVersion: GBRAIN_PIN, pin, repos, scheduleAlerts, runner,
+      at: new Date().toISOString(),
+    },
     ok ? 200 : 503,
   );
 });
