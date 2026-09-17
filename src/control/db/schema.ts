@@ -180,6 +180,11 @@ export const connections = pgTable('connections', {
   // Null until provisioned. A3 provisions at claim time, so an unclaimed invite
   // never corresponds to a live OAuth client.
   gbrainClientId: text('gbrain_client_id'),
+  // Slice 4 (D8): the server-side client this deployment mints per-run gbrain
+  // tokens as — a SECOND client beside the member's own. Its secret lives in
+  // `secrets` under `connection:<id>:server_client`, never here. Null until
+  // provisioned, and the runner refuses a Connection that has no value.
+  serverClientId: text('server_client_id'),
   profile: text('profile').notNull(),
   tokenTtl: integer('token_ttl').notNull(),
   budgetUsdPerDay: text('budget_usd_per_day'),
@@ -225,10 +230,33 @@ export const schedules = pgTable('schedules', {
   /** Slug-shaped: it becomes the reports/<job-name>/ directory. */
   name: text('name').notNull(),
   preset: text('preset'),
-  /** A key of SCHEDULER_COMMANDS, not a raw gbrain argv. */
-  operation: text('operation').notNull(),
+  /**
+   * Slice 4 (D2): ONE queue, two consumers. `schedule_runs` stays the single
+   * run ledger; `jobType` decides who claims the row — the scheduler claims
+   * 'gbrain_command', `POST /api/runs/claim` claims 'agent_prompt'. The filter
+   * is applied inside the FOR UPDATE SKIP LOCKED select, so neither consumer
+   * can starve the other.
+   */
+  jobType: text('job_type').notNull().default('gbrain_command'),
+  /** A key of SCHEDULER_COMMANDS, not a raw gbrain argv. NULL on an
+   * agent_prompt row: `shape_matches_job_type` below allows exactly one
+   * payload shape per row. */
+  operation: text('operation'),
   /** Tunable params only. Fenced params (source) are never stored here. */
   params: jsonb('params').notNull().default(sql`'{}'::jsonb`),
+  // --- Slice 4 agent payload (D2) -------------------------------------------
+  // All five are NULL on a gbrain_command row and required on an agent_prompt
+  // row — enforced by shape_matches_job_type, not by convention.
+  /** Thin on purpose: a pointer at a skill, not an inlined essay. */
+  agentPrompt: text('agent_prompt'),
+  agentModel: text('agent_model'),
+  agentMaxTokens: integer('agent_max_tokens'),
+  /** Text, exactly like connections.budget_usd_per_day: money never becomes a
+   * float on its way to the database or back out of it. */
+  agentBudgetUsd: text('agent_budget_usd'),
+  /** The harness pin the schedule was written against. A runner whose own pin
+   * differs refuses the claim rather than running an unknown binary. */
+  agentHarnessVersion: text('agent_harness_version'),
   kind: text('kind').notNull(),
   // kind = 'interval'
   intervalSeconds: integer('interval_seconds'),
@@ -263,6 +291,21 @@ export const schedules = pgTable('schedules', {
   check('catchup_policy_valid', sql`${t.catchupPolicy} in ('skip','run_latest','run_all')`),
   check('overlap_policy_valid', sql`${t.overlapPolicy} in ('skip','queue','kill_previous')`),
   check('report_policy_valid', sql`${t.reportPolicy} in ('always','on_change_or_failure','never')`),
+  check('job_type_valid', sql`${t.jobType} in ('gbrain_command','agent_prompt')`),
+  // Orthogonal to shape_matches_kind below: `kind` is the TIMING shape (interval
+  // vs calendar), `jobType` is the PAYLOAD shape (argv vs prompt). A schedule has
+  // both, so both CHECKs apply, and neither one subsumes the other.
+  check('shape_matches_job_type', sql`(
+    ${t.jobType} = 'agent_prompt' and ${t.operation} is null
+      and ${t.agentPrompt} is not null and ${t.agentModel} is not null
+      and ${t.agentMaxTokens} is not null and ${t.agentBudgetUsd} is not null
+      and ${t.agentHarnessVersion} is not null
+  ) or (
+    ${t.jobType} = 'gbrain_command' and ${t.operation} is not null
+      and ${t.agentPrompt} is null and ${t.agentModel} is null
+      and ${t.agentMaxTokens} is null and ${t.agentBudgetUsd} is null
+      and ${t.agentHarnessVersion} is null
+  )`),
   // A calendar schedule must be staggered; an interval schedule must not be.
   check('shape_matches_kind', sql`(
     ${t.kind} = 'interval' and ${t.intervalSeconds} is not null and ${t.anchorAt} is not null
@@ -309,8 +352,12 @@ export const scheduleRuns = pgTable('schedule_runs', {
   check('run_state_valid', sql`${t.state} in (
     'pending','running','succeeded','failed','blocked','cancelled',
     'lease_expired','skipped_overlap','skipped_catchup','held')`),
+  // Slice 4 (D11) appended budget_exceeded / agent_failed / infra_failed: an
+  // agent run classifies into this SAME column, so the vocabulary is one
+  // vocabulary. Nothing in the gbrain_command path emits the new three.
   check('run_classification_valid', sql`${t.classification} is null or ${t.classification} in (
-    'ok','failed','blocked','conflict','lock_lost','timeout','cancelled','refused')`),
+    'ok','failed','blocked','conflict','lock_lost','timeout','cancelled','refused',
+    'budget_exceeded','agent_failed','infra_failed')`),
 ]);
 
 /** Never swallowed. A rejected push, a revoked Connection, an expired lease. */
@@ -414,3 +461,95 @@ export const upgradeChecklistItems = pgTable('upgrade_checklist_items', {
   uniqueIndex('upgrade_checklist_run_key_uq').on(t.runId, t.itemKey),
   check('upgrade_checklist_state_valid', sql`${t.state} in ('pending','acknowledged','declined')`),
 ]);
+
+// --- Slice 4: the agent runner (D2) ------------------------------------------
+// One row per claimed `agent_prompt` occurrence. The run ledger stays
+// `schedule_runs` — this table carries only what an agent run adds: the meter,
+// the failure class and the brain diff. Writer: `finishAgentRun` /
+// `claimAgentRun` in `src/agent/claim.ts` (Task 6).
+
+/**
+ * L14: the failure class lives ON THIS ROW (`failure_class` + `failure_detail`),
+ * never reconstructed by a renderer. D11's five classes are the whole
+ * vocabulary; a successful run leaves both NULL.
+ */
+export const agentRuns = pgTable('agent_runs', {
+  runId: text('run_id').primaryKey().references(() => scheduleRuns.id, { onDelete: 'cascade' }),
+  // Audit-shaped, like schedule_runs.organization_id: denormalised, no FK, so
+  // run history survives an org being deleted.
+  organizationId: text('organization_id').notNull(),
+  // set null, not cascade: deleting a Connection must not delete the record of
+  // what it authorized (honesty rule 11 — a run we cannot show is not auditable).
+  connectionId: text('connection_id').references(() => connections.id, { onDelete: 'set null' }),
+  model: text('model').notNull(),
+  harnessVersion: text('harness_version').notNull(),
+  /** The cap this run was claimed under, not a re-derivation at display time. */
+  budgetUsd: text('budget_usd').notNull(),
+  /** NULL when the model could not be priced — never 0 (honesty rule 3). This
+   * is a rollup of agent_run_usage.cost_usd and must equal its SUM at finish. */
+  costUsd: text('cost_usd'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  numTurns: integer('num_turns').notNull().default(0),
+  /** NULL on a successful run; a ref or a command line never lands here. */
+  failureClass: text('failure_class'),
+  /** S3c: a redacted summary, never a raw model request body. */
+  failureDetail: jsonb('failure_detail'),
+  /** D9: `{ commits, files, concurrentWriters }`, attribution included. */
+  diffSummary: jsonb('diff_summary'),
+  /** D9: sourceId -> git HEAD, captured at claim (before) and at finish (after).
+   * A read Space whose head moved is a finding, not a diff row (honesty rule 10). */
+  headsBefore: jsonb('heads_before'),
+  headsAfter: jsonb('heads_after'),
+  revertedAt: timestamp('reverted_at', { withTimezone: true }),
+  revertCommit: text('revert_commit'),
+  /** Set by the finish path AND by the reclaimer; whichever wins the race. An
+   * already-revoked token still stamps this (honesty rule 9). */
+  tokenRevokedAt: timestamp('token_revoked_at', { withTimezone: true }),
+}, (t) => [
+  check('agent_failure_class_valid', sql`${t.failureClass} is null or ${t.failureClass} in (
+    'budget_exceeded','agent_failed','infra_failed','timeout','refused')`),
+  index('agent_runs_org_idx').on(t.organizationId),
+]);
+
+/**
+ * The harness event stream, appended as it arrives. UNIQUE (run_id, seq) is the
+ * same idempotent-replay key as upgrade_events (D2): `POST /api/runs/:id/events`
+ * is retried after a blip and must re-upsert, never duplicate.
+ * Writer: `recordEvents` in `src/agent/claim.ts` (Task 6).
+ */
+export const agentRunEvents = pgTable('agent_run_events', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => agentRuns.runId, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  kind: text('kind').notNull(),
+  /** S3c: REDACTED. Tool arguments and brain content never land here raw. */
+  data: jsonb('data'),
+}, (t) => [uniqueIndex('agent_run_events_run_seq_uq').on(t.runId, t.seq)]);
+
+/**
+ * One row per metered model call. This table is the budget's authority;
+ * `agent_runs.cost_usd` is its rollup. UNIQUE (run_id, seq) makes the gateway's
+ * retried write idempotent.
+ * Writer: `recordUsage` / the streaming meter in `src/gateway/meter.ts` (Task 7).
+ */
+export const agentRunUsage = pgTable('agent_run_usage', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => agentRuns.runId, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  /** NULL when priceUsage could not price the model — never 0 (honesty rule 3). */
+  costUsd: text('cost_usd'),
+  /** The upstream stop_reason, kept verbatim: 'max_tokens' is a truncation the
+   * operator must see, and it is not the same thing as our own cap firing. */
+  stopReason: text('stop_reason'),
+  httpStatus: integer('http_status'),
+}, (t) => [uniqueIndex('agent_run_usage_run_seq_uq').on(t.runId, t.seq)]);

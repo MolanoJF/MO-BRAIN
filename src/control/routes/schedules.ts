@@ -572,7 +572,7 @@ scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId
   }
 
   if (body.params !== undefined) {
-    const command = SCHEDULER_COMMANDS[schedule.operation] ?? null;
+    const command = schedule.operation ? (SCHEDULER_COMMANDS[schedule.operation] ?? null) : null;
     const next = asObject(body.params);
     if (!command) {
       // The briefing takes no params; anything else is a command we do not know.
@@ -589,7 +589,7 @@ scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId
   if (body.connectionId !== undefined) {
     const connection = await loadOwnConnection(orgId, body.connectionId, userId, role);
     if (!connection) return c.json({ error: 'forbidden' }, 403);
-    const command = SCHEDULER_COMMANDS[schedule.operation] ?? null;
+    const command = schedule.operation ? (SCHEDULER_COMMANDS[schedule.operation] ?? null) : null;
     if (command && command.scope === 'brain-wide'
       && ROLE_RANK[connection.memberRole] < ROLE_RANK.admin) {
       return c.json({ error: BRAIN_WIDE_ERROR, scope: 'brain-wide' }, 400);

@@ -36,6 +36,13 @@
       "when": 1789602873651,
       "tag": "0004_real_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789655953551,
+      "tag": "0005_wakeful_prodigy",
+      "breakpoints": true
     }
   ]
 }

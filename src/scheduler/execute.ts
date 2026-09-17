@@ -191,9 +191,13 @@ export async function executeRun(
     return runBriefing(schedule, run, deps);
   }
 
-  const command = SCHEDULER_COMMANDS[schedule.operation];
+  const command: SchedulerCommand | undefined = schedule.operation
+    ? SCHEDULER_COMMANDS[schedule.operation]
+    : undefined;
   if (!command) {
-    await fail(run.id, schedule, 'refused', `unknown scheduler command ${schedule.operation}`);
+    await fail(run.id, schedule, 'refused', schedule.operation
+      ? `unknown scheduler command ${schedule.operation}`
+      : 'gbrain_command run has no operation — a shape_matches_job_type violation');
     return { classification: 'refused', reportPath: null };
   }
 
