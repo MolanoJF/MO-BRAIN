@@ -23,6 +23,9 @@ const SKIP_COMPOSE_DOCKER_CHECK_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPOSE_DOCKER_CHEC
 
 describe('compose invariants', () => {
   test('caddy is the only service publishing host ports', () => {
+    // Iterates every service in the file, so the profile-gated `agent-runner`
+    // (present in the parsed object even though a plain `up` never starts it)
+    // is covered here as well as by its own block below.
     const publishers = Object.entries(compose.services)
       .filter(([, s]: [string, any]) => Array.isArray(s.ports) && s.ports.length > 0)
       .map(([n]) => n);
@@ -180,6 +183,124 @@ describe('scheduler service invariants', () => {
     for (const name of ['gbrain-serve', 'gbrain-worker', 'gbrain-ops']) {
       expect(svc(name).environment.GBRAIN_SELF_UPGRADE_MODE).toBe('off');
     }
+  });
+});
+
+describe('agent runner service invariants', () => {
+  // D6/D12/U14: the agent runner is the stack's FIRST hardened service, and
+  // it is profile-gated — a profile-gated service is still present in the
+  // parsed YAML, so every assertion here is structural and none is skipped.
+  test('runner-net is internal — the network is the fence, the tool flags are not (D6, honesty rule 2)', () => {
+    expect(compose.networks['runner-net'].driver).toBe('bridge');
+    expect(compose.networks['runner-net'].internal).toBe(true);
+  });
+
+  test('agent-runner is on runner-net and on nothing else', () => {
+    expect(svc('agent-runner').networks).toEqual(['runner-net']);
+  });
+
+  test('caddy and control-plane join runner-net, and caddy answers to ${DOMAIN} there', () => {
+    expect(svc('control-plane').networks).toContain('runner-net');
+    // Caddy keeps every network it already had, plus the alias the runner
+    // dials: https://${DOMAIN}/mcp has to resolve inside the internal network,
+    // so gbrain is reached through Caddy (and X-Forwarded-For stays Caddy's
+    // job) rather than over a direct route the runner could spoof.
+    expect(Object.keys(svc('caddy').networks).sort()).toEqual(['brain-net', 'control-net', 'runner-net']);
+    expect(svc('caddy').networks['runner-net'].aliases).toEqual(['${DOMAIN}']);
+  });
+
+  test('the runner profile is off by default, so a plain up omits the service (D12)', () => {
+    expect(svc('agent-runner').profiles).toEqual(['runner']);
+  });
+
+  test('agent-runner mounts NO volumes, and no compose file publishes a port for it', () => {
+    expect(svc('agent-runner').volumes ?? []).toEqual([]);
+    expect(svc('agent-runner').ports).toBeUndefined();
+    expect(devOverride.services['agent-runner'].ports).toBeUndefined();
+  });
+
+  test('agent-runner holds no credential but its bearer (S2)', () => {
+    const env = svc('agent-runner').environment as Record<string, string>;
+    for (const key of Object.keys(env)) {
+      expect(key, `agent-runner must hold no credential, but its environment has ${key}`)
+        .not.toMatch(/(^|_)DATABASE_URL$/);
+      expect(key, `agent-runner must hold no credential, but its environment has ${key}`)
+        .not.toMatch(/_API_KEY$/);
+    }
+    expect(env.GBRAIN_DATABASE_URL).toBeUndefined();
+    expect(env.CONTROL_DATABASE_URL).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.GBRAIN_HOME).toBeUndefined();
+    expect(env.OPS_RPC_TOKEN).toBeUndefined();
+    expect(env.ENCRYPTION_KEY).toBeUndefined();
+    // What it does hold: its own bearer, and where to spend it.
+    expect(env.CONTROL_URL).toBe('http://control-plane:3150');
+    expect(env.HARNESS_VERSION).toBeDefined();
+  });
+
+  test('a missing RUNNER_TOKEN cannot break a runner-less deployment — the runtime guards own it (D12)', () => {
+    // Compose interpolates this whole file before profiles resolve, so
+    // `${RUNNER_TOKEN:?required}` would fail `docker compose stop scheduler`
+    // on a deployment that never enables the runner. The control plane
+    // authenticates the same value, with the same optionality: empty means
+    // `503 runner_disabled`, because an empty bearer must never authenticate.
+    expect((svc('agent-runner').environment as Record<string, string>).RUNNER_TOKEN).toBe('${RUNNER_TOKEN:-}');
+    expect(svc('control-plane').environment.RUNNER_TOKEN).toBe('${RUNNER_TOKEN:-}');
+    // Every RUNNER_TOKEN *assignment* is the optional form. Checked on
+    // assignment lines rather than on the raw file, because the comment above
+    // each one documents the `${RUNNER_TOKEN:?required}` shape it forbids.
+    const assignments = readFileSync('compose/docker-compose.yml', 'utf8')
+      .split('\n')
+      .filter((line) => /^\s*RUNNER_TOKEN:/.test(line))
+      .map((line) => line.trim());
+    expect(assignments).toEqual(['RUNNER_TOKEN: ${RUNNER_TOKEN:-}', 'RUNNER_TOKEN: ${RUNNER_TOKEN:-}']);
+  });
+
+  test('every hardening directive is present — this service is where they were all introduced (U14)', () => {
+    expect(svc('agent-runner').read_only).toBe(true);
+    expect(svc('agent-runner').user).toBe('10001:10001');
+    expect(svc('agent-runner').user).not.toMatch(/^(0|root)(:.*)?$/);
+    expect(svc('agent-runner').security_opt).toEqual(['no-new-privileges:true']);
+    expect(svc('agent-runner').cap_drop).toEqual(['ALL']);
+    expect(svc('agent-runner').pids_limit).toBe(256);
+    expect(svc('agent-runner').mem_limit).toBe('2g');
+    expect(svc('agent-runner').cpus).toBe(1);
+    expect(svc('agent-runner').stop_grace_period).toBe('60s');
+  });
+
+  test('the only tmpfs is /tmp — a tmpfs at $HOME hides the harness (P5, Task 1)', () => {
+    expect(svc('agent-runner').tmpfs).toEqual(['/tmp']);
+  });
+
+  test('the image is pinned to HARNESS_VERSION and the build uses the same pin (G1)', () => {
+    expect(svc('agent-runner').image).toContain('${HARNESS_VERSION');
+    expect(svc('agent-runner').build.dockerfile).toBe('docker/agent-runner.Dockerfile');
+    expect(svc('agent-runner').build.args.HARNESS_VERSION).toBe('${HARNESS_VERSION:?required}');
+  });
+
+  test('neither compose file defaults HARNESS_VERSION — a version move must be explicit or compose refuses to start', () => {
+    expect(readFileSync('compose/docker-compose.yml', 'utf8')).not.toMatch(/\$\{HARNESS_VERSION:-/);
+    expect(readFileSync('compose/docker-compose.dev.yml', 'utf8')).not.toMatch(/\$\{HARNESS_VERSION:-/);
+  });
+
+  test('NODE_EXTRA_CA_CERTS is dev-only — production validates against the public roots (D6)', () => {
+    expect((svc('agent-runner').environment as Record<string, string>).NODE_EXTRA_CA_CERTS).toBeUndefined();
+    expect(devOverride.services['agent-runner'].environment.NODE_EXTRA_CA_CERTS)
+      .toBe('/etc/ssl/caddy-root.crt');
+  });
+
+  test('the dev CA lane reads Caddy\'s own CA read-only and hands Node a real file, not a directory', () => {
+    const exporter = devOverride.services['caddy-ca-export'];
+    const caSource = exporter.volumes.find((v: string) => String(v).includes('caddy-data'));
+    expect(caSource).toMatch(/:ro$/);
+    const mount = devOverride.services['agent-runner'].volumes[0];
+    expect(mount.type).toBe('volume');
+    expect(mount.source).toBe('runner-ca');
+    expect(mount.target).toBe('/etc/ssl/caddy-root.crt');
+    expect(mount.read_only).toBe(true);
+    // A named volume mounted onto a file path is created as a DIRECTORY (the
+    // subpath mount is what makes it a file Node can actually load).
+    expect(mount.volume.subpath).toBe('caddy-root.crt');
   });
 });
 

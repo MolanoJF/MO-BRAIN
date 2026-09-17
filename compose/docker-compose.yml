@@ -25,7 +25,15 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on: [gbrain-serve, control-plane]
-    networks: [brain-net, control-net]
+    # D6: Caddy is the ONLY route into gbrain for the runner, and it is the
+    # one member of runner-net that answers to the public name. Long form
+    # (not a list) because only the long form can carry an alias.
+    networks:
+      brain-net:
+      control-net:
+      runner-net:
+        aliases:
+          - ${DOMAIN}
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -109,6 +117,14 @@ services:
       CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
       OPS_RPC_URL: http://gbrain-ops:3140
       OPS_RPC_TOKEN: ${OPS_RPC_TOKEN:?required}
+      # D12: NOT `${RUNNER_TOKEN:?required}` — Compose interpolates the whole
+      # file before profiles resolve, so a required variable here would break
+      # `docker compose stop scheduler` on every deployment that never enables
+      # the runner. The RUNTIME guard owns this instead: every runner route
+      # answers `503 runner_disabled` while RUNNER_TOKEN is empty, because an
+      # empty bearer must never authenticate (timingSafeEqual over two empty
+      # strings would otherwise pass). Note the trailing `:-`, not `:?`.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?required}
       PUBLIC_URL: https://${DOMAIN}
@@ -129,7 +145,11 @@ services:
       - ${UPGRADE_DIR:-/srv/upgrades}:/srv/upgrades:ro
     depends_on:
       postgres: { condition: service_healthy }
-    networks: [control-net, ops-net]
+    # D6: the runner reaches claim/heartbeat/events/finish and the model
+    # gateway over runner-net, directly and never through Caddy. Every other
+    # route on this surface is behind requireRole, which the runner cannot
+    # satisfy; its bearer authenticates on the two token-gated routes only.
+    networks: [control-net, ops-net, runner-net]
 
   # The scheduler. Strictly less privileged than the control plane: control-DB
   # creds and the ops bearer token, nothing else — no brain DB, no GBRAIN_HOME,
@@ -154,11 +174,72 @@ services:
       gbrain-ops: { condition: service_started }
     networks: [control-net, ops-net]
 
+  # U14: the stack's FIRST hardened service — every directive below is new,
+  # and each one is pinned in test/integration/compose-invariants.test.ts.
+  # Profile-gated (D12): a deployment that only connects members' own agents
+  # omits it and loses nothing else, so a plain `docker compose up` never
+  # starts it.
+  agent-runner:
+    profiles: ["runner"]
+    image: brainstand/agent-runner:${HARNESS_VERSION:?required}
+    build:
+      context: ..
+      dockerfile: docker/agent-runner.Dockerfile
+      args:
+        HARNESS_VERSION: ${HARNESS_VERSION:?required}
+    command: ["bun", "run", "/app/src/runner/main.ts"]
+    # No `restart:` on purpose. The process refuses to start without
+    # RUNNER_TOKEN (Task 8's guard), and a restart policy would turn that
+    # explicit misconfiguration into an endless crash loop that hides the
+    # error. An exited container plus the `never_claimed` health state is the
+    # honest signal; the operator starts the runner with the profile.
+    environment:
+      # D12: `${RUNNER_TOKEN:-}`, never `${RUNNER_TOKEN:?required}` — Compose
+      # interpolates this whole file before profiles resolve, so a required
+      # variable would break `docker compose stop scheduler` on every
+      # runner-less deployment. The runtime guards own it: the control plane
+      # answers `503 runner_disabled` while it is empty (an empty bearer must
+      # never authenticate — timingSafeEqual on two empty strings would pass),
+      # and this process exits non-zero without it.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      CONTROL_URL: http://control-plane:3150
+      HARNESS_VERSION: ${HARNESS_VERSION:?required}
+    # The fence (D6) is the network, not the tool flags (honesty rule 2).
+    read_only: true
+    user: "10001:10001"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 1.0
+    # D13: long enough for an in-flight harness to be SIGTERMed and its
+    # gbrain token revoked on the way out.
+    stop_grace_period: 60s
+    # P5 (Task 1): a tmpfs at /tmp ALONE is the minimal writable set for a
+    # `-p` harness run, and /workspace is not needed either — the per-run
+    # workspace directory is created under /tmp by the runner process and
+    # destroyed on every exit path. The harness lives at
+    # /opt/harness/bin/claude (BUN_INSTALL=/opt/harness), not under any $HOME,
+    # so no $HOME tmpfs is required.
+    tmpfs: [/tmp]
+    volumes: []   # none. Ever.
+    networks: [runner-net]
+
 networks:
   brain-net: { driver: bridge }
   control-net: { driver: bridge }
   # Carries only control-plane → gbrain-ops RPC.
   ops-net: { driver: bridge }
+  # D6: the fence. `internal: true` removes the gateway, so this network has
+  # no route out and the runner has no default route at all — the only things
+  # it can address are the peers named here. Members: agent-runner (this one
+  # network, nothing else), caddy (aliased to ${DOMAIN} so
+  # https://${DOMAIN}/mcp resolves, which keeps X-Forwarded-For Caddy's job),
+  # and control-plane (the claim/heartbeat/events/finish and gateway routes,
+  # never routed publicly — Caddy gains no route for them).
+  runner-net:
+    driver: bridge
+    internal: true
 
 volumes:
   pg-data:
