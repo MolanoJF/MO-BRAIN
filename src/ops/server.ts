@@ -14,7 +14,7 @@ import {
   patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile, readSupervisorAuditTail,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
-import { commitAs, inspectRepos } from './git.ts';
+import { commitAs, diffRange, inspectRepos, revertRange } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -180,6 +180,39 @@ Bun.serve({
 
       if (url.pathname === '/git/inspect') {
         return json({ repos: await inspectRepos() });
+      }
+
+      // D9: the brain diff is the git range. Read-only, and a bad ref is an
+      // explicit error rather than an empty range (`diffRange` checks exits).
+      if (url.pathname === '/git/range') {
+        const { sourceId, before, after } = body as { sourceId?: unknown; before?: unknown; after?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof before !== 'string' || !before) return json({ error: 'before required' }, 400);
+        if (typeof after !== 'string' || !after) return json({ error: 'after required' }, 400);
+        return json(await diffRange(sourceId, before, after, { sql }));
+      }
+
+      // D10 steps 1+2: the revert and the commit that signs it are ONE locked
+      // sequence in `revertRange` — composing `commitAs` around a repo lock here
+      // would reserve a second pooled connection and deadlock a small pool. The
+      // two refusals (`conflict`, `nothing_to_revert`) come back as results, not
+      // as thrown errors: they are choices the console renders.
+      if (url.pathname === '/git/revert-range') {
+        const { sourceId, before, after, actor, message } = body as {
+          sourceId?: unknown; before?: unknown; after?: unknown; message?: unknown;
+          actor?: { name?: unknown; email?: unknown };
+        };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof before !== 'string' || !before) return json({ error: 'before required' }, 400);
+        if (typeof after !== 'string' || !after) return json({ error: 'after required' }, 400);
+        if (typeof message !== 'string' || !message) return json({ error: 'message required' }, 400);
+        if (!actor || typeof actor.name !== 'string' || typeof actor.email !== 'string') {
+          return json({ error: 'actor name and email required' }, 400);
+        }
+        return json(await revertRange(
+          { sourceId, before, after, message, actor: { name: actor.name, email: actor.email } },
+          { sql },
+        ));
       }
 
       // Overlap policy 'kill_previous'. Aborting the control-plane fetch does

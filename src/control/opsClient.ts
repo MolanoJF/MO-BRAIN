@@ -1,5 +1,5 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
-import type { RepoStatus } from '../ops/git.ts';
+import type { GitRange, RepoStatus, RevertOutcome, RevertRequest } from '../ops/git.ts';
 
 export type { RepoStatus };
 
@@ -63,6 +63,28 @@ export async function commitAsMember(
 export async function inspectRepos(): Promise<RepoStatus[]> {
   const payload = await post<{ repos?: RepoStatus[] }>('/git/inspect', {}, 30_000);
   return Array.isArray(payload.repos) ? payload.repos : [];
+}
+
+/**
+ * D10 — the read-only brain diff for one Space: `git log` plus
+ * `git diff --name-status` over `<before>..<after>`. A ref ops cannot resolve
+ * comes back as a thrown `unknown ref: …`, never an empty range.
+ */
+export async function gitRange(sourceId: string, before: string, after: string): Promise<GitRange> {
+  return post('/git/range', { sourceId, before, after }, 60_000);
+}
+
+/**
+ * D10 steps 1+2 — the range comes back as ONE new commit signed by `actor`.
+ * `nothing_to_revert` and `conflict` are RESULTS, not thrown errors: they are
+ * refusals the console renders as choices, and only the latter's `detail` is
+ * git's own words. An invalid `sourceId` or an unresolvable ref throws.
+ *
+ * The revert is one locked sequence inside ops; a range can be large, so this
+ * budgets more than a single git read.
+ */
+export async function gitRevertRange(req: RevertRequest): Promise<RevertOutcome> {
+  return post('/git/revert-range', req, 120_000);
 }
 
 export async function putSchemaPack(name: string, yaml: string): Promise<void> {
