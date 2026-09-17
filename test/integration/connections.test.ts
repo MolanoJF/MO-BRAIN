@@ -15,15 +15,18 @@ type OpsResult = {
 };
 
 const calls: Call[] = [];
+/** credentialsOut paths handed to takeGrantCredentials, in call order. */
+const handoffsTaken: string[] = [];
+/** Client ids whose credential journal ops was asked to delete. */
+const journalDeletes: string[] = [];
 
-function grantJson(dryRun: boolean): unknown {
-  if (dryRun) {
-    return { status: 'preview', grant: { profile: 'memory-writer', sourceId: 'customers' } };
-  }
-  // Pin receipt (credentialReceipt): top-level client_id, credentials is the
-  // string 'private-file' — not { client_id } and not grant.clientId.
+let grantSeq = 0;
+
+/** A grant receipt for a named client — the shape, without touching the
+ *  per-grant counter, so assertions can compare against it. */
+function grantReceipt(clientId: string): unknown {
   return {
-    client_id: 'gbrain_cl_mock',
+    client_id: clientId,
     mcp_url: 'http://127.0.0.1:3131/mcp',
     profile: 'memory-writer',
     harness: 'generic',
@@ -33,6 +36,32 @@ function grantJson(dryRun: boolean): unknown {
     credentials: 'private-file',
   };
 }
+
+function grantJson(dryRun: boolean): unknown {
+  if (dryRun) {
+    return { status: 'preview', grant: { profile: 'memory-writer', sourceId: 'customers' } };
+  }
+  // Pin receipt (credentialReceipt): top-level client_id, credentials is the
+  // string 'private-file' — not { client_id } and not grant.clientId.
+  // Distinct id per grant: a Connection mints the member's client AND the
+  // server-side one, and a run mints its own.
+  const n = grantSeq++;
+  return grantReceipt(n === 0 ? 'gbrain_cl_mock' : `gbrain_cl_mock_${n}`);
+}
+
+/** The private handoff `mcp grant` wrote for the client it just minted. */
+const HANDOFF = {
+  version: 1,
+  mcp_url: 'http://127.0.0.1:3131/mcp',
+  issuer_url: 'http://127.0.0.1:3131',
+  client_id: 'gbrain_cl_mock_handoff',
+  client_secret: 'not-a-real-secret-not-a-real-secret-not-a-real',
+  access_token: 'gbrain_at_mock_handoff',
+  expires_at: 1789657429,
+  profile: 'memory-writer',
+  harness: 'generic',
+  source_id: 'customers',
+};
 
 function defaultOk(op: string, opts?: CallOpts): OpsResult {
   return {
@@ -44,6 +73,10 @@ function defaultOk(op: string, opts?: CallOpts): OpsResult {
     json: op === 'mcp.grant' ? grantJson(Boolean(opts?.dryRun)) : { ok: true },
   };
 }
+
+/** What `takeGrantCredentials` returns. Swapped by the tests that exercise a
+ *  mint whose handoff cannot be read. */
+let handoffHandler: () => Promise<unknown> = async () => HANDOFF;
 
 let callOpsHandler: (op: string, params?: Record<string, unknown>, opts?: CallOpts) => Promise<OpsResult> | OpsResult =
   (op, _params, opts) => defaultOk(op, opts);
@@ -57,7 +90,14 @@ mock.module('../../src/control/opsClient.ts', () => ({
   putSchemaPack: async () => {},
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
-  takeGrantCredentials: async () => ({}),
+  takeGrantCredentials: async (path: string) => {
+    handoffsTaken.push(path);
+    return handoffHandler();
+  },
+  deleteCredentialJournal: async (clientId: string) => {
+    journalDeletes.push(clientId);
+    return { deleted: true };
+  },
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
@@ -65,6 +105,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
 
 const { previewConnection, provisionConnection, revokeConnection, createPendingConnection, retiredClientName } =
   await import('../../src/control/connections.ts');
+const { serverClientSecretName, serverClientName } = await import('../../src/control/connections.ts');
+const { mintRunToken, revokeRunToken } = await import('../../src/agent/token.ts');
+const { readSecret } = await import('../../src/control/secrets.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
 const { clientName } = await import('../../src/contracts/compile.ts');
@@ -124,6 +167,48 @@ async function insertConnection(state: 'pending' | 'active' | 'revoked', extra: 
   return { id, clientName: name };
 }
 
+/** An agent_prompt schedule + its run row, so `agent_runs` has a real parent. */
+async function insertAgentRun(gbrainClientId: string | null = 'gbrain_cl_run'): Promise<string> {
+  const scheduleId = randomUUID();
+  await getDb().insert(schema.schedules).values({
+    id: scheduleId,
+    organizationId: orgId,
+    connectionId: null,
+    name: `agent-job-${scheduleId.slice(0, 8)}`,
+    jobType: 'agent_prompt',
+    operation: null,
+    agentPrompt: 'summarise the week',
+    agentModel: 'haiku-4-5',
+    agentMaxTokens: 2048,
+    agentBudgetUsd: '1.00',
+    agentHarnessVersion: '2.1.274',
+    kind: 'interval',
+    intervalSeconds: 3600,
+    anchorAt: new Date(),
+    enabled: false,
+    createdBy: actor,
+  });
+  const runId = randomUUID();
+  await getDb().insert(schema.scheduleRuns).values({
+    id: runId,
+    scheduleId,
+    organizationId: orgId,
+    slot: `agent-slot-${runId.slice(0, 8)}`,
+    fireAt: new Date(),
+    state: 'running',
+  });
+  await getDb().insert(schema.agentRuns).values({
+    runId,
+    organizationId: orgId,
+    connectionId: null,
+    model: 'haiku-4-5',
+    harnessVersion: '2.1.274',
+    budgetUsd: '1.00',
+    gbrainClientId,
+  });
+  return runId;
+}
+
 beforeAll(async () => {
   await runMigrations();
   for (const t of [
@@ -151,7 +236,14 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   calls.length = 0;
+  handoffsTaken.length = 0;
+  journalDeletes.length = 0;
+  grantSeq = 0;
+  handoffHandler = async () => HANDOFF;
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
+  await getDb().delete(schema.agentRuns);
+  await getDb().delete(schema.scheduleRuns);
+  await getDb().delete(schema.schedules);
   await getDb().delete(schema.connections);
   await getDb().delete(schema.auditLog);
 });
@@ -218,7 +310,7 @@ describe('provisionConnection', () => {
   test('new grant uses credentialsOut, not --reissue, and persists gbrainClientId', async () => {
     const result = await provisionConnection(input(), actor);
     expect(result.connectionId).toBeTruthy();
-    expect(result.credentials).toEqual(grantJson(false));
+    expect(result.credentials).toEqual(grantReceipt('gbrain_cl_mock'));
 
     const grant = calls.find((c) => c.op === 'mcp.grant');
     expect(grant).toBeDefined();
@@ -247,6 +339,121 @@ describe('provisionConnection', () => {
     expect(rescope[0]!.params?.id).toBe('gbrain_cl_live');
     expect(rescope[0]!.params).not.toHaveProperty('reissue');
     expect(calls.some((c) => c.op === 'mcp.grant')).toBe(false);
+  });
+
+  test('mints the server-side client too, with the same compiled scoping (D8)', async () => {
+    const result = await provisionConnection(
+      input({ boundSlugPrefixes: ['customers/'], tokenTtl: 900 }),
+      actor,
+    );
+
+    const grants = calls.filter((c) => c.op === 'mcp.grant');
+    expect(grants.length).toBe(2);
+    const [member, server] = grants;
+    expect(member!.params?.name).toBe(clientName(membershipId, writeSpace.sourceId));
+    expect(server!.params?.name).toBe(serverClientName(String(member!.params?.name)));
+    expect(server!.opts?.json).toBe(true);
+    expect(server!.params).not.toHaveProperty('reissue');
+
+    // Identical compiled scoping: one compiler, so every scoping flag matches.
+    for (const key of ['profile', 'source', 'federatedRead', 'boundSlugPrefixes', 'tokenTtl', 'budgetUsdPerDay']) {
+      expect(server!.params?.[key]).toEqual(member!.params?.[key]);
+    }
+    expect(server!.params?.profile).toBe('memory-writer');
+    expect(server!.params?.source).toBe('customers');
+    expect(server!.params?.federatedRead).toEqual(['shared']);
+    expect(server!.params?.boundSlugPrefixes).toBe('customers/');
+    expect(server!.params?.tokenTtl).toBe('900');
+
+    // Its own handoff, not the member's: the two secrets never share a file.
+    expect(server!.params?.credentialsOut).not.toBe(member!.params?.credentialsOut);
+    const serverOut = String(server!.params?.credentialsOut);
+    expect(serverOut).toMatch(/^\/srv\/gbrain-home\/\.creds-[\w-]+-server\.json$/);
+    expect(handoffsTaken).toEqual([serverOut]);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, result.connectionId));
+    expect(row?.gbrainClientId).toBe('gbrain_cl_mock');
+    expect(row?.serverClientId).toBe('gbrain_cl_mock_1');
+    expect(row?.state).toBe('active');
+
+    // S3b: the secret is stored, envelope-encrypted, under the documented name.
+    const stored = await readSecret(orgId, serverClientSecretName(result.connectionId));
+    expect(JSON.parse(String(stored)).client_secret).toBe(HANDOFF.client_secret);
+    // F7: the plaintext journal the grant retained is deleted, and no secret
+    // ever reaches the connection row.
+    expect(journalDeletes).toEqual(['gbrain_cl_mock_1']);
+    expect(JSON.stringify(row)).not.toMatch(/not-a-real-secret/);
+  });
+
+  test('a failed server-client grant leaves no live member client behind', async () => {
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'mcp.grant' && String(params?.name).endsWith('-server')) {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'mcp', 'grant'],
+          stdout: '', stderr: 'mcp_setup_failed', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try {
+      await provisionConnection(input(), actor);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/server client/);
+
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked).toEqual(['gbrain_cl_mock']);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.organizationId, orgId));
+    expect(row?.state).toBe('pending');
+    expect(row?.gbrainClientId).toBeNull();
+    expect(row?.serverClientId).toBeNull();
+  });
+
+  test('a rescope moves BOTH clients, so the pair never drifts (D8)', async () => {
+    const result = await provisionConnection(input(), actor);
+    calls.length = 0;
+
+    await provisionConnection(
+      input({ connectionId: result.connectionId, readSpaceIds: [] }),
+      actor,
+    );
+
+    const rescopes = calls.filter((c) => c.op === 'auth.rescopeClient');
+    expect(rescopes.map((c) => c.params?.id)).toEqual(['gbrain_cl_mock_1', 'gbrain_cl_mock']);
+    // The server client is rescoped first: a failure there has moved nothing the
+    // member's client depends on.
+    expect(rescopes.every((c) => c.opts?.dryRun !== true)).toBe(true);
+    expect(calls.some((c) => c.op === 'mcp.grant')).toBe(false);
+  });
+
+  test('a failed server-client rescope leaves the member client untouched', async () => {
+    const result = await provisionConnection(input(), actor);
+    calls.length = 0;
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'auth.rescopeClient' && params?.id === 'gbrain_cl_mock_1') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'auth', 'rescope-client'],
+          stdout: '', stderr: 'unknown client', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try {
+      await provisionConnection(input({ connectionId: result.connectionId, readSpaceIds: [] }), actor);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/server client/);
+    expect(calls.filter((c) => c.op === 'auth.rescopeClient').map((c) => c.params?.id))
+      .toEqual(['gbrain_cl_mock_1']);
   });
 
   test('collision on clientName fails loudly; never --reissue', async () => {
@@ -363,5 +570,202 @@ describe('revokeConnection', () => {
     const audits = await getDb().select().from(schema.auditLog)
       .where(eq(schema.auditLog.action, 'connection.revoke'));
     expect(audits.length).toBe(1);
+  });
+
+  test('revokes BOTH clients and deletes both credential journals (D8, F7)', async () => {
+    const result = await provisionConnection(input(), actor);
+    calls.length = 0;
+    journalDeletes.length = 0;
+
+    await revokeConnection(result.connectionId, actor);
+
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
+    expect(journalDeletes).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, result.connectionId));
+    expect(row?.state).toBe('revoked');
+    expect(row?.revokedAt).toBeTruthy();
+  });
+
+  test('a failed server-client revoke does not mark the Connection revoked', async () => {
+    const result = await provisionConnection(input(), actor);
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'auth.revokeClient' && params?.clientId === 'gbrain_cl_mock_1') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'auth', 'revoke-client'],
+          stdout: '', stderr: 'No client found', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try {
+      await revokeConnection(result.connectionId, actor);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/server client/);
+
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, result.connectionId));
+    expect(row?.state).toBe('active');
+    expect(row?.revokedAt).toBeNull();
+  });
+});
+
+describe('run token lane (D8)', () => {
+  test('mints a run-scoped client carrying the Connection scoping and the RUN ttl', async () => {
+    const conn = await insertConnection('active');
+    calls.length = 0;
+
+    const minted = await mintRunToken(conn.id, 900);
+
+    const grant = calls.find((c) => c.op === 'mcp.grant');
+    expect(grant).toBeDefined();
+    expect(grant!.opts?.json).toBe(true);
+    expect(String(grant!.params?.name)).toMatch(/^bs-run-[0-9a-f]{8}-[0-9a-f]{12}$/);
+    expect(grant!.params).not.toHaveProperty('reissue');
+    // The Connection's compiled scoping, verbatim.
+    expect(grant!.params?.profile).toBe('memory-writer');
+    expect(grant!.params?.source).toBe('customers');
+    expect(grant!.params?.federatedRead).toEqual(['shared']);
+    // The run's own deadline, not the Connection's 3600: TTL is defence in depth.
+    expect(grant!.params?.tokenTtl).toBe('900');
+
+    // One handoff, taken from the path the grant was told to write, and the
+    // token out of it is what the runner gets.
+    const runOut = String(grant!.params?.credentialsOut);
+    expect(runOut).toMatch(/^\/srv\/gbrain-home\/\.creds-run-[0-9a-f]{12}\.json$/);
+    expect(handoffsTaken).toEqual([runOut]);
+    expect(minted).toEqual({
+      gbrainClientId: 'gbrain_cl_mock',
+      accessToken: HANDOFF.access_token,
+    });
+  });
+
+  test('refuses a Connection that is not active', async () => {
+    const conn = await insertConnection('pending');
+
+    let err: unknown;
+    try {
+      await mintRunToken(conn.id, 900);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/not active/);
+    expect(calls.some((c) => c.op === 'mcp.grant')).toBe(false);
+  });
+
+  test('a mint whose handoff cannot be read revokes its own client', async () => {
+    const conn = await insertConnection('active');
+    handoffHandler = async () => { throw new Error('credentials file was not json'); };
+
+    let err: unknown;
+    try {
+      await mintRunToken(conn.id, 900);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/not json/);
+
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked).toEqual(['gbrain_cl_mock']);
+    expect(journalDeletes).toEqual(['gbrain_cl_mock']);
+  });
+
+  test('revokeRunToken kills the run client, deletes its journal, and stamps the run', async () => {
+    const runId = await insertAgentRun('gbrain_cl_run');
+
+    expect(await revokeRunToken(runId)).toEqual({ revoked: true });
+
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked).toEqual(['gbrain_cl_run']);
+    expect(journalDeletes).toEqual(['gbrain_cl_run']);
+
+    const [row] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    expect(row?.tokenRevokedAt).toBeTruthy();
+  });
+
+  test('is idempotent: the second call no-ops and leaves the stamp set', async () => {
+    const runId = await insertAgentRun('gbrain_cl_run');
+    await revokeRunToken(runId);
+    const [first] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    calls.length = 0;
+    journalDeletes.length = 0;
+
+    expect(await revokeRunToken(runId)).toEqual({ revoked: false });
+
+    // A second `auth revoke-client` for a deleted client exits 1 (measured), so
+    // the no-op must not reach ops at all.
+    expect(calls.length).toBe(0);
+    const [row] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    expect(row?.tokenRevokedAt).toBeTruthy();
+    expect(row!.tokenRevokedAt!.getTime()).toBeGreaterThanOrEqual(first!.tokenRevokedAt!.getTime());
+  });
+
+  test('two racing callers revoke exactly once', async () => {
+    const runId = await insertAgentRun('gbrain_cl_run');
+
+    const [a, b] = await Promise.all([revokeRunToken(runId), revokeRunToken(runId)]);
+
+    expect([a.revoked, b.revoked].filter(Boolean).length).toBe(1);
+    expect(calls.filter((c) => c.op === 'auth.revokeClient').length).toBe(1);
+  });
+
+  test('a run whose mint never returned is stamped without an ops call', async () => {
+    const runId = await insertAgentRun(null);
+
+    expect(await revokeRunToken(runId)).toEqual({ revoked: true });
+    expect(calls.length).toBe(0);
+
+    const [row] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    expect(row?.tokenRevokedAt).toBeTruthy();
+  });
+
+  test('a failed revoke releases the stamp so a retry can revoke', async () => {
+    const runId = await insertAgentRun('gbrain_cl_run');
+    callOpsHandler = async (op, _params, opts) => {
+      if (op === 'auth.revokeClient') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'auth', 'revoke-client'],
+          stdout: '', stderr: 'No client found', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try {
+      await revokeRunToken(runId);
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/revokeClient/);
+    let [row] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    expect(row?.tokenRevokedAt).toBeNull();
+
+    callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
+    expect(await revokeRunToken(runId)).toEqual({ revoked: true });
+    [row] = await getDb().select().from(schema.agentRuns)
+      .where(eq(schema.agentRuns.runId, runId));
+    expect(row?.tokenRevokedAt).toBeTruthy();
+  });
+
+  test('refuses a run id that does not exist', async () => {
+    let err: unknown;
+    try {
+      await revokeRunToken(randomUUID());
+    } catch (e) {
+      err = e;
+    }
+    expect(String(err)).toMatch(/not found/);
   });
 });

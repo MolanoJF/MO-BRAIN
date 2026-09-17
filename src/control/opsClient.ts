@@ -109,6 +109,16 @@ export async function takeGrantCredentials(path: string): Promise<unknown> {
   return payload.credentials;
 }
 
+/**
+ * F7: delete the private credential journal `mcp grant` retained for a client we
+ * have just revoked. Revoking the client does not remove the journal, so this is
+ * the step that stops a dead secret from sitting on the file plane. The path is
+ * computed ops-side from the client id — no path crosses the RPC.
+ */
+export async function deleteCredentialJournal(clientId: string): Promise<{ deleted: boolean }> {
+  return post('/fileplane/delete-credential-journal', { clientId }, 30_000);
+}
+
 /** Tail the supervisor's own audit log (Task 6) — the only way to tell a
  *  clean SIGTERM exit from a MAX_CRASHES exit inside the same drain window
  *  (U9). A dedicated route, not an allowlisted operation: it takes no argv,

@@ -508,6 +508,12 @@ export const agentRuns = pgTable('agent_runs', {
   /** Set by the finish path AND by the reclaimer; whichever wins the race. An
    * already-revoked token still stamps this (honesty rule 9). */
   tokenRevokedAt: timestamp('token_revoked_at', { withTimezone: true }),
+  /** D8 (Task 5): the per-run gbrain OAuth client this run's token was minted
+   * as. Non-secret — the token itself is never stored here. It is the ONLY
+   * handle the reclaimer has on a run whose runner is gone: revocation of a
+   * run needs this id, so the claim inserts it in the same row as the run.
+   * Null on a run whose mint never returned. */
+  gbrainClientId: text('gbrain_client_id'),
 }, (t) => [
   check('agent_failure_class_valid', sql`${t.failureClass} is null or ${t.failureClass} in (
     'budget_exceeded','agent_failed','infra_failed','timeout','refused')`),

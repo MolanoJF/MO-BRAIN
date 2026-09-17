@@ -126,6 +126,42 @@ describe('ops rpc', () => {
     const body = await r.json() as { error: string };
     expect(body.error).toMatch(/invalid path|not under GBRAIN_HOME/i);
   });
+
+  // F7: `mcp grant` retains a private credential journal per client, and
+  // revoking the client does not remove it. This route is how a revoke deletes
+  // the last copy of a dead secret.
+  test('delete-credential-journal deletes the retained journal, and an absent one is not an error', async () => {
+    const clientId = 'gbrain_cl_f7delete';
+    const dir = join(homeDir, '.gbrain', 'credential-deliveries');
+    await mkdir(dir, { recursive: true });
+    const journal = join(dir, `${clientId}.json`);
+    await Bun.write(journal, JSON.stringify({ client_secret: 'sk-journal-once' }));
+
+    const del = async (id: string) => fetch(`${BASE}/fileplane/delete-credential-journal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ clientId: id }),
+    });
+
+    const first = await del(clientId);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ deleted: true });
+    expect(await Bun.file(journal).exists()).toBe(false);
+
+    const again = await del(clientId);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ deleted: false });
+  });
+
+  test('delete-credential-journal refuses an id that could name a path', async () => {
+    const r = await fetch(`${BASE}/fileplane/delete-credential-journal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ clientId: '../../etc/passwd' }),
+    });
+    expect(r.status).toBe(400);
+    expect((await r.json() as { error: string }).error).toMatch(/invalid client id/);
+  });
 });
 
 const gitPost = (path: string, body: unknown, token = TOKEN) =>

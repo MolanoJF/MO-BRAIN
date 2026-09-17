@@ -43,6 +43,13 @@
       "when": 1789655953551,
       "tag": "0005_wakeful_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789657682263,
+      "tag": "0006_spotty_rhodey",
+      "breakpoints": true
     }
   ]
 }

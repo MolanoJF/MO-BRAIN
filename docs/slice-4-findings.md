@@ -1,0 +1,1143 @@
+# Slice 4 findings — the agent runner lane
+
+> **Task 1 complete; Task 18 owns the rest of this file.** This document was created by
+> **Task 1 — Probe the harness and the token lane** of
+> [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](superpowers/plans/2026-09-17-slice-4-agent-runner.md),
+> on branch `slice-4-agent-runner`. It carries a status, the exact command and the verbatim output for
+> **every** upstream-reality row (U1–U8) and **every** probe (P1–P9), plus the execution findings
+> (F1–F13) Task 1 surfaced, the **D8 mechanism decision**, and the cleanup record. Task 18 appends
+> Gate C's measured numbers and real dollar cost here.
+
+Status vocabulary: `confirmed` (the claim held as written) | `contradicted` (reality differed, and the
+correction is named here) | `inference` (no artifact carries the observation; stated as such, never
+dressed up as a measurement).
+
+Every command below was run on this machine on **2026-09-17** against the live dev stack
+(`brainstand-*-1` at gbrain `0.50.5.0`, `DOMAIN=localhost`) and the pinned harness
+`@anthropic-ai/claude-code@2.1.274`. Output is pasted from that run; nothing is reconstructed from
+memory, and no row is backed by "expected" text. Where a probe could not discriminate between its two
+outcomes, that is said in the row and the replacement probe is given.
+
+**Verification of this document's own premise:** this task's **only** write to the repository is
+`docs/slice-4-findings.md`. No file under `src/`, `test/`, `docker/`, `compose/`, `scripts/` or
+`contracts/` was created or modified by Task 1 — sibling agents have their own uncommitted work in this
+shared tree, so a tree-wide `git status` is not evidence about this task, and none is offered here.
+
+---
+
+## The go/no-go on U1–U8
+
+| # | Claim | Status | Consequence if contradicted |
+|---|---|---|---|
+| U1 | The Claude Code headless CLI installs cleanly on `oven/bun:1.3.13` at an exact version, and `claude --version` reports it | `confirmed` | — **GO.** Task 2 builds on `oven/bun:1.3.13` with `ARG HARNESS_VERSION=2.1.274` |
+| U2 | `--output-format stream-json` emits a line-delimited frame vocabulary that carries per-turn `usage` and tool-use blocks | `confirmed` | — **GO**, with two corrections Task 8 must absorb: `--verbose` is mandatory with `-p`, and the vocabulary is 8 frame types, not the 3 the plan implies (P2) |
+| U3 | `ANTHROPIC_BASE_URL` routes **all** model traffic, and with the auto-updater and telemetry off the process makes no other outbound connection | `confirmed` | — **GO.** D6's fence needs no extra host in the allowlist (P3) |
+| U4 | `--mcp-config` accepts an HTTP MCP server with a static `Authorization` header (no interactive OAuth dance) | `confirmed` | — **GO.** D5's "exactly one server, static bearer" holds (P4) |
+| U5 | A CLI-minted gbrain token has a **revocable id** exposed on the grant receipt, and a CLI verb revokes it | **`contradicted`** | **D8 takes the fallback.** The receipt exposes a **client id**, never a token id; OAuth tokens are stored by `token_hash` with no id column, and `gbrain auth revoke --id <uuid>` operates on the *legacy* `access_tokens` table. See [the D8 decision](#the-d8-mechanism-decision) and F7/F8 |
+| U6 | An MCP `put_page` produces one or more git commits in the Space repo, with an author gbrain chooses | **`contradicted`** | **D9 changes shape.** An MCP write produces **zero** commits in this stack (the file lands untracked); the write-through commit is gated on `sources harden`, and gbrain supplies **no** author identity when it does commit. Task 9 must derive the diff from the working tree / our own commits, not from gbrain's. See P8 and F10 |
+| U7 | `claude` runs under a read-only rootfs given tmpfs at `$HOME` and the workspace | `confirmed` | — **GO, and cheaper than planned:** the minimal writable set is **`/tmp` alone**; `$HOME` is not required. Two image-shape findings in F1 |
+| U8 | gbrain-serve's `/mcp` accepts a bearer access token directly | `confirmed` | — **GO.** The per-run token lane needs no OAuth handshake inside the container (P7) |
+
+**Two of eight upstream rows are contradicted, and both are load-bearing** (D8's kill switch and D9's
+diff). Neither blocks the slice; both change a downstream task's shape, as recorded per row below.
+
+---
+
+## Probe summary
+
+| # | Probe | Status |
+|---|---|---|
+| P1 | The harness installs on `oven/bun:1.3.13` at an exact version and `claude --version` reports it | `confirmed` |
+| P2 | The complete `stream-json` frame vocabulary, per-turn usage, cumulative cost and tool-use blocks | `confirmed` |
+| P3 | `ANTHROPIC_BASE_URL` carries all model traffic; no other outbound connection; the silence env vars | `confirmed` |
+| P4 | `--mcp-config` HTTP server with a static `Authorization` header — sent as given, no OAuth negotiation | `confirmed` |
+| P5 | The minimal writable set under `--read-only` | `confirmed` (`/tmp` alone; not stop-the-line) |
+| P6 | The `mcp grant --json` receipt's key set, and whether a CLI verb revokes the minted token | **`contradicted`** — no token id exists |
+| P7 | A raw bearer is accepted by gbrain-serve's `/mcp` | `confirmed` |
+| P8 | The author/committer/message of the commit an MCP `put_page` produces | **`contradicted`** — there is no commit |
+| P9 | `MODEL_PRICING` source, `pricedAt`, and the mapping from P2's usage fields | `confirmed` |
+
+| # | Finding (execution surfaced these; the plan did not predict them) | Status |
+|---|---|---|
+| F1 | A root `bun install -g` puts the harness under `/root/.bun`, which a non-root `USER` cannot traverse (`Permission denied`), and a tmpfs at `$HOME` hides it entirely (`Script not found "claude"`) | `confirmed` |
+| F2 | `claude -p … --output-format stream-json` **exits 1** without `--verbose`: `Error: When using --print, --output-format=stream-json requires --verbose` | `confirmed` |
+| F3 | `--tools ""` yields an MCP-only surface (`tools: ["mcp__gbrain__put_page"]`) and the model then made **no** `ToolSearch` call — a strictly stronger MCP-only fence than `--disallowedTools` | `confirmed` |
+| F4 | The harness issues `HEAD /api/hello` against the base URL before `POST /v1/messages` | `confirmed` |
+| F5 | `ANTHROPIC_AUTH_TOKEN` is sent verbatim as `Authorization: Bearer <token>` on every model request; no API key is needed | `confirmed` |
+| F6 | `mcp grant` refuses a non-HTTPS `--url`: `Use HTTPS for credential delivery; HTTP is supported only on loopback` | `confirmed` |
+| F7 | Every `mcp grant` writes a private credential journal to `GBRAIN_HOME/.gbrain/credential-deliveries/<client_id>.json`, and `auth revoke-client` does **not** delete it — 38 such files existed in the dev stack before this probe | `confirmed` |
+| F8 | `oauth_tokens` is keyed by `token_hash` with **no id column**; per-token revocation by id is structurally impossible, and RFC 7009 `POST /revoke` (which needs the client secret) is the only per-token kill | `confirmed` |
+| F9 | The harness's own `total_cost_usd` matched our table exactly on a single-request run and was 8.8% higher than the same table on a two-request run — it is a hint, never the authority | `confirmed` |
+| F10 | A successful MCP write reports `write_through.written: true` with **no** `committed` key and can still carry `status: "skipped"` / `chunk_skip_reason: "write_skipped"`; chunks appear asynchronously | `confirmed` |
+| F11 | `delete_page` is **not** on the granted MCP surface (`unknown_operation`) although the grant's `allowedOperations` lists it — `allowedToolsFor` must read the surface, not the grant | `confirmed` |
+| F12 | The Space repos have **no** `user.name`/`user.email` configured, so every commit in them must carry `-c user.name -c user.email` (our `commitAs` does; gbrain's write-through would exit 128) | `confirmed` |
+| F13 | Pre-existing secret residue: 36 credential-delivery journals from earlier slices persist under `GBRAIN_HOME` | `confirmed` |
+
+---
+
+## P1 — the harness installs on `oven/bun:1.3.13` at an exact version
+
+**Status: `confirmed`.** Where the plan relies on it: U1, D4, Task 2's from-line and smoke gate.
+
+Package identity resolved from the registry before the build (`@anthropic-ai/claude-code`, latest
+`2.1.274`, `bin: {"claude": "bin/claude.exe"}`, optional platform packages
+`@anthropic-ai/claude-code-linux-x64@2.1.274`, `postinstall: node install.cjs`, `engines.node >=22`).
+
+Throwaway Dockerfile (`.brainstand-tmp/slice4/p1.Dockerfile`, deleted with the rest of the scratch):
+
+```dockerfile
+FROM oven/bun:1.3.13
+
+ARG HARNESS_VERSION
+RUN test -n "$HARNESS_VERSION" || (echo "HARNESS_VERSION required" >&2; exit 1)
+
+RUN bun install -g "@anthropic-ai/claude-code@${HARNESS_VERSION}"
+
+RUN claude --version | tee /opt/harness-version.txt
+RUN test -s /opt/harness-version.txt || exit 1
+```
+
+Command and wall-clock:
+
+```bash
+time docker build --build-arg HARNESS_VERSION=2.1.274 \
+  -t slice4-probe-harness:2.1.274 -f p1.Dockerfile .
+```
+
+```
+#6 [3/5] RUN bun install -g "@anthropic-ai/claude-code@2.1.274"
+#6 0.550 bun add v1.3.13 (bf2e2cec)
+#6 11.26 Resolved, downloaded and extracted [22]
+#6 11.31 installed @anthropic-ai/claude-code@2.1.274 with binaries:
+#6 11.31  - claude
+#6 11.31 3 packages installed [10.77s]
+#6 DONE 11.6s
+
+#7 [4/5] RUN claude --version | tee /opt/harness-version.txt
+#7 0.341 2.1.274 (Claude Code)
+#7 DONE 0.4s
+
+real	0m39.762s
+user	0m0.000s
+sys	0m0.000s
+```
+
+Exit code `0`. **`claude --version` reports `2.1.274 (Claude Code)`** — the pinned value, in the second
+field, not the last one; Task 2's smoke gate must `grep -F "$HARNESS_VERSION"`, **not** use
+`gbrain-base.Dockerfile`'s `$NF == v` awk test (the last field here is `(Claude Code)`).
+
+The base image resolved to a digest, so the from-line is pinnable by digest too:
+`oven/bun:1.3.13@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e`
+(Debian GNU/Linux 13 *trixie*, `x86_64`, `bun 1.3.13`).
+
+Where the binary lands, and its size: `/usr/local/bin/claude` →
+`/root/.bun/install/global/node_modules/@anthropic-ai/claude-code-linux-x64/claude` (230,580,536 bytes).
+That symlink target is **inside `/root`**, which is `drwx------` — the direct cause of F1.
+
+---
+
+## P2 — the audit receipt's schema
+
+**Status: `confirmed`, with two corrections.** Where the plan relies on it: U2, D4's "the event stream is
+the receipt", Task 8's `parseStreamJson`, Task 15's A3, Task 13's run detail.
+
+The plan's literal command **fails** (F2), so the probe that discriminates is the corrected one.
+
+```bash
+# The plan's command, verbatim — run once to record why it is not the shape:
+docker run --rm -e ANTHROPIC_API_KEY slice4-probe-harness:2.1.274 \
+  claude -p "say hi" --output-format stream-json --model haiku
+Error: When using --print, --output-format=stream-json requires --verbose
+EXIT_PIPELINE=1
+```
+
+**Both arms below used `--model haiku`, per the slice directive.**
+
+### P2-a — the simple run (the frame vocabulary)
+
+```bash
+docker run --rm -e ANTHROPIC_API_KEY slice4-probe-harness:2.1.274 \
+  claude -p "say hi" --output-format stream-json --model haiku --verbose > p2-simple.jsonl
+```
+
+`type` / `subtype` / top-level key set, one line per frame, in order:
+
+```
+system	init	agents,analytics_disabled,apiKeySource,capabilities,claude_code_version,cwd,fast_mode_disabled_reason,fast_mode_state,mcp_servers,memory_paths,messaging_socket_path,model,output_style,permissionMode,plugins,product_feedback_disabled,session_id,skills,slash_commands,subtype,terminal_slash_commands,tools,type,uuid
+assistant	-	message,parent_tool_use_id,request_id,session_id,timestamp,type,uuid
+assistant	-	message,parent_tool_use_id,request_id,session_id,timestamp,type,uuid
+rate_limit_event	-	rate_limit_info,session_id,type,uuid
+result	success	api_error_status,duration_api_ms,duration_ms,fast_mode_disabled_reason,fast_mode_state,first_content_frame_ms,is_error,modelUsage,num_turns,permission_denials,queued_turn_count,result,result_index,session_id,stop_reason,subagent_stats,terminal_reason,time_to_request_ms,total_cost_usd,ttft_ms,ttft_stream_ms,type,usage,uuid
+```
+
+The complete `result` frame, verbatim:
+
+```json
+{
+  "duration_api_ms": 1868,
+  "stop_reason": "end_turn",
+  "session_id": "8d003c68-24a3-44d7-ba4a-47c4529a60a3",
+  "total_cost_usd": 0.0154847,
+  "usage": {
+    "input_tokens": 10,
+    "cache_creation_input_tokens": 6922,
+    "cache_read_input_tokens": 13607,
+    "output_tokens": 54,
+    "output_tokens_details": { "thinking_tokens": 27 },
+    "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
+    "service_tier": "standard",
+    "cache_creation": { "ephemeral_1h_input_tokens": 6922, "ephemeral_5m_input_tokens": 0 },
+    "inference_geo": "not_available",
+    "iterations": [
+      { "input_tokens": 10, "output_tokens": 54, "cache_read_input_tokens": 13607,
+        "cache_creation_input_tokens": 6922,
+        "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 6922 },
+        "type": "message" }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 10, "outputTokens": 54, "cacheReadInputTokens": 13607,
+      "cacheCreationInputTokens": 6922, "webSearchRequests": 0, "costUSD": 0.0154847,
+      "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 27,
+      "canonicalModel": "claude-haiku-4-5", "provider": "firstParty", "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "is_error": false,
+  "num_turns": 1,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "Hey! 👋 Ready to help you with whatever you're working on. What's up?",
+  "ttft_ms": 1681, "type": "result", "duration_ms": 2003,
+  "ttft_stream_ms": 1424, "time_to_request_ms": 133, "first_content_frame_ms": 1425,
+  "queued_turn_count": 0, "result_index": 0
+}
+```
+
+Answers to P2's four questions, verbatim from the above:
+
+1. **Every `type` seen** — `system`, `assistant`, `rate_limit_event`, `result`. (Three more appear in the
+   tool-use arm below: `user`, plus the `system` subtypes `thinking_tokens` and `api_retry`.)
+2. **`usage` appears per turn** — yes, on **every `assistant` frame's `message.usage`**, with
+   `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `cache_creation.
+   {ephemeral_5m_input_tokens,ephemeral_1h_input_tokens}`, `output_tokens`, `service_tier`,
+   `inference_geo`.
+3. **A cumulative cost field exists** — `result.total_cost_usd`, plus per-model
+   `result.modelUsage[model].costUSD` and the token totals beside it.
+4. **What a tool-use block looks like** — see below; `assistant.message.content[]` carries a
+   `{type:"tool_use", id, name, input, caller}` block, the tool result comes back on a **`user`** frame,
+   and the harness adds a `wire_tool_inputs` map on the assistant frame.
+
+Also load-bearing for Task 8's parser: `"model":"claude-haiku-4-5-20251001"` in the init frame — **the
+alias `haiku` resolves to a dated model id**, and the `system/init` frame carries `mcp_servers`,
+`permissionMode`, `tools`, `apiKeySource`, `analytics_disabled` and `product_feedback_disabled`. The run
+exited `0`.
+
+### P2-b — the forced tool call (the `--verbose` arm's second run)
+
+Prompt forces one `Read`, `--allowedTools Read`:
+
+```bash
+docker run --rm -e ANTHROPIC_API_KEY -v "$PWD/p2ws:/tmp/probe" -w /tmp/probe \
+  slice4-probe-harness:2.1.274 \
+  claude -p "Use the Read tool on ./notes.txt and reply with only its first line." \
+  --output-format stream-json --model haiku --verbose --allowedTools Read > p2-tool.jsonl
+```
+
+Frame order and content-block census:
+
+```
+system	init
+rate_limit_event
+system	thinking_tokens
+system	thinking_tokens
+assistant
+assistant
+rate_limit_event
+user
+assistant
+assistant
+result	success
+
+      1 text
+      2 thinking
+      1 tool_use
+```
+
+The `tool_use` block, verbatim:
+
+```json
+{
+  "type": "assistant",
+  "message": {
+    "model": "claude-haiku-4-5-20251001",
+    "id": "msg_011Cf9Ba2m9e8RkHqr7MKL7V",
+    "type": "message", "role": "assistant",
+    "content": [
+      { "type": "tool_use", "id": "toolu_01HjZUDZEfYKhEJjkd3sPqo4", "name": "Read",
+        "input": { "file_path": "/tmp/probe/notes.txt" }, "caller": { "type": "direct" } }
+    ],
+    "stop_reason": null, "stop_sequence": null,
+    "usage": { "input_tokens": 10, "cache_creation_input_tokens": 3032,
+      "cache_read_input_tokens": 17512,
+      "cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 3032 },
+      "output_tokens": 3, "service_tier": "standard", "inference_geo": "not_available" }
+  },
+  "parent_tool_use_id": null,
+  "session_id": "54726187-4936-48eb-85ac-31e712e71bf6",
+  "uuid": "698a02ba-192e-479d-bd61-2370fd474de9",
+  "timestamp": "2026-09-17T14:38:48.693Z",
+  "request_id": "req_011Cf9Ba2Gt6M1WCV3oX9s43",
+  "wire_tool_inputs": { "toolu_01HjZUDZEfYKhEJjkd3sPqo4": { "file_path": "/tmp/probe/notes.txt" } }
+}
+```
+
+The tool *result* arrives on the `user` frame, not on an assistant frame:
+
+```json
+{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01HjZUDZEfYKhEJjkd3sPqo4","type":"tool_result","content":"1\tPROBE-LINE-ALPHA\n2\tsecond line\n3\t"}]},"tool_use_result":{"type":"text","file":{"filePath":"/tmp/probe/notes.txt","content":"PROBE-LINE-ALPHA\nsecond line\n","numLines":3,"startLine":1,"totalLines":3}}}
+```
+
+`result.total_cost_usd` for this arm was `0.0121636`, `num_turns: 3`, `stop_reason: "end_turn"`.
+
+**Consequence for Task 8/Task 15:** `parseStreamJson` must handle eight frame shapes, not three, and
+must not assume the tool result arrives on an `assistant` frame. A3's fixtures should be taken from
+these two runs verbatim. Any parser that switches only on `assistant`/`result` silently drops the
+`tool_use_result` payload — which is the *only* place the tool's output appears.
+
+---
+
+## P3 — one route out: `ANTHROPIC_BASE_URL`, and nothing else
+
+**Status: `confirmed`.** Where the plan relies on it: U3, D6's allowlist, D7's proxy, honesty rule 2.
+
+Design. A recorder (`.brainstand-tmp/slice4/sink.ts`, ~150 lines, deleted with the scratch) served three
+things in one container on a docker `--internal` network (no gateway, no NAT, therefore **no default
+route at all**): `POST /v1/messages` with a valid Anthropic SSE stream, a **DNS sinkhole** on UDP 53 that
+answers every A query with its own address and logs the queried name, and a TCP 443 accept-logger.
+
+```bash
+docker network create --internal --subnet 172.31.99.0/24 slice4-probe-net
+docker run -d --name slice4-sink --network slice4-probe-net --ip 172.31.99.10 \
+  -e SINK_IP=172.31.99.10 -v "$PWD/sink.ts:/rec/sink.ts:ro" \
+  slice4-probe-harness:2.1.274 bun run /rec/sink.ts
+```
+
+### A0 — the control that proves the fence is real
+
+```bash
+docker run --rm --network slice4-probe-net slice4-probe-harness:2.1.274 bun -e '
+for (const url of ["https://api.anthropic.com/v1/models","https://statsig.anthropic.com/v1/initialize"]) {
+  try { const r = await fetch(url, { signal: AbortSignal.timeout(8000) }); console.log("REACHED", url, r.status); }
+  catch (e) { console.log("BLOCKED", url, e.message); }
+}
+try { const s = await Bun.connect({ hostname: "1.1.1.1", port: 443, socket: { data() {}, open(){}, error(){} } }); console.log("REACHED raw tcp 1.1.1.1:443"); s.end(); }
+catch (e) { console.log("BLOCKED raw tcp 1.1.1.1:443", e.message); }
+try { const r = await fetch("http://slice4-recorder:8787/health", { signal: AbortSignal.timeout(5000) }); console.log("REACHED recorder", r.status); }
+catch (e) { console.log("BLOCKED recorder", e.message); }
+'
+```
+
+```
+BLOCKED https://api.anthropic.com/v1/models Unable to connect. Is the computer able to access the url?
+BLOCKED https://statsig.anthropic.com/v1/initialize Unable to connect. Is the computer able to access the url?
+BLOCKED raw tcp 1.1.1.1:443 Failed to connect
+REACHED recorder 404
+```
+
+No route out; the recorder is reachable. Every run below happened inside this net.
+
+### A1 — the arm the plan asks for, with the silence env vars
+
+```bash
+docker run --rm --network slice4-probe-net --dns 172.31.99.10 \
+ -e ANTHROPIC_BASE_URL=http://slice4-sink:8787 \
+ -e ANTHROPIC_AUTH_TOKEN=probe-gateway-token \
+ -e DISABLE_AUTOUPDATER=1 -e DISABLE_TELEMETRY=1 -e DISABLE_ERROR_REPORTING=1 -e DISABLE_BUG_COMMAND=1 \
+ -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -e CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
+ slice4-probe-harness:2.1.274 \
+ claude -p "say hi" --output-format stream-json --model haiku --verbose
+```
+
+```
+EXIT=0
+{"subtype":"success","is_error":false,"result":"recorder-ok","total_cost_usd":0.000024999999999999998,"num_turns":1}
+```
+
+Recorder log — the **complete** traffic of that process:
+
+```
+2026-09-17T14:40:09.811Z HTTP#1 HEAD /api/hello
+2026-09-17T14:40:09.811Z HTTP#1-HDR accept: */* | accept-encoding: gzip, deflate, br, zstd | connection: keep-alive | host: slice4-sink:8787 | user-agent: Bun/1.4.3
+2026-09-17T14:40:10.124Z HTTP#2 POST /v1/messages?beta=true
+2026-09-17T14:40:10.124Z HTTP#2-HDR accept: application/json | … | authorization: <redacted len=26 head=Bearer probe-g> | content-length: 111787 | content-type: application/json | host: slice4-sink:8787 | user-agent: claude-cli/2.1.274 (external, sdk-cli) | x-app: cli | x-claude-code-session-id: 306eafc9-… | x-stainless-retry-count: 0 | …
+2026-09-17T14:40:10.124Z HTTP#2-BODY bytes=111440 keys=model,messages,system,tools,metadata,max_tokens,thinking,context_management,stream stream=true model=claude-haiku-4-5-20251001 msgs=1 tools=25
+```
+
+Two requests, both to the base URL, zero external DNS names, zero TLS connects.
+
+### A2–A5 — the arms that make A1's null result mean something
+
+**A2 — the same run with no silence env vars at all** (so the null result cannot be an artifact of the
+vars that were supposed to cause it):
+
+```bash
+docker run --rm --network slice4-probe-net \
+ -e ANTHROPIC_BASE_URL=http://slice4-sink:8787 -e ANTHROPIC_AUTH_TOKEN=probe-gateway-token \
+ slice4-probe-harness:2.1.274 claude -p "say hi" --output-format stream-json --model haiku --verbose
+```
+
+```
+ARM_B_EXIT=0
+result: recorder-ok cost=0.000024999999999999998 is_error=false
+--- new sink lines (arm B) ---
+2026-09-17T14:40:51.583Z HTTP#4 HEAD /api/hello
+2026-09-17T14:40:51.977Z HTTP#5 POST /v1/messages?beta=true
+… (no DNS lines, no TLS lines)
+```
+
+**A4 — 25 seconds of idle after a run, still no silence vars** (an auto-update or telemetry check is
+asynchronous by nature, so a short run cannot clear it):
+
+```bash
+docker run --rm --network slice4-probe-net \
+ -e ANTHROPIC_BASE_URL=http://slice4-sink:8787 -e ANTHROPIC_AUTH_TOKEN=probe-gateway-token \
+ slice4-probe-harness:2.1.274 \
+ sh -c 'claude -p "say hi" --output-format stream-json --model haiku --verbose > /tmp/out.jsonl 2>&1; echo EXIT=$?; sleep 25; echo SLEPT'
+```
+
+```
+EXIT=0
+SLEPT
+--- external DNS/TLS lines added by arm D ---
+(count: 0)
+```
+
+**A5 — the positive control, without which A1–A4 are uninformative.** Same net, same sinkhole, no base
+URL override (so the default `https://api.anthropic.com` is used):
+
+```bash
+docker run --rm --network slice4-probe-net --dns 172.31.99.10 \
+ -e ANTHROPIC_API_KEY="<a syntactically valid but non-existent key; never a real one>" \
+ slice4-probe-harness:2.1.274 claude -p "say hi" --output-format stream-json --model haiku --verbose
+```
+
+```
+() => new Date().toISOString() DNS A? api.anthropic.com from 172.31.99.3:54077
+() => new Date().toISOString() TLS-CONNECT opens
+() => new Date().toISOString() TLS-CONNECT bytes=1478 first=160301
+… repeated for every retry, for 90 seconds
+```
+
+`first=160301` is a TLS ClientHello. **The observation channel demonstrably sees external attempts**, so
+"no DNS query and no TLS connect" in A1–A4 is a real measurement, not a blind spot. The harness's retry
+frames in that arm read `{"error_status":null,"error":"unknown"}` — a *connection* failure, not a 401.
+
+### A6 — every env name verified against the pinned binary, not guessed
+
+Extracted from the installed 2.1.274 binary itself (230,580,536 bytes) by regex over its latin1 view:
+
+```
+DISABLE_AUTOUPDATER  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC  DISABLE_TELEMETRY  DISABLE_ERROR_REPORTING
+DISABLE_UPDATES  DISABLE_BUG_COMMAND  DISABLE_FEEDBACK_COMMAND  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY
+DO_NOT_TRACK  FORCE_AUTOUPDATE_PLUGINS  CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE  ENABLE_LOCKLESS_UPDATES
+SENTRY_INGEST_HOST  SENTRY_WILDCARD_HOST  ANTHROPIC_TELEMETRY_GROUP  …
+```
+
+The gating code, read out of the same binary:
+
+```js
+function x(){ if(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) return "essential-traffic";
+             if(process.env.DISABLE_TELEMETRY) return "no-telemetry";
+             if(Pe(process.env.DO_NOT_TRACK)) return "no-telemetry";
+             return "default" }
+function kt(){ return x()==="essential-traffic" … }
+// and, on the error path:
+… || process.env.DISABLE_ERROR_REPORTING || kt()) return;
+```
+
+So `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` *implies* the telemetry-and-error-reporting mode, and
+`DISABLE_ERROR_REPORTING` is the explicit Sentry guard.
+
+**Consequence for Task 2:** the image's `ENV` set is
+`DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_TELEMETRY=1
+DISABLE_ERROR_REPORTING=1 DISABLE_BUG_COMMAND=1 DISABLE_FEEDBACK_COMMAND=1
+CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`, each name proven present in the pinned binary. **Consequence
+for D6:** no second host is needed in the allowlist. **Consequence for Task 7:** the gateway must
+tolerate `HEAD /api/hello` against its base URL (F4) — it is issued before the first model call.
+
+---
+
+## P4 — `--mcp-config` with a static `Authorization` header
+
+**Status: `confirmed`.** Where the plan relies on it: U4, D5's "exactly one server", Task 8's argv.
+
+Stub server: `.brainstand-tmp/slice4/stub-mcp.ts` (~110 lines, deleted with the scratch), answering
+JSON-RPC `initialize`, `notifications/initialized`, `tools/list` (one tool, `put_page`) and `tools/call`.
+
+```bash
+MC='{"mcpServers":{"gbrain":{"type":"http","url":"http://slice4-mcpstub:8080/mcp","headers":{"Authorization":"Bearer probe-mcp-bearer-token"}}}}'
+docker run --rm --network slice4-probe-net \
+ -e ANTHROPIC_BASE_URL=http://slice4-sink:8787 -e ANTHROPIC_AUTH_TOKEN=probe-gateway-token \
+ -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+ slice4-probe-harness:2.1.274 \
+ claude -p "Use the gbrain put_page tool with slug 'probe' and content 'hello'. Then reply with only the tool output." \
+ --output-format stream-json --model haiku --verbose \
+ --mcp-config "$MC" --strict-mcp-config --allowedTools "mcp__gbrain__put_page"
+```
+
+Init frame's MCP view and the stub's log:
+
+```
+{"mcp_servers":[{"name":"gbrain","status":"connected","source":"dynamic"}],"mcp_tools":["mcp__gbrain__put_page"]}
+```
+
+```
+2026-09-17T14:45:04.055Z MCP#1 POST /mcp
+2026-09-17T14:45:04.055Z MCP#1-HDR accept: application/json, text/event-stream | authorization: <redacted len=29 head=Bearer probe-mcp-bearer-> | content-length: 440 | content-type: application/json | host: slice4-mcpstub:8080 | mcp-method: server/discover | mcp-protocol-version: …
+2026-09-17T14:45:04.077Z MCP#2-RPC method=initialize id=0 params={"protocolVersion":"2025-11-25",…}
+2026-09-17T14:45:04.080Z MCP#3-RPC method=notifications/initialized id=null params={}
+2026-09-17T14:45:04.084Z MCP#4 GET /mcp
+2026-09-17T14:45:04.096Z MCP#5-RPC method=tools/list id=1 params={}
+```
+
+**The header is sent exactly as given** — `authorization: <redacted len=29 head=Bearer probe-mcp-bearer->`
+is `Bearer probe-mcp-bearer-token`, byte for byte. No OAuth endpoint was contacted: a precise re-grep of
+the stub log for request lines yields exactly `1 MCP#1 POST /mcp` and `1 MCP#2 POST /mcp` in the 401 arm
+(below); no `/.well-known/*`, `/register`, `/authorize` or `/token` request ever appears.
+
+### P4-b — the 401 arm (does a bad token trigger an OAuth dance?)
+
+The stub re-run with `-e STUB_401=1`, answering every request `401` with
+`WWW-Authenticate: Bearer error="invalid_token", resource_metadata="…/.well-known/oauth-protected-resource"`:
+
+```
+>>> initialize -> HTTP 401 …      (stub log)
+"mcp_servers":[{"name":"gbrain","status":"failed","source":"dynamic"}]
+P4_401_EXIT=0
+  1 MCP#1 POST /mcp
+  1 MCP#2 POST /mcp
+```
+
+Two requests, then it gives up and marks the server `failed`. **No OAuth discovery, no dynamic client
+registration, no authorization attempt.** The failure mode is clean and loud.
+
+### P4-c — the real end-to-end MCP tool call (real model, one paid turn)
+
+Same stub, healthy, on a routable network, with real auth and a real model:
+
+```
+{"name":"ToolSearch","input":{"query":"select:mcp__gbrain__put_page","max_results":1}}
+{"name":"mcp__gbrain__put_page","input":{"slug":"probe","content":"hello"}}
+{"result":"stub-put_page-ok","num_turns":3,"total_cost_usd":0.021504500000000003}
+```
+
+Stub side:
+
+```
+2026-09-17T14:45:40.524Z MCP#9-RPC method=tools/call id=2 params={"name":"put_page","arguments":{"slug":"probe","content":"hello"},"_meta":{"claudecode/toolUseId":"toolu_01HDhYwaEpGkb2CVHuyP2hZ4","progressToken":2}}
+```
+
+**The tool name on the wire is `mcp__gbrain__put_page`; the JSON-RPC `params.name` is the bare
+`put_page`.** Task 8's allowlist is written in the former, gbrain sees the latter.
+
+Note the extra `ToolSearch` turn: with the default tool surface, the harness first searches for the MCP
+tool before calling it. Task 8's tool-call timeline must expect it (or suppress it with `--tools ""`,
+below).
+
+### P4-d — `--tools ""` is a stronger MCP-only fence than `--disallowedTools` (F3)
+
+```bash
+… --mcp-config "$MC" --strict-mcp-config --allowedTools "mcp__gbrain__put_page" --tools ""
+```
+
+```
+{"tools":["mcp__gbrain__put_page"],"mcp_servers":[{"name":"gbrain","status":"connected","source":"dynamic"}]}
+{"name":"mcp__gbrain__put_page"}
+{"result":"stub-put_page-ok","num_turns":2,"is_error":false,"permission_denials":[]}
+```
+
+The session's **entire** tool list is the one MCP tool: every built-in (Bash, Write, Edit, WebFetch,
+Task, …) is gone at the source, the MCP tool still works, and no `ToolSearch` turn is spent.
+**D5's deny-list (`--disallowedTools` naming Bash/Write/Edit) is the weaker half of what is available.**
+Task 8 should pass `--tools ""` (`--help`: *"Use \"\" to disable all tools"*) and keep the deny-list as
+defence in depth, per honesty rule 2.
+
+---
+
+## P5 — the minimal writable set under `--read-only`
+
+**Status: `confirmed`. Not a stop-the-line finding.** Where the plan relies on it: U7, Task 3's `tmpfs:`.
+
+Two throwaway images were used, because the first one exposed F1 and could not be tested as a non-root
+user:
+
+- `slice4-probe-harness:2.1.274` — P1's image (`bun install -g` as root).
+- `slice4-probe-harness-nonroot:2.1.274` — same, plus `ENV BUN_INSTALL=/opt/harness`,
+  `ENV PATH=/opt/harness/bin:/usr/local/bin:$PATH`, `chmod -R a+rX /opt/harness`,
+  `RUN useradd -u 10001 -m runner`, `USER 10001:10001`, `ENV HOME=/home/runner`. Build wall-clock
+  `real 0m41.185s`; `claude --version` inside it prints `2.1.274 (Claude Code)`.
+
+Every arm: `docker run --rm --read-only [tmpfs…] --network slice4-probe-net -e ANTHROPIC_BASE_URL=…
+-e ANTHROPIC_AUTH_TOKEN=… -e DISABLE_AUTOUPDATER=1 -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 …
+claude -p "say hi" --output-format stream-json --model haiku --verbose`.
+
+| arm | mounts | exit | decisive line |
+|---|---|---|---|
+| 1 | none (root user) | **1** | `EROFS: read-only file system, mkdir '/tmp/claude-0'` |
+| 2 | `--tmpfs /tmp` (root user) | **0** | `"subtype":"success"` |
+| 3 | `--tmpfs /tmp --tmpfs /root` (root user) | **1** | `error: Script not found "claude"` — the tmpfs replaced the install directory (F1) |
+| 4 | none (uid 10001) | **1** | `EROFS: read-only file system, mkdir '/tmp/claude-10001'` |
+| 5 | `--tmpfs /home/runner` only (uid 10001) | **1** | `EROFS: read-only file system, mkdir '/tmp/claude-10001'` |
+| 6 | `--tmpfs /tmp` only (uid 10001, **$HOME read-only**) | **0** | `"subtype":"success"` |
+| 7 | `--tmpfs /tmp --tmpfs /home/runner` (uid 10001) | **0** | `"subtype":"success"` |
+| 8 | `--tmpfs /tmp --tmpfs /home/runner --tmpfs /workspace -w /workspace` | **0** | `"subtype":"success"` |
+
+**The minimal writable set is `/tmp` alone.** The harness `mkdir`s `/tmp/claude-<uid>` at startup and a
+read-only rootfs is otherwise fine; `$HOME` is not required for a `-p` run (arm 6). Task 3's three
+tmpfs mounts are therefore *sufficient but not minimal* — `/tmp` is the only one that is mandatory, and
+`/workspace` is needed for the run's own files, not for the harness. **U7 is `confirmed`: no writable
+rootfs is needed, so `read_only: true` stands.**
+
+Two image-shape findings came out of this probe and Task 2/Task 3 must absorb both (F1):
+
+```bash
+docker run --rm slice4-probe-harness:2.1.274 sh -c 'ls -ld /root /root/.bun /usr/local/bin/claude'
+drwx------ 1 root root 4096 … /root
+lrwxrwxrwx 1 root root   89 … /usr/local/bin/claude -> ../../../root/.bun/install/global/node_modules/@anthropic-ai/claude-code-linux-x64/claude
+
+docker run --rm -u 10001:10001 -w /tmp slice4-probe-harness:2.1.274 claude --version
+error: Script not found "claude"
+
+docker run --rm -u 10001:10001 -w /tmp slice4-probe-harness:2.1.274 \
+  sh -c 'command -v claude; ls -l "$(command -v claude)"; claude --version'
+sh: 1: claude: Permission denied
+```
+
+`/root` is mode `0700`, so a non-root `USER` cannot traverse it: **the plan's compose block
+(`user: "10001:10001"` + `tmpfs: [/home/runner, …]`) cannot work with a root `bun install -g`.** The
+fix, verified: install to `BUN_INSTALL=/opt/harness` and put `/opt/harness/bin` on `PATH`.
+
+---
+
+## P6 — the grant receipt, and what can revoke it (D8)
+
+**Status: `contradicted`.** The claim *"a CLI-minted gbrain token has a revocable id exposed on the grant
+receipt"* is **false**. Where the plan relies on it: U5, D8's preferred mechanism, Task 5's
+`auth.revokeToken` registry entry (U11).
+
+### P6-a — the grant, against the live stack
+
+```bash
+docker exec brainstand-gbrain-ops-1 gbrain mcp grant probe-runner-p6 \
+  --harness claude-code --profile memory-writer --source shared --federated-read shared \
+  --bound-slug-prefixes "probe-runner/" --token-ttl 900 \
+  --url http://gbrain-serve:3131/mcp --credentials-out /tmp/probe-p6-creds.json --json
+```
+
+```
+{"status":"error","reason":"mcp_setup_failed","message":"Use HTTPS for credential delivery; HTTP is supported only on loopback"}
+EXIT=1
+```
+
+(F6 — worth recording: the grant refuses a plaintext `--url`, so the per-run mint must use
+`https://${DOMAIN}/mcp`. Our `mcpUrl()` already does.)
+
+Re-run with HTTPS — exit `0`, `"status":"granted"`. **The receipt's full key set:**
+
+```
+status
+grant{ clientId, clientName, scopes, sourceId, federatedRead, boundSlugPrefixes, allowedOperations,
+       boundTools, boundSourceId, boundBrainId, delegatedSlugPrefixes, delegatedNamespace,
+       boundMaxConcurrent, budgetUsdPerDay, surface, surfaceSetBy, tokenTtlSeconds, profile,
+       revision, repairReasons, revoked }
+before
+spending
+credentials{ client_id, mcp_url, profile, harness, source_id, expires_at, renewable,
+             credentials: "private-file" }
+credential_file
+next_action
+```
+
+`clientId` was `gbrain_cl_4eb1faab953b0f4fbd23c96053d5ea3aaa0b03d081654b90acf867a5e838d8b7`,
+`tokenTtlSeconds: 900`, `surface: "starter"`, `revoked: false`.
+
+**There is no token id anywhere in the receipt.** The only identifier is an **OAuth client id**, and
+the only token-shaped thing is `tokenTtlSeconds` / `expires_at`. The private handoff file is where the
+credential actually is:
+
+```
+keys: version,mcp_url,issuer_url,client_id,client_secret,access_token,expires_at,profile,harness,source_id
+version => 1
+mcp_url => https://localhost/mcp
+issuer_url => https://localhost
+client_id => <string len=74>
+client_secret => <string len=74>
+access_token => <string len=74>
+expires_at => 1789657429
+```
+
+So `mcp grant` **mints the run token itself** (upstream: `provider.exchangeClientCredentials(...)`,
+`src/commands/mcp-provision.ts:86`) and delivers it in the private handoff — and exposes no id for it.
+
+### P6-b — the revoke verbs, verbatim
+
+```bash
+docker exec brainstand-gbrain-ops-1 gbrain auth revoke --id 00000000-0000-0000-0000-000000000000 --json
+No active token found with id "00000000-0000-0000-0000-000000000000".
+EXIT=1
+
+docker exec brainstand-gbrain-ops-1 gbrain auth revoke --id 00000000-0000-0000-0000-000000000000
+No active token found with id "00000000-0000-0000-0000-000000000000".
+EXIT=1
+
+docker exec brainstand-gbrain-ops-1 gbrain auth list --json
+No tokens found. Create one: gbrain auth create "my-client"
+EXIT=0
+```
+
+`--json` is accepted and ignored (prose output, exit 1). And the CLI's own help says what `--id`
+targets: *"`gbrain auth revoke --id <uuid>` — Revoke exactly one token by id (names are not unique)"*,
+implemented as `UPDATE access_tokens SET revoked_at = now() WHERE id = $1::uuid` — the **legacy token
+table**, not the OAuth one.
+
+**Structurally confirmed at the storage layer** (F8):
+
+```
+                   Table "public.oauth_tokens"
+   Column   |           Type           | …
+------------+--------------------------+---
+ token_hash | text                     | not null      <- PRIMARY KEY: the token is hashed, there is no id
+ token_type | text                     | not null
+ client_id  | text                     | not null
+ scopes     | text[]                   |
+ expires_at | bigint                   |
+ …
+```
+
+```
+ gbrain_cl_4eb1faab…  | access | 1789657429 | | 2026-09-17 14:48:49.827996+00
+```
+
+**An OAuth access token has no id to revoke.** `auth.revokeToken` as the plan words it (U11, Task 5)
+has nothing to accept as a parameter.
+
+### P6-c — the two mechanisms that *do* work, measured
+
+```bash
+docker exec brainstand-gbrain-ops-1 gbrain auth revoke-client gbrain_cl_4eb1faab…8d8b7
+OAuth client revoked: "probe-runner-p6" (gbrain_cl_4eb1faab…8d8b7)
+Tokens and authorization codes purged via cascade.
+EXIT=0
+```
+
+Before that revoke, the token called `/mcp` fine; after it:
+
+```
+=== BEFORE revoke: token still works (control) ===
+>>> tools/list -> HTTP 200 ct=text/event-stream session=-
+=== AFTER revoke: same call ===
+>>> tools/list -> HTTP 401 ct=application/json; charset=utf-8 session=-
+```
+
+The RFC 7009 per-token path also works — a second grant, then `POST /revoke` on the internal URL with
+`token` + `client_id` + `client_secret`:
+
+```
+=== before: token live ===
+>>> tools/list -> HTTP 200 ct=text/event-stream session=-
+=== POST /revoke (RFC 7009) ===
+>>> POST /revoke -> HTTP 200 ct=null
+(empty body)
+=== after: same token ===
+>>> tools/list -> HTTP 401 ct=application/json; charset=utf-8 session=-
+```
+
+Upstream citation: `src/commands/serve-http-oauth.ts:85` mounts `POST /revoke`, RFC 7009-shaped, and it
+requires the client's secret (`confidentialCredentials(req)` before `provider.revokeToken`).
+
+**F7 — the leak the fallback creates.** Every grant retains a private credential journal, and
+revocation does not clean it:
+
+```bash
+docker exec brainstand-gbrain-ops-1 sh -c 'ls -l /srv/gbrain-home/.gbrain/credential-deliveries/'
+… 38 files, mode -rw-------, one per grant, from 06:12–14:54 today
+```
+
+Two of those 38 were this probe's; both were deleted (the clients themselves were revoked, so the files
+were the only remaining copy). The other 36 predate this session and are **left alone** — but they are
+secret material sitting in a shared volume, and the slice's own runbook should say so. This is the first
+concrete cost of the D8 fallback: **one ephemeral client per run means one more retained secret file per
+run.**
+
+---
+
+## The D8 mechanism decision
+
+**Decision: the fallback. Mint a per-run ephemeral client with `gbrain mcp grant` at claim, and kill it
+with `gbrain auth revoke-client <client_id>` at finish.** The plan's preferred mechanism is
+**unavailable**, not merely inconvenient:
+
+1. The grant receipt carries **`clientId`, not a token id** (P6-a). There is no id to store on
+   `agent_runs` and no id to hand to a revoke verb.
+2. `gbrain auth revoke --id <uuid>` updates the **legacy `access_tokens`** table (P6-b), which an
+   OAuth-minted token never enters.
+3. OAuth access tokens are stored by **`token_hash`**, with no id column at all (F8), so no CLI verb
+   *could* address one by id.
+
+What Task 5 builds instead, all measured above:
+
+- **Mint:** `mcp.grant` per run with `--token-ttl` (the run's TTL), `--url https://${DOMAIN}/mcp`
+  (F6: plaintext is refused), `--credentials-out` to an ops-side path, and the run's compiled scoping.
+  The `access_token` arrives in that handoff file and is the bearer the harness uses on `/mcp`.
+- **Revoke:** `auth.revoke-client <clientId>` — exit `0`, output *"OAuth client revoked … Tokens and
+  authorization codes purged via cascade."*, and a `401` on the next `/mcp` call. This is the kill
+  switch, and it works whether or not the runner still exists (honesty rule 5).
+- **Do not** add `auth.revokeToken` to the registry as the plan words it. If Task 5 wants a *token*
+  (rather than client) kill switch it must be the **RFC 7009 `POST /revoke`** endpoint — a real,
+  measured alternative, but it needs the client secret and is an HTTP OAuth contract, not a CLI verb,
+  so it is a bigger posture change than the fallback and is **not** recommended for this slice.
+- **Budget for F7:** each mint drops one more retained secret file under
+  `GBRAIN_HOME/.gbrain/credential-deliveries/`, and neither `revoke-client` nor TTL expiry deletes it.
+  Gate C's mint count should be small (L11's 50/15min `/token` limit is also in play, since
+  `mcp grant` performs a `client_credentials` exchange), and the runbook needs a "how to rotate/clean
+  the credential journals" line.
+
+`G2` is satisfied either way: both verbs are published CLI contracts on our ops lane.
+
+---
+
+## P7 — a raw bearer is accepted by gbrain-serve's `/mcp`
+
+**Status: `confirmed`.** Where the plan relies on it: U8, D5's single MCP server, D7's per-run token.
+
+From inside `brainstand-gbrain-ops-1`, against the internal serve address, with the grant's
+`access_token` sent as a raw bearer and **no** client secret, **no** session id and **no** OAuth
+handshake:
+
+```
+>>> initialize -> HTTP 200 ct=text/event-stream session=-
+event: message
+data: {"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"gbrain","version":"0.50.5.0"},"instructions":"GBrain agent operating contract (apply on every cold start): …"}}
+>>> tools/list -> HTTP 200 ct=text/event-stream session=-
+event: message
+data: {"result":{"tools":[{"name":"entity",…
+```
+
+21 tools were returned (the granted `surface: "starter"`), the response is server-sent events with
+`event: message` + one `data:` JSON line, and no `mcp-session-id` header is issued or required. The
+session-less, bearer-only shape is exactly what `--mcp-config` needs.
+
+---
+
+## P8 — what an MCP `put_page` leaves behind (U6)
+
+**Status: `contradicted`.** The claim *"an MCP `put_page` produces one or more git commits in the Space
+repo, with an author gbrain chooses"* was written into the plan as the ceiling on D9's attribution.
+Reality: **it produces no commit at all**, and when it would, gbrain supplies no author.
+
+Same client, same granted token (`probe-runner/` fence), writing to the `shared` Space:
+
+```
+=== pre-write git head in the shared Space ===
+6325100773271fb710840a347e564d1806d6bbac|slice2-cshared-mu54u9vf@example.test|…|reports: live-sync 2026-09-17-0213
+```
+
+The `put_page` result, verbatim:
+
+```json
+{"slug":"probe-runner/p8-probe","status":"skipped","chunks":0,"chunk_skip_reason":"write_skipped",
+ "auto_links":{"skipped":"remote","hint":"auto_link/auto_timeline run for trusted local writers only; …"},
+ "auto_timeline":{"skipped":"remote","hint":"…"},
+ "facts_backstop":{"skipped":"slug_bound_client"},
+ "chronicle_backstop":{"skipped":"not_imported"},
+ "write_through":{"written":true,"path":"/srv/brain-repos/shared/probe-runner/p8-probe.md"}}
+```
+
+**The response carries `write_through.written: true` and no `committed` key.** Upstream
+(`src/core/write-through.ts:464-484`):
+
+```ts
+let committed = false;
+try {
+  assertSourceFilesystemActive();
+  if (isDurabilityHardened(writeRoot)) {
+    committed = commitWriteThroughFile(writeRoot, filePath, slug);
+    …
+} catch { /* best-effort */ }
+return { written: true, path: filePath, ...(committed ? { committed, pushed, lastPushStatus } : {}) };
+```
+
+`isDurabilityHardened` is true only when the gbrain durability post-commit hook is installed
+(`gbrain sources harden`). It is not, in this stack:
+
+```
+=== file present? ===
+-rw-r--r-- 1 root root 178 … probe-runner/p8-probe.md
+=== working tree status ===
+?? probe-runner/
+```
+
+And more than fifteen minutes later, with a 5-minute `live-sync` schedule supposedly enabled on this
+Space, HEAD had still not moved:
+
+```
+--- last 3 commits ---   (unchanged: 6325100… live-sync 2026-09-17-0213)
+--- status ---
+?? probe-runner/
+```
+
+**The author/committer/message gbrain chooses: none, because gbrain made no commit.** What the write
+*did* leave was a file, a `pages` row, and a searchable chunk (`gbrain search "P8 probe"` →
+`{"slug":"probe-runner/p8-probe","page_id":5,…,"chunk_source":"compiled_truth","score":0.875001}`,
+`select count(*) from pages where slug like '%p8-probe%'` → `1`), i.e. **the brain moved and git did
+not.** That is the exact inversion of D9's premise.
+
+What happens when a Space *is* hardened is still not an attribution: `GIT_ENV`
+(`src/core/git-remote.ts:189-194`) sets **no identity**, only prompt-suppression
+(`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_ASKPASS=/bin/false`). So the commit inherits the
+repo's git config. This repo has none:
+
+```bash
+docker exec brainstand-gbrain-ops-1 sh -c 'cd /srv/brain-repos/shared; git config --get user.name; git config --get user.email'
+name_exit=1
+email_exit=1
+```
+
+and the exact commit command the write-through path would run therefore fails:
+
+```bash
+cd /srv/brain-repos/shared && git add -- probe-runner/p8-probe.md \
+  && git commit -m "gbrain: write-through probe-runner/p8-probe" -- probe-runner/p8-probe.md
+Author identity unknown
+
+*** Please tell me who you are.
+…
+fatal: unable to auto-detect email address (got 'root@ada829a1dee2.(none)')
+COMMIT_EXIT=128
+```
+
+(That command was run with the file staged and then `git reset` — no commit was created, and the repo
+was left exactly as found.) Upstream swallows that failure by design (`catch { return false }`).
+
+**Consequences, named:**
+
+- **Task 9 (`diffForRun`) cannot be "git log of gbrain's commits".** In this stack the agent's own
+  writes are *untracked files*; a commit only exists if something else commits them. The honest
+  implementation: capture `git rev-parse HEAD` **and** the working-tree state at claim, and treat
+  "commits in `<before>..<after>`" **plus** "uncommitted paths under the write Space" as the run's
+  footprint; or have the runner's own finish path commit its work first (then the commit is ours, and
+  the author is our named actor, which is a *better* attribution story than the plan expected).
+- **`concurrentWriters` (D9) keeps its purpose for a different reason.** Every commit observed in these
+  Spaces was authored by **us** — `e2e|e2e@brainstand.local`, `gate-b|gate-b@brainstand.local`,
+  `slice2-cshared-mu54u9vf@example.test` — because `commitAs` passes `-c user.name -c user.email` (F12).
+  So a git range will show our other writers, never gbrain's, and the console's hedge must be worded for
+  that case.
+- **Honesty rule 7 gets *more* important, not less.** Because the write lands in the DB and the file
+  plane at different times (`chunks: 0` at response time, the chunk visible shortly after), a revert
+  that only moves the git tree would leave the index answering searches in exactly the way the rule
+  warns about.
+- **Task 8 must not read `status` as failure** (F10): `status: "skipped"` with
+  `chunk_skip_reason: "write_skipped"` accompanied a *successful* write.
+
+**F11, related and load-bearing for Task 8:** `delete_page` is in the grant's `allowedOperations` but
+**not** on the granted MCP surface:
+
+```
+data: {"result":{"content":[{"type":"text","text":"{\"error\":\"unknown_operation\",\"message\":\"Unknown: delete_page\"}"}],"isError":true}}
+```
+
+`allowedToolsFor(connection, snapshot)` must intersect with the **surface** (`capability_snapshots.
+tools_json`, i.e. the 21 tools `tools/list` returns), not with `allowedOperations` — otherwise the
+allowlist names tools the server will reject.
+
+---
+
+## P9 — `MODEL_PRICING`'s source, `pricedAt`, and the mapping from P2
+
+**Status: `confirmed`.** Where the plan relies on it: D7's price table, Task 7's `priceUsage`, Task 12's
+"refuse a model absent from `MODEL_PRICING`", Gate C's budget.
+
+Source read on **2026-09-17**: <https://platform.claude.com/docs/en/about-claude/pricing> (documents
+`https://docs.claude.com/en/docs/about-claude/pricing`, which redirects there). Per-MTok, verbatim from
+that page's model-pricing table:
+
+| Model | Base input | 5m cache write | 1h cache write | Cache read | Output |
+|---|---|---|---|---|---|
+| Claude Opus 5 | $5 | $6.25 | $10 | $0.50 | $25 |
+| Claude Opus 4.8 | $5 | $6.25 | $10 | $0.50 | $25 |
+| Claude Sonnet 5 | $2 | $2.50 | $4 | $0.20 | $10 |
+| Claude Sonnet 4.6 / 4.5 | $3 | $3.75 | $6 | $0.30 | $15 |
+| **Claude Haiku 4.5** | **$1** | **$1.25** | **$2** | **$0.10** | **$5** |
+
+and the multipliers the page states: *"5-minute cache write 1.25x base input price", "1-hour cache write
+2x base input price", "Cache read (hit) 0.1x base input price"*, with `inference_geo: "us"` a 1.1x
+multiplier on all categories.
+
+**So `MODEL_PRICING` must be five rates per model, not four** — the plan says "input / output /
+cache-read / cache-write" (D7, Task 7). Claude Code's own request uses the **1-hour** cache:
+
+```
+"cache_creation": { "ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 6922 }
+```
+
+Pricing those 6,922 tokens at the 5-minute rate undercounts that run by **33.5%** (computed below). A
+single `cacheWrite` rate is a silent undercount on every run.
+
+**The mapping from P2's frames onto the table** — the four counts the plan names, plus the fifth:
+
+| `MODEL_PRICING` rate | Frame field | Note |
+|---|---|---|
+| input | `usage.input_tokens` | |
+| output | `usage.output_tokens` | includes `output_tokens_details.thinking_tokens` |
+| cache read | `usage.cache_read_input_tokens` | 0.1x base input |
+| cache write (5m) | `usage.cache_creation.ephemeral_5m_input_tokens` | 1.25x base input |
+| cache write (1h) | `usage.cache_creation.ephemeral_1h_input_tokens` | 2x base input — **the one Claude Code uses** |
+
+`usage.cache_creation_input_tokens` is the **sum** of the two and is what the per-message frames carry
+without the split; the split is present in the same frame. Task 7 should read the split and fall back to
+the sum at the 5m rate only when the split is absent.
+
+**Calibration against the harness's own math.** Applying that table to P2-a's counts reproduces the
+harness's `total_cost_usd` **exactly**:
+
+```
+simple  reported=0.0154847  recomputed(1h write)=0.0154847  recomputed(5m write)=0.0102932
+     10 in + 54 out + 6922 cw1h + 13607 cr  →  10*1 + 54*5 + 6922*2 + 13607*0.1 = 15484.7 per-MTok units
+1h-vs-5m mispricing on simple run: 0.0051915 (33.5% undercount)
+```
+
+On the **two-request** run the same table does not reproduce it (F9):
+
+```
+tool    reported=0.0121636  recomputed(1h write)=0.0111846  delta=0.0009790
+tool    delta in output-token equivalents: 195.8
+```
+
+The harness's local cost math is a *hint*, and the 8.8% gap on a two-request run is exactly why D7
+makes the gateway the authority. Task 15's A4 should pin `priceUsage` to the five-rate table, and
+Task 7's `agent_run_usage` rows come from the frames the gateway observes, never from
+`total_cost_usd`.
+
+`claude-haiku-4-5-20251001` is the only model id this slice **observed** (P2's init frame). The plan's
+default, "claude-opus-5", exists on the pricing page as *Claude Opus 5* ($5/$25), but no API model id
+for it was observed here: `GET https://api.anthropic.com/v1/models` with the host's OAuth bearer
+returns `401 {"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token"}}`
+— OAuth tokens are not raw API bearers, so that endpoint was not a usable id oracle. **[INFERENCE]**
+The dated Opus/Sonnet ids must be confirmed at Task 12's validation, which is exactly where the plan
+puts the refusal: a model absent from `MODEL_PRICING` is refused at schedule creation, never at 3am.
+
+---
+
+## Findings execution surfaced (F1–F13)
+
+| # | Finding | Status | Where it lands |
+|---|---|---|---|
+| F1 | `bun install -g` as root installs under `/root/.bun`; `/root` is `0700`, so a non-root `USER` gets `Permission denied`, and a tmpfs at `$HOME` hides the binary (`error: Script not found "claude"`) | `confirmed` | **Task 2**: `ENV BUN_INSTALL=/opt/harness` + `PATH`, verified as uid 10001. **Task 3**: the tmpfs set is compatible once the install is outside `$HOME` |
+| F2 | `-p` + `--output-format stream-json` exits 1 without `--verbose` | `confirmed` | **Task 8**'s `buildHarnessArgv` and **Task 15**'s A1 must include `--verbose` |
+| F3 | `--tools ""` yields an MCP-only tool list and removes the `ToolSearch` turn | `confirmed` | **Task 8**: pass it; keep `--disallowedTools` as defence in depth (D5, honesty rule 2) |
+| F4 | The harness sends `HEAD /api/hello` to the base URL before `POST /v1/messages?beta=true` | `confirmed` | **Task 7**: the gateway must answer or tolerate it |
+| F5 | `ANTHROPIC_AUTH_TOKEN` → `Authorization: Bearer <token>` on the model request; no API key needed | `confirmed` | **Task 7/8**: D7's lane is exactly this, and it was exercised end-to-end (P3) |
+| F6 | `mcp grant` refuses a non-HTTPS `--url` for credential delivery | `confirmed` | **Task 5**: mint against `https://${DOMAIN}/mcp`, never the internal `http://gbrain-serve:3131` |
+| F7 | Each grant retains a private credential journal; `revoke-client` does not delete it (38 existed) | `confirmed` | **Task 5 / runbook**: budget the journal growth, document the cleanup |
+| F8 | OAuth tokens are stored by `token_hash` (no id); RFC 7009 `POST /revoke` is the only per-token kill | `confirmed` | **Task 5**: the D8 decision above |
+| F9 | The harness's `total_cost_usd` matches our table on one request, is 8.8% high on two | `confirmed` | **Task 7**: the gateway meters; the frame's cost is a hint |
+| F10 | A successful MCP write has no `committed` key and can carry `status: skipped` | `confirmed` | **Task 8** (event classification), **Task 9** (the diff cannot come from gbrain's commits) |
+| F11 | `delete_page` is in `allowedOperations` but not on the granted surface | `confirmed` | **Task 8**'s `allowedToolsFor` intersects the surface |
+| F12 | Space repos have no git identity; every commit needs `-c user.name -c user.email` | `confirmed` | **Task 9/10**: `commitAs` already does this; gbrain's own commit cannot |
+| F13 | 36 credential-delivery journals from earlier slices persist under `GBRAIN_HOME` | `confirmed` | Informational for the security review and the runbook; **not touched** by this task |
+
+## What the plan got wrong
+
+Recorded here rather than patched into the plan, because each is a one-line correction to a probe or a
+flag, not a design change. Task 18 can lift them into a `> **Corrected**` blockquote if it prefers.
+
+1. **U5's shape.** "A CLI-minted gbrain token has a revocable id exposed on the grant receipt, and a CLI
+   verb revokes it" is false in both halves: no id on the receipt, and the revoke-by-id verb targets a
+   different table. D8's fallback is the mechanism.
+2. **U6's shape.** "An MCP `put_page` produces one or more git commits, with an author gbrain chooses" is
+   false: zero commits unless the Space is durability-hardened, and no identity when it is. D9 must not
+   build the diff on gbrain's commits.
+3. **U7's shape.** The proposed tmpfs set (`$HOME` + workspace) works but is not minimal: `/tmp` alone is
+   mandatory, `$HOME` is not required, and `$HOME` is actively dangerous when the harness is installed
+   under it.
+4. **D7/Task 7's price table is four rates; it needs five** (5m and 1h cache writes), or it undercounts
+   Claude Code's default 1-hour cache by 33.5% on a run like P2-a.
+5. **Task 1's own P2 command does not run** — `--verbose` is required with `-p`.
+6. **The probe table's "author gbrain chooses" wording presumes a commit exists**; the honest question
+   was "what does the write leave behind", which is a file, a page row and a chunk.
+7. **`gbrain-base.Dockerfile`'s `$NF` version gate does not transfer.** `claude --version` prints
+   `2.1.274 (Claude Code)`; a `$NF == v` test would fail on a correct build.
+
+## Probe hygiene and cleanup
+
+Nothing of this task's is left behind. The record, so the containers/images/networks can be verified
+gone:
+
+```bash
+# containers and network created by P3/P4 (all removed)
+docker rm -f slice4-sink slice4-recorder slice4-mcpstub
+docker network rm slice4-probe-net slice4-p4-net
+# images built by P1/P5 (all removed)
+docker rmi -f slice4-probe-harness:2.1.274 slice4-probe-harness-nonroot:2.1.274
+# scratch (deleted; another agent had already swept this dir mid-run — see below)
+rm -rf .brainstand-tmp/slice4
+```
+
+Dev-stack hygiene for the two live writes this task made:
+
+```bash
+# the probe page: file + page row + chunk, removed through the product contract
+docker exec brainstand-gbrain-ops-1 gbrain call delete_page '{"slug":"probe-runner/p8-probe"}' --source shared
+docker exec brainstand-gbrain-ops-1 gbrain delete probe-runner/p8-probe --purge --source shared
+docker exec brainstand-gbrain-ops-1 rmdir /srv/brain-repos/shared/probe-runner
+docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -tAc \
+  "select count(*) from pages where slug like '%p8-probe%';"   # -> 0
+# both probe OAuth clients revoked (cascade), both handoffs and journals deleted
+docker exec brainstand-gbrain-ops-1 gbrain auth revoke-client gbrain_cl_4eb1faab…8d8b7
+docker exec brainstand-gbrain-ops-1 gbrain auth revoke-client gbrain_cl_732507c0…3a158a
+docker exec brainstand-gbrain-ops-1 rm -f /tmp/probe-p6-creds.json /tmp/probe-p6b-creds.json /tmp/mcp-call.ts
+docker exec brainstand-gbrain-ops-1 rm -f /srv/gbrain-home/.gbrain/credential-deliveries/gbrain_cl_4eb1faab…8d8b7.json \
+                                              /srv/gbrain-home/.gbrain/credential-deliveries/gbrain_cl_732507c0…3a158a.json
+docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -tAc \
+  "select client_name from oauth_clients where client_name like 'probe-runner%';"   # -> (none)
+```
+
+No existing dev-stack container, volume or row was disturbed. The 36 pre-existing credential journals
+(F13) and the pre-existing Space fixture commits were deliberately **not** touched.
+
+**Mid-run collision, disclosed:** a sibling agent ran `rm -rf .brainstand-tmp/slice4` while this task was
+in flight, destroying the raw capture files for P1–P5 (`Task14UpgradeLane` confirmed the sweep and
+apologised). Every command and output above is unaffected — they are pasted from this run's own captured
+transcript, not from those files — but the on-disk captures for P1–P5 no longer exist, so they cannot be
+re-inspected. The convention going forward is a private subdir per agent
+(`.brainstand-tmp/slice4/<agent-id>/`).
+
+## Money spent by this task
+
+Real API spend was kept to the two P2 arms and the one P4-c arm — the only runs that needed a real
+model — and every one used `--model haiku`:
+
+| Run | Reported cost |
+|---|---|
+| P2-a, `say hi` (real API) | `$0.0154847` |
+| P2-b, forced `Read` (real API) | `$0.0121636` |
+| P4-c, real MCP tool call (real API) | `$0.0215045` |
+| **Total** | **$0.0491529** |
+
+Everything else (P3, P5, and the P4 header arms) ran against the local recorder with **zero** real
+tokens. The `fake` key used in the P3 control arm is not real and could not have spent anything.
+
+**Credential note.** The `ANTHROPIC_API_KEY` present in this host's environment is **invalid**: the
+direct call `fetch("https://api.anthropic.com/v1/models", {headers:{"x-api-key": …}})` returns
+`401 {"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}`,
+and so does the same call from the host shell. The real API runs above therefore used the host's Claude
+Code subscription credential instead. **This matters to Gate C**, which is budgeted to spend real money:
+the slice currently has no working API key, and Task 7's `readSecret(orgId,'anthropic_api_key')` path
+(U12, first caller) cannot be exercised end-to-end until one is stored. This is the single largest
+open item this task hands to the orchestrator.

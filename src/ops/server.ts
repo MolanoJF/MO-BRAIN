@@ -12,6 +12,7 @@ import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import {
   patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile, readSupervisorAuditTail,
+  deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { commitAs, diffRange, inspectRepos, revertRange } from './git.ts';
@@ -160,6 +161,16 @@ Bun.serve({
         const path = (body as { path?: unknown }).path;
         const credentials = await takeGrantCredentialsFile(path);
         return json({ credentials });
+      }
+
+      // F7: a revoked grant's private credential journal is the last copy of a
+      // dead secret, and revoking the client does not remove it. The request
+      // carries a client id, never a path.
+      if (url.pathname === '/fileplane/delete-credential-journal') {
+        const clientId = typeof body === 'object' && body !== null && 'clientId' in body
+          ? body.clientId
+          : undefined;
+        return json(await deleteCredentialDelivery(clientId));
       }
 
       // Actor is identity data fed to `git -c`; never interpolated into a shell (G2).

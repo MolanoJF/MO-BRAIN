@@ -1,18 +1,46 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
-import { callOps } from './opsClient.ts';
+import { callOps, deleteCredentialJournal, takeGrantCredentials } from './opsClient.ts';
+import { storeSecret } from './secrets.ts';
 import type { Role } from './rbac.ts';
 import {
   clientName,
   compileConnection,
   diffCompiled,
+  GRANT_PROFILES,
   type CompiledConnection,
+  type GrantProfileId,
 } from '../contracts/compile.ts';
 
 /** Ops-side --credentials-out path. Claim takes (reads+deletes) this file once. */
 export function grantCredentialsOutPath(connectionId: string): string {
   return `/srv/gbrain-home/.creds-${connectionId}.json`;
+}
+
+/**
+ * D8: the Connection's SECOND client — the server-side one, provisioned from the
+ * same `compileConnection` output as the member's. Suffixed from the member's
+ * deterministic name so `auth clients` shows the pair together; unique per org by
+ * construction because the member name is (`connections_org_client_name_uq`).
+ */
+export function serverClientName(memberClientName: string): string {
+  return `${memberClientName}-server`;
+}
+
+/** Where the server client's secret lives: envelope-encrypted, never on a row. */
+export function serverClientSecretName(connectionId: string): string {
+  return `connection:${connectionId}:server_client`;
+}
+
+/** Ops-side handoff for the server client. Taken once, then deleted (S2/S3c). */
+export function serverCredentialsOutPath(connectionId: string): string {
+  return `/srv/gbrain-home/.creds-${connectionId}-server.json`;
+}
+
+/** Ops-side handoff for one RUN's client. Suffix is a short random hex tag. */
+export function runCredentialsOutPath(suffix: string): string {
+  return `/srv/gbrain-home/.creds-run-${suffix}.json`;
 }
 
 export type ConnectionInput = {
@@ -83,6 +111,17 @@ export async function provisionConnection(
 
   if (existing?.state === 'active' && existing.gbrainClientId) {
     const clientId = existing.gbrainClientId;
+    // D8: the pair stays identical through a rescope, and the server client goes
+    // first — if it fails, nothing the member's own client depends on has moved
+    // yet, so a failure leaves one state rather than two.
+    if (existing.serverClientId) {
+      const rs = await callOps(
+        'auth.rescopeClient',
+        rescopeParams(existing.serverClientId, compiled),
+        { json: true },
+      );
+      if (!rs.ok) throw new Error(`auth.rescopeClient (server client) failed (exit ${rs.exitCode})`);
+    }
     const r = await callOps(
       'auth.rescopeClient',
       rescopeParams(clientId, compiled),
@@ -91,7 +130,7 @@ export async function provisionConnection(
     if (!r.ok) throw new Error(`auth.rescopeClient failed (exit ${r.exitCode})`);
     await persistCompiled(existing.id, input, name, compiled);
     await audit(input.organizationId, actor, 'connection.rescope', existing.id, {
-      clientId, clientName: name,
+      clientId, serverClientId: existing.serverClientId, clientName: name,
       writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
       profile: compiled.profile,
     });
@@ -109,19 +148,75 @@ export async function provisionConnection(
   );
   if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode})`);
   const gbrainClientId = grantedClientId(r.json);
+
+  // D8: the server-side client, alongside the member's. Same compiler output —
+  // same write Space, same federatedRead, same fence, same profile — because it
+  // is the same `compiled`. Its secret goes to `secrets`, not to a row.
+  let serverClientId: string;
+  try {
+    serverClientId = await provisionServerClient(
+      connectionId, input.organizationId, name, input.harness, compiled,
+    );
+  } catch (e) {
+    // Half a Connection is worse than none: the member client we just minted
+    // would be live with no row and no audit naming it. Revoke it and rethrow,
+    // so a retry re-mints both (never --reissue, never a duplicate name).
+    try {
+      await callOps('auth.revokeClient', { clientId: gbrainClientId });
+    } catch {
+      // Ops may be unreachable; the throw below is the operator's signal.
+    }
+    throw e;
+  }
+
   await persistCompiled(connectionId, input, name, compiled, {
     gbrainClientId,
+    serverClientId,
     state: 'active',
     provisionedAt: new Date(),
   });
   await audit(input.organizationId, actor, 'connection.provision', connectionId, {
-    clientId: gbrainClientId, clientName: name,
+    clientId: gbrainClientId, serverClientId, clientName: name,
     writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
     profile: compiled.profile,
   });
   // Grant JSON is the redacted receipt (client_id, not client_secret). The
   // secret stays in the ops-side --credentials-out file; we do not cat it (S2).
   return { connectionId, credentials: r.json };
+}
+
+/**
+ * D8: mint the Connection's server-side client and put its secret where secrets
+ * live. The grant's own private journal is deleted here — the envelope-encrypted
+ * copy in `secrets` is the only one we keep (F7: revocation never removes the
+ * journal, and a plaintext credential that outlives its purpose is a leak).
+ */
+async function provisionServerClient(
+  connectionId: string,
+  organizationId: string,
+  memberClientName: string,
+  harness: string,
+  compiled: CompiledConnection,
+): Promise<string> {
+  const name = serverClientName(memberClientName);
+  const credentialsOut = serverCredentialsOutPath(connectionId);
+  const r = await callOps(
+    'mcp.grant',
+    grantParams(name, harness, compiled, credentialsOut),
+    { json: true },
+  );
+  if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode})`);
+  const clientId = grantedClientId(r.json);
+
+  const handoff = await takeGrantCredentials(credentialsOut);
+  if (!handoff || typeof handoff !== 'object' || !('client_secret' in handoff)
+    || typeof handoff.client_secret !== 'string' || handoff.client_secret.length === 0) {
+    throw new Error('server client handoff carried no client_secret');
+  }
+  // S3b: envelope-encrypted at rest, under the same name every reader would use.
+  await storeSecret(organizationId, serverClientSecretName(connectionId), JSON.stringify(handoff));
+  await deleteCredentialJournal(clientId);
+  return clientId;
 }
 
 /** Admin POST /api/connections: persist pending, provision later at claim (A3). */
@@ -152,6 +247,18 @@ export async function revokeConnection(connectionId: string, actor: string): Pro
     // G2/V15: positional clientId, no --json, no --dry-run, no --reissue.
     const r = await callOps('auth.revokeClient', { clientId: row.gbrainClientId });
     if (!r.ok) throw new Error(`auth.revokeClient failed (exit ${r.exitCode})`);
+    // F7: the grant's private journal survives the revoke; it is now the last
+    // copy of a dead secret, so delete it (and the server client's, below).
+    await deleteCredentialJournal(row.gbrainClientId);
+  }
+
+  if (row.serverClientId) {
+    // D8: both clients die with the Connection. A failure here is thrown, not
+    // swallowed: the row is not yet marked revoked, so the operator sees a
+    // half-revoked Connection instead of a silent one-client survivor.
+    const r = await callOps('auth.revokeClient', { clientId: row.serverClientId });
+    if (!r.ok) throw new Error(`auth.revokeClient (server client) failed (exit ${r.exitCode})`);
+    await deleteCredentialJournal(row.serverClientId);
   }
 
   // Free the live A4 name so the same membership+write Space can be re-granted.
@@ -205,6 +312,7 @@ export async function compensateGrantedConnection(
       state: 'pending',
       clientName: liveClientName,
       gbrainClientId: null,
+      serverClientId: null,
       provisionedAt: null,
       revokedAt: null,
     })
@@ -224,7 +332,11 @@ function compileFrom(input: ConnectionInput, write: SpaceRow, reads: SpaceRow[])
   );
 }
 
-async function compileStored(row: ConnectionRow, role: Role): Promise<CompiledConnection> {
+async function compileStored(
+  row: ConnectionRow,
+  role: Role,
+  tokenTtl?: number,
+): Promise<CompiledConnection> {
   const readIds = asStringArray(row.readSpaceIds);
   const { write, reads } = await loadSpaces(row.organizationId, row.writeSpaceId, readIds);
   const prefixes = Array.isArray(row.boundSlugPrefixes) ? row.boundSlugPrefixes as string[] : undefined;
@@ -234,10 +346,60 @@ async function compileStored(row: ConnectionRow, role: Role): Promise<CompiledCo
     reads.map((s) => ({ sourceId: s.sourceId })),
     {
       boundSlugPrefixes: prefixes,
-      tokenTtl: row.tokenTtl,
+      tokenTtl: tokenTtl ?? row.tokenTtl,
       budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
     },
   );
+}
+
+/**
+ * The inverse of compile.ts's `ROLE_TO_PROFILE`, for the one caller that must
+ * compile WITHOUT a role: the run lane. The connection row stores the compiled
+ * profile — the scope the member's own client carries — and reading the member's
+ * current role instead would silently re-scope a run whenever that role changed
+ * after the grant. Only the three profiles a Connection can actually hold are
+ * listed; `operator`, `delegating-agent` and `full` are not reachable from
+ * `compileConnection`, so a row carrying one is a loud error, not a guess.
+ */
+const PROFILE_TO_ROLE: Partial<Record<GrantProfileId, Role>> = {
+  'memory-reader': 'viewer',
+  'memory-writer': 'member',
+  'coding-agent': 'admin',
+};
+
+/** The row stores `profile` as text; this narrows it to the known ids. */
+function isGrantProfileId(value: string): value is GrantProfileId {
+  return (GRANT_PROFILES as readonly string[]).includes(value);
+}
+
+/**
+ * D8 (Task 5): the compiled scoping one RUN's gbrain client gets. The
+ * Connection's stored scoping verbatim — same write Space, same federated read,
+ * same fence, same profile, through `compileStored`, so there is no second
+ * compiler — with the RUN's TTL instead of the member's. `compileConnection`
+ * clamps it to gbrain's own 60..7_776_000 grant bounds.
+ *
+ * A Connection that is not `active` has no business minting a brain credential,
+ * so this refuses rather than relying on the caller's precondition.
+ */
+export async function runScopeFor(connectionId: string, ttlSeconds: number): Promise<{
+  organizationId: string;
+  membershipId: string;
+  harness: string;
+  name: string;
+  compiled: CompiledConnection;
+}> {
+  const row = await loadConnection(connectionId);
+  if (row.state !== 'active') throw new Error(`connection ${connectionId} is not active`);
+  const role = isGrantProfileId(row.profile) ? PROFILE_TO_ROLE[row.profile] : undefined;
+  if (!role) throw new Error(`connection ${connectionId} has profile ${row.profile}, which no role compiles to`);
+  return {
+    organizationId: row.organizationId,
+    membershipId: row.membershipId,
+    harness: row.harness,
+    name: row.clientName,
+    compiled: await compileStored(row, role, ttlSeconds),
+  };
 }
 
 async function loadSpaces(orgId: string, writeSpaceId: string, readSpaceIds: string[]) {
@@ -292,7 +454,8 @@ async function assertNoCollision(orgId: string, name: string, exceptId?: string)
   }
 }
 
-function grantParams(
+/** One argv builder for every `mcp.grant` call (member, server, per-run). */
+export function grantParams(
   name: string,
   harness: string,
   compiled: CompiledConnection,
@@ -335,7 +498,8 @@ export function mcpUrl(): string {
   return base.endsWith('/mcp') ? base : `${base}/mcp`;
 }
 
-function grantedClientId(json: unknown): string {
+/** The client id in an `mcp.grant` receipt (pin shape; L6/L7 parsers). */
+export function grantedClientId(json: unknown): string {
   if (!json || typeof json !== 'object') throw new Error('mcp.grant json did not include a client id');
   const body = json as Record<string, unknown>;
   const grant = body.grant && typeof body.grant === 'object' ? body.grant as Record<string, unknown> : undefined;
@@ -386,7 +550,7 @@ async function persistCompiled(
   input: ConnectionInput,
   name: string,
   compiled: CompiledConnection,
-  extra: { gbrainClientId?: string; state?: string; provisionedAt?: Date } = {},
+  extra: { gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date } = {},
 ): Promise<void> {
   await getDb().update(schema.connections).set({
     writeSpaceId: input.writeSpaceId,
@@ -407,6 +571,7 @@ async function revokeSnapshot(row: ConnectionRow): Promise<Record<string, unknow
     const { write, reads } = await loadSpaces(row.organizationId, row.writeSpaceId, readIds);
     return {
       clientId: row.gbrainClientId,
+      serverClientId: row.serverClientId,
       clientName: row.clientName,
       writeSpace: write.sourceId,
       readSpaces: reads.map((s) => s.sourceId),
@@ -415,6 +580,7 @@ async function revokeSnapshot(row: ConnectionRow): Promise<Record<string, unknow
   } catch {
     return {
       clientId: row.gbrainClientId,
+      serverClientId: row.serverClientId,
       clientName: row.clientName,
       writeSpace: row.writeSpaceId,
       readSpaces: readIds,
