@@ -35,7 +35,10 @@ every control-plane command works there. The control plane holds neither.
 ```bash
 docker compose -f compose/docker-compose.yml exec gbrain-ops gbrain doctor --json
 ```
-Exit 0 = no blockers. Non-zero = read the `blockers` array.
+Exit 0 does **not** mean healthy: `status: "warnings"` exits 0, and *"this binary is behind the
+database schema"* is a warn. Read `checks[]` — `filter(c => c.status !== 'ok')` — and `top_issues`.
+The report has no `blockers` key; the only `blockers` in gbrain's doctor belongs to the unrelated
+`--locks` diagnostic.
 
 **The console cannot reach the ops sidecar**
 ```bash
@@ -78,8 +81,12 @@ incident notes; the console cannot show it to you.
   duplicate-scheduler bug depending on the base image. The product owns
   scheduling.
 - **Never run `gbrain upgrade` or a self-upgrade** by hand. The product owns
-  the upgrade lane; an in-container self-upgrade desynchronizes the image from
-  the running binary. `GBRAIN_SELF_UPGRADE_MODE=off` is set for this reason.
+  the upgrade lane: `bun run scripts/upgrade.ts` on the host, with a snapshot in
+  front of it and a one-command rollback behind it — see
+  [`upgrade.md`](./upgrade.md). An in-container self-upgrade desynchronizes the
+  image from the running binary and leaves nothing to roll back to.
+  `GBRAIN_SELF_UPGRADE_MODE=off` is set for this reason, and
+  `scripts/lint-forbidden.ts` fails the build on a moving pin.
 - **Never publish a host port for `gbrain-serve` or `postgres`.** `gbrain-serve`
   runs with `GBRAIN_HTTP_TRUST_PROXY=1`; making it directly reachable lets
   clients spoof `X-Forwarded-For`.
