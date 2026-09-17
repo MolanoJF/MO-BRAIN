@@ -55,3 +55,21 @@ export type DiffSummary = {
   /** Mirrors `write.concurrentWriters` — D9's name for the console's hedge. */
   concurrentWriters: boolean;
 };
+
+/**
+ * D11's failure vocabulary, and the five values the CHECK
+ * `agent_failure_class_valid` on `agent_runs.failure_class` permits (Task 4).
+ * The two are the same list on purpose: `classifyAgentExit` returns this type,
+ * the column stores it verbatim, and a renderer reads it rather than
+ * reconstructing it (L14 — Slice 3's mistake).
+ *
+ * `null` is a SUCCESS, not a sixth class: the column is nullable because a
+ * failure class is a diagnosis, and a run that did not fail has none. `null`
+ * has no SQL spelling in the CHECK above, so `is null` is the whole of it.
+ */
+export type FailureClass =
+  | 'budget_exceeded'
+  | 'agent_failed'
+  | 'infra_failed'
+  | 'timeout'
+  | 'refused';

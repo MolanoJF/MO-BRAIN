@@ -6,6 +6,7 @@ import {
   holdBadge, hhmm,
 } from '../../src/console/pages/Schedules.tsx';
 import { api, ApiError, scheduleApi } from '../../src/console/api.ts';
+import { AGENT_ALERT_KINDS } from '../../src/agent/alerts.ts';
 
 const STATES = [
   'pending', 'running', 'succeeded', 'failed', 'blocked', 'cancelled',
@@ -259,6 +260,26 @@ describe('alerts are unmissable and acknowledgeable', () => {
   test('an unknown alert kind is still rendered as words, never as an enum', () => {
     expect(alertLabel('some_new_alert')).not.toContain('_');
     expect(alertTone('some_new_alert')).not.toBe('ok');
+  });
+
+  // Task 11's seam. `schedule_alerts.kind` is free text with no CHECK, so the
+  // only thing standing between a new kind and a shrug is the hand-maintained
+  // tables in this page — an unregistered kind falls through to the warning
+  // tone and the de-underscored label, which reads as an enum and hides the
+  // money.
+  test('every agent alert kind the lane can raise is registered by hand', () => {
+    for (const kind of Object.values(AGENT_ALERT_KINDS)) {
+      expect(alertLabel(kind)).not.toBe(kind);
+      expect(alertLabel(kind)).not.toBe(kind.replaceAll('_', ' '));
+      expect(alertLabel(kind)).not.toContain('_');
+    }
+  });
+
+  test('the two agent alerts that stopped work are danger, not the warning default', () => {
+    expect(alertTone(AGENT_ALERT_KINDS.budgetExceeded)).toBe('danger');
+    expect(alertTone(AGENT_ALERT_KINDS.runFailed)).toBe('danger');
+    // D11 says "never retry" for both, so neither can be a shrug.
+    expect(alertTone('agent_budget_exceeded')).not.toBe('warning');
   });
 });
 

@@ -295,6 +295,13 @@ export function holdBadge(
 /**
  * Requirement 7. A rejected push, a revoked Connection and an expired lease pin
  * above everything else — they are the four that mean work silently stopped.
+ *
+ * Slice 4's agent kinds are deliberately NOT pinned, and the decision is here
+ * so it is not re-litigated: each one has a run row on the Schedules page and a
+ * detail view on Runs, so it is never silent. `agent_budget_exceeded` and
+ * `agent_run_failed` carry the danger tone below instead, and D12's
+ * runner-less deployment (a supported configuration) must not have a banner
+ * pinned at the top of every schedule page.
  */
 const PINNED_ALERT_KINDS = [
   'push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked',
@@ -312,6 +319,20 @@ const ALERT_LABEL: Record<string, string> = {
   overlap_queue_full: 'Overlap queue full — queued runs were dropped',
   overlap_killed_previous: 'Overlapping run cancelled (kill_previous)',
   report_write_failed: 'Report write failed — the run has no report',
+  // Slice 4, Task 11. The five agent kinds are registered here by hand, and
+  // `test/unit/console-schedules.test.ts` fails if one is missing: an
+  // unregistered kind falls through to the de-underscored fallback below and
+  // reads as an enum instead of a reason.
+  agent_budget_exceeded:
+    'Agent run stopped — the budget cap for this run was reached',
+  agent_run_failed:
+    'Agent run failed — the harness exited non-zero or its stream carried error frames',
+  agent_read_space_moved:
+    'A read Space moved under an agent run — read isolation is broken, so the run is a finding',
+  runner_never_seen:
+    'Agent runner never claimed — agent schedules cannot run until one connects',
+  harness_pin_mismatch:
+    'Harness version mismatch — a runner refused the claim rather than run an unknown binary',
 };
 
 export function alertLabel(kind: string): string {
@@ -327,6 +348,12 @@ const ALERT_TONE: Record<string, Tone> = {
   lease_expired: 'danger',
   connection_revoked: 'danger',
   report_write_failed: 'danger',
+  // Slice 4, Task 11: the two agent kinds that mean work stopped — the money
+  // ran out, or the run failed. A `warning` here would be a shrug at a run the
+  // operator is paying for. The other three agent kinds are informational and
+  // take the default.
+  agent_budget_exceeded: 'danger',
+  agent_run_failed: 'danger',
   overlap_queue_full: 'warning',
   overlap_killed_previous: 'warning',
   run_cancelled: 'warning',
