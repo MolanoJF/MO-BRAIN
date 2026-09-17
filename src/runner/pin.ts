@@ -15,6 +15,18 @@ import type { PinVerification } from '../contracts/pin.ts';
 export const HARNESS_PIN = process.env.HARNESS_VERSION ?? '2.1.274';
 
 /**
+ * The harness executable. The image installs it at `/opt/harness/bin/claude` and
+ * puts that on `PATH` (Task 2), so the plain name is the production value.
+ *
+ * It is a named knob rather than a literal in two files because the version
+ * self-check below must read the SAME binary the runner spawns: a check that
+ * verifies a different file than the one that runs is decoration, not a pin.
+ * `HARNESS_BIN` is also what lets the loop be exercised against a stand-in
+ * harness without rebuilding the image.
+ */
+export const HARNESS_BIN = process.env.HARNESS_BIN ?? 'claude';
+
+/**
  * Same shape, and the same null-is-not-false convention, as the gbrain pin's
  * `PinVerification`: `observed: null` means "unverifiable", never "mismatched".
  */
@@ -42,7 +54,7 @@ function parseHarnessVersion(stdout: string): string | null {
 async function readHarnessVersion(): Promise<string> {
   // argv array, never a shell string (G2) -- the same rule `claude` now shares
   // with `gbrain`.
-  const proc = Bun.spawn(['claude', '--version'], { stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawn([HARNESS_BIN, '--version'], { stdout: 'pipe', stderr: 'pipe' });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   if (exitCode !== 0) throw new Error(`claude --version exited ${exitCode}`);
   return stdout;
