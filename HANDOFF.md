@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Written 2026-09-15; updated 2026-09-16. **Slice 0, Slice 1 and Slice 3 are complete on `main`.** **Slice 2 is complete on `slice-2-members-connections` (not yet merged).** **Slice 3.5 is complete on `slice-3.5-upgrades` (not yet merged).** **Next is Slice 4** — its plan is not yet written.
+Written 2026-09-15; updated 2026-09-17. **Slices 0, 1, 2, 3 and 3.5 are complete on `main`** — one branch, `main`; Slice 3.5 merged at `202a658`. **Next is Slice 4** — its plan is not yet written.
 
 This file is the cold-start entry point. Historical mid-task resume notes (including “resume at Task 3 re-review” and branch `slice-1-deploy-one-brain`) are obsolete and were removed.
 
@@ -22,9 +22,9 @@ The strategy rests on one bet: **gbrain is a pinned upstream dependency driven o
 |---|---|
 | 0 — prove the CLI lane | **complete** on `main` |
 | 1 — deploy + one brain + one admin | **complete** on `main` (merged 2026-09-15, HEAD `77a18d1` at merge) |
-| 2 — members + connections | **complete** on `slice-2-members-connections` (Gates A/B/C green; not yet merged) |
+| 2 — members + connections | **complete** on `main` (Gates A/B/C green) |
 | 3 — scheduler, `gbrain_command` only | **complete** on `main` (Gates A/B/C green) |
-| 3.5 — deterministic upgrades | **complete** on `slice-3.5-upgrades` (Gates A/B/C green; not yet merged) |
+| 3.5 — deterministic upgrades | **complete** on `main` (Gates A/B/C green; merged 2026-09-17, HEAD `202a658` at merge) |
 
 Do **not** re-execute the Slice 0, Slice 1, Slice 2, Slice 3, or Slice 3.5 plan/gate work. Those are historical records.
 
@@ -69,7 +69,7 @@ Slice 0 contract stack: `bun run stack:up` / `stack:down`.
 
 | | |
 |---|---|
-| Branch | `slice-3.5-upgrades` (Slice 3.5 complete, not yet merged); `main` holds through Slice 3; Slice 2 still unmerged on `slice-2-members-connections` |
+| Branch | `main` only — Slices 0–3.5 all merged (Slice 3.5 at `202a658`) |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
 | Slice 0 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md`](docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md) |
 | Slice 1 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md`](docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md) |

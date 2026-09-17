@@ -4,7 +4,7 @@
 
 **Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical)
 **Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3.
-**Branch:** `main` — Slice 3's implementation is committed there; `test/e2e/slice3.e2e.test.ts` and the Slice 3 docs were still untracked at close. Slice 2 remains complete on `slice-2-members-connections`, not yet merged. **Slice 3 is complete — all six Task 19 Step 5 commands green** (`test/unit` 292/0, `test/integration` 255+1 skip/0, `test/contract` 69/0, `test/e2e` 54/0 run twice including from a cold stack, `lint:forbidden` and `tsc --noEmit` clean).
+**Branch:** `main` — the only branch. Slices 0–3.5 are all merged into it (Slice 3.5 at `202a658`). **Slice 3.5 is complete — all six verification commands green** (`test/unit` 421/0, `test/integration` 314+1 skip/0, `test/contract` 83/0, `test/e2e` 77/0 twice consecutively from the 0.50.5.0 state, `lint:forbidden` and `tsc --noEmit` clean).
 
 ---
 
@@ -81,7 +81,7 @@ Carried into Slice 2 (not blockers for Slice 1):
 
 ## Slice 2 — COMPLETE ✅
 
-Members + Connections on `slice-2-members-connections`. Not yet merged to `main`.
+Members + Connections. **Merged to `main`** (the `slice-2-members-connections` branch no longer exists; its code and tests are in `main`).
 
 | Gate | Result |
 |---|---|
@@ -351,13 +351,27 @@ Environment recorded at the earlier pass's close (the final e2e runs then cycled
 
 ---
 
-## Slice 3.5 — COMPLETE ✅ (with one family-e2e finding, recorded)
+## Slice 3.5 — COMPLETE ✅ (merged to `main`)
 
-Deterministic upgrades, on branch `slice-3.5-upgrades` (not yet merged). All three gates are green, the
-upgrade lane is live on the dev stack at **0.50.5.0**, and the six-command verification is recorded
-below — **five commands green, `bun test --parallel=1 test/e2e` red (68 pass / 9 fail)** for two
-state/order reasons that are findings, not passes. The red is root-caused in
-[`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md) row **F7**.
+Deterministic upgrades, **merged to `main`** (fast-forward from `slice-3.5-upgrades`, tip `202a658`;
+feature branch deleted). All three gates are green, the upgrade lane is live on the dev stack at
+**0.50.5.0**, and **all six verification commands are green** — the family e2e is **77 pass / 0 fail**,
+proven twice consecutively from the 0.50.5.0 state the gate itself leaves behind.
+
+The first six-command run was red (68 pass / 9 fail) and the red was real. Three findings came out of it
+and were closed in the same slice, all recorded in
+[`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md):
+
+- **F7** — `capability_snapshots` had no product writer, so the drift panel would 400 on any fresh
+  deployment; and the fixture's own residue made preflight refuse `NO_BASELINE` on the real leg. The run
+  now captures both pins into the run directory and the reconciler imports them; C6 repairs the residue
+  its fixture caused. `captureDoctorBaseline`'s refusal is untouched.
+- **F8** — the digest's `filePlane` part hashed gbrain's own runtime state, so a correct rollback could
+  never compare equal.
+- **F9** — the gate was not re-runnable: starting from 0.50.5.0 twelve tests cascaded off `SAME_VERSION`,
+  and an abort between the fixture and its undo left the live brain fixtured. `normalizeToFromPin()`
+  now establishes the entry state, and the fixture is paired with its undo in a `try/finally` plus an
+  `afterAll` backstop.
 
 | Gate | Result |
 |---|---|
@@ -439,9 +453,10 @@ capability-snapshot half of Task 8 is unexercised by the product, and the family
 
 ### Carried into Slice 4
 
-- **Capability snapshots are not recorded by the upgrade lane** (F7). `recordCapabilitySnapshot` exists
-  and the drift route reads it, but nothing calls it during a run; wire it (or state that the drift
-  panel is test-fed only) before the multi-tenant upgrade story depends on drift.
+- **Capability snapshots ARE now recorded by the upgrade lane** (F7, closed). `runUpgrade` captures the
+  from-pin before the digest and the to-pin after resume into the run directory, and `reconcileJournals`
+  imports both into `capability_snapshots`; proven from an empty table. What remains for Slice 4 is the
+  multi-tenant story, not the writer.
 - **No schema-version surface exists in any published contract** (U6), so the ledger records the binary
   version plus doctor's `schema_version` check **status** — less than it should. Filed as an upstream
   contribution, never scraped.
@@ -474,4 +489,5 @@ capability-snapshot half of Task 8 is unexercised by the product, and the family
 - 2026-09-15 — Slice 3 implemented on `main`. Gates A (18 pass) and B+C (25 pass, twice) green. **Task 19 Step 5 RED — 3 of 6 commands fail:** `bun test test/unit` without an exported `CONTROL_DATABASE_URL` (F1), `test/integration/auth.test.ts` stale table allowlist (F2), `test/e2e/restore.e2e.test.ts` post-restore `doctor` exit code (F3, cause open). Recorded with raw output; no code changed, nothing marked complete.
 - 2026-09-16 — Task 19 Step 5 re-run against the three fixes. **F1 and F2 are fixed; the file-plane half of F3 is fixed** (`scripts/restore.ts` re-materializes the pin before the services boot — the restore e2e now clears `report.ok` and `doctorExitCode` and fails one assertion later, at its unqualified `gbrain search`, which is a search-scope artifact and not restored-data loss; raw evidence in the Slice 3 section). `lint:forbidden`, `tsc --noEmit`, `test/unit` (292/0), `test/integration` (255+1 skip/0) green; `test/contract` failed once (A7 `sync` exit 1, suspect stack state) and green on two re-runs (69/0); `bun test --parallel=1 test/e2e` red in both runs (52/2 of 54) — the Slice 1 restore search assertion and one Slice 1 routing 502, the latter a readiness race after the restore file's `down -v`. **Slice 3 is not marked complete**; the Slice 3.5 entry gate is unresolved. **Superseded by the final green run in the entry below.**
 - 2026-09-16 — Task 19 Step 5 final run, **all six commands green**: `lint:forbidden` + `tsc --noEmit` clean, `test/unit` 292/0, `test/integration` 255 pass + 1 skip (win32 0600 opt-out) / 0, `test/contract` 69/0 (18 in the slice-3 file), `bun test --parallel=1 test/e2e` 54/0 across 4 files — twice, the second from a cold stack. The two remaining reds were closed by **F4** (the wizard now passes `federated: true` at both `sources.add` call sites — a Slice 1/2 product gap the exit gate exposed, `src/control/routes/wizard.ts`) and **F5** (`slice1.e2e`'s `beforeAll` now waits for `/.well-known/gbrain` 200 as well as the console health — `test/e2e/slice1.e2e.test.ts`). Both plan copies carry matching `Corrected 2026-09-16` blockquotes and are byte-identical. **SLICE 3 COMPLETE.** Next: Slice 3.5.
-- 2026-09-16 — Slice 3.5 executed on `slice-3.5-upgrades`. Gate A `test/contract/upgrade.contract.test.ts` 14/0, Gate B+C `test/e2e/slice35.e2e.test.ts` 23/0, and the six-command verification run: `lint:forbidden` + `tsc --noEmit` clean, `test/unit` 421/0, `test/integration` 314+1 skip/0, `test/contract` 83/0, `test/e2e` **68 pass / 9 fail** (B9 + C4 + the C6–C12 cascade; root-caused to F7 — `capability_snapshots` has no product writer, and C6's preflight needs a healthy `doctor` after the failure leg). The dev stack is left healthy on **0.50.5.0** (`/api/health` 200, `pin.matches: true`, `gbrain-ops` binary `gbrain 0.50.5.0`). Three defects fixed during the slice: F3 the nested journal path, F4 the rollback busy loop, F5 the Bun `.env` pin shadow. Findings: [`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md); runbook: [`docs/runbooks/upgrade.md`](../../runbooks/upgrade.md). **SLICE 3.5 COMPLETE** (with the family-e2e finding carried). Next: Slice 4.
+- 2026-09-16 — Slice 3.5 executed on `slice-3.5-upgrades`. Gate A `test/contract/upgrade.contract.test.ts` 14/0, Gate B+C `test/e2e/slice35.e2e.test.ts` 23/0, and the six-command verification run: `lint:forbidden` + `tsc --noEmit` clean, `test/unit` 421/0, `test/integration` 314+1 skip/0, `test/contract` 83/0, `test/e2e` **68 pass / 9 fail** (B9 + C4 + the C6–C12 cascade; root-caused to F7 — `capability_snapshots` has no product writer, and C6's preflight needs a healthy `doctor` after the failure leg). The dev stack is left healthy on **0.50.5.0** (`/api/health` 200, `pin.matches: true`, `gbrain-ops` binary `gbrain 0.50.5.0`). Three defects fixed during the slice: the nested journal path the reconciler could never read, the rollback busy loop (a circular dynamic import re-entering the CLI entry), and Bun's start-time environment snapshot shadowing the pin the swap had just rewritten. Findings: [`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md); runbook: [`docs/runbooks/upgrade.md`](../../runbooks/upgrade.md). Next: Slice 4.
+- 2026-09-17 — Slice 3.5 closed. The 68/9 red was real and is fixed: **F7** (the run now captures both pins' capability and the reconciler imports them; C6 repairs the residue its own fixture caused), **F8** (the digest's `filePlane` no longer hashes gbrain's runtime state, so a correct rollback compares equal again), **F9** (the gate normalizes its entry state and pairs the fixture with its undo in `try/finally` + `afterAll`). **All six commands green**, and `bun test --parallel=1 test/e2e` is **77 pass / 0 fail twice consecutively** from the 0.50.5.0 state the gate itself leaves. Fast-forwarded to `main` (`202a658`); feature branch deleted. **SLICE 3.5 COMPLETE.** Next: Slice 4.

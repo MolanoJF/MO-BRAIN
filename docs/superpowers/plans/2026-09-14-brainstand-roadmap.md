@@ -89,7 +89,7 @@ Do not re-litigate these. Each was read out of the source, not inferred.
 
 ## Environment prerequisites
 
-**Current (2026-09-16):** Slice 0–3 are complete on `main`; Slice 2 is complete but unmerged on `slice-2-members-connections`; **Slice 3.5 is complete on `slice-3.5-upgrades`** (Gates A/B/C green; not yet merged). Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 4 — its plan is not yet written.**
+**Current (2026-09-17):** Slices 0–3.5 are complete and merged on `main`, which is the **only** branch (Slice 3.5 merged at `202a658`). Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 4 — its plan is not yet written.**
 
 The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
 
@@ -185,7 +185,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 3.5 — Deterministic upgrades
 
-**Plan:** [`2026-09-16-slice-3.5-deterministic-upgrades.md`](./2026-09-16-slice-3.5-deterministic-upgrades.md) — **COMPLETE** on `slice-3.5-upgrades` (Gates A/B/C green; not yet merged). Findings: [`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md). Runbook: [`docs/runbooks/upgrade.md`](../../runbooks/upgrade.md).
+**Plan:** [`2026-09-16-slice-3.5-deterministic-upgrades.md`](./2026-09-16-slice-3.5-deterministic-upgrades.md) — **COMPLETE** on `main` (merged 2026-09-17, HEAD `202a658`; Gates A/B/C green). Findings: [`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md). Runbook: [`docs/runbooks/upgrade.md`](../../runbooks/upgrade.md).
 
 **Why pulled forward:** with per-tenant stacks, reaching 20 installs on v0.50 while upstream is at v0.56 creates a backlog that cannot be cleared by hand. **This is the actual moat over the 90-minute tutorial.**
 
@@ -224,7 +224,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 **Why last of the build stages:** highest risk. Depends on Slice 2 (an identity to run as) and Slice 3 (dispatch).
 
-**Entry gate:** Slice 3.5 exit gate green — **it is** (Gate C 23/0; the plan's six family commands all green). Slice 4 inherits three things it must not break: an exact, moved pin (`v0.50.5.0`; `lint:forbidden`'s moving-pin rule), the `verifyRuntimePin` runtime cross-check surfaced as `/api/health` `pin.matches` (honesty rule 9), and the rule that **an agent runner is never a path to an upgrade** — upgrades run only through the host `scripts/upgrade.ts` lane, never an in-container self-upgrade.
+**Entry gate:** Slice 3.5 exit gate green — **it is** (Gate C's 12 tests pass inside a 23/0 `slice35.e2e.test.ts`, and the family `bun test --parallel=1 test/e2e` is 77/0 twice consecutively from the upgraded state). Slice 4 inherits three things it must not break: an exact, moved pin (`v0.50.5.0`; `lint:forbidden`'s moving-pin rule), the `verifyRuntimePin` runtime cross-check surfaced as `/api/health` `pin.matches` (honesty rule 9), and the rule that **an agent runner is never a path to an upgrade** — upgrades run only through the host `scripts/upgrade.ts` lane, never an in-container self-upgrade.
 
 **Non-negotiables:**
 - **Dispatch is pull / long-poll. Never the Docker socket.** `POST /runs/claim` with SKIP LOCKED + lease + heartbeat + TTL so a dead runner's job is reclaimed. Scale = replicas.
