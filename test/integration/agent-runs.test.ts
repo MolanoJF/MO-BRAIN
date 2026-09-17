@@ -239,17 +239,16 @@ async function humanPost(path: string, cookie: string) {
   return app.request(path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' } });
 }
 
-/** `RUNNER_TOKEN` is read per call, so a probe can move the lane in and out of
- *  `disabled` without a rebuild. */
-async function withRunnerToken<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
-  const before = process.env.RUNNER_TOKEN;
-  if (value === undefined) delete process.env.RUNNER_TOKEN;
-  else process.env.RUNNER_TOKEN = value;
+/** Env the claim reads PER CALL, so a probe can move it without a rebuild. */
+async function withEnv<T>(key: string, value: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const before = process.env[key];
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
   try {
     return await fn();
   } finally {
-    if (before === undefined) delete process.env.RUNNER_TOKEN;
-    else process.env.RUNNER_TOKEN = before;
+    if (before === undefined) delete process.env[key];
+    else process.env[key] = before;
   }
 }
 
@@ -433,6 +432,46 @@ describe('the claim (D2, D3)', () => {
     expect(row.costUsd).toBeNull(); // nothing metered yet is not "cost 0"
   });
 
+  test('the claim hands the runner RUNNER_MCP_ORIGIN when set, PUBLIC_URL when not (D6)', async () => {
+    // D6: the runner dials gbrain over runner-net, where the public origin can
+    // be unreachable — with DOMAIN=localhost, /etc/hosts inside the runner maps
+    // `localhost` to the runner's OWN loopback, so https://localhost/mcp hits
+    // the runner itself. Compose therefore posts an internal name instead.
+    // Asserted through the route, because the URL is a wire contract: the
+    // runner is handed it and dials it verbatim.
+    const urlFor = async (origin: string | undefined) => {
+      // Every claim leaves a live write-Space lease behind, and D9's
+      // single-flight refuses the next one (`write_space_busy`) while it lives.
+      // So each case does what `beforeEach` does: cascade this test's runs away
+      // first, then hand the claim one fresh pending run.
+      await getDb().delete(schema.schedules).where(eq(schema.schedules.organizationId, ORG));
+      await pendingRun(await agentSchedule());
+      return withEnv('RUNNER_MCP_ORIGIN', origin, async () => {
+        const res = await claim();
+        expect(res.status).toBe(200);
+        const body = await res.json() as { mcp: { url: string } };
+        return body.mcp.url;
+      });
+    };
+
+    // Unset: exactly the public origin, which is what every deployment that
+    // does not set this variable gets — unchanged.
+    expect(await urlFor(undefined)).toBe(`${process.env.PUBLIC_URL}/mcp`);
+
+    // Set: the origin the runner was told it can dial. A trailing slash and an
+    // origin that already ends in `/mcp` both normalise, so a compose value
+    // cannot become `https://caddy//mcp` or `https://caddy/mcp/mcp`.
+    expect(await urlFor('https://caddy')).toBe('https://caddy/mcp');
+    expect(await urlFor('https://caddy/')).toBe('https://caddy/mcp');
+    expect(await urlFor('https://caddy/mcp')).toBe('https://caddy/mcp');
+
+    // Empty is "unset", never a relative url: an interpolated-but-blank
+    // variable must not silently degrade the origin to nothing.
+    expect(await urlFor('')).toBe(`${process.env.PUBLIC_URL}/mcp`);
+    // Five REAL claims against real Postgres, each one a full mint + heads
+    // capture, so the per-test default (5s) is the wrong budget for this one.
+  }, 60_000);
+
   test('an empty lane long-polls to 204 rather than 404 or a spin', async () => {
     const started = Date.now();
     const res = await claim();
@@ -444,7 +483,7 @@ describe('the claim (D2, D3)', () => {
 
   test('an empty RUNNER_TOKEN never authenticates, and a wrong bearer is a 401', async () => {
     await agentSchedule();
-    await withRunnerToken(undefined, async () => {
+    await withEnv('RUNNER_TOKEN', undefined, async () => {
       const res = await claim();
       expect(res.status).toBe(503);
       expect(await res.json()).toMatchObject({ error: 'runner_disabled' });
@@ -452,7 +491,7 @@ describe('the claim (D2, D3)', () => {
     // The empty string is the shape compose interpolates on a runner-less
     // deployment; two empty strings would pass `timingSafeEqual`, so it must be
     // refused BEFORE the comparison.
-    await withRunnerToken('', async () => {
+    await withEnv('RUNNER_TOKEN', '', async () => {
       expect((await claim()).status).toBe(503);
     });
     const wrong = await runnerPost('/api/runs/claim', { runnerId: 'r', harnessVersion: HARNESS }, 'not-the-token');

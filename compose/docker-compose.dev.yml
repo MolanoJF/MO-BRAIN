@@ -32,7 +32,31 @@ services:
   # ---------------------------------------------------------------------
   # Runner lane — dev only (profile `runner`, so a plain `up` never starts
   # any of this).
+  # ---------------------------------------------------------------------
+  # The origin the control plane tells the runner to dial for gbrain's /mcp
+  # (the claim's `mcp.url`; see src/agent/claim.ts). It is `caddy`, not
+  # `${DOMAIN}`: /etc/hosts inside the runner maps `localhost` to its own
+  # loopback and wins over Docker's embedded resolver, so the public origin
+  # (PUBLIC_URL = https://${DOMAIN} = https://localhost here) is unreachable
+  # from inside that container — https://localhost/mcp hits the runner
+  # itself. `caddy` is this service's alias on runner-net, and Caddy answers
+  # it with a certificate from the same local CA the runner already trusts.
   #
+  # Written as a literal, NOT `${RUNNER_MCP_ORIGIN}`: a variable absent from
+  # the environment interpolates to the empty string, and an empty
+  # RUNNER_MCP_ORIGIN falls back to PUBLIC_URL — silently restoring the exact
+  # defect this exists to fix. A fixed internal name has nothing
+  # machine-local to carry.
+  #
+  # NOT in compose/docker-compose.yml: in production the runner dials
+  # ${DOMAIN}, which is already an alias on runner-net and whose certificate
+  # is a real one — and production deliberately has no NODE_EXTRA_CA_CERTS,
+  # so an internal-CA name would not verify there anyway.
+  control-plane:
+    environment:
+      RUNNER_MCP_ORIGIN: https://caddy
+
+  # ---------------------------------------------------------------------
   # With DOMAIN=localhost Caddy issues certificates from its own internal CA
   # instead of ACME, and the runner's Node process has to trust that CA to
   # speak https://${DOMAIN}/mcp. Production validates normally, so

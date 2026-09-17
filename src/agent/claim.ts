@@ -69,6 +69,29 @@ export function controlUrlForRunner(): string {
   return configured.replace(/\/+$/, '');
 }
 
+/**
+ * D3/D6: the `/mcp` URL the runner is TOLD to dial, which is not always the
+ * public one. The runner reaches gbrain only through Caddy, over `runner-net`,
+ * where the public origin may not be dialable at all: with DOMAIN=localhost,
+ * /etc/hosts inside the runner maps `localhost` to its OWN loopback and wins
+ * over Docker's embedded resolver, so `https://localhost/mcp` — which
+ * `PUBLIC_URL` builds — hits the runner itself. Compose therefore hands the
+ * dev stack an internal name (`RUNNER_MCP_ORIGIN`, see
+ * compose/docker-compose.dev.yml) that Docker's resolver answers and Caddy
+ * serves from its local CA.
+ *
+ * Unset (or empty) it is exactly `mcpUrl()` — the same `PUBLIC_URL` the rest of
+ * the control plane already defaults to, so production is unchanged. The
+ * GRANT's recorded URL stays the public one in every case: the run bearer is a
+ * bearer, not host-bound (see `mcpUrl()` in `../control/connections.ts`).
+ */
+function runnerMcpUrl(): string {
+  const origin = process.env.RUNNER_MCP_ORIGIN;
+  if (!origin) return mcpUrl();
+  const base = origin.replace(/\/+$/, '');
+  return base.endsWith('/mcp') ? base : `${base}/mcp`;
+}
+
 // --- refusals ----------------------------------------------------------------
 
 /**
@@ -373,7 +396,7 @@ export async function claimAgentRun(
       maxTokens: spec.maxTokens,
       harnessVersion: spec.harnessVersion,
       allowedTools,
-      mcp: { url: mcpUrl(), token: token.accessToken },
+      mcp: { url: runnerMcpUrl(), token: token.accessToken },
       gateway: { url: `${controlUrlForRunner()}/api/gateway`, token: mintGatewayToken(run.id, ttlSeconds) },
       budgetUsd: Number(spec.budgetUsd),
       timeoutSeconds: spec.timeoutSeconds,
