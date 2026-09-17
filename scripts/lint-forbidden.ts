@@ -19,9 +19,30 @@ const RULES: { rule: string; re: RegExp; why: string }[] = [
     why: 'G2 requires argv arrays, never shell strings',
   },
   {
+    rule: 'shell-string-harness',
+    // The sibling of shell-string-gbrain, and it copies that rule's
+    // command-position guards verbatim: `claude` must not be preceded by / or -
+    // (a /opt/harness/bin/claude path is not an invocation) and must be followed
+    // by whitespace. Without them this flags every benign `sh -c` that merely
+    // names the harness path.
+    re: /["'`]\s*(sh|bash)\s*["'`]\s*,\s*["'`]-c["'`][\s\S]{0,80}(?<![\w\/-])claude\s/,
+    why: 'G2 requires argv arrays, never shell strings; that covers claude as well as gbrain',
+  },
+  {
     rule: 'moving-pin',
     re: /garrytan\/gbrain#(latest|latest-stable|main|master|HEAD)\b/,
     why: 'G1 requires an exact semver pin; a moving ref is non-reproducible',
+  },
+  {
+    rule: 'moving-harness-pin',
+    // Sibling of moving-pin, for the second pinned dependency. Three ways to
+    // name the harness without pinning it: a dist-tag, a bare ^/~ range, or no
+    // version at all. `(?![-\w])` keeps the platform sub-packages
+    // (-linux-x64, -darwin-arm64) out of it, and the Dockerfile's own
+    // `@${HARNESS_VERSION}` is an exact ARG by construction -- it must not be
+    // flagged, or the rule would fail the one line that IS the pin.
+    re: /@anthropic-ai\/claude-code(?![-\w])(?:@(?:latest|next|stable|beta|canary|nightly|dev)\b|@[\^~]|\s*["'`]?\s*$|["'`]?\s*:\s*["'`]?(?:latest|next|stable|beta|canary|nightly|dev|\^|~))/,
+    why: 'G1 requires an exact harness version; a dist-tag, a range, or no version at all is non-reproducible',
   },
   {
     rule: 'log-request-body',

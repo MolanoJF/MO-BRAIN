@@ -22,6 +22,14 @@ describe('lintForbidden', () => {
     expect(v.map((x) => x.rule)).toContain('shell-string-gbrain');
   });
 
+  // The harness gets the same treatment as gbrain (G2): a shell string is a
+  // shell string whether the command it builds is `claude` or `gbrain`.
+  test('flags a shell-string claude invocation', async () => {
+    await writeFile(join(dir, 'a', 'shell-harness.ts'), `Bun.spawn(["sh","-c","claude -p "+prompt]);\n`);
+    const v = await lintForbidden(dir);
+    expect(v.map((x) => x.rule)).toContain('shell-string-harness');
+  });
+
   // A path that merely CONTAINS "gbrain" is not an invocation. Without this
   // case the rule flags every legitimate `sh -c` touching /srv/gbrain-home.
   test('does not flag a shell command that only mentions a gbrain path', async () => {
@@ -32,10 +40,43 @@ describe('lintForbidden', () => {
     await rm(clean, { recursive: true, force: true });
   });
 
+  // Same near-miss for the harness rule: /opt/harness/bin/claude on a shell
+  // command line is a path being tested for existence, not a command being run.
+  test('does not flag a shell command that only mentions the harness path', async () => {
+    const clean = await mkdtemp(join(tmpdir(), 'bs-harness-path-'));
+    await writeFile(join(clean, 'paths.ts'),
+      `composeExec('agent-runner', ['sh', '-c', 'test -x /opt/harness/bin/claude || exit 1']);`);
+    expect(await lintForbidden(clean)).toEqual([]);
+    await rm(clean, { recursive: true, force: true });
+  });
+
   test('flags a moving gbrain tag in a Dockerfile', async () => {
     await writeFile(join(dir, 'a', 'D.Dockerfile'), `RUN bun install -g github:garrytan/gbrain#latest-stable\n`);
     const v = await lintForbidden(dir);
     expect(v.map((x) => x.rule)).toContain('moving-pin');
+  });
+
+  // The harness rule covers both halves of the same bug: a dist-tag that moves
+  // under us, and no version at all.
+  test('flags a harness ref that is a dist-tag or missing entirely', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-harness-pin-'));
+    await writeFile(join(root, 'H.Dockerfile'),
+      `RUN bun install -g @anthropic-ai/claude-code@latest\nRUN bun install -g @anthropic-ai/claude-code\n`);
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toEqual(['moving-harness-pin', 'moving-harness-pin']);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // The one line that must never be flagged is the pin itself: an exact ARG is
+  // an exact version by construction. The platform sub-packages are a different
+  // package and are not the harness.
+  test('does not flag the exact harness pin or the platform sub-packages', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-harness-pin-ok-'));
+    await writeFile(join(root, 'H.Dockerfile'),
+      `RUN bun install -g "@anthropic-ai/claude-code@\${HARNESS_VERSION}"\n`
+      + `RUN bun install -g "@anthropic-ai/claude-code-linux-x64@2.1.274"\n`);
+    expect(await lintForbidden(root)).toEqual([]);
+    await rm(root, { recursive: true, force: true });
   });
 
   test('passes a clean tree', async () => {
