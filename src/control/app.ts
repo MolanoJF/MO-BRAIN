@@ -56,6 +56,33 @@ app.notFound((c) => c.json({ error: 'not_found' }, 404));
 
 export default app;
 
+/**
+ * F14. Bun's `idleTimeout` defaults to 10 s, and it is a *connection* timer:
+ * when it fires on a request whose handler has not written a byte yet, the
+ * socket is closed and the client sees EOF — through Caddy, a `502` — instead
+ * of the route's own answer. Measured on this Bun (1.3.13, same container):
+ * a default server severs a body-less `GET` handler that is still working at
+ * 12.0 s, while the identical handler on `idleTimeout: 120` answers at 15.0 s.
+ *
+ * Two routes here legitimately take longer than 10 s to their first byte:
+ *
+ *   - `POST /api/runs/claim` holds the request for `RUN_CLAIM_WAIT_MS` (25 s
+ *     by default) by design. It survives today only by Bun implementation
+ *     detail: a request that carries a body is not severed this way (measured
+ *     `204` at 25.074 s on the live server, and 15.0 s for a synthetic POST)
+ *     — the claim's safety is not something the route asked for.
+ *   - `/api/health` is an unauthenticated readiness surface whose honest
+ *     worst case is an ops round trip: `checkUpdate` measured 3.2–5.9 s and
+ *     `doctor` 8.0–39.0 s through the same relay. A severed connection turns
+ *     its honest `503` into a `502` with no body.
+ *
+ * 60 s is `RUN_CLAIM_WAIT_MS` × 2.4: above the 40 s ceiling the runner's own
+ * client waits (`CLAIM_WAIT_MS + CLAIM_SLACK_MS`), above the 30 s the runner
+ * docs call "the common proxy idle timeout", and well under Bun's 255 s
+ * maximum. It still reaps a half-open socket within a minute.
+ */
+const IDLE_TIMEOUT_S = 60;
+
 if (import.meta.main) {
   await runMigrations();
   const upgradeDir = process.env.UPGRADE_DIR ?? '/srv/upgrades';
@@ -67,6 +94,11 @@ if (import.meta.main) {
     void reconcileJournals(getDb(), upgradeDir)
       .catch((e) => console.error('[upgrade] reconcile failed:', e));
   }, UPGRADE_RECONCILE_INTERVAL_MS);
-  Bun.serve({ port: Number(process.env.PORT ?? 3150), hostname: '0.0.0.0', fetch: app.fetch });
+  Bun.serve({
+    port: Number(process.env.PORT ?? 3150),
+    hostname: '0.0.0.0',
+    idleTimeout: IDLE_TIMEOUT_S,
+    fetch: app.fetch,
+  });
   console.log(`control-plane listening on :${process.env.PORT ?? 3150}`);
 }

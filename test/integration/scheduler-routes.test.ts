@@ -48,6 +48,19 @@ mock.module('../../src/control/opsClient.ts', () => ({
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
+  // Same rule, and the graph is loaded before this suite's own tests run:
+  // `src/agent/revert.ts` re-exports `classifyExit` from `scheduler/execute.ts`,
+  // which imports `writeReport` here. Without it the whole file dies at load
+  // with `Export named 'writeReport' not found` and none of the assertions
+  // below ever run. The health path never calls it; it exists so the mock
+  // mirrors the module it replaces.
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
+  gitRange: async (sourceId: string) => ({
+    sourceId, before: '', after: '', commits: [], files: [],
+  }),
+  gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
+  auditTail: async () => [],
 }));
 
 // mock.module must be registered before the app's import graph loads, so these

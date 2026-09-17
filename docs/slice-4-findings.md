@@ -1141,3 +1141,124 @@ Code subscription credential instead. **This matters to Gate C**, which is budge
 the slice currently has no working API key, and Task 7's `readSecret(orgId,'anthropic_api_key')` path
 (U12, first caller) cannot be exercised end-to-end until one is stored. This is the single largest
 open item this task hands to the orchestrator.
+
+---
+
+## F14 — `/api/health` paid two `gbrain` subprocesses, and Bun's default 10 s idle timeout severed the connection (502) under load
+
+**Status: `confirmed`. Pre-existing — present at `2620aaa`, before Task 12 touched `health.ts`; NOT Slice-4-introduced.**
+Measured 2026-09-17 on the live dev stack (`brainstand-*-1`, gbrain `0.50.5.0`) by an agent whose only
+product edits are `src/control/routes/health.ts` and `src/control/app.ts`.
+
+### What was wrong
+
+`GET /api/health` was taking 8–11 s. Two per-request `gbrain` subprocesses through the ops relay account
+for all of it, and they are serialized inside one handler:
+
+| step (in `health.ts` order) | cost, runner lane UP | cost, runner lane STOPPED | cost after the fix |
+|---|---|---|---|
+| `select 1` (`controlDb`) | 167 / 2 / 1 ms | 197 / 1 / 1 ms | 44 / 0 / 0 ms |
+| `opsHealthy()` → `GET /healthz` | 6 / 1 / 1 ms | 16 / 1 / 1 ms | 6 / 1 / 0 ms |
+| **`callOps('toolsJson')` — result discarded** | **4413 / 2953 / 3420 ms** | **2604 / 3379 / 2680 ms** | **gone** |
+| `verifyRuntimePin()` → `callOps('checkUpdate')` | 5599 / 5399 / 3602 ms | 3718 / 5919 / 3158 ms | 1488 / 1407 / 1722 ms |
+| `inspectRepos()` → `GET /git/inspect` | 314 / 386 / 131 ms | 653 / 171 / 48 ms | 29 / 21 / 22 ms |
+| `openAlerts()` (db select) | 102 / 7 / 4 ms | 43 / 13 / 6 ms | 11 / 2 / 2 ms |
+| `runnerStatus()` | 76 / 7 / 29 ms | 33 / 10 / 35 ms | 6 / 3 / 3 ms |
+| **handler total** | **10 677 / 8755 / 7188 ms** | **7264 / 9495 / 5929 ms** | **1583 / 1434 / 1750 ms** |
+
+Raw op cost from inside `brainstand-control-plane-1` (host under load, the window the 502s were seen in):
+`GET /healthz` 1–51 ms · `GET /git/inspect` 242–507 ms · `POST /rpc {op:'toolsJson'}` **2879–4460 ms,
+171 870 bytes** · `POST /rpc {op:'checkUpdate', json:true}` **3891–4697 ms, 12 391 bytes** ·
+`POST /rpc {op:'doctor'}` 8032–39 000 ms, 46 786 bytes. Every one of these is a fresh `gbrain` process
+spawned by the ops side; the control plane's own DB work is single-digit milliseconds.
+
+**Not the runner lane.** Stopping it (`docker compose --env-file .env -f compose/docker-compose.yml
+-f compose/docker-compose.dev.yml stop agent-runner`) leaves the same two steps dominating with the same
+profile (table above), so the lane is not what costs the time. The long poll holds nothing either:
+`claimNextRun` wraps only its own select+update in `db.transaction(...)` — `.for('update', { skipLocked:
+true, of: schema.scheduleRuns })` with the lease-taking `UPDATE` in the same transaction
+(`src/scheduler/claim.ts:53-60`, `:139-146`) — while the 25 s wait's `await Bun.sleep(...)` sits *outside*
+it in the route's loop (`src/control/routes/runs.ts:141-149`). Confirmed live: with the runner
+long-polling, `pg_stat_activity` on `control` showed **13 `idle` + 1 `active`** (the psql probe itself),
+**no `idle in transaction`**, against a pool of `max: 10`.
+
+### The mechanism that turned it into a 502
+
+`src/control/app.ts` called `Bun.serve({ port, hostname, fetch })` with no `idleTimeout`, so Bun's
+default 10 s applied, and it is a *connection* timer: a request whose handler has not written a byte when
+it fires gets its socket closed, and Caddy reports `EOF` / `reverseproxy.statusError` as a **502**, not
+the route's own answer. Measured on this Bun (1.3.13, same container), same construction as `app.ts`:
+
+| server | request shape | handler | result |
+|---|---|---|---|
+| default `idleTimeout` | body-less `GET` | sleeps 15 s | **socket closed at 12.009 s** (`closed unexpectedly`) |
+| default | body-less `GET` | sleeps 22 s | **socket closed at 12.006 s** |
+| `idleTimeout: 120` | body-less `GET` | sleeps 15 s | 200 at 15.082 s |
+| `idleTimeout: 60` | body-less `GET` | sleeps 22 s | 200 at 22.014 s |
+| default | `POST` **with a body** | sleeps 15 s | 200 at 15.006 s |
+| live server | `POST /api/runs/claim` (25 s long poll) | — | 204 at 25.074 s |
+
+That last row is why nobody noticed: the claim long poll survives its own 25 s wait only because it
+carries a request body — an implementation detail, not something the route asked for. The health route is
+a body-less `GET`, which is exactly the shape the default severs. Direct in-container probes of
+`/api/health` in the loaded window: one **severed socket at 8.153 s**, the rest 200 at 7.76/7.92/11.17/18.28 s.
+
+### The fix (two parts, and which is which)
+
+1. **The cost — a Slice 3 defect, removed.** `health.ts` ran `await callOps('toolsJson', {}, {timeoutMs:
+   10_000})` and **discarded the result**: an extra 2.6–4.5 s, 171 KB `gbrain --tools-json` process on an
+   endpoint served without a session, reporting nothing (`components.ops` is `opsHealthy()`'s verdict,
+   and the two probes below it already fail visibly when the relay is down). Present at `2620aaa`;
+   removed. `verifyRuntimePin`'s `checkUpdate` **stays**: its `pin.observed`/`pin.matches` are payload
+   fields the e2e suite reads, and deleting it would turn an honest "unverifiable" into a permanent one.
+2. **The mechanism — explicit `idleTimeout: 60` in `app.ts`.** This is not a timeout raised to hide a slow
+   route: the route keeps its own multi-second ops round trip (now one of them, not two), and 60 s is
+   chosen against the server's *own* longest deliberate first-byte delay — the 25 s claim long poll — and
+   the 40 s ceiling that route's client waits (`CLAIM_WAIT_MS + CLAIM_SLACK_MS`). Without it, any honest
+   `503` from a loaded relay is delivered as a bodiless 502.
+
+### Before / after (same five-curl loop, `curl -sk -m 30 -o /dev/null -w 'http=%{http_code} t=%{time_total}\n' https://localhost/api/health`)
+
+Before (host loaded, runner lane up — the window the brief's 502s came from):
+
+```
+http=200 t=7.634849
+http=200 t=5.407666
+http=200 t=6.078090
+http=200 t=5.921726
+http=200 t=5.175180
+```
+
+(the brief's own run in the same conditions: `11.407545 / 9.895538 / 502 20.227755 / 502 10.934088`)
+
+After (rebuilt image, host quiet):
+
+```
+http=200 t=1.515786
+http=200 t=1.530966
+http=200 t=1.100700
+http=200 t=1.152051
+http=200 t=1.048814
+```
+
+Direct in-container hits, Caddy bypassed: 1.018 / 0.938 / 0.940 / 0.900 / 0.978 s (all 200).
+Re-measured with the relay deliberately loaded again (4 concurrent `gbrain doctor` ops, 52 ops in 48.5 s):
+1.493 / 1.610 / 1.258 / 1.400 / 1.462 s, all 200 — the old handler shape costs 2671 ms in that same window,
+998 ms of which is the step that was removed. Host load moves these numbers 3–4× (the ops subprocesses
+above were 8032–39 000 ms for `doctor`), which is why the same route 502'd at 11:00 and answered at 6 s
+later; the removal is a constant ~⅓–⅖ of the handler either way.
+
+Payload unchanged, checked live: keys `at, components, gbrainVersion, ok, pin, repos, runner,
+scheduleAlerts`; `pin = {declared: "0.50.5.0", observed: "0.50.5.0", matches: true}`;
+`runner = {state, lastSeenAt, version}` — three keys, no token, no client id.
+
+### Blocking defect found while running the payload tests (not mine, not the product's)
+
+`test/integration/scheduler-routes.test.ts` **could not load at all** in this tree: its
+`mock.module('../../src/control/opsClient.ts', …)` omitted the module's real exports, and the graph pulls
+them in through `src/agent/revert.ts` → `../scheduler/execute.ts` → `writeReport`, `cancelRun`, … Bun
+aborts the file with `Export named 'writeReport' not found` before any test runs. Reproduced with this
+task's own two files reverted to `HEAD`, so it is pre-existing. The mock now carries the five missing
+stubs (`writeReport`, `cancelRun`, `gitRange`, `gitRevertRange`, `auditTail`); **no assertion was changed
+or weakened** — the full file goes from unloadable to **55 pass / 0 fail**.
+

@@ -79,12 +79,14 @@ health.get('/health', async (c) => {
 
   try { await getDb().execute(sql`select 1`); components.controlDb = 'ok'; } catch { /* reported as down */ }
 
-  if (await opsHealthy()) {
-    components.ops = 'ok';
-    try {
-      await callOps('toolsJson', {}, { timeoutMs: 10_000 });
-    } catch { /* opsHealth already confirmed reachability; nothing to report here */ }
-  }
+  // F14: this used to also `await callOps('toolsJson', …)` and discard the
+  // result. It was an extra `gbrain --tools-json` process on the ops side per
+  // call — measured 2.6–4.5 s and a 171 870-byte body — on an endpoint served
+  // without a session, and it reported nothing: `components.ops` is
+  // `opsHealthy()`'s verdict, and the two probes below already fail visibly
+  // when the RPC lane is down (`pin.observed`/`pin.matches` null, `repos`
+  // empty). Removing it is a Slice 3 defect fix, not a change of contract.
+  if (await opsHealthy()) components.ops = 'ok';
 
   let pin: PinVerification = { declared: GBRAIN_PIN, observed: null, matches: null };
   if (components.ops === 'ok') {
