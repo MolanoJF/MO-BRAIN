@@ -1027,7 +1027,7 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c8-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    expect(await claimNextRun('gate-c-worker', now)).toBe('none');
+    expect(await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] })).toBe('none');
     expect((await runRow(waiting)).state).toBe('skipped_overlap');
     expect((await runRow(inFlight)).state).toBe('running'); // untouched
   }, 300_000);
@@ -1040,11 +1040,11 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c9-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    expect(await claimNextRun('gate-c-worker', now)).toBe('none');
+    expect(await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] })).toBe('none');
     expect((await runRow(waiting)).state).toBe('pending');
 
     await finishRun(inFlight, { state: 'succeeded', classification: 'ok', exitCode: 0 });
-    const claimed = await claimNextRun('gate-c-worker', now);
+    const claimed = await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] });
     expect(claimed).not.toBe('none');
     expect(claimed === 'none' ? null : claimed.run.id).toBe(waiting);
   }, 300_000);
@@ -1057,7 +1057,7 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c10-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    const claimed = await claimNextRun('gate-c-worker', now);
+    const claimed = await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] });
     expect(claimed === 'none' ? null : claimed.run.id).toBe(waiting);
 
     const previous = await runRow(inFlight);

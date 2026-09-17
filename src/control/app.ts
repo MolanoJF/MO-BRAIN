@@ -11,6 +11,8 @@ import { connectionRoutes } from './routes/connections.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { upgrades } from './routes/upgrades.ts';
 import { claimRoutes } from './routes/claim.ts';
+import { runRoutes } from './routes/runs.ts';
+import { gatewayRoutes } from './routes/gateway.ts';
 import { getDb, runMigrations } from './db/client.ts';
 import { reconcileJournals, UPGRADE_RECONCILE_INTERVAL_MS } from '../upgrade/reconcile.ts';
 
@@ -31,6 +33,13 @@ app.route('/api', connectionRoutes);
 app.route('/api', scheduleRoutes);
 app.route('/api', upgrades);
 app.route('/api', claimRoutes);
+// Slice 4 (Task 6, Task 7): the runner's two surfaces. Neither is ever routed
+// publicly — Caddy gains no route for /api/runs or /api/gateway, and the runner
+// reaches both directly on runner-net (D6). The gateway mount is the whole
+// contract Task 7 asked for: the harness's own paths land at
+// POST /api/gateway/v1/messages and HEAD /api/gateway/api/hello (F4).
+app.route('/api/runs', runRoutes);
+app.route('/api/gateway', gatewayRoutes);
 
 // Live collisions with gbrain-serve. Caddy routes these away in production;
 // refuse them here so a direct hit never returns the SPA.

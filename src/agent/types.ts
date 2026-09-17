@@ -73,3 +73,73 @@ export type FailureClass =
   | 'infra_failed'
   | 'timeout'
   | 'refused';
+
+// --- Dispatch (Task 6) -------------------------------------------------------
+
+/**
+ * The schedule's agent payload plus the Connection facts a claim needs — the
+ * run's SPEC, resolved once at claim time. Money stays a string, exactly as
+ * `schedules.agent_budget_usd` and `agent_runs.budget_usd` store it: a float
+ * round-trip through JSON is the one way a cap can move.
+ *
+ * `readSpaces` is the Space SOURCE ids (not the control-plane Space ids):
+ * `captureHeads` and `diffForRun` speak the repo plane, which knows sources.
+ */
+export type AgentRunSpec = {
+  scheduleId: string;
+  /** `schedule_runs.attempt`. A retry is a NEW row with `attempt = n + 1`. */
+  attempt: number;
+  organizationId: string;
+  connectionId: string;
+  /** The member the range is attributed against and the commit is signed by. */
+  member: { name: string; email: string };
+  writeSpace: string;
+  readSpaces: string[];
+  prompt: string;
+  model: string;
+  maxTokens: number;
+  budgetUsd: string;
+  harnessVersion: string;
+  timeoutSeconds: number;
+};
+
+/**
+ * D3 — the claim response: everything the run needs and nothing it does not.
+ *
+ * This is the ONLY place a secret crosses to the runner (D3), it crosses over
+ * the internal network, and both tokens die with the run: `mcp.token` is the
+ * per-run gbrain credential, revoked by `revokeRunToken` on every exit path
+ * (D8), and `gateway.token` is the stateless HMAC whose "burned at run end" is
+ * the `agent_runs` lookup the budget check already performs (D7). Neither ever
+ * appears in a projection a human can read.
+ */
+export type AgentRunClaim = {
+  runId: string;
+  scheduleId: string;
+  attempt: number;
+  prompt: string;
+  model: string;
+  maxTokens: number;
+  /** The schedule's pin. The runner refuses the claim unless its own
+   *  `claude --version` reports exactly this (D4). */
+  harnessVersion: string;
+  /** Already intersected and fully qualified: `mcp__gbrain__<tool>` (D5). */
+  allowedTools: string[];
+  mcp: { url: string; token: string };
+  gateway: { url: string; token: string };
+  budgetUsd: number;
+  timeoutSeconds: number;
+  leaseExpiresAt: string;
+};
+
+/**
+ * One normalized harness frame as appended to `agent_run_events`. `seq` is the
+ * runner's own monotonic counter; the UNIQUE `(run_id, seq)` key is what makes
+ * a replayed batch idempotent rather than duplicating. `data` is the REDACTED
+ * frame — tool arguments and brain content never land here raw (S3c).
+ */
+export type AgentRunEvent = {
+  seq: number;
+  kind: string;
+  data?: unknown;
+};

@@ -58,6 +58,10 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return callOpsHandler(op, params, opts);
   },
   takeGrantCredentials: async (path: string) => takeHandler(path),
+  // Task 5's revoke path, reached through the app's new /api/runs mount
+  // (agent/token.ts imports this alongside the others); a mock that omits a real
+  // export makes the whole graph unloadable.
+  deleteCredentialJournal: async () => ({ deleted: true }),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
