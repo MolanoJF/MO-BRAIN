@@ -1,6 +1,6 @@
 import './host-ops-env.ts';
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { openJournal, appendEvent, readJournal } from '../../src/upgrade/journal.ts';
 import { verifyManifest } from '../../src/upgrade/manifest.ts';
 import { stateDigest, compareDigests, type StateDigest } from '../../src/upgrade/digest.ts';
+import { writePin } from '../../src/contracts/pin.ts';
 import type { UpgradeContext } from '../../src/upgrade/types.ts';
 import {
   FIXTURE_MARKERS, applyMigrationCollisionFixture, undoMigrationCollisionFixture,
@@ -40,6 +41,10 @@ import {
  */
 
 const SKIP_SLICE35_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE35_E2E';
+
+/** The pin Gate C requires when it STARTS (B2/C1 assert it), and its target. */
+const FROM_PIN = '0.50.0.0';
+const TO_PIN = '0.50.5.0';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 const ADMIN_EMAIL = 'admin@example.test';
@@ -249,6 +254,93 @@ export async function upgradeCli(args: string[], env: Record<string, string> = {
   } finally { clearTimeout(timer); }
 }
 
+/**
+ * F9: the gate is RE-RUNNABLE. Gate C requires a stack at FROM_PIN (B2 and C1
+ * assert it), and a second run starts at TO_PIN — exactly where Gate C's own
+ * Leg 3 / C12 leaves the stack. So the file normalizes its own precondition
+ * instead of asserting a state it did not establish.
+ *
+ * The product's own one-operation rollback is the primary path: pick the newest
+ * run that STARTED at FROM_PIN and COMPLETED. A completed leg's snapshot is the
+ * pristine pre-upgrade brain; a FAILED leg's snapshot is the FIXTURED brain, so
+ * a completed-only filter is what keeps this from re-installing the collision.
+ * The documented host-side pin + recreate is the fallback when no run exists.
+ */
+async function latestCompletedRunFromPin(fromVersion: string): Promise<string | null> {
+  const entries = await readdir(HOST_UPGRADE_DIR, { withFileTypes: true }).catch(() => []);
+  let best: { id: string; mtimeMs: number } | null = null;
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const dir = join(HOST_UPGRADE_DIR, e.name);
+    try {
+      const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as { fromVersion?: string };
+      if (manifest.fromVersion !== fromVersion) continue;
+      const journal = await readFile(join(dir, 'journal.ndjson'), 'utf8');
+      if (!journal.split('\n').some((l) => l.includes('"step":"completed"'))) continue;
+      const s = await stat(join(dir, 'manifest.json'));
+      if (!best || s.mtimeMs > best.mtimeMs) best = { id: e.name, mtimeMs: s.mtimeMs };
+    } catch { /* not a run dir we can roll back */ }
+  }
+  return best?.id ?? null;
+}
+
+async function normalizeToFromPin(): Promise<void> {
+  const declared = await declaredPin();
+  if (declared === FROM_PIN) {
+    console.log(`MEASURED PRECONDITION: declared pin already ${FROM_PIN}; nothing to normalize`);
+    return;
+  }
+  if (declared !== TO_PIN) {
+    throw new Error(
+      `this gate needs a stack on ${FROM_PIN} or ${TO_PIN}, but the declared pin is ${declared}. ` +
+      'Normalize it deliberately (rollback, or the upgrade runbook path) before running this file.',
+    );
+  }
+  const runId = await latestCompletedRunFromPin(FROM_PIN);
+  if (runId) {
+    const rb = await upgradeCli(['rollback', '--run', runId]);
+    await waitForStackReady(900_000);
+    // Exit 4 is the rollback's own digest-parity verdict against the run's
+    // recorded digest-before; for a PRECONDITION move the restore and the pin
+    // move are what matter, and both happen before that verdict. Anything else
+    // is a real failure. The pin/binary are verified below either way.
+    if (rb.exitCode !== 0 && rb.exitCode !== 4) {
+      throw new Error(`precondition rollback of ${runId} exited ${rb.exitCode}: ${rb.stderr.trim().slice(0, 400)}`);
+    }
+    console.log(
+      `MEASURED PRECONDITION: stack was on ${TO_PIN}; the product's rollback of completed run ${runId} ` +
+      `returned it to ${FROM_PIN} (rollback exit ${rb.exitCode}` +
+      `${rb.exitCode === 4 ? ', a parity verdict against that run\'s recorded digest — restore and pin move completed' : ''})`,
+    );
+  } else {
+    // The documented host-side pin + recreate (docs/runbooks/upgrade.md), used
+    // only when no completed run exists to roll back.
+    await writePin('.env', FROM_PIN);
+    const build = await compose('build', '--build-arg', `GBRAIN_VERSION=${FROM_PIN}`, 'gbrain-ops');
+    if (build.exitCode !== 0) throw new Error(`precondition build failed: ${build.stderr.trim().slice(0, 400)}`);
+    const up = await compose(
+      'up', '-d', '--force-recreate', '--wait', 'gbrain-ops', 'gbrain-serve', 'gbrain-worker', 'control-plane',
+    );
+    if (up.exitCode !== 0) throw new Error(`precondition recreate failed: ${up.stderr.trim().slice(0, 400)}`);
+    await waitForStackReady(900_000);
+    console.log(
+      `MEASURED PRECONDITION: stack was on ${TO_PIN} with no completed run to roll back; moved the pin to ` +
+      `${FROM_PIN} and rebuilt/recreated the images (host-side path)`,
+    );
+  }
+  const after = await declaredPin();
+  if (after !== FROM_PIN) {
+    throw new Error(`precondition normalization failed: declared pin is ${after}, not ${FROM_PIN}`);
+  }
+  const pin = await healthPin();
+  if (pin.observed !== FROM_PIN || pin.matches !== true) {
+    throw new Error(
+      `precondition normalization left the RUNNING binary at ${pin.observed ?? 'unknown'} ` +
+      `(matches ${String(pin.matches)}); honesty rule 9 requires it at ${FROM_PIN}`,
+    );
+  }
+}
+
 // --- beforeAll: bring the stack up, point the mount, wait on BOTH surfaces --
 
 beforeAll(async () => {
@@ -261,6 +353,11 @@ beforeAll(async () => {
     const up = await compose('up', '-d', '--wait');
     if (up.exitCode !== 0) throw new Error(`compose up failed: ${up.stderr || up.stdout}`);
   }
+
+  // F9: B2 (Gate B) and C1 (Gate C) both pin-assert, so the precondition is
+  // normalized once, here, before either gate — a second run starts on
+  // 0.50.5.0 and must be brought back to 0.50.0.0 explicitly.
+  await normalizeToFromPin();
 
   // Pin the bind mount at HOST_UPGRADE_DIR, then L11: restart control-plane and
   // gbrain-serve for fresh in-process rate-limit windows — never the volumes.
@@ -560,6 +657,8 @@ let failedRunId = '';
 let realRunId = '';
 /** Schedules this gate disabled for its window (Gate C beforeAll), restored after. */
 let disabledScheduleIds: string[] = [];
+/** F9: true between C2's fixture application and C5's un-fixture; the afterAll backstop reads it. */
+let fixtureApplied = false;
 
 function requireGateBReady(): void {
   if (!cookie) throw new Error('Gate C needs the admin cookie from Gate B (B1)');
@@ -742,7 +841,32 @@ describe('Slice 3.5 seam gate C', () => {
   }, 120_000);
 
   afterAll(async () => {
-    if (!dockerAvailable || disabledScheduleIds.length === 0) return;
+    if (!dockerAvailable) return;
+
+    // F9 backstop: a describe-scoped afterAll IS the `finally` here — bun runs
+    // it on assertion failure and timeout. If C2 applied the fixture and the
+    // file aborted before C5 un-fixtured it, the brain is still fixtured; a
+    // gate that can leave a live brain broken is the worst bug in this slice,
+    // so restore it now, and say so loudly if the restore itself fails.
+    if (fixtureApplied) {
+      let restored = false;
+      try {
+        const undone = await undoMigrationCollisionFixture(gbrainPsql);
+        console.log(`MEASURED UN-FIXTURE (afterAll backstop): ${undone.summary}`);
+        fixtureApplied = false;
+        restored = true;
+      } finally {
+        if (!restored) {
+          console.error(
+            'MEASURED UN-FIXTURE FAILED (afterAll backstop): the migration-collision fixture could not be ' +
+            'undone; the brain may still be fixtured (config.version 143, incompatible open_loops). Run the ' +
+            'fixture undo by hand before using this brain.',
+          );
+        }
+      }
+    }
+
+    if (disabledScheduleIds.length === 0) return;
     const list = disabledScheduleIds.map((id) => `'${id}'`).join(',');
     await psql(`update schedules set enabled = true, disabled_reason = null where id in (${list})`);
   }, 120_000);
@@ -778,6 +902,7 @@ describe('Slice 3.5 seam gate C', () => {
     expect(await grepTree(['src', 'scripts'], FIXTURE_MARKERS)).toEqual([]);
 
     const applied = await applyMigrationCollisionFixture(gbrainPsql);
+    fixtureApplied = true;
     console.log(`MEASURED FIXTURE: ${applied.summary}`);
     console.log(`MEASURED FIXTURE STATEMENTS: ${applied.statements.join(' || ')}`);
     expect(applied.recordedSchemaVersionBefore).toBe(PRISTINE_SCHEMA_VERSION);
@@ -873,6 +998,7 @@ describe('Slice 3.5 seam gate C', () => {
 
     // FIX 4: un-fixture BEFORE Leg 2, through the same test-only psql lane.
     const undone = await undoMigrationCollisionFixture(gbrainPsql);
+    fixtureApplied = false;
     console.log(`MEASURED UN-FIXTURE: ${undone.summary}`);
     expect(undone.recordedSchemaVersionAfter).toBe(PRISTINE_SCHEMA_VERSION);
     expect(await columnsOf(gbrainPsql, COLLIDING_OBJECT)).toContain('source_id');

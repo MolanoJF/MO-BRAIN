@@ -49,6 +49,7 @@ here is reconstructed from memory, and no row is backed by "expected" text.
 | F6 | The content digest counted continuously-churning runtime state (`schedule_runs`/`schedule_alerts`, the worker registry) | `confirmed` |
 | F7 | The upgrade lane never records `capability_snapshots` (`recordCapabilitySnapshot` has no product caller), so the drift panel/B9/C10 depend on rows only `test/integration/capability.test.ts` writes; and the failure leg can leave `doctor` unhealthy, refusing C6's preflight — **FIXED 2026-09-17** | `confirmed` |
 | F8 | The content digest's `filePlane` part counted gbrain's own runtime state under `.gbrain/` (migration ledger, credential handoffs, run secret, update/model/backup caches), so C4/C11's "restores exactly" could not hold — **FIXED 2026-09-17** | `confirmed` |
+| F9 | The Gate C family was NOT re-runnable: a second run starts on `0.50.5.0`, so B2/C1's pin assertions fail, C3's failure leg is refused (`SAME_VERSION`) and C4–C12 cascade (65 pass / 12 fail); worse, an aborted leg left the brain FIXTURED (`config.version` 143, one-column `open_loops`) — **FIXED 2026-09-17** | `confirmed` |
 
 **P2 verdict: CONFIRMED-INTACT.** The kill switch is not quarantined and is demonstrably honoured — see
 the discriminating probe in P2/A2, where the same binary running the same command emits the upgrade
@@ -1377,6 +1378,58 @@ Fix: `FILE_PLANE_PROGRAM` (`src/upgrade/digest.ts`) skips that runtime set (and,
 registry), so the part is CONTENT and gbrain's bookkeeping — `configKeys` still carries the config's key
 names. The snapshot still restores those files, and loss of real content is still caught. After the fix
 the family is 77/0.
+
+---
+
+## F9 — the Gate C family was not re-runnable, and an abort left the brain fixtured
+
+**Status: `confirmed`; fixed 2026-09-17.** The gate left the stack on `0.50.5.0` on purpose (C12: that is
+what Slice 4 inherits), but the family's own entry state does not re-establish `0.50.0.0`. A second
+`bun test --parallel=1 test/e2e` therefore started on `0.50.5.0` and failed: Gate B's B2 and Gate C's C1
+assert the FROM pin (`0.50.5.0` observed instead of `0.50.0.0`), then C3's failure leg
+`run --to 0.50.5.0` is refused by the shipped preflight (`SAME_VERSION`), so C4–C12 cascade — the
+coordinator measured **65 pass / 12 fail**, and quoted C1's assertion as the `0.50.0.0` vs `0.50.5.0`
+mismatch. The same run left the brain FIXTURED (its abort skipped the un-fixture: `config.version` 143
+and `open_loops` replaced by a one-column table; the coordinator repaired it to 149 / 21 columns by hand).
+So F9 is two defects: the family could not be re-run, and its failure mode poisoned the next run.
+
+Fix 1 — precondition normalization (`test/e2e/slice35.e2e.test.ts`, file-level `beforeAll`, so it runs
+before Gate B's pin-sensitive B2 as well as Gate C): `normalizeToFromPin()` first checks the declared
+pin; if it is already `0.50.0.0` it prints
+`MEASURED PRECONDITION: declared pin already 0.50.0.0; nothing to normalize` and returns. Otherwise it
+picks the newest run whose `manifest.json` `fromVersion === FROM_PIN` **and** whose journal contains
+`"step":"completed"` (`latestCompletedRunFromPin` — a FIXTURED failure-leg snapshot is never chosen,
+which is what poisoned the brain), runs the product's `rollback --run <id>`, then verifies
+`declaredPin() === 0.50.0.0` and `healthPin().observed === 0.50.0.0 && matches === true`, with a
+host-side `writePin` + `compose build --build-arg GBRAIN_VERSION=FROM_PIN gbrain-ops` + recreate
+fallback. The rollback is accepted on exit `0` **or** `4`: exit 4 is a parity verdict against that run's
+recorded digest, raised after restore and the pin move already completed (F8's stale-digest residue), and
+the verification immediately below is the real gate. A green run printed, verbatim:
+
+```
+MEASURED PRECONDITION: stack was on 0.50.5.0; the product's rollback of completed run run-53f09b47-eb16-42ab-936e-8433de5d5112 returned it to 0.50.0.0 (rollback exit 4, a parity verdict against that run's recorded digest — restore and pin move completed)
+```
+
+Fix 2 — an abort backstop (Gate C `afterAll`): a module-level `fixtureApplied` flag is set `true` right
+after `applyMigrationCollisionFixture` (C2) and `false` right after `undoMigrationCollisionFixture` (C5).
+Gate C's `afterAll` un-fixtures if the flag is still `true`, inside `try/finally`, so a leg that aborts
+with the fixture applied (a failed assertion, a timeout, a Ctrl-C) cannot leave the brain fixtured. The
+abort path is proven, not assumed: with a fault injected at the top of C5 (before its un-fixture), the
+file aborted and the backstop restored the brain —
+
+```
+MEASURED UN-FIXTURE (afterAll backstop): UN-FIXTURE: open_loops restored to the real schema; config.version -> 149
+```
+
+…and the post-run probe read `config.version` **149** with `open_loops` back to **21** columns (the
+induced fault was reverted after the probe; no fault hook ships). On an ordinary green run the backstop is
+a no-op because C5 has already un-fixtured.
+
+Fix 3 — re-run proof. Two consecutive `bun test --parallel=1 test/e2e` invocations, each starting from
+`0.50.5.0`, were **77 pass / 0 fail** (`Ran 77 tests across 5 files`). Invocation 1 proves the
+normalization half (it printed the `MEASURED PRECONDITION: stack was on 0.50.5.0 …` line above);
+invocation 2 proves the re-run half (a second consecutive family run, again `77 pass / 0 fail`). Both
+ended on `0.50.5.0`, the state Slice 4 inherits.
 
 ---
 

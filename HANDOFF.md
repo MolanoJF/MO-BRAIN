@@ -78,7 +78,7 @@ Slice 0 contract stack: `bun run stack:up` / `stack:down`.
 | Slice 0 risk register | [`docs/slice-0-findings.md`](docs/slice-0-findings.md) |
 | Slice 2 scale probe | [`docs/slice-2-findings.md`](docs/slice-2-findings.md) |
 | Slice 3 findings | [`docs/slice-3-findings.md`](docs/slice-3-findings.md) |
-| Slice 3.5 findings | [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md) — U1–U12, P1–P8, F1–F6, Gate C's measured numbers |
+| Slice 3.5 findings | [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md) — U1–U12, P1–P8, F1–F9, Gate C's measured numbers |
 | Scheduler runbook | [`docs/runbooks/scheduler.md`](docs/runbooks/scheduler.md) |
 | Upgrade runbook | [`docs/runbooks/upgrade.md`](docs/runbooks/upgrade.md) |
 | Break-glass | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) |

@@ -246,6 +246,14 @@ On the dev port, the console's better-auth endpoints require an `Origin` header.
 5. **A pending checklist item keeps the banner up and blocks nothing else.**
 6. **A snapshot nobody verified is not a backup.** Every snapshot this lane takes is checksum-verified
    before the swap, and the rollback re-verifies before restoring.
+7. **If a gate run aborts mid-leg, the brain can be left fixtured.** The Slice 3.5 exit gate's C2 installs
+   a **test-only** migration-collision fixture — recorded `config.version` `143` and `open_loops` reduced to
+   a one-column table — and C5 removes it. An abort between the two (failed assertion, timeout, Ctrl-C)
+   leaves the brain that way, so the next run's real leg collides on migration 144. The undo path is the
+   fixture's own `undoMigrationCollisionFixture` in `test/e2e/fixtures/migration-collision.ts` (the same
+   test-only psql lane that applied it); the gate's `afterAll` now calls it automatically as a backstop.
+   Before any real upgrade the brain must read `config.version` **149** with the 21-column `open_loops`
+   (F9).
 
 ## After the upgrade
 
