@@ -351,3 +351,66 @@ export const heldNotifications = pgTable('held_notifications', {
 }, (t) => [
   index('held_notifications_pending_idx').on(t.organizationId, t.releasedAt),
 ]);
+
+/**
+ * D2: the journal (Task 4) is the authority while the control plane is
+ * down; `src/upgrade/reconcile.ts` (Task 13) upserts it into these three
+ * tables once the control plane is back — idempotent on `(runId, seq)` for
+ * events, on the row identity for the rest.
+ */
+export const upgradeRuns = pgTable('upgrade_runs', {
+  id: text('id').primaryKey(),
+  // Audit-shaped, like audit_log.organizationId: nullable, no FK, so run
+  // history survives an org being deleted and a single-org deployment
+  // never has to invent one.
+  organizationId: text('organization_id'),
+  fromVersion: text('from_version').notNull(),
+  toVersion: text('to_version').notNull(),
+  state: text('state').notNull().default('planned'),
+  snapshotId: text('snapshot_id'),
+  journalPath: text('journal_path'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  doctorBaseline: jsonb('doctor_baseline'),
+  doctorAfter: jsonb('doctor_after'),
+  failureReason: text('failure_reason'),
+  createdBy: text('created_by'),
+}, (t) => [check('upgrade_run_state_valid', sql`${t.state} in (
+  'planned','preflight_ok','quiesced','snapshot_taken','swapped','migrated',
+  'playbooks_applied','gated_ok','completed','failed',
+  'rolling_back','rolled_back','rollback_failed')`)]);
+
+/** UNIQUE (run_id, seq) is what makes reconciliation idempotent (D2): a
+ * reconcile pass that reruns after a crash re-upserts the same rows instead
+ * of duplicating them. */
+export const upgradeEvents = pgTable('upgrade_events', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => upgradeRuns.id, { onDelete: 'cascade' }),
+  seq: integer('seq').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  step: text('step').notNull(),
+  level: text('level').notNull().default('info'),
+  message: text('message').notNull(),
+  data: jsonb('data'),
+}, (t) => [
+  uniqueIndex('upgrade_events_run_seq_uq').on(t.runId, t.seq),
+  check('upgrade_event_level_valid', sql`${t.level} in ('info','warn','error')`),
+]);
+
+/** G5: an LLM may PROPOSE a checklist item; only a human acknowledges one.
+ * Honesty rule 8: a pending item survives a control-plane restart because
+ * it lives here, not in memory. */
+export const upgradeChecklistItems = pgTable('upgrade_checklist_items', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => upgradeRuns.id, { onDelete: 'cascade' }),
+  gbrainVersion: text('gbrain_version').notNull(),
+  itemKey: text('item_key').notNull(),
+  prompt: text('prompt').notNull(),
+  why: text('why'),
+  state: text('state').notNull().default('pending'),
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('upgrade_checklist_run_key_uq').on(t.runId, t.itemKey),
+  check('upgrade_checklist_state_valid', sql`${t.state} in ('pending','acknowledged','declined')`),
+]);

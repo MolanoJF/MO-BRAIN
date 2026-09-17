@@ -8,18 +8,20 @@ import { Connection } from './pages/Connection.tsx';
 import { Claim } from './pages/Claim.tsx';
 import { Access } from './pages/Access.tsx';
 import { Schedules } from './pages/Schedules.tsx';
+import { Upgrades } from './pages/Upgrades.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'upgrades';
 
 /**
- * The SPA's only real route. Everything else is a page switch, but a schedule
- * alert arrives as a link (from the Health page, a runbook, or an operator's
- * clipboard), so `/schedules` has to survive a cold load.
+ * The SPA's only real routes. Everything else is a page switch, but a schedule
+ * alert (or an upgrade banner) arrives as a link, so `/schedules` and
+ * `/upgrades` have to survive a cold load.
  */
 function pageFromPath(): Page | null {
   const path = window.location.pathname.replace(/\/+$/, '');
   if (path === '/schedules') return 'schedules';
+  if (path === '/upgrades') return 'upgrades';
   return null;
 }
 
@@ -65,6 +67,7 @@ export function App() {
             <button className="nav-item" onClick={() => setPage('members')}>Members</button>
             <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
             <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
+            <button className="nav-item" onClick={() => setPage('upgrades')}>Upgrades</button>
             <button className="nav-item" onClick={() => setPage('access')}>Access</button>
           </>
         )}
@@ -75,6 +78,7 @@ export function App() {
         {page === 'members' && <Members />}
         {page === 'connection' && <Connection />}
         {page === 'schedules' && <Schedules />}
+        {page === 'upgrades' && <Upgrades />}
         {page === 'access' && <Access />}
       </main>
     </div>

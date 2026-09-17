@@ -29,6 +29,13 @@
       "when": 1789525703920,
       "tag": "0003_kind_lightspeed",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789602873651,
+      "tag": "0004_real_paibok",
+      "breakpoints": true
     }
   ]
 }

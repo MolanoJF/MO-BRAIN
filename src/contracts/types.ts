@@ -30,6 +30,15 @@ export type OperationSpec = {
   privilege: Privilege;
   /** Exit codes that are not failures. Anything else is an error. */
   okExitCodes: readonly number[];
+  /**
+   * S3: some operations write the file plane even though they run through
+   * the same `gbrain <argv>` spawn as everything else — post-upgrade
+   * patches config.json with no lock of its own (U4), and check-update
+   * writes its own cache file. When true, gbrain-ops wraps the whole
+   * invocation in the CONTROL database's advisory lock (src/ops/lock.ts),
+   * the same one every other file-plane write already serializes through.
+   */
+  requiresLock?: boolean;
 };
 
 export type ParamValues = Record<string, string | string[] | boolean | undefined>;

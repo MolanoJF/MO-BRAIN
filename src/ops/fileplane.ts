@@ -90,6 +90,34 @@ async function readIfExists(path: string): Promise<string | null> {
   try { return await readFile(path, 'utf8'); } catch { return null; }
 }
 
+const AUDIT_DIR = process.env.GBRAIN_AUDIT_DIR ?? join(GBRAIN_HOME, '.gbrain', 'audit');
+
+/** ISO-8601 week file name, matching gbrain's own `supervisor-YYYY-Www.jsonl`
+ *  naming (RECON, U9). */
+function isoWeekAuditFile(date: Date): string {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(
+    ((d.getTime() - firstThursday.getTime()) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
+  );
+  return `supervisor-${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}.jsonl`;
+}
+
+/**
+ * Tail the CURRENT ISO week's supervisor audit log. A read, not a write —
+ * S3 gates file-plane WRITES behind the advisory lock; this takes none. The
+ * path is computed here, never accepted from the caller — no traversal
+ * surface at all, unlike `takeGrantCredentialsFile`.
+ */
+export async function readSupervisorAuditTail(lines: number): Promise<string[]> {
+  const path = join(AUDIT_DIR, isoWeekAuditFile(new Date()));
+  const raw = await readIfExists(path);
+  if (raw === null) return [];
+  return raw.split('\n').filter((l) => l.trim() !== '').slice(-Math.max(1, lines));
+}
+
 /**
  * Merge a patch into config.json. Never blind-writes: an unparseable document
  * is a signal something else is mid-write or corrupt, and overwriting it is

@@ -1,5 +1,6 @@
 import { test, expect, describe } from 'bun:test';
 import app from '../../src/control/app.ts';
+import { GBRAIN_PIN } from '../../src/contracts/pin.ts';
 
 describe('/api/health', () => {
   // /health and /metrics belong to gbrain-serve — live collisions. The
@@ -33,5 +34,15 @@ describe('/api/health', () => {
   test('/api/health never leaks a connection string', async () => {
     const text = await (await app.request('/api/health')).text();
     expect(text).not.toMatch(/postgres(ql)?:\/\//);
+  });
+
+  test('/api/health reports pin verification honestly, never a false match', async () => {
+    const res = await app.request('/api/health');
+    const body = await res.json() as { pin?: { declared?: unknown; matches?: unknown } };
+    expect(body.pin).toBeDefined();
+    expect(body.pin!.declared).toBe(GBRAIN_PIN);
+    // ops is down in this suite (no sidecar) — pin verification must not
+    // fabricate a match against a container it never reached.
+    expect(body.pin!.matches === null || body.pin!.matches === false).toBe(true);
   });
 });

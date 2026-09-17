@@ -6,6 +6,10 @@ x-gbrain-env: &gbrain-env
   GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain
   GBRAIN_HOME: /srv/gbrain-home
   GBRAIN_SELF_UPGRADE_MODE: "off"
+  # Task 6: deterministic regardless of how `~` resolves per-container —
+  # ops reads exactly this path, gbrain-worker's supervisor writes exactly
+  # this path, both already share the gbrain-home volume (S2 unchanged).
+  GBRAIN_AUDIT_DIR: /srv/gbrain-home/.gbrain/audit
 
 services:
   caddy:
@@ -42,7 +46,7 @@ services:
     networks: [brain-net, control-net]
 
   gbrain-serve:
-    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment:
       <<: *gbrain-env
@@ -60,7 +64,7 @@ services:
     networks: [brain-net]
 
   gbrain-worker:
-    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment: *gbrain-env
     command: ["gbrain", "jobs", "supervisor", "--concurrency", "${WORKER_CONCURRENCY:-2}"]
@@ -81,13 +85,14 @@ services:
       context: ..
       dockerfile: docker/control-plane.Dockerfile
       args:
-        GBRAIN_VERSION: ${GBRAIN_VERSION:-0.50.0.0}
+        GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment:
       <<: *gbrain-env
       OPS_RPC_TOKEN: ${OPS_RPC_TOKEN:?required}
       # The advisory lock for the file plane lives in the CONTROL database.
       CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
+      GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
     command: ["bun", "run", "/app/src/ops/server.ts"]
     volumes:
       - gbrain-home:/srv/gbrain-home
@@ -108,10 +113,20 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?required}
       PUBLIC_URL: https://${DOMAIN}
       GBRAIN_HOME: /srv/gbrain-home
+      GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
+      # D2: reconcileJournals reads the host CLI's journal from here. Fixed
+      # inside the container; the bind mount below maps it to the host path.
+      UPGRADE_DIR: /srv/upgrades
     command: ["bun", "run", "/app/src/control/app.ts"]
     volumes:
       # Read-only: the control plane reads config state, never writes it (S3).
       - gbrain-home:/srv/gbrain-home:ro
+      # scripts/upgrade.ts runs on the Docker HOST (D1) and journals directly
+      # to host disk at this path; bind-mount that host path into the
+      # container, read-only, so reconcileJournals can see it without the
+      # control plane ever gaining a Docker socket or CLI (S2). The left side
+      # resolves on the HOST; the right side is fixed — always /srv/upgrades.
+      - ${UPGRADE_DIR:-/srv/upgrades}:/srv/upgrades:ro
     depends_on:
       postgres: { condition: service_healthy }
     networks: [control-net, ops-net]

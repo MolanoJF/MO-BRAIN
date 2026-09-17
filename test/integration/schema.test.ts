@@ -71,6 +71,7 @@ describe('control schema', () => {
     'organizations', 'memberships', 'brains', 'spaces', 'secrets',
     'capability_snapshots', 'playbook_ledger', 'audit_log',
     'connections', 'claim_links',
+    'upgrade_runs', 'upgrade_events', 'upgrade_checklist_items',
   ])('%s exists', async (t) => {
     const [row] = await sql`select to_regclass(${'public.' + t}) as r`;
     expect(row.r).not.toBeNull();

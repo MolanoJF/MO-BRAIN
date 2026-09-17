@@ -168,3 +168,145 @@ export const scheduleApi = {
   saveSettings: (patch: Partial<ScheduleSettings>) =>
     api.patch<{ settings: ScheduleSettings }>('/org/schedule-settings', patch),
 };
+
+/**
+ * The upgrades surface (`src/control/routes/upgrades.ts`, Task 13).
+ *
+ * The route returns the control DB's rows verbatim plus `detectUpdate`'s
+ * classified envelope (`src/upgrade/detect.ts`). Those server shapes are the
+ * source of truth; this client adapts them into the small view models the
+ * page reads, in one place, so a column rename upstream surfaces here instead
+ * of in every JSX branch. Two real mismatches the plan's samples did not know
+ * about and that this adapter absorbs:
+ *   - `upgrade_runs` names the closing column `endedAt`, not `finishedAt`;
+ *   - `upgrade_events.step` holds the EVENT TYPE (`step_started`), while the
+ *     step NAME it happened to lives in `data.step`.
+ */
+export type DetectResult = {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  changelog_diff: string;
+  release_url: string;
+  error?: 'network_error' | 'no_releases' | 'malformed_response';
+};
+
+export type UpgradeRunRow = {
+  id: string;
+  fromVersion: string;
+  toVersion: string;
+  state: string;
+  startedAt: string;
+  finishedAt: string | null;
+  snapshotId: string | null;
+  createdBy: string;
+};
+
+export type UpgradeEventRow = { id: string; runId: string; seq: number; at: string; type: string; data: unknown };
+
+export type ChecklistItemRow = {
+  id: string; runId: string; gbrainVersion: string; itemKey: string;
+  prompt: string; why: string | null; state: string; decidedBy: string | null; decidedAt: string | null;
+};
+
+export type LedgerRow = { id: string; gbrainVersion: string; state: string; notes: string | null };
+
+export type CapabilityDrift = {
+  versionChanged: boolean; toolsAdded: string[]; toolsRemoved: string[];
+  adaptersAdded: string[]; adaptersRemoved: string[]; profilesChanged: boolean;
+};
+
+export type DriftResult = {
+  signal: 'drift' | 'no_drift' | 'single_snapshot';
+  from: string; to: string;
+  diff: CapabilityDrift | null;
+};
+
+export type UpgradeRunDetail = {
+  run: UpgradeRunRow; events: UpgradeEventRow[]; checklist: ChecklistItemRow[]; ledger: LedgerRow[];
+};
+
+/** The route's own shapes, exactly as `src/control/routes/upgrades.ts` returns them. */
+type ServerDetect = {
+  status: 'up_to_date' | 'available' | 'unknown';
+  error: 'network_error' | 'no_releases' | 'malformed_response' | null;
+  currentVersion: string | null;
+  candidateVersion: string | null;
+  changelog: string | null;
+  releaseUrl: string | null;
+};
+
+type ServerRun = {
+  id: string; fromVersion: string; toVersion: string; state: string;
+  startedAt: string; endedAt: string | null; snapshotId: string | null; createdBy: string | null;
+};
+
+type ServerEvent = {
+  id: string; runId: string; seq: number; at: string;
+  step: string; level: string; message: string; data: unknown;
+};
+
+type ServerDetail = {
+  run: ServerRun; events: ServerEvent[]; checklist: ChecklistItemRow[]; ledger: LedgerRow[];
+};
+
+const toRunRow = (r: ServerRun): UpgradeRunRow => ({
+  id: r.id, fromVersion: r.fromVersion, toVersion: r.toVersion, state: r.state,
+  startedAt: r.startedAt, finishedAt: r.endedAt, snapshotId: r.snapshotId,
+  createdBy: r.createdBy ?? '',
+});
+
+const toEventRow = (e: ServerEvent): UpgradeEventRow => ({
+  id: e.id, runId: e.runId, seq: e.seq, at: e.at, type: e.step, data: e.data,
+});
+
+const countOf = (a: string[] | undefined): number => a?.length ?? 0;
+
+export const upgradeApi = {
+  available: async (): Promise<DetectResult> => {
+    const r = await api.get<ServerDetect>('/upgrades/available');
+    return {
+      current_version: r.currentVersion ?? '',
+      latest_version: r.candidateVersion ?? '',
+      update_available: r.status === 'available',
+      changelog_diff: r.changelog ?? '',
+      release_url: r.releaseUrl ?? '',
+      ...(r.error ? { error: r.error } : {}),
+    };
+  },
+  list: async (): Promise<{ runs: UpgradeRunRow[] }> => {
+    const r = await api.get<{ runs: ServerRun[] }>('/upgrades');
+    return { runs: r.runs.map(toRunRow) };
+  },
+  detail: async (id: string): Promise<UpgradeRunDetail> => {
+    const r = await api.get<ServerDetail>(`/upgrades/${encodeURIComponent(id)}`);
+    return {
+      run: toRunRow(r.run), events: r.events.map(toEventRow),
+      checklist: r.checklist, ledger: r.ledger,
+    };
+  },
+  drift: async (from: string, to: string): Promise<DriftResult> => {
+    try {
+      const diff = await api.get<CapabilityDrift>(
+        `/upgrades/drift?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      );
+      const changed =
+        diff.versionChanged === true ||
+        countOf(diff.toolsAdded) > 0 || countOf(diff.toolsRemoved) > 0 ||
+        countOf(diff.adaptersAdded) > 0 || countOf(diff.adaptersRemoved) > 0 ||
+        diff.profilesChanged === true;
+      return { signal: changed ? 'drift' : 'no_drift', from, to, diff };
+    } catch (e) {
+      // `driftBetween` THROWS `SingleSnapshotError` when only one version has a
+      // snapshot; the route's guard turns that into a 400. That is "nothing to
+      // compare", not "no drift" — never let the catch collapse it into the
+      // clean-comparison sentence (the trap Task 8 exists to close).
+      if (e instanceof ApiError && e.status === 400) {
+        return { signal: 'single_snapshot', from, to, diff: null };
+      }
+      throw e;
+    }
+  },
+  ack: (itemId: string) => api.post<{ item: ChecklistItemRow }>(`/upgrades/checklist/${encodeURIComponent(itemId)}/ack`),
+  decline: (itemId: string) => api.post<{ item: ChecklistItemRow }>(`/upgrades/checklist/${encodeURIComponent(itemId)}/decline`),
+};

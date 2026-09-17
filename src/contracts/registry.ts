@@ -622,4 +622,51 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     privilege: 'brain-db',
     okExitCodes: [0],
   },
+
+  /**
+   * U1: NEVER sets a non-zero exit code — not even on a network failure.
+   * okExitCodes: [0] here means "0 is the only code this ever emits," not
+   * "0 means success." Branch on `.json.error` (src/upgrade/detect.ts),
+   * never on exitCode.
+   *
+   * S3: also a file-plane writer (its `~/.gbrain/last-update-check` cache),
+   * so it runs under the ops advisory lock like post-upgrade below.
+   */
+  checkUpdate: {
+    id: 'checkUpdate',
+    argv: ['check-update'],
+    params: [
+      { name: 'refreshCache', flag: '--refresh-cache', kind: 'flag' },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'read-only',
+    okExitCodes: [0],
+    requiresLock: true,
+  },
+
+  /**
+   * U4/S3: a lock-free read-modify-write of config.json's self_upgrade.*
+   * subtree that the autopilot channel races independently. Runs only
+   * inside the quiesce window (Task 6), behind ops' own advisory lock —
+   * enforced at the RPC boundary in src/ops/server.ts, not left to caller
+   * discipline.
+   *
+   * No --json: post-upgrade has none. Text output only — G3 forbids
+   * parsing it; the caller reads the exit code alone.
+   */
+  postUpgrade: {
+    id: 'postUpgrade',
+    argv: ['post-upgrade'],
+    params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    // Unconfirmed beyond upstream's own "idempotent, safe to re-run any
+    // time" and its in-process apply-migrations call, whose own exit codes
+    // are 0/1/2 (U3). This operation's contract test is what proves this in
+    // practice — patch here with the real number if it ever disagrees.
+    okExitCodes: [0],
+    requiresLock: true,
+  },
 };

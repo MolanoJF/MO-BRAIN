@@ -21,12 +21,12 @@ services:
     networks: [brain-net]
 
   gbrain-ops:
-    image: brainstand/gbrain-base:${GBRAIN_VERSION:-0.50.0.0}
+    image: brainstand/gbrain-base:${GBRAIN_VERSION:?required}
     build:
       context: ..
       dockerfile: docker/gbrain-base.Dockerfile
       args:
-        GBRAIN_VERSION: ${GBRAIN_VERSION:-0.50.0.0}
+        GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
     environment:
       # GBRAIN_DATABASE_URL, never a bare DATABASE_URL: upstream refuses to
       # adopt a DATABASE_URL that leaked in from a working-directory .env,

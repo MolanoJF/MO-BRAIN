@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.0.0",
-  "generatedAt": "2026-09-16T02:28:14.330Z",
+  "generatedAt": "2026-09-17T00:37:24.676Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -222,6 +222,26 @@
       "okExitCodes": [
         0
       ]
+    },
+    {
+      "id": "checkUpdate",
+      "argv": [
+        "check-update"
+      ],
+      "params": [
+        {
+          "name": "refreshCache",
+          "flag": "--refresh-cache",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ],
+      "requiresLock": true
     },
     {
       "id": "config.get",
@@ -681,6 +701,20 @@
       "okExitCodes": [
         0
       ]
+    },
+    {
+      "id": "postUpgrade",
+      "argv": [
+        "post-upgrade"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ],
+      "requiresLock": true
     },
     {
       "id": "schema.lint",

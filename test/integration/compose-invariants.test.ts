@@ -72,6 +72,18 @@ describe('compose invariants', () => {
     }
   });
 
+  test('neither compose file defaults GBRAIN_VERSION — a bump must be explicit or compose refuses to start', () => {
+    const rawBase = readFileSync('compose/docker-compose.yml', 'utf8');
+    const rawSlice0 = readFileSync('compose/docker-compose.slice0.yml', 'utf8');
+    expect(rawBase).not.toMatch(/\$\{GBRAIN_VERSION:-/);
+    expect(rawSlice0).not.toMatch(/\$\{GBRAIN_VERSION:-/);
+  });
+
+  test('gbrain-ops and control-plane both receive GBRAIN_VERSION as a real runtime env var', () => {
+    expect(svc('gbrain-ops').environment.GBRAIN_VERSION).toBeDefined();
+    expect(svc('control-plane').environment.GBRAIN_VERSION).toBeDefined();
+  });
+
   // Finding 1 (Task 1 review): docker-compose.dev.yml used to set
   // caddy.environment.DOMAIN=localhost, which looked like it supplied the
   // dev DOMAIN but never could: Compose interpolates each file's `${...}`
@@ -167,6 +179,25 @@ describe('scheduler service invariants', () => {
   test('self-upgrade stays off everywhere gbrain env is merged', () => {
     for (const name of ['gbrain-serve', 'gbrain-worker', 'gbrain-ops']) {
       expect(svc(name).environment.GBRAIN_SELF_UPGRADE_MODE).toBe('off');
+    }
+  });
+});
+
+describe('upgrade reconciliation invariants', () => {
+  test('control-plane mounts the upgrade directory read-only, separate from GBRAIN_HOME', () => {
+    const mounts: string[] = svc('control-plane').volumes;
+    const home = mounts.find((m) => m.includes('gbrain-home'));
+    const upgrade = mounts.find((m) => m.includes('/srv/upgrades'));
+    expect(upgrade).toBeDefined();
+    expect(upgrade).toMatch(/:ro$/);
+    expect(upgrade).not.toBe(home);
+  });
+
+  test('no container mounts the upgrade directory writable — only the host CLI writes it (D1)', () => {
+    for (const name of Object.keys(compose.services)) {
+      const mounts: string[] = svc(name).volumes ?? [];
+      const upgrade = mounts.find((m) => m.includes('/srv/upgrades'));
+      if (upgrade) expect(upgrade).toMatch(/:ro$/);
     }
   });
 });

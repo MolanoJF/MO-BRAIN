@@ -10,10 +10,13 @@ import { timingSafeEqual } from 'node:crypto';
 import { loadOperations, validateRequest } from './dispatch.ts';
 import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
-import { patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile } from './fileplane.ts';
+import {
+  patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile, readSupervisorAuditTail,
+} from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { commitAs, inspectRepos } from './git.ts';
 import { writeReport } from './reports.ts';
+import { withAdvisoryLock } from './lock.ts';
 
 const PORT = Number(process.env.OPS_RPC_PORT ?? 3140);
 const TOKEN = process.env.OPS_RPC_TOKEN;
@@ -144,6 +147,14 @@ Bun.serve({
         return json({ ok: true });
       }
 
+      // A read, not a write: no advisory lock, and the path is
+      // server-computed — the request carries only a line count (Task 6, U9).
+      if (url.pathname === '/fileplane/audit-tail') {
+        const requested = (body as { lines?: unknown }).lines;
+        const lines = typeof requested === 'number' && Number.isFinite(requested) ? requested : 50;
+        return json({ lines: await readSupervisorAuditTail(lines) });
+      }
+
       // A3: claim takes the ops-side --credentials-out file once, then deletes it.
       if (url.pathname === '/fileplane/take-grant-credentials') {
         const path = (body as { path?: unknown }).path;
@@ -209,7 +220,15 @@ Bun.serve({
         const timeoutMs = Number((body as { timeoutMs?: number }).timeoutMs ?? 600_000);
         const runId = typeof (body as { runId?: unknown }).runId === 'string'
           ? (body as { runId: string }).runId : undefined;
-        const r = await runGbrain(argv, timeoutMs, runId);
+
+        // S3: a file-plane-writing operation (post-upgrade's config.json
+        // read-modify-write, check-update's cache file) serializes through the
+        // CONTROL database's advisory lock — enforced here, not by caller
+        // discipline.
+        const exec = () => runGbrain(argv, timeoutMs, runId);
+        const r = spec.requiresLock
+          ? await withAdvisoryLock(sql, `fileplane:op:${spec.id}`, exec)
+          : await exec();
 
         let parsed: unknown = null;
         if (wantJson) parsed = lastJsonValue(r.stdout);

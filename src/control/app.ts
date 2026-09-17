@@ -9,8 +9,10 @@ import { backup } from './routes/backup.ts';
 import { members } from './routes/members.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
+import { upgrades } from './routes/upgrades.ts';
 import { claimRoutes } from './routes/claim.ts';
-import { runMigrations } from './db/client.ts';
+import { getDb, runMigrations } from './db/client.ts';
+import { reconcileJournals, UPGRADE_RECONCILE_INTERVAL_MS } from '../upgrade/reconcile.ts';
 
 const app = new Hono();
 
@@ -27,6 +29,7 @@ app.route('/api', backup);
 app.route('/api', members);
 app.route('/api', connectionRoutes);
 app.route('/api', scheduleRoutes);
+app.route('/api', upgrades);
 app.route('/api', claimRoutes);
 
 // Live collisions with gbrain-serve. Caddy routes these away in production;
@@ -46,6 +49,15 @@ export default app;
 
 if (import.meta.main) {
   await runMigrations();
+  const upgradeDir = process.env.UPGRADE_DIR ?? '/srv/upgrades';
+  // Boot reconcile: the control plane was down for most of any upgrade that
+  // ran while it was offline, so this is the first chance to see it.
+  await reconcileJournals(getDb(), upgradeDir)
+    .catch((e) => console.error('[upgrade] boot reconcile failed:', e));
+  setInterval(() => {
+    void reconcileJournals(getDb(), upgradeDir)
+      .catch((e) => console.error('[upgrade] reconcile failed:', e));
+  }, UPGRADE_RECONCILE_INTERVAL_MS);
   Bun.serve({ port: Number(process.env.PORT ?? 3150), hostname: '0.0.0.0', fetch: app.fetch });
   console.log(`control-plane listening on :${process.env.PORT ?? 3150}`);
 }

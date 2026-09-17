@@ -109,18 +109,31 @@ export function diffCapability(before: CapabilitySnapshot, after: CapabilitySnap
 }
 
 /**
+ * The seam `captureCapability` reads through. The default targets the slice0
+ * harness (via `src/docker/host.ts`); the upgrade lane passes one built from
+ * the MAIN stack's compose prefix, so the same capturer serves both and no
+ * second implementation exists (Task 18's F7).
+ */
+export type CapabilityExec = (
+  service: string, argv: string[],
+) => Promise<{ stdout: string; exitCode: number }>;
+
+/**
  * Capture the self-describing surfaces. Requires a running stack with an
  * initialized brain; the caller starts `gbrain serve` for the well-known probe.
  */
-export async function captureCapability(opts: { serveBaseUrl?: string } = {}): Promise<CapabilitySnapshot> {
+export async function captureCapability(
+  opts: { serveBaseUrl?: string; exec?: CapabilityExec } = {},
+): Promise<CapabilitySnapshot> {
+  const exec: CapabilityExec = opts.exec ?? ((service, argv) => composeExec(service, argv));
   const version = parseGbrainVersion(
-    (await composeExec('gbrain-ops', ['gbrain', '--version'])).stdout,
+    (await exec('gbrain-ops', ['gbrain', '--version'])).stdout,
   );
-  const toolsRaw = await composeExec('gbrain-ops', ['gbrain', '--tools-json']);
+  const toolsRaw = await exec('gbrain-ops', ['gbrain', '--tools-json']);
   // No --json here: it is silently ignored (see parseSchemaPacksProse's doc
   // comment) — asking for it would suggest this reads a machine-readable
   // reply, when it reads the same prose either way.
-  const packsRaw = await composeExec('gbrain-ops', ['gbrain', 'schema', 'list']);
+  const packsRaw = await exec('gbrain-ops', ['gbrain', 'schema', 'list']);
 
   let wellKnown: CapabilitySnapshot['wellKnown'] = null;
   if (opts.serveBaseUrl) {
@@ -130,7 +143,7 @@ export async function captureCapability(opts: { serveBaseUrl?: string } = {}): P
     // same pattern as test/contract/discovery.contract.test.ts's
     // fetchWellKnown(). This runs as an argv array passed to `bun -e`, not
     // a shell string invoking gbrain, so it stays clear of the G2 lint rule.
-    const probe = await composeExec('gbrain-ops', [
+    const probe = await exec('gbrain-ops', [
       'bun', '-e',
       `const r = await fetch(${JSON.stringify(`${opts.serveBaseUrl}/.well-known/gbrain`)}).catch(() => null); ` +
       'if (r && r.ok) console.log(await r.text());',

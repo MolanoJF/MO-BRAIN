@@ -260,7 +260,7 @@ export async function runRestore(dir: string, opts: { newDomain?: string } = {})
   }
 
   // Stop everything that writes before touching the databases.
-  await sh([...COMPOSE, 'stop', '-t', '90', 'gbrain-worker', 'gbrain-serve', 'control-plane'], 150_000);
+  await sh([...COMPOSE, 'stop', '-t', '90', 'scheduler', 'gbrain-worker', 'gbrain-serve', 'control-plane'], 150_000);
 
   const restoreDb = async (db: string, file: string) => {
     // WITH (FORCE) so gbrain-ops' open connections cannot block DROP (PG 13+).
@@ -299,7 +299,7 @@ export async function runRestore(dir: string, opts: { newDomain?: string } = {})
   // it does not match.
   await reMaterializeFilePlane();
 
-  await sh([...COMPOSE, 'start', 'gbrain-serve', 'gbrain-worker', 'control-plane'], 180_000);
+  await sh([...COMPOSE, 'start', 'gbrain-serve', 'gbrain-worker', 'control-plane', 'scheduler'], 180_000);
   await sh(
     [...COMPOSE, 'exec', '-T', 'gbrain-ops', 'gbrain', 'apply-migrations', '--yes', '--non-interactive'],
     600_000,

@@ -100,7 +100,7 @@ export async function runBackup(outDir: string): Promise<BackupManifest> {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   // V5: SIGTERM drains; `stop` waits up to 40s. Budget 90s.
-  await sh([...COMPOSE, 'stop', '-t', '90', 'gbrain-worker'], 120_000);
+  await sh([...COMPOSE, 'stop', '-t', '90', 'scheduler', 'gbrain-worker'], 120_000);
   let quiesced = true;
   try {
     const status = await callOps('jobs.supervisorStatus', {}, { json: true, timeoutMs: 30_000 });
@@ -153,7 +153,7 @@ export async function runBackup(outDir: string): Promise<BackupManifest> {
     await Bun.write(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     return manifest;
   } finally {
-    await sh([...COMPOSE, 'start', 'gbrain-worker'], 120_000);
+    await sh([...COMPOSE, 'start', 'gbrain-worker', 'scheduler'], 120_000);
   }
 }
 

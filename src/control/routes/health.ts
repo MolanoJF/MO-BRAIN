@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { desc, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
+import { GBRAIN_PIN, verifyRuntimePin, type PinVerification } from '../../contracts/pin.ts';
 
 export const health = new Hono();
 
@@ -50,16 +51,19 @@ async function openAlerts(): Promise<
 
 health.get('/health', async (c) => {
   const components: Record<string, 'ok' | 'down'> = { controlDb: 'down', ops: 'down' };
-  let gbrainVersion: string | null = null;
 
   try { await getDb().execute(sql`select 1`); components.controlDb = 'ok'; } catch { /* reported as down */ }
 
   if (await opsHealthy()) {
     components.ops = 'ok';
     try {
-      const r = await callOps('toolsJson', {}, { timeoutMs: 10_000 });
-      if (r.ok) gbrainVersion = process.env.GBRAIN_VERSION ?? null;
-    } catch { /* version stays null */ }
+      await callOps('toolsJson', {}, { timeoutMs: 10_000 });
+    } catch { /* opsHealth already confirmed reachability; nothing to report here */ }
+  }
+
+  let pin: PinVerification = { declared: GBRAIN_PIN, observed: null, matches: null };
+  if (components.ops === 'ok') {
+    try { pin = await verifyRuntimePin(callOps); } catch { /* stays unverifiable */ }
   }
 
   // inspectRepos: stale index.lock plus uncommitted/unpushed drift. Sync
@@ -74,7 +78,7 @@ health.get('/health', async (c) => {
   const scheduleAlerts = components.controlDb === 'ok' ? await openAlerts() : [];
   // Never include a connection string, a token or an env dump here.
   return c.json(
-    { ok, components, gbrainVersion, repos, scheduleAlerts, at: new Date().toISOString() },
+    { ok, components, gbrainVersion: GBRAIN_PIN, pin, repos, scheduleAlerts, at: new Date().toISOString() },
     ok ? 200 : 503,
   );
 });

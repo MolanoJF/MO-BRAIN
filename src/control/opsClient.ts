@@ -87,6 +87,15 @@ export async function takeGrantCredentials(path: string): Promise<unknown> {
   return payload.credentials;
 }
 
+/** Tail the supervisor's own audit log (Task 6) — the only way to tell a
+ *  clean SIGTERM exit from a MAX_CRASHES exit inside the same drain window
+ *  (U9). A dedicated route, not an allowlisted operation: it takes no argv,
+ *  just a line count, and the path it reads is fixed server-side. */
+export async function auditTail(lines = 50): Promise<string[]> {
+  const payload = await post<{ lines?: string[] }>('/fileplane/audit-tail', { lines }, 30_000);
+  return Array.isArray(payload.lines) ? payload.lines : [];
+}
+
 export async function opsHealthy(): Promise<boolean> {
   try { return (await fetch(`${OPS_URL}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
   catch { return false; }

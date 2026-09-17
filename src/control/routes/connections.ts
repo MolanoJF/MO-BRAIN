@@ -13,12 +13,26 @@ import {
 } from '../connections.ts';
 import { annotateAdapters } from '../harness.ts';
 import { commitAsMember } from '../opsClient.ts';
+import { GBRAIN_PIN, capabilityPath } from '../../contracts/pin.ts';
 
 export const connectionRoutes = new Hono();
 
-const capability = JSON.parse(
-  readFileSync(join(import.meta.dir, '../../../contracts/v0.50.0.0/capability.json'), 'utf8'),
-) as { wellKnown?: { adapters?: Array<{ id: string }>; profiles?: unknown } };
+type CapabilityFile = { wellKnown?: { adapters?: Array<{ id: string }>; profiles?: unknown } };
+
+function loadCapability(): CapabilityFile {
+  const path = join(import.meta.dir, '../../..', capabilityPath());
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as CapabilityFile;
+  } catch (e) {
+    // D8: capability.json for a freshly-bumped pin does not exist until
+    // Task 8's capture runs post-upgrade — a missing file must not crash
+    // the whole control plane at import time.
+    console.error(`connections: no capability snapshot at ${path} yet (${(e as Error).message})`);
+    return {};
+  }
+}
+
+const capability = loadCapability();
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
