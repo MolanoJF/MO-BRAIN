@@ -213,10 +213,18 @@ describe('the quiesce lane (D13)', () => {
     expect(restoreLane(stray)).toEqual([...QUIESCE_ORDER].filter((s) => s !== 'agent-runner').reverse());
 
     // A project compose cannot render is not evidence that a writer is absent:
-    // the pre-Task-14 behaviour stands (drain everything in the order) rather
-    // than silently skipping a drain.
+    // the pre-Task-14 behaviour stands for the DRAIN (stop everything in the
+    // order) rather than silently skipping a drain. The RESTORE direction is
+    // the one that starts containers, so it is the one that must not trust the
+    // missing model: `up -d --no-deps agent-runner` starts a profile-gated
+    // service regardless of the profile (measured), so an unknown model
+    // restores every requested service EXCEPT the runner. An assertion that
+    // still accepts agent-runner here is pinning a path to the runner.
     expect(drainLane('unknown')).toEqual([...QUIESCE_ORDER]);
-    expect(restoreLane('unknown')).toEqual([...QUIESCE_ORDER].reverse());
+    expect(restoreLane('unknown')).toEqual(
+      [...QUIESCE_ORDER].filter((s) => s !== 'agent-runner').reverse(),
+    );
+    expect(restoreLane('unknown')).not.toContain('agent-runner');
     // An explicit resume() request cannot name what the project does not have.
     expect(restoreLane({ active: new Set(['scheduler']), containers: new Set() },
       ['scheduler', 'control-plane'])).toEqual(['scheduler']);

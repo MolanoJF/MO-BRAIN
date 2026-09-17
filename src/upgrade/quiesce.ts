@@ -91,10 +91,17 @@ function composeArgv(ctx: QuiesceContext): readonly string[] {
  *    whatever the profile says.
  *
  * `'unknown'` = the project could not be rendered. That is NOT the same as "no
- * services": the lanes below then fall back to every service in QUIESCE_ORDER,
- * which is the pre Task 14 behaviour — a project compose cannot read is not
- * evidence that a writer is absent, and the failure surfaces at the first stop
- * that cannot succeed instead of being silently skipped.
+ * services": a compose project that cannot be read is not evidence that a
+ * writer is absent, so drainLane still stops every service in QUIESCE_ORDER.
+ * That fallback is harmless even for a profile-gated member: `stop` of a
+ * service whose profile is off exits 0 — it does NOT fail, so nothing
+ * surfaces at the first stop that "cannot succeed" (measured:
+ * `docker compose --env-file .env -f compose/docker-compose.yml stop -t 1
+ * agent-runner` exits 0 with the runner profile off). restoreLane is the
+ * direction that STARTS containers, and there the same profile-gated member
+ * must be excluded even when the model is unknown: `up -d --no-deps` ignores
+ * the profile and would switch the runner on (measured), so an unreadable
+ * project must not become a path to it either.
  */
 export type ComposeModel =
   | { active: ReadonlySet<string>; containers: ReadonlySet<string> }
@@ -137,12 +144,19 @@ export function drainLane(
  * the operator's configuration excludes must not be switched on by an upgrade —
  * G5's rule read the other way round, because an upgrade is not a path to an
  * agent runner either.
+ *
+ * An `unknown` model is every requested service EXCEPT the profile-gated
+ * runner: an unreadable project is not evidence that the operator enabled the
+ * `runner` profile, and `up -d --no-deps agent-runner` would start it anyway
+ * (measured) — the container that executes model-written code with the
+ * organisation's key.
  */
 export function restoreLane(
   model: ComposeModel, requested: readonly string[] = QUIESCE_ORDER,
 ): string[] {
-  return QUIESCE_ORDER.filter((svc) => requested.includes(svc)
-    && (model === 'unknown' || model.active.has(svc))).reverse();
+  return QUIESCE_ORDER.filter((svc) => requested.includes(svc) && (
+    model === 'unknown' ? svc !== 'agent-runner' : model.active.has(svc)
+  )).reverse();
 }
 
 async function sh(argv: string[], timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {

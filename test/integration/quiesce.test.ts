@@ -131,5 +131,15 @@ describe('quiesce: real stack', () => {
     const runnerOff: ComposeModel = { active: new Set(writers), containers: noContainers };
     expect(drainLane(runnerOff)).toEqual([...QUIESCE_ORDER].filter((svc) => svc !== 'agent-runner'));
     expect(restoreLane(runnerOff)).not.toContain('agent-runner');
+
+    // An unreadable project is no better: the drain still stops everything
+    // (stopping a profile-off runner exits 0), but the restore must not start
+    // it — `up -d --no-deps agent-runner` ignores the profile (measured), so
+    // an unknown model restoring agent-runner is a path to the runner.
+    expect(drainLane('unknown')).toEqual([...QUIESCE_ORDER]);
+    expect(restoreLane('unknown')).not.toContain('agent-runner');
+    expect(restoreLane('unknown')).toEqual(
+      [...QUIESCE_ORDER].filter((svc) => svc !== 'agent-runner').reverse(),
+    );
   });
 });
