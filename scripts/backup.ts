@@ -3,7 +3,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { callOps } from '../src/control/opsClient.ts';
+import { defaultOpsCaller, type OpsCaller } from '../src/control/opsCaller.ts';
+
+export type QuiesceState = 'verified' | 'unverified' | 'failed';
 
 export type BackupManifest = {
   id: string;
@@ -11,7 +13,8 @@ export type BackupManifest = {
   gbrainVersion: string;
   components: { brainDb: string; controlDb: string; brainRepos: string; secrets: string };
   sha256: Record<string, string>;
-  quiesced: boolean;
+  quiesced: QuiesceState;
+  quiesceLane: 'http' | 'relay' | null;
   warning: string;
 };
 
@@ -85,6 +88,26 @@ async function sha256(path: string): Promise<string> {
 }
 
 /**
+ * Honesty rule: a probe that could not run did not succeed.
+ *
+ * The previous shape was `let quiesced = true` with `catch { quiesced = true }`
+ * (scripts/backup.ts:104-108) reached through a client whose default URL is the
+ * CONTAINER NAME `http://gbrain-ops:3140`. On a production host that name does
+ * not resolve and no ops port is published (S2), so the probe ALWAYS threw and
+ * every production manifest claimed a quiesce nobody checked.
+ */
+export function classifyQuiesce(
+  status: { running: boolean; workers: unknown[] } | null,
+  error: unknown,
+  caller: { kind: 'http' | 'relay' | 'stub' },
+): { quiesced: QuiesceState; quiesceLane: 'http' | 'relay' | null } {
+  if (error !== null && error !== undefined) return { quiesced: 'unverified', quiesceLane: null };
+  if (status === null) return { quiesced: 'unverified', quiesceLane: null };
+  const lane = caller.kind === 'http' || caller.kind === 'relay' ? caller.kind : null;
+  return { quiesced: status.running ? 'failed' : 'verified', quiesceLane: lane };
+}
+
+/**
  * Quiesce first. A pg_dump of two databases plus a tar of two volumes taken
  * at three moments is three artifacts that disagree: a job commits a page to
  * the repo, then writes its row; the tar ran before the commit and the dump
@@ -94,20 +117,39 @@ async function sha256(path: string): Promise<string> {
  * cloud disk snapshot) so atomicity across DB + files is structural. This is
  * the portable minimum.
  */
-export async function runBackup(outDir: string): Promise<BackupManifest> {
+export async function runBackup(
+  outDir: string,
+  opts: { ops?: OpsCaller; allowUnquiesced?: boolean } = {},
+): Promise<BackupManifest> {
   await mkdir(outDir, { recursive: true });
   const id = randomUUID();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   // V5: SIGTERM drains; `stop` waits up to 40s. Budget 90s.
   await sh([...COMPOSE, 'stop', '-t', '90', 'scheduler', 'gbrain-worker'], 120_000);
-  let quiesced = true;
-  try {
-    const status = await callOps('jobs.supervisorStatus', {}, { json: true, timeoutMs: 30_000 });
-    quiesced = status.exitCode === 1; // 1 = not running
-  } catch { quiesced = true; }
 
   try {
+    const ops = opts.ops ?? (await defaultOpsCaller(COMPOSE));
+    let status: { running: boolean; workers: unknown[] } | null = null;
+    let probeError: unknown = null;
+    try { status = await ops.supervisorStatus(); } catch (e) { probeError = e; }
+    const { quiesced, quiesceLane } = classifyQuiesce(status, probeError, ops);
+
+    if (quiesced === 'failed') {
+      throw new Error(
+        'Refusing to back up: the job supervisor is still running after `compose stop`. ' +
+        'A dump taken now can disagree with the repos. Investigate before retrying.',
+      );
+    }
+    if (quiesced === 'unverified' && !opts.allowUnquiesced) {
+      throw new Error(
+        'Refusing to back up: could not verify the stack is quiesced ' +
+        `(lane=${ops.kind}${probeError ? `, error=${(probeError as Error).message}` : ''}). ` +
+        'An unverified quiesce can produce a dump that disagrees with the repos. ' +
+        'Re-run with --allow-unquiesced to take it anyway; the manifest will say so.',
+      );
+    }
+
     const components = {
       brainDb: `brain-${stamp}.sql`,
       controlDb: `control-${stamp}.sql`,
@@ -143,11 +185,14 @@ export async function runBackup(outDir: string): Promise<BackupManifest> {
     const manifest: BackupManifest = {
       id, createdAt: new Date().toISOString(),
       gbrainVersion: process.env.GBRAIN_VERSION ?? '0.50.0.0',
-      components, sha256: sums, quiesced,
+      components, sha256: sums, quiesced, quiesceLane,
       warning:
         'Restoring requires the ENCRYPTION_KEY that sealed the secrets table. ' +
         'Store it separately from this archive — together they are a credential dump. ' +
-        'Restoring to a NEW DOMAIN invalidates every OAuth grant; re-provision all Connections.',
+        'Restoring to a NEW DOMAIN invalidates every OAuth grant; re-provision all Connections.' +
+        (quiesced === 'unverified'
+          ? ' WARNING: the stack quiesce is unverified — this archive may not be consistent.'
+          : ''),
     };
 
     await Bun.write(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
@@ -158,6 +203,8 @@ export async function runBackup(outDir: string): Promise<BackupManifest> {
 }
 
 if (import.meta.main) {
-  const out = process.argv[2] ?? `./backups/${new Date().toISOString().slice(0, 10)}`;
-  console.log(JSON.stringify(await runBackup(out), null, 2));
+  const args = process.argv.slice(2);
+  const allowUnquiesced = args.includes('--allow-unquiesced');
+  const out = args.find((a) => !a.startsWith('--')) ?? `./backups/${new Date().toISOString().slice(0, 10)}`;
+  console.log(JSON.stringify(await runBackup(out, { allowUnquiesced }), null, 2));
 }

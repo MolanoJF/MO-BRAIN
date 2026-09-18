@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import app from '../../src/control/app.ts';
-import { BACKUP_HOST_ONLY_ERROR } from '../../scripts/backup.ts';
+import { BACKUP_HOST_ONLY_ERROR, runBackup } from '../../scripts/backup.ts';
 import type { BackupManifest } from '../../scripts/backup.ts';
 import { runMigrations, getDb, schema, closeDb, pinDb } from '../../src/control/db/client.ts';
 import { bootstrapFirstAdmin } from '../../src/control/bootstrap.ts';
@@ -214,10 +214,58 @@ describe('backup', () => {
   });
 
   // Three artifacts taken at three moments are three artifacts that disagree.
-  test.skipIf(!stackAvailable)('the manifest records that the worker was quiesced', async () => {
+  // `quiesced` is now the three-state result of a real probe (D6), so this
+  // asserts the exact state and the lane that proved it — not merely truthy.
+  test.skipIf(!stackAvailable)('the manifest records a verified quiesce and the lane that proved it', async () => {
     const m = JSON.parse(await readFile(join(out, 'manifest.json'), 'utf8'));
-    expect(m.quiesced).toBe(true);
+    expect(m.quiesced).toBe('verified');
+    expect(m.quiesceLane === 'http' || m.quiesceLane === 'relay').toBe(true);
+    console.log(`MEASURED backup quiesce at ${m.gbrainVersion}: quiesced=${m.quiesced} quiesceLane=${m.quiesceLane}`);
   });
+
+  // A probe that could not run did not succeed (D6). Because runBackup takes an
+  // INJECTED caller, these cases are answered by the caller handed in, not by a
+  // sibling file's process-wide `mock.module` — so they can run in-process while
+  // the manifest-producing case above runs the real script in its own process
+  // under the cross-process stack-exclusion lock in test/helpers/stack.ts.
+  test.skipIf(!stackAvailable)('an injected caller that throws is refused, never recorded as verified', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'bs-backup-refuse-'));
+    try {
+      const throwing = {
+        kind: 'relay' as const,
+        auditTail: async () => [],
+        supervisorStatus: async () => { throw new Error('ops unreachable: getaddrinfo ENOTFOUND gbrain-ops'); },
+      };
+      await withStackExclusion('backup.test.ts', async () => {
+        await expect(runBackup(dir, { ops: throwing })).rejects
+          .toThrow(/could not verify the stack is quiesced/);
+      });
+      expect(existsSync(join(dir, 'manifest.json'))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 600_000);
+
+  test.skipIf(!stackAvailable)('allowUnquiesced takes the backup and stamps quiesced:unverified', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'bs-backup-unverified-'));
+    try {
+      const throwing = {
+        kind: 'relay' as const,
+        auditTail: async () => [],
+        supervisorStatus: async () => { throw new Error('ops unreachable: getaddrinfo ENOTFOUND gbrain-ops'); },
+      };
+      await withStackExclusion('backup.test.ts', async () => {
+        await runBackup(dir, { ops: throwing, allowUnquiesced: true });
+      });
+      const m: BackupManifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
+      expect(m.quiesced).toBe('unverified');
+      expect(m.quiesceLane).toBeNull();
+      expect(m.warning).toMatch(/unverified/i);
+      console.log(`MEASURED backup quiesce (allowUnquiesced) at ${m.gbrainVersion}: quiesced=${m.quiesced} quiesceLane=${m.quiesceLane}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 600_000);
 
   test.skipIf(!stackAvailable)('the secrets component is the encrypted table, not decrypted values', async () => {
     const m = JSON.parse(await readFile(join(out, 'manifest.json'), 'utf8'));
