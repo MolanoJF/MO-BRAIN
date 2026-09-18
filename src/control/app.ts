@@ -13,6 +13,7 @@ import { upgrades } from './routes/upgrades.ts';
 import { claimRoutes } from './routes/claim.ts';
 import { runRoutes } from './routes/runs.ts';
 import { gatewayRoutes } from './routes/gateway.ts';
+import { spendRoutes } from './routes/spend.ts';
 import { getDb, runMigrations } from './db/client.ts';
 import { reconcileJournals, UPGRADE_RECONCILE_INTERVAL_MS } from '../upgrade/reconcile.ts';
 
@@ -32,6 +33,7 @@ app.route('/api', members);
 app.route('/api', connectionRoutes);
 app.route('/api', scheduleRoutes);
 app.route('/api', upgrades);
+app.route('/api', spendRoutes);
 app.route('/api', claimRoutes);
 // Slice 4 (Task 6, Task 7): the runner's two surfaces. Neither is ever routed
 // publicly — Caddy gains no route for /api/runs or /api/gateway, and the runner
