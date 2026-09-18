@@ -4,7 +4,10 @@ import { join, relative } from 'node:path';
 
 export type Violation = { file: string; line: number; rule: string; text: string };
 
-const RULES: { rule: string; re: RegExp; why: string }[] = [
+/** `only` restricts a rule to paths matching the regex; absent means everywhere. */
+type Rule = { rule: string; re: RegExp; why: string; only?: RegExp };
+
+const RULES: Rule[] = [
   {
     rule: 'autopilot-install',
     re: /autopilot\s+--install/,
@@ -56,6 +59,22 @@ const RULES: { rule: string; re: RegExp; why: string }[] = [
     re: /\b(plaintext|api_key_plain|secret_value)\s*:\s*text\(/,
     why: 'S3b: secrets are envelope-encrypted; a plaintext column makes a pg_dump a credential dump',
   },
+  {
+    rule: 'frozen-crypto-domain',
+    // D3: these three strings are HKDF domain separators, not names. Changing
+    // 'brainstand-kek-v1' makes every row in `secrets` permanently
+    // undecryptable — both provider keys, with no recovery. Changing either
+    // gateway-token string breaks every live token mid-run. They are frozen
+    // forever, including through the product rename.
+    re: /Buffer\.from\(\s*['"`](?!brainstand-(?:kek-v1|gateway-token-salt|gateway-token-v1)['"`])[\w-]*-(?:kek|gateway-token)-(?:v\d+|salt)['"`]/,
+    why: 'D3: HKDF domain separators are frozen forever; renaming one destroys every stored secret or every live token',
+  },
+  {
+    rule: 'production-compose-build',
+    re: /^\s{2,}build:\s*$/m,
+    why: 'D2: the production compose file pulls published images; build stanzas live in docker-compose.build.yml',
+    only: /compose\/docker-compose\.yml$/,
+  },
 ];
 
 // 'docs' is skipped deliberately: this guard protects CODE, and planning
@@ -86,6 +105,22 @@ async function* walk(dir: string): AsyncGenerator<string> {
   }
 }
 
+/**
+ * The per-file scanning half of the walker, split out so a rule can be tested
+ * against a path and a text without a filesystem. A rule carrying `only` fires
+ * only when its regex matches `path`; rules without `only` apply everywhere.
+ */
+export function scanText(path: string, text: string): Violation[] {
+  const out: Violation[] = [];
+  text.split('\n').forEach((line, i) => {
+    for (const r of RULES) {
+      if (r.only && !r.only.test(path)) continue;
+      if (r.re.test(line)) out.push({ file: path, line: i + 1, rule: r.rule, text: line.trim() });
+    }
+  });
+  return out;
+}
+
 export async function lintForbidden(root: string): Promise<Violation[]> {
   const out: Violation[] = [];
   for await (const file of walk(root)) {
@@ -93,10 +128,7 @@ export async function lintForbidden(root: string): Promise<Violation[]> {
     if (file.includes('lint-forbidden')) continue;
     // Named-file exemption for root-level planning docs (see ROOT_FILE_EXEMPTIONS above).
     if (ROOT_FILE_EXEMPTIONS.has(relative(root, file))) continue;
-    const lines = (await readFile(file, 'utf8')).split('\n');
-    lines.forEach((text, i) => {
-      for (const r of RULES) if (r.re.test(text)) out.push({ file, line: i + 1, rule: r.rule, text: text.trim() });
-    });
+    out.push(...scanText(file, await readFile(file, 'utf8')));
   }
   return out;
 }

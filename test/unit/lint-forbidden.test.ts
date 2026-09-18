@@ -2,7 +2,7 @@ import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { lintForbidden } from '../../scripts/lint-forbidden.ts';
+import { lintForbidden, scanText } from '../../scripts/lint-forbidden.ts';
 
 let dir: string;
 beforeAll(async () => { dir = await mkdtemp(join(tmpdir(), 'bs-lint-')); });
@@ -163,5 +163,35 @@ describe('lintForbidden', () => {
     await writeFile(join(dir, 'a', 'sch.ts'), `plaintext: text('plaintext'),\n`);
     const v = await lintForbidden(dir);
     expect(v.map((x) => x.rule)).toContain('secret-column-name');
+  });
+});
+
+describe('frozen-crypto-domain (D3)', () => {
+  test('flags any edit to the KEK domain separator', () => {
+    const v = scanText('src/control/secrets.ts',
+      `Buffer.from('acmebrain-kek-v1', 'utf8')`);
+    expect(v.map((x) => x.rule)).toContain('frozen-crypto-domain');
+  });
+
+  test('flags any edit to the gateway token salt or info', () => {
+    expect(scanText('src/gateway/token.ts', `Buffer.from('acmebrain-gateway-token-salt')`)
+      .map((x) => x.rule)).toContain('frozen-crypto-domain');
+    expect(scanText('src/gateway/token.ts', `Buffer.from('acmebrain-gateway-token-v1')`)
+      .map((x) => x.rule)).toContain('frozen-crypto-domain');
+  });
+
+  test('leaves the frozen values themselves alone', () => {
+    expect(scanText('src/control/secrets.ts', `Buffer.from('brainstand-kek-v1')`)).toEqual([]);
+  });
+});
+
+describe('production-compose-build (D2)', () => {
+  test('flags a build stanza in the production compose file', () => {
+    const v = scanText('compose/docker-compose.yml', '    build:\n      context: ..');
+    expect(v.map((x) => x.rule)).toContain('production-compose-build');
+  });
+
+  test('allows one in the build overlay', () => {
+    expect(scanText('compose/docker-compose.build.yml', '    build:\n      context: ..')).toEqual([]);
   });
 });

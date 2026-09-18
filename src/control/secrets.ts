@@ -12,6 +12,9 @@ export type Sealed = { version: number; salt: string; wrappedDek: string; payloa
 function deriveKek(salt: Buffer): Buffer {
   const master = process.env.ENCRYPTION_KEY;
   if (!master || master.length < 32) throw new Error('ENCRYPTION_KEY must be at least 32 characters');
+  // FROZEN FOREVER (D3). This is an HKDF domain separator, not a product name.
+  // Changing it makes every existing sealed secret permanently undecryptable.
+  // `lint:forbidden`'s frozen-crypto-domain rule fails the build if you try.
   return Buffer.from(hkdfSync('sha256', Buffer.from(master, 'utf8'), salt, Buffer.from('brainstand-kek-v1'), 32));
 }
 
