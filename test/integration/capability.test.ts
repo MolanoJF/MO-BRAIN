@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { getDb, closeDb, pinDb, runMigrations, schema } from '../../src/control/db/client.ts';
 import {
@@ -9,8 +10,21 @@ import type { CapabilitySnapshot } from '../../src/contracts/capability.ts';
 process.env.CONTROL_DATABASE_URL ??=
   'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 
-const FROM = '0.50.0.0';
-const TO = '0.50.5.0';
+// Scoped to THIS file's own fixture. `capability_snapshots` is keyed by version
+// text with no owner column, and other files in this directory legitimately
+// write the SAME versions: agent-runs.test.ts seeds the running pin's catalog
+// (0.50.5.0) so D5 has a tool surface to read, and this suite's afterAll used to
+// delete precisely that row. Under `bun test test/integration` (files run
+// concurrently) the shared pair made "only one version recorded" depend on
+// another file's timing — and it stopped being true at all once agent-runs
+// seeded 0.50.5.0 between the FROM insert and the driftBetween call. A per-run
+// suffix gives this suite a private pair, so the premise is a property of its
+// own rows. Nothing about the delta under test changes: driftBetween compares
+// version strings (diffCapability: `before.gbrainVersion !== after.gbrainVersion`)
+// and reads every other field off the rows, never off the version labels.
+const RUN = randomUUID().slice(0, 8);
+const FROM = `0.50.0.0-${RUN}`;
+const TO = `0.50.5.0-${RUN}`;
 
 function snap(version: string, tools: string[]): CapabilitySnapshot {
   return {
@@ -27,6 +41,8 @@ function snap(version: string, tools: string[]): CapabilitySnapshot {
 
 beforeAll(async () => { pinDb(); await runMigrations(); });
 afterAll(async () => {
+  // Only this suite's own suffixed pair — see RUN above. Deleting the bare
+  // 0.50.0.0/0.50.5.0 rows here is what corrupted a sibling's fixture.
   await getDb().delete(schema.capabilitySnapshots).where(eq(schema.capabilitySnapshots.gbrainVersion, FROM));
   await getDb().delete(schema.capabilitySnapshots).where(eq(schema.capabilitySnapshots.gbrainVersion, TO));
   await closeDb();

@@ -292,7 +292,13 @@ describe('Slice 3.5 seam gate A', () => {
     const byId = Object.fromEntries(doc.operations.map((o: any) => [o.id, o]));
     expect(byId['checkUpdate']).toBeDefined();
     expect(byId['postUpgrade']).toBeDefined();
-    expect(doc.operations.length).toBe(33); // 31 at Slice 3 close + 2
+    // 33 at Slice 3.5 close (31 at Slice 3 close + `checkUpdate` and
+    // `postUpgrade`) + 1: Slice 4 added `page.delete` — F16's
+    // `delete <slug> --source-id <id> --purge`, the operation the revert's
+    // re-index needs to remove the page an agent run wrote
+    // (docs/slice-4-findings.md, F16). The pinned
+    // contracts/v0.50.5.0/operations.json carries it.
+    expect(doc.operations.length).toBe(34);
     // U1/U3: neither declares a dry run, and only checkUpdate has --json.
     expect(byId['checkUpdate'].supportsJson).toBe(true);
     expect(byId['postUpgrade'].supportsJson).toBe(false);

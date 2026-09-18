@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { QUIESCE_ORDER, composeModel, drainLane, quiesce, resume, restoreLane } from '../../src/upgrade/quiesce.ts';
 import type { ComposeModel } from '../../src/upgrade/quiesce.ts';
 import type { UpgradeContext } from '../../src/upgrade/types.ts';
+import { withStackExclusion } from '../helpers/stack.ts';
 
 const COMPOSE = [
   'docker', 'compose',
@@ -62,50 +63,58 @@ describe('quiesce: real stack', () => {
       const model = await composeModel(COMPOSE);
       if (model === 'unknown') throw new Error('the live compose project could not be rendered');
 
-      try {
-        const evidence = await quiesce(ctx);
-        expect(evidence.stopped).toEqual([...QUIESCE_ORDER]);
+      // The whole round trip holds the stack exclusively. backup.test.ts runs
+      // the real scripts/backup.ts (which stops these same services and writes
+      // its manifest from a `jobs.supervisorStatus` read); with files running
+      // concurrently, this file's stop/resume can invalidate that read and
+      // backup's own stop/start can invalidate the `backUp` assertion below.
+      // See withStackExclusion for why the lock is per-leg and not `--parallel=1`.
+      await withStackExclusion('quiesce.test.ts', async () => {
+        try {
+          const evidence = await quiesce(ctx);
+          expect(evidence.stopped).toEqual([...QUIESCE_ORDER]);
 
-        // Plan defect corrected (evidence: `docker compose ps` shows `caddy`
-        // Up, and caddy is not in QUIESCE_ORDER). The plan's literal
-        // `toEqual(['postgres'])` omits the stateless ingress QUIESCE_ORDER
-        // deliberately never stops (D3 stops writers only), so it cannot hold
-        // on a stock stack. Assert the load-bearing claim directly instead:
-        // every writer is down, postgres is up, and nothing beyond postgres +
-        // caddy is left running. This is not weaker than `['postgres']` — it
-        // still fails if any QUIESCE_ORDER service survives or an unexpected
-        // service appears.
-        const afterQuiesce = await runningServices();
-        expect(afterQuiesce).toContain('postgres');
-        for (const svc of QUIESCE_ORDER) expect(afterQuiesce).not.toContain(svc);
-        expect(afterQuiesce.filter((s) => s !== 'postgres' && s !== 'caddy')).toEqual([]);
-      } finally {
-        // The task requires the live stack be left healthy even when an
-        // assertion (or a mid-quiesce stop) fails, so restore unconditionally.
-        // The plan sample only resumed on the success path.
-        await resume(ctx);
-      }
+          // Plan defect corrected (evidence: `docker compose ps` shows `caddy`
+          // Up, and caddy is not in QUIESCE_ORDER). The plan's literal
+          // `toEqual(['postgres'])` omits the stateless ingress QUIESCE_ORDER
+          // deliberately never stops (D3 stops writers only), so it cannot hold
+          // on a stock stack. Assert the load-bearing claim directly instead:
+          // every writer is down, postgres is up, and nothing beyond postgres +
+          // caddy is left running. This is not weaker than `['postgres']` — it
+          // still fails if any QUIESCE_ORDER service survives or an unexpected
+          // service appears.
+          const afterQuiesce = await runningServices();
+          expect(afterQuiesce).toContain('postgres');
+          for (const svc of QUIESCE_ORDER) expect(afterQuiesce).not.toContain(svc);
+          expect(afterQuiesce.filter((s) => s !== 'postgres' && s !== 'caddy')).toEqual([]);
+        } finally {
+          // The task requires the live stack be left healthy even when an
+          // assertion (or a mid-quiesce stop) fails, so restore unconditionally.
+          // The plan sample only resumed on the success path.
+          await resume(ctx);
+        }
 
-      // Task 14, D12/D13. This used to read
-      //   `for (const svc of QUIESCE_ORDER) expect(backUp).toContain(svc);`
-      // and that is exactly the assertion the runner lane breaks BY DESIGN: on a
-      // stack that never enabled the `runner` profile, resume() must not bring
-      // the runner back — `up -d --no-deps` CREATES a profile-gated service
-      // whether or not its profile is active (measured), which would switch an
-      // agent runner on during an upgrade nobody asked to have it. Not a
-      // weakening: the quiesce half above still proves every writer in
-      // QUIESCE_ORDER is down, this half requires EVERY service the project
-      // declares to be back (including `agent-runner` whenever the operator has
-      // it enabled), and it adds a requirement the old line could not express at
-      // all — a service whose profile is inactive is deliberately NOT started.
-      const restored = restoreLane(model);
-      const backUp = await runningServices();
-      expect(restored.length).toBeGreaterThan(0);
-      for (const svc of restored) expect(backUp).toContain(svc);
-      for (const svc of QUIESCE_ORDER) {
-        if (model.active.has(svc)) continue;
-        expect(backUp).not.toContain(svc);
-      }
+        // Task 14, D12/D13. This used to read
+        //   `for (const svc of QUIESCE_ORDER) expect(backUp).toContain(svc);`
+        // and that is exactly the assertion the runner lane breaks BY DESIGN: on a
+        // stack that never enabled the `runner` profile, resume() must not bring
+        // the runner back — `up -d --no-deps` CREATES a profile-gated service
+        // whether or not its profile is active (measured), which would switch an
+        // agent runner on during an upgrade nobody asked to have it. Not a
+        // weakening: the quiesce half above still proves every writer in
+        // QUIESCE_ORDER is down, this half requires EVERY service the project
+        // declares to be back (including `agent-runner` whenever the operator has
+        // it enabled), and it adds a requirement the old line could not express at
+        // all — a service whose profile is inactive is deliberately NOT started.
+        const restored = restoreLane(model);
+        const backUp = await runningServices();
+        expect(restored.length).toBeGreaterThan(0);
+        for (const svc of restored) expect(backUp).toContain(svc);
+        for (const svc of QUIESCE_ORDER) {
+          if (model.active.has(svc)) continue;
+          expect(backUp).not.toContain(svc);
+        }
+      });
     },
     600_000,
   );

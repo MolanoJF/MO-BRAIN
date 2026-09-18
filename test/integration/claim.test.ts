@@ -72,7 +72,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
 }));
 
 const { mintClaimLink, claim } = await import('../../src/control/claim.ts');
-const { grantCredentialsOutPath } = await import('../../src/control/connections.ts');
+const { grantCredentialsOutPath, serverCredentialsOutPath, serverClientName } =
+  await import('../../src/control/connections.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
 const { clientName } = await import('../../src/contracts/compile.ts');
@@ -251,9 +252,13 @@ describe('claim', () => {
     expect(fulfilled.length).toBe(1);
     expect(rejected.length).toBe(1);
 
+    // D8 (Task 5): one Connection is TWO gbrain clients — the member's and the
+    // server-side one — so a winning claim grants twice and hands off two
+    // credentials files. Exactly one claim wins, so exactly one Connection's
+    // worth of provisioning happened: 2 grants, 2 takes, never 4.
     const grants = calls.filter((c) => c.op === 'mcp.grant' && c.opts?.dryRun !== true);
-    expect(grants.length).toBe(1);
-    expect(takes.length).toBe(1);
+    expect(grants.length).toBe(2);
+    expect(takes.length).toBe(2);
 
     const [row] = await getDb().select().from(schema.connections)
       .where(eq(schema.connections.id, pendingId));
@@ -282,9 +287,12 @@ describe('claim', () => {
     const ids = result.connections.map((c) => c.connectionId).sort();
     expect(ids).toEqual([a, b].sort());
 
+    // D8 (Task 5): two pending Connections, two clients each — 4 grants and 4
+    // handoffs, one per client (the server client's taken inside
+    // provisionConnection, the member's taken by claim itself).
     const grants = calls.filter((c) => c.op === 'mcp.grant' && c.opts?.dryRun !== true);
-    expect(grants.length).toBe(2);
-    expect(takes.length).toBe(2);
+    expect(grants.length).toBe(4);
+    expect(takes.length).toBe(4);
 
     for (const id of [a, b]) {
       const [row] = await getDb().select().from(schema.connections)
@@ -307,7 +315,25 @@ describe('claim', () => {
     });
     expect(result.connections[0]!.harness).toBe('claude-code');
     expect(result.connections[0]!.mcp_url).toBe('http://127.0.0.1:3131/mcp');
-    expect(takes).toEqual([grantCredentialsOutPath(pendingId)]);
+
+    // D8 (Task 5): the member's client and the server-side client carry the
+    // SAME compiled scoping, so the two grants differ only in name — the server
+    // client's is `serverClientName(memberClientName)`.
+    const grantNames = calls.filter((c) => c.op === 'mcp.grant' && c.opts?.dryRun !== true)
+      .map((c) => c.params?.name);
+    expect(grantNames).toEqual([
+      clientName(membershipId, writeSpace.sourceId),
+      serverClientName(clientName(membershipId, writeSpace.sourceId)),
+    ]);
+
+    // One handoff per client, from one file each, never a shared file: the
+    // server client's is taken inside provisionServerClient (which is how its
+    // secret reaches the `secrets` table), the member's by claim after
+    // provisionConnection returns — and only the member's lands on the result.
+    expect(takes).toEqual([
+      serverCredentialsOutPath(pendingId),
+      grantCredentialsOutPath(pendingId),
+    ]);
 
     const claimRows = await getDb().select().from(schema.claimLinks);
     const connRows = await getDb().select().from(schema.connections);
