@@ -18,7 +18,7 @@ up as a measurement).
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 | F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
-| F21 | Mobrain's `SEARCH_MODES` offers ids `fast` and `thorough`, but the pinned gbrain `0.50.5.0` accepts only `conservative \| balanced \| tokenmax`; `search.mode` is stored verbatim and the resolver silently falls back to `balanced`, so the product's mode picker does not change the search pipeline | `confirmed` — found by Task 9, not fixed there |
+| F21 | Mobrain's `SEARCH_MODES` offers ids `fast` and `thorough`, but the pinned gbrain `0.50.5.0` accepts only `conservative \| balanced \| tokenmax`; `search.mode` is stored verbatim and the resolver silently falls back to `balanced`, so the product's mode picker does not change the search pipeline | `confirmed` — fixed here |
 
 ---
 
@@ -423,7 +423,7 @@ The `brain` block is no longer null and `coverage.brainReachable` is `true`;
 
 ## F21 — the wizard's `fast` and `thorough` search modes do not exist in the pinned binary
 
-**Found by Task 9's probe, P5 above.** `src/control/lifecycle.ts`'s `SEARCH_MODES`
+**Found by Task 9's probe, P5 above; FIXED HERE.** `src/control/lifecycle.ts`'s `SEARCH_MODES`
 was written in Slice 1 with ids `fast` / `balanced` / `thorough` and upstream's
 claimed `relativeCost` of `1 / 6 / 25`. The pinned gbrain `0.50.5.0` accepts only
 `conservative | balanced | tokenmax`; `config set search.mode fast` and
@@ -445,11 +445,66 @@ product consequences, both measured or directly read from the pinned artifact:
    just unmeasured — for two of the three buttons, the mode behind it is not the
    one the button names.
 
-Not fixed in Task 9: correcting it means re-keying `SEARCH_MODES` IDs to the
-binary's real vocabulary (or adding a translation layer), updating the wizard
-tests that post `mode: 'fast'`, and deciding whether the human-facing labels
-`Fast` / `Thorough` survive as display text over `conservative` / `tokenmax`.
-That is a product decision with its own task, and Task 9 is a probe. The probe's
-job was to measure the spread or record that it could not; it did both, and the
-null is real.
+### Fix (F21, this task)
+
+`SEARCH_MODES` now carries the binary's real vocabulary: `conservative` /
+`balanced` / `tokenmax`, with honest labels and descriptions of what the engine
+does in each (retrieval only; reranker on; expansion + uncapped per-chunk
+synopsis). The `relativeCost` values stay `1 / 6 / 25`, but the D7 block now
+states plainly that these are **upstream's declared claim for the current mode
+names and were not measured here**; `measuredCost` / `measuredAt` / `measuredOn`
+stay `null` (P5), and `MEASURED_COST_DISCLAIMER` is unchanged. No measured number
+was invented.
+
+Verified against the live pinned binary (`brainstand-gbrain-ops-1`), one
+`docker exec ... gbrain config set search.mode <id>` per mode — **after**:
+
+```text
+$ docker exec brainstand-gbrain-ops-1 sh -c "gbrain config set search.mode conservative 2>&1"
+Set search.mode = conservative
+[mode-switch] Switched to conservative.
+[mode-switch]   First-time mode set. Cache will populate as queries run.
+
+$ docker exec brainstand-gbrain-ops-1 sh -c "gbrain config set search.mode balanced 2>&1"
+Set search.mode = balanced
+[mode-switch] Switched to balanced.
+[mode-switch]   Existing wrapped embeddings (if any) continue serving queries.
+
+$ docker exec brainstand-gbrain-ops-1 sh -c "gbrain config set search.mode tokenmax 2>&1"
+Set search.mode = tokenmax
+[mode-switch] Switched to tokenmax. Per-chunk Haiku synopsis enabled.
+[mode-switch]   Backfill cost (one-time): ~$1-5 per 10K pages via Anthropic Haiku.
+[mode-switch]   Per-query overhead: ~$0.0003 (reranker + slightly larger payload).
+[mode-switch]   Run `gbrain reindex --markdown` to backfill existing pages.
+[mode-switch] To backfill now: gbrain reindex --markdown
+```
+
+Every one answered `Switched to <id>`; none answered `Invalid search.mode value`.
+The stack was then left on `balanced`, a valid mode (it had been left on the
+invalid `fast` by the probe).
+
+Files changed:
+
+- `src/control/lifecycle.ts` — mode ids, labels, descriptions, D7 comment.
+- `src/console/pages/Wizard.tsx` — **no change needed**: it renders
+  `state.searchModes` generically and posts `m.id`.
+- `test/e2e/slice1.e2e.test.ts:158`, `test/e2e/slice2.e2e.test.ts:451`,
+  `test/integration/wizard.test.ts:132,134`,
+  `test/contract/config.contract.test.ts:19,22`,
+  `test/contract/init.contract.test.ts:46`,
+  `test/unit/wizard-finish.test.ts:22`, `test/unit/argv.test.ts:88-89`
+  — **fixture corrections**, not assertion weakenings: they posted an id the
+  binary refuses as if it were the product's valid set; they now post
+  `conservative` and assert the same round-trip.
+- `scripts/tutorial.ts:146`, `scripts/connection-e2e.ts:271`,
+  `scripts/scale-probe.ts:331` — the same invalid `config.set` value in the
+  product's own setup flows.
+- `scripts/measure-search-modes.ts` — **deliberately left untouched**: it is the
+  evidence-producing probe whose verbatim P5 output above recorded the invalid
+  ids, and rewriting its `MODES` would rewrite that record.
+
+Gates: `bunx tsc --noEmit`, `bun run lint:forbidden`, `bun test test/unit` (649
+pass / 0 fail), `bun test test/integration/wizard.test.ts` (10 pass / 0 fail),
+and `bun test test/contract/config.contract.test.ts test/contract/init.contract.test.ts`
+(8 pass / 0 fail) all green.
 

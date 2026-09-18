@@ -448,7 +448,7 @@ describe('Slice 2 seam gate B', () => {
       });
       expect([200, 409]).toContain(provider.status);
 
-      const mode = await post('/api/wizard/search-mode', { mode: 'fast' });
+      const mode = await post('/api/wizard/search-mode', { mode: 'conservative' });
       expect([200, 409]).toContain(mode.status);
 
       const schema = await post('/api/wizard/schema', { pack: 'gbrain-base-v2' });

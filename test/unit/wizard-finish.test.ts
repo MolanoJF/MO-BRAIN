@@ -19,7 +19,7 @@ describe('wizard /finish json flags', () => {
     ).toThrow('init does not support --json');
 
     expect(() =>
-      buildArgv(OPERATIONS['config.set']!, { key: 'search.mode', value: 'fast' }, { json: true }),
+      buildArgv(OPERATIONS['config.set']!, { key: 'search.mode', value: 'conservative' }, { json: true }),
     ).toThrow('config.set does not support --json');
   });
 });

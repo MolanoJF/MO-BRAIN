@@ -43,7 +43,7 @@ test('init created gbrain tables in the brain database', async () => {
 // V4: the search-mode cost matrix is a POST-init config set, not part of init.
 test('search.mode is settable after init, not during it', async () => {
   const spec = OPERATIONS['config.set']!;
-  const r = await execOperation(spec, { key: 'search.mode', value: 'fast' });
+  const r = await execOperation(spec, { key: 'search.mode', value: 'conservative' });
   assertOk(spec, r);
 });
 

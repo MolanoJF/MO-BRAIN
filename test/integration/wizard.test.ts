@@ -129,9 +129,9 @@ describe('wizard', () => {
   });
 
   test('the search-mode step records the choice', async () => {
-    expect((await call('/api/wizard/search-mode', { mode: 'fast' })).status).toBe(200);
+    expect((await call('/api/wizard/search-mode', { mode: 'conservative' })).status).toBe(200);
     const [brain] = await getDb().select().from(schema.brains);
-    expect(brain?.searchMode).toBe('fast');
+    expect(brain?.searchMode).toBe('conservative');
     expect(brain?.lifecycle).toBe('mode-selected');
   });
 

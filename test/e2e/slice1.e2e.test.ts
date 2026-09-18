@@ -155,7 +155,7 @@ describe('Slice 1 exit gate', () => {
       provider: 'openai', apiKey: process.env.OPENAI_API_KEY ?? 'sk-e2e-placeholder',
       embeddingModel: 'openai:text-embedding-3-small',
     })).status).toBe(200);
-    expect((await post('/api/wizard/search-mode', { mode: 'fast' })).status).toBe(200);
+    expect((await post('/api/wizard/search-mode', { mode: 'conservative' })).status).toBe(200);
     expect((await post('/api/wizard/schema', { pack: 'gbrain-base-v2' })).status).toBe(200);
     expect((await post('/api/wizard/space', { sourceId: 'shared', name: 'Shared' })).status).toBe(200);
 

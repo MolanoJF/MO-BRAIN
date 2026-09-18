@@ -29,17 +29,20 @@ export function nextStep(current: Lifecycle): Lifecycle | null {
 }
 
 /**
- * D7: the search-mode cost matrix. `relativeCost` is UPSTREAM'S published
- * claim, never measured on this deployment. `measuredCost` is OURS — produced
- * by `scripts/measure-search-modes.ts` on this stack's own corpus — or `null`
- * when no honest number exists. A surface must render the two differently and
- * must never present upstream's number as one we produced.
+ * D7: the search-mode cost matrix. `relativeCost` is UPSTREAM'S declared claim
+ * for the CURRENT mode names (`conservative` / `balanced` / `tokenmax`), never
+ * measured on this deployment. `measuredCost` is OURS — produced by
+ * `scripts/measure-search-modes.ts` on this stack's own corpus — or `null` when
+ * no honest number exists. A surface must render the two differently and must
+ * never present upstream's number as one we produced.
  *
- * Measured 2026-09-18 (P5, docs/slice-5-findings.md): every mode's 20-query
+ * Measured 2026-09-18 (P5, docs/slice-5-findings.md): each mode's 20-query
  * workload moved the `get_usage` ledger by $0.0000000 over an empty 1-day
- * window on a thin corpus, and the pinned binary refuses two of these three
- * values outright ("Valid options: conservative | balanced | tokenmax"). So
- * every `measuredCost` stays `null` — a 25× claim cannot be validated here.
+ * window on a thin corpus, so there is no ratio to write. The same probe also
+ * showed the pinned binary refuses the product's old `fast` / `thorough`
+ * vocabulary outright ("Valid options: conservative | balanced | tokenmax");
+ * F21 keyed these ids to the binary's real values. Every `measuredCost` stays
+ * `null` — the 1/6/25 spread is upstream's claim, not a number we produced.
  */
 export const MEASURED_COST_DISCLAIMER =
   'Measured on this deployment\u2019s own corpus. Your ratio depends on page count, ' +
@@ -47,15 +50,15 @@ export const MEASURED_COST_DISCLAIMER =
 
 export const SEARCH_MODES = [
   {
-    id: 'fast',
-    label: 'Fast',
+    id: 'conservative',
+    label: 'Conservative',
     /** Upstream's published claim. NOT ours — see measuredCost. */
     relativeCost: 1,
     /** Ours, or null. D7: a number we did not produce is never shown as ours. */
     measuredCost: null as number | null,
     measuredAt: null as string | null,
     measuredOn: null as string | null,
-    description: 'Lexical + vector retrieval only. Cheapest and lowest latency; no LLM reranking or synthesis on the read path.',
+    description: 'Retrieval only: no reranker and no query expansion. Cheapest and lowest latency on the read path.',
   },
   {
     id: 'balanced',
@@ -65,16 +68,16 @@ export const SEARCH_MODES = [
     measuredCost: null as number | null,
     measuredAt: null as string | null,
     measuredOn: null as string | null,
-    description: 'Adds query expansion and reranking. Noticeably better recall on vague questions, at several times the cost per search.',
+    description: 'Turns the reranker on. Better ordering of what retrieval already found, at several times the cheapest mode.',
   },
   {
-    id: 'thorough',
-    label: 'Thorough',
+    id: 'tokenmax',
+    label: 'Tokenmax',
     /** Upstream's published claim. NOT ours — see measuredCost. */
     relativeCost: 25,
     measuredCost: null as number | null,
     measuredAt: null as string | null,
     measuredOn: null as string | null,
-    description: 'Full synthesis over expanded retrieval. Best answers, roughly 25x the cheapest mode — budget for this before enabling it team-wide.',
+    description: 'Adds query expansion and an uncapped, per-chunk Haiku synopsis. Most thorough and most expensive — budget for it before enabling team-wide.',
   },
 ] as const;

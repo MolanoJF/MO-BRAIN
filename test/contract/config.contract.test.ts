@@ -16,10 +16,10 @@ afterAll(async () => { await composeDown(); }, 120_000);
 
 test('a non-key config value round-trips through set and get', async () => {
   assertOk(OPERATIONS['config.set']!,
-    await execOperation(OPERATIONS['config.set']!, { key: 'search.mode', value: 'fast' }));
+    await execOperation(OPERATIONS['config.set']!, { key: 'search.mode', value: 'conservative' }));
   const got = await execOperation(OPERATIONS['config.get']!, { key: 'search.mode' });
   assertOk(OPERATIONS['config.get']!, got);
-  expect(got.stdout).toContain('fast');
+  expect(got.stdout).toContain('conservative');
 });
 
 /**

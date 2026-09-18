@@ -328,7 +328,7 @@ async function initBrain(): Promise<void> {
   await step('init', 'init', {
     nonInteractive: true, force: true, url: BRAIN_DB_URL, embeddingModel: EMBEDDING_MODEL,
   }, { timeoutMs: 900_000 });
-  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'fast' });
+  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'conservative' });
 }
 
 function grantFederatedReadFromJson(json: unknown): number | null {

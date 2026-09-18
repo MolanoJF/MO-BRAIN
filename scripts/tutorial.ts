@@ -143,7 +143,7 @@ export async function runTutorial(): Promise<TutorialReport> {
   }, { timeoutMs: 900_000 });
 
   // V4: the search-mode cost matrix is a POST-init decision — ours to render.
-  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'fast' });
+  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'conservative' });
 
   // --- Part 3: carve the brain into sources. Space = source, hard rule (S4b).
   //

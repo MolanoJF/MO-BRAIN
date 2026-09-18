@@ -268,7 +268,7 @@ export async function runConnectionE2E(): Promise<ConnectionE2EReport> {
   await step('init', 'init', {
     nonInteractive: true, force: true, url: BRAIN_DB_URL, embeddingModel: EMBEDDING_MODEL,
   }, { timeoutMs: 900_000 });
-  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'fast' });
+  await step('config:search-mode', 'config.set', { key: 'search.mode', value: 'conservative' });
 
   for (const s of SOURCES) {
     await seedGitSource(s.id);

@@ -85,8 +85,8 @@ describe('buildArgv', () => {
       ],
       supportsJson: false, supportsDryRun: false, privilege: 'brain-db', okExitCodes: [0],
     };
-    expect(buildArgv(CONFIG_SET, { key: 'search.mode', value: 'fast' }))
-      .toEqual(['config', 'set', 'search.mode', 'fast']);
+    expect(buildArgv(CONFIG_SET, { key: 'search.mode', value: 'conservative' }))
+      .toEqual(['config', 'set', 'search.mode', 'conservative']);
   });
 });
 
