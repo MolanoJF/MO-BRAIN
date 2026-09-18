@@ -1537,3 +1537,208 @@ C9), so a run that has already made its last call when that write lands finishes
 the leg's timing, on a code path (the gateway meter and its cap) this change does not touch. The other
 25 legs, C6 among them, passed: the run ended **26 pass / 1 fail**, and Gate C's own teardown logged
 `Gate C total model spend = $0.0773488 over 5 run(s)`.
+
+**Correction (F17) — the paragraph above diagnoses C9 correctly, and is superseded on two points.**
+(a) The leg it names no longer exists: F17 rewrote C9, whose title is now
+`C9 a cap below the first call's cost refuses before forwarding, and never truncates`, and it passes in
+all three acceptance runs below. (b) "a race in the leg's timing, on a code path … this change does not
+touch" is right about the code path, but the race was **structural, not unlucky**: `usageRows` can only
+see a call's row once that call has ENDED, so the write could never be issued before the harness had
+already begun its next call. F15's green 1-call run and F16's red 2-call run were two shapes of the same
+defect, and no amount of retrying would have made the old leg deterministic. Everything else F16 says
+about that run — C6's own clauses, the 26/1 count, the `$0.0773488` — stands.
+
+## F17 — C9 raced the harness's next call; the ordering it needed was the runner's own claim sequence
+
+**Where.** `test/e2e/slice4.e2e.test.ts`, C9, inside `describe('Slice 4 exit gate C')` (Task 17). F16 left
+it red; this is the **leg's** defect, not the product's — `assertBudget`, the meter and the refusal path
+all behaved exactly as `docs/runbooks/agent-runner.md` says. Nothing in `src/` changed for this finding.
+
+### The diagnosis, from the leg's own lines
+
+Pre-F17 revision (`git show HEAD:test/e2e/slice4.e2e.test.ts`, where the leg starts at line 2543):
+
+```
+2555    const row = await waitFor('the runner to claim the budget fixture', 120_000, async () => {
+2556      const r = (await runsOf(C_BUDGET_SCHEDULE))[0];
+2557      return r?.state === 'running' ? r : null;
+2558    }, 1_000);
+2561    // The first metered call lands, then the cap goes below it.
+2562    const firstCall = await waitFor('the first metered call', 180_000, async () => {
+2563      const usage = await usageRows(row.id);
+2564      return usage.length >= 1 && usage.every((u) => u.costUsd !== null) ? usage : null;
+2565    }, 250);
+2566    const accrued = Number(one(await psql(
+2567      `select sum(cost_usd::numeric)::text from agent_run_usage where run_id = '${row.id}'`,
+2568    )));
+2569    expect(accrued).toBeGreaterThan(0);
+2570    const cap = (accrued * 0.5).toFixed(7);
+2571    await psql(`update agent_runs set budget_usd = '${cap}' where run_id = '${row.id}'`);
+```
+
+It **waits** at 2562-2565 on `usageRows` (a read of `agent_run_usage`, 2563) and it **writes** at 2571
+(`agent_runs.budget_usd = accrued × 0.5`). The row it waits for is written by the gateway when the
+exchange it belongs to **ends** — `finalize()` → `recordUsage` in `src/gateway/proxy.ts` — and
+`usage.every((u) => u.costUsd !== null)` (2564) is what the wait really waits for. So the earliest the leg
+could react to call N was *after call N had already been answered*, and the harness issues call N+1
+immediately: whether the tightened cap then met a live call was decided by how many calls the agent
+happened to make. That is F15's GREEN (1-call run) and F16's RED (2-call run, `succeeded` before the
+write landed) — the same defect, two shapes.
+
+### Why the plan's configuration cannot be created ON the schedule
+
+The plan's words for this leg are "A schedule with a cap below the first call's cost → the gateway
+refuses before forwarding, the run ends `budget_exceeded`, an alert exists, and `agent_run_usage` shows
+zero completed calls — not a truncated one." Creating the schedule with that cap cannot produce it, for
+two measured product facts:
+
+* **A non-positive cap never reaches the gateway.** `src/runner/harness.ts:87` refuses the claim:
+  `if (!(claim.budgetUsd > 0) || !Number.isFinite(claim.budgetUsd)) throw` — and the claim's budget is
+  the schedule's (`src/agent/claim.ts:924`, `budgetUsd: schedule.agentBudgetUsd ?? '0'`). A schedule with
+  a $0 cap therefore produces no 402, no alert and no `budget_exceeded`; that check's own comment says
+  why it exists ("a non-positive budget — the meter would refuse the first call anyway").
+* **A positive cap below the first call's cost is caught MID-CALL, by design.** `StreamMeter.observe`
+  (`src/gateway/meter.ts`) fires `accrued + capCost >= budget` on the `message_start` frame, whose usage
+  carries the input/cache counts — the dominant cost of one expensive request — so `0 + capCost ≥ cap`
+  is true before the first output token. That is the mid-stream path: `midStream: true`, a bounded row
+  with `stop_reason` null, and tokens/cost on its gateway log line. It is the path C9 exists to
+  distinguish itself FROM.
+
+The pre-forward check (`assertBudget`, `src/gateway/meter.ts`) therefore only ever fires for a cap the run
+is **already over**. C9's cap has to be below the first call's cost when the first call starts, and the
+only writer of that cap is `agent_runs.budget_usd` — the column `assertBudget` re-reads on every call.
+
+### The fix: write it in the window the runner's own sequence opens
+
+The leg now writes the cap between the claim and the harness that claim produces
+(`test/e2e/slice4.e2e.test.ts:2605-2617`):
+
+```
+2605    const cap = '0';
+2606    const postgres = one((await compose('ps', '-q', 'postgres')).stdout.trim());
+2607    expect(postgres).not.toBe('');
+2608    const runId = await waitFor('the claimed run to be capped below a call', 180_000, async () => {
+2609      const got = one(await psqlIn(
+2610        postgres,
+2611        `update agent_runs a set budget_usd = '${cap}' `
+2612        + `where a.budget_usd = '0.50' and exists (select 1 from schedule_runs r `
+2613        + `where r.id = a.run_id and r.schedule_id = '${C_BUDGET_SCHEDULE}') `
+2614        + 'returning a.run_id',
+2615      ));
+2616      return got === '' || got.startsWith('UPDATE ') ? null : got;
+2617    }, 25);
+```
+
+The ordering is the runner's own, not a timing hope: `claimAgentRun` INSERTs `agent_runs`
+(`src/agent/claim.ts:306`) **before** its response reaches the runner, and the runner only spawns the
+harness after that response — `createWorkspace`, `verifyHarnessPin`, `Bun.spawn` (`src/runner/main.ts`).
+Measured on C9's own runs: the runner's `run <id>: …, workspace …` line (printed immediately before the
+spawn) is followed by the gateway's first line for that run **0.695 s** later (the run logged in the Gate
+C file run) and **0.78 s** later in the earlier diagnostic run. Detection and write are ONE statement, so
+there is no window between them, and the poll's round trip is ~145 ms. The schedule is still created
+claimable at $0.50 (`test/e2e/slice4.e2e.test.ts:2580-2584` says why it must be), and
+`budget_usd = '0.50'` in the guard keeps the write to this leg's run.
+
+`psqlIn` (`test/e2e/slice4.e2e.test.ts:154-171`) exists for this one write: `docker exec … psql` costs
+~145 ms a round trip against `docker compose exec`'s ~300 ms (both measured), and the leg cannot afford
+150 ms of CLI startup per attempt while the harness is booting. Same route, same container, same flags.
+
+### What C9 now asserts (all four of the plan's facts)
+
+`402` with `tokens: 0` / `costUsd: null` on the gateway's own log line and **zero 2xx lines** (refuses
+before forwarding); `state failed` / `classification budget_exceeded` on `schedule_runs` and
+`failure_class budget_exceeded` on `agent_runs` (the run ends `budget_exceeded`); exactly one
+`agent_budget_exceeded` alert with `reason budget_exceeded`, `budgetUsd 0`, `accruedUsd 0` and **no
+`midStream`** (an alert exists); `agent_run_usage` with **zero rows**, which is also `forwarded.length`
+(zero completed calls — not a truncated one). `failure_detail.reason` is still
+`recorded_by_component`: `finishAgentRun` rewrites the detail of a run whose class a component already
+recorded, and the class it keeps is the meter's.
+
+### The three acceptance runs, verbatim
+
+```
+bun test --parallel=1 test/e2e/slice4.e2e.test.ts
+ 27 pass
+ 0 fail
+ 456 expect() calls
+Ran 27 tests across 1 file. [426.75s]
+[gate-c] C9 cap=$0 (schedule 0.50) accrued=$0 -> classification=budget_exceeded
+         alert=agent_budget_exceeded gateway=402/tokens:0 forwarded=0 usage rows=0 (no row, no midStream)
+[gate-c] spend {"schedule":"gate-c-budget-mu6k9ia7","run":"25ab1b74-…","state":"failed",
+         "class":"budget_exceeded","cost":null,"attempt":1,"in":0,"out":0,"cacheRead":0,
+         "cacheWrite":0,"calls":0}
+[gate-c] Gate C total model spend = $0.0662396 over 5 run(s)
+```
+
+```
+bun test --parallel=1 test/e2e          # first of the two consecutive directory runs
+ 104 pass
+ 0 fail
+ 1006 expect() calls
+Ran 104 tests across 6 files. [1277.63s]
+[gate-c] Gate C total model spend = $0.0639037 over 5 run(s)
+[gate-b] B6 metered call model=claude-haiku-4-5-20251001 in=23 out=4 cacheRead=0 cacheWrite=0 cost=$0.0000430
+```
+
+```
+bun test --parallel=1 test/e2e          # the second, from the state the first left
+ 104 pass
+ 0 fail
+ 1006 expect() calls
+Ran 104 tests across 6 files. [1287.61s]
+[gate-c] Gate C total model spend = $0.0795167 over 6 run(s)
+[gate-b] B6 metered call model=claude-haiku-4-5-20251001 in=24 out=4 cacheRead=0 cacheWrite=0 cost=$0.0000440
+```
+
+Both directory runs are far above the plan's `≥ 77 pass / 0 fail` baseline, and the second started from
+exactly the state the first left (the gate's teardown deletes every fixture and leaves the write Space
+clean and the lane enabled). Per-run figures, from the gate's own teardown:
+
+| run | schedule | state | calls | cost |
+|---|---|---|---|---|
+| file run | `gate-c-nightly-mu6k9ia7` | `succeeded` | 2 | `$0.0262647` |
+| file run | `gate-c-kill-mu6k9ia7` (attempt 1) | `lease_expired` | 1 | `$0.0119937` |
+| file run | `gate-c-kill-mu6k9ia7` (attempt 2) | `succeeded` | 2 | `$0.0167400` |
+| file run | **`gate-c-budget-mu6k9ia7` (C9)** | `failed` / `budget_exceeded` | **0** | **`null`** |
+| file run | `gate-c-bash-mu6k9ia7` | `succeeded` | 1 | `$0.0112412` |
+| dir run 1 | `gate-c-nightly-mu6l1209` | `succeeded` | 2 | `$0.0261576` |
+| dir run 1 | `gate-c-kill-mu6l1209` (attempt 1) | `lease_expired` | 1 | `$0.0117787` |
+| dir run 1 | `gate-c-kill-mu6l1209` (attempt 2) | `succeeded` | 2 | `$0.0153650` |
+| dir run 1 | **`gate-c-budget-mu6l1209` (C9)** | `failed` / `budget_exceeded` | **0** | **`null`** |
+| dir run 1 | `gate-c-bash-mu6l1209` | `succeeded` | 1 | `$0.0106024` |
+| dir run 2 | `gate-c-nightly-mu6lslzf` (two slots) | `succeeded` ×2 | 2 + 2 | `$0.0268267`, `$0.0139300` |
+| dir run 2 | `gate-c-kill-mu6lslzf` (attempt 1) | `lease_expired` | 1 | `$0.0122087` |
+| dir run 2 | `gate-c-kill-mu6lslzf` (attempt 2) | `succeeded` | 2 | `$0.0156451` |
+| dir run 2 | **`gate-c-budget-mu6lslzf` (C9)** | `failed` / `budget_exceeded` | **0** | **`null`** |
+| dir run 2 | `gate-c-bash-mu6lslzf` | `succeeded` | 1 | `$0.0109062` |
+
+The second directory run left one extra `gate-c-nightly` run (6 runs, `$0.0795167`): that run's C1 fixture
+materialized two slots. It is the C1 fixture's shape, not C9's — C9's own run is the `budget` row in all
+three runs, `cost null` with `calls=0`, i.e. **`$0.0000000`**: the refusal happens before any upstream
+connection, so the leg costs nothing, and every dollar below is the other legs'.
+
+**This task's real spend: `$0.2097910`** — Gate C's own counters (`$0.0662396` + `$0.0639037` +
+`$0.0795167` = `$0.2096600`) plus Gate B's metered leg three times (`$0.0000440` + `$0.0000430` +
+`$0.0000440` = `$0.0001310`). The diagnostic C9 runs before the acceptance set cost nothing either (three
+green runs at `$0`, and the two failed attempts, whose harness traffic was 401s with `tokens: 0` /
+`costUsd: null` — no upstream connection). About `$0.31` was already spent on this slice before this
+task, so the slice stands at **≈ `$0.52` against the `$5.00` ceiling**.
+
+### Which coverage the mid-flight cap has
+
+A5 (`test/contract/runner.contract.test.ts`, `describe('A5 assertBudget')`) is the **control-DB half**:
+`accrued == cap` REFUSES at exactly the cap, one alert, the class on both rows, and the SUM rollup — the
+pre-forward decision, asserted without a gateway. The **mid-stream crossing** is Task 7's live
+verification: the streaming meter is Task 7's subject ("parse usage frames as they pass through rather
+than buffering the response, so a single runaway request is capped mid-flight rather than after",
+`2026-09-17-slice-4-agent-runner.md:787-790`), and its signature is the `midStream: true` refusal C9
+asserts is absent. C9 does not re-litigate it: it asserts `midStream` is undefined precisely so the two
+paths stay distinguishable.
+
+### Residual
+
+The write must land inside the harness's boot window. It does, by ~0.5-0.6 s (the boot measured 0.695-0.78
+s, the write one ~145 ms round trip), and the leg **cannot pass silently** if it ever loses: a forwarded
+first call shows up as `forwarded.length !== 0` and a non-empty ledger, so the leg fails on the plan's own
+fourth fact rather than passing on a technicality. The other residual is the C1 fixture's extra slot in
+the second directory run, above — a shape variance of a fixture this finding does not own.

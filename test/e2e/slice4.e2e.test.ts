@@ -151,6 +151,25 @@ async function psql(sql: string): Promise<string> {
 /** `psql -tAc` prints one value per row; every scalar read here is the first. */
 const one = (v: string): string => v.split(/\r?\n/)[0] ?? '';
 
+/**
+ * The same route as `psql`, straight into the container instead of through the
+ * compose CLI: one round trip costs ~145ms where `compose exec` costs ~300ms
+ * (measured). C9's cap write has to land inside the harness's boot window, so
+ * its poll cannot afford 150ms of CLI startup per attempt. No kill guard: the
+ * leg's own timeout bounds a hung exec.
+ */
+async function psqlIn(containerId: string, sql: string): Promise<string> {
+  const p = Bun.spawn(
+    ['docker', 'exec', containerId, 'psql', '-U', 'gbrain', '-d', 'control', '-tAc', sql],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
+  ]);
+  if (exitCode !== 0) throw new Error(`psql failed (${exitCode}): ${stderr || stdout}`);
+  return stdout.trim();
+}
+
 async function probeDockerCompose(): Promise<boolean> {
   try {
     return (await Bun.$`docker compose version`.quiet().nothrow()).exitCode === 0;
@@ -1750,8 +1769,8 @@ const C_KILL_PROMPT =
   + `"kill-a ${RUN_ID}", then write the page "${C_KILL_B}" with the content "kill-b ${RUN_ID}". `
   + 'Then reply with exactly: done';
 
-/** C9's run: one read tool call and one write, i.e. at least three model calls —
- *  enough that a cap crossed after the first one still has a call to refuse. */
+/** C9's run: the work the plan's cap leg would have the agent attempt — a read
+ *  and a write — so the refusal is what stops it, not the prompt. */
 const C_BUDGET_SLUG = `gate-c/${RUN_ID}/budget`;
 const C_BUDGET_PROMPT =
   `First call mcp__gbrain__search with the query "widget". Then call mcp__gbrain__put_page to write `
@@ -2520,28 +2539,48 @@ describe('Slice 4 exit gate C', () => {
 
   /**
    * C9 — exceeding the cap stops the run and alerts, rather than silently
-   * truncating it (honesty rule 4).
+   * truncating it (honesty rule 4). The plan's own words for this leg:
+   *
+   * > A schedule with a cap below the first call's cost → the gateway refuses
+   * > **before forwarding**, the run ends `budget_exceeded`, an alert exists, and
+   * > `agent_run_usage` shows zero completed calls — not a truncated one.
    *
    * Which column carries "no upstream connection was opened": `src/gateway/
    * proxy.ts`'s step-1 refusal returns before the forward and writes **no
    * `agent_run_usage` row at all** — there is no column for it, the absence IS
    * the record — while a mid-stream crossing writes a row and marks its alert
    * `midStream: true`. So the leg asserts the absence: a 402 with `tokens: 0` in
-   * the gateway's own log line, every usage row complete (`http_status` 200, a
-   * non-null `stop_reason`), and an alert whose detail carries no `midStream`.
+   * the gateway's own log line, and a ledger with nothing in it because nothing
+   * was forwarded.
    *
-   * The cap has to be crossed by spend that ALREADY EXISTS when a call starts:
-   * the meter checks `accrued + this call's cost` inside every call, so a cap
-   * that a call crosses is caught mid-call by design, and the pre-forward check
-   * only ever fires for a cap the run is already over. That is why the leg
-   * tightens the run's enforced cap (`agent_runs.budget_usd` — the column
-   * `assertBudget` reads) below the first call's measured cost as soon as the
-   * first metered call lands: the schedule is the same schedule, and the cap the
-   * run is held to is below its first call's cost, which is the configuration the
-   * plan asks for.
+   * The cap has to be crossed by spend that ALREADY EXISTS when a call starts.
+   * The meter checks `accrued + this call's cost` as the bytes pass
+   * (`StreamMeter.observe`, `src/gateway/meter.ts`), so a positive cap the run's
+   * FIRST call crosses is caught mid-call by design — `midStream: true`, and a
+   * bounded row written — and the pre-forward check only ever fires for a cap the
+   * run is already over. A run's first call starts at accrued 0, so the cap that
+   * refuses before forwarding, deterministically, is one that cannot fund a call
+   * at all.
+   *
+   * Two windows are therefore excluded. The schedule cannot be CREATED with it:
+   * `src/runner/harness.ts` refuses a claim whose budget is not positive ("the
+   * meter would refuse the first call anyway"), so the fixture is created
+   * claimable at $0.50 while the cap the GATEWAY reads (`agent_runs.budget_usd`,
+   * the column `assertBudget` re-reads on every call) is written after the claim
+   * and before the harness the runner spawns exists — the claim is what INSERTs
+   * `agent_runs` (`src/agent/claim.ts`), and the runner only spawns the harness
+   * after a workspace and a pin check (`src/runner/main.ts`). Timing the write off
+   * the first METERED CALL — what this leg did before F17 — is not a construction
+   * at all: a call's row is written when that call ENDS, so the write raced the
+   * harness's next call, and the leg's outcome depended on how many calls the
+   * agent happened to make.
    */
-  test('C9 a cap below the accrued spend refuses before forwarding, and never truncates', async () => {
+  test("C9 a cap below the first call's cost refuses before forwarding, and never truncates", async () => {
     C_FIXTURES.push(C_BUDGET_SCHEDULE);
+    // $0.50 is the cap the run is CLAIMED under, and it has to be positive:
+    // `src/runner/harness.ts` refuses a claim whose budget is not positive, so a
+    // run that cannot fund a call is tightened after the claim (below), never
+    // created with it.
     await insertAgentPrompt({
       id: C_BUDGET_SCHEDULE,
       prompt: C_BUDGET_PROMPT,
@@ -2552,35 +2591,43 @@ describe('Slice 4 exit gate C', () => {
     const responded = await scheduledPost(`/api/schedules/${C_BUDGET_SCHEDULE}/run-now`, {});
     expect(responded.status).toBe(202);
 
-    const row = await waitFor('the runner to claim the budget fixture', 120_000, async () => {
-      const r = (await runsOf(C_BUDGET_SCHEDULE))[0];
-      return r?.state === 'running' ? r : null;
-    }, 1_000);
-    cObs.budgetRunId = row.id;
-
-    // The first metered call lands, then the cap goes below it.
-    const firstCall = await waitFor('the first metered call', 180_000, async () => {
-      const usage = await usageRows(row.id);
-      return usage.length >= 1 && usage.every((u) => u.costUsd !== null) ? usage : null;
-    }, 250);
-    const accrued = Number(one(await psql(
-      `select sum(cost_usd::numeric)::text from agent_run_usage where run_id = '${row.id}'`,
-    )));
-    expect(accrued).toBeGreaterThan(0);
-    const cap = (accrued * 0.5).toFixed(7);
-    await psql(`update agent_runs set budget_usd = '${cap}' where run_id = '${row.id}'`);
+    // The cap goes below the first call's cost in the one window where the
+    // ordering is the runner's own sequence rather than a guess. `claimAgentRun`
+    // INSERTs `agent_runs` (src/agent/claim.ts) before its response reaches the
+    // runner, so a row that exists IS the claim; the harness that will make the
+    // first call does not exist until the runner has read that response, made a
+    // workspace, verified the pin and spawned it — and its first
+    // `POST /v1/messages` was measured 0.7-0.8s after the spawn. This poll's
+    // round trip is ~145ms, so the cap is on the row before anything can read it.
+    //
+    // Detection and write are ONE statement, so there is no window between them,
+    // and `budget_usd = '0.50'` keeps it to this leg's run.
+    const cap = '0';
+    const postgres = one((await compose('ps', '-q', 'postgres')).stdout.trim());
+    expect(postgres).not.toBe('');
+    const runId = await waitFor('the claimed run to be capped below a call', 180_000, async () => {
+      const got = one(await psqlIn(
+        postgres,
+        `update agent_runs a set budget_usd = '${cap}' `
+        + `where a.budget_usd = '0.50' and exists (select 1 from schedule_runs r `
+        + `where r.id = a.run_id and r.schedule_id = '${C_BUDGET_SCHEDULE}') `
+        + 'returning a.run_id',
+      ));
+      return got === '' || got.startsWith('UPDATE ') ? null : got;
+    }, 25);
+    cObs.budgetRunId = runId;
 
     const ended = await waitFor('the run to end budget_exceeded', 420_000, async () => {
-      const r = await runRow(row.id);
+      const r = await runRow(runId);
       return r && r.state !== 'running' && r.state !== 'pending' ? r : null;
     }, 2_000);
     expect(ended.state).toBe('failed');
     expect(ended.classification).toBe('budget_exceeded');
 
-    const stored = (await agentRun(row.id))!;
+    const stored = (await agentRun(runId))!;
     expect(stored.failureClass).toBe('budget_exceeded');
     const detail = JSON.parse(one(await psql(
-      `select coalesce(failure_detail::text, 'null') from agent_runs where run_id = '${row.id}'`,
+      `select coalesce(failure_detail::text, 'null') from agent_runs where run_id = '${runId}'`,
     ))) as Record<string, unknown>;
     // The reason the FINISH path records. `finishAgentRun` rewrites
     // `failure_detail` for a run whose class a component already recorded, so the
@@ -2591,43 +2638,39 @@ describe('Slice 4 exit gate C', () => {
     // `budget_exceeded` rather than `agent_failed` for the 402 the harness saw.
     expect(stored.failureClass).toBe('budget_exceeded');
 
-    const alerts = await alertsForRun(row.id);
+    const alerts = await alertsForRun(runId);
     expect(alerts.length).toBe(1);
     expect(alerts[0]!.kind).toBe('agent_budget_exceeded');
     expect(alerts[0]!.detail?.reason).toBe('budget_exceeded');
     expect(Number(alerts[0]!.detail?.budgetUsd)).toBe(Number(cap));
-    // `accruedCost` rounds to 7 decimal places; the SQL sum does not.
-    expect(Number(alerts[0]!.detail?.accruedUsd)).toBeCloseTo(accrued, 6);
+    // `accruedCost` is 0 over zero rows — nothing spent is a known amount.
+    expect(Number(alerts[0]!.detail?.accruedUsd)).toBe(0);
     // The meter's own discriminator: a mid-stream crossing records `midStream`.
     expect(alerts[0]!.detail?.midStream).toBeUndefined();
 
-    // The gateway's own log lines: every exchange it forwarded (a 2xx), and the
-    // refusal — status 402 with `tokens: 0`, i.e. it closed the exchange before
-    // any upstream usage existed. A mid-stream crossing would log the tokens it
-    // had metered instead.
-    const lines = await gatewayLines(row.id);
+    // The gateway's own log lines: the refusal — status 402 with `tokens: 0`, i.e.
+    // it closed the exchange before any upstream usage existed — and NO forwarded
+    // exchange at all. A mid-stream crossing would log the tokens it had metered.
+    const lines = await gatewayLines(runId);
     const forwarded = lines.filter((l) => typeof l.status === 'number' && l.status >= 200 && l.status < 300);
     const refused = lines.filter((l) => l.status === 402);
     expect(refused.length).toBeGreaterThanOrEqual(1);
     expect(refused.every((l) => l.tokens === 0 && l.costUsd === null)).toBe(true);
+    expect(forwarded.length).toBe(0);
 
-    // agent_run_usage holds one row per FORWARDED call and nothing for the refused
-    // one — the count is derived from the gateway's own record, so it cannot be
-    // satisfied by a row the refusal would have written. No row is partial.
-    const usage = await usageRows(row.id);
+    // "agent_run_usage shows zero completed calls — not a truncated one": the
+    // count is derived from the gateway's own record (one row per FORWARDED call,
+    // and nothing for a refusal), and both sides are zero — the ledger's emptiness
+    // is the gateway's own statement that it forwarded nothing, so it cannot be
+    // satisfied by a truncated row the crossing would have written.
+    const usage = await usageRows(runId);
     expect(usage.length).toBe(forwarded.length);
-    expect(usage.length).toBeGreaterThanOrEqual(firstCall.length);
-    expect(usage.every((u) => u.httpStatus === 200)).toBe(true);
-    expect(usage.every((u) => u.stopReason !== null)).toBe(true);
-    expect(usage.every((u) => u.costUsd !== null)).toBe(true);
-    expect(Number(one(await psql(
-      `select sum(cost_usd::numeric)::text from agent_run_usage where run_id = '${row.id}'`,
-    )))).toBeGreaterThanOrEqual(accrued);
+    expect(usage.length).toBe(0);
 
     console.log(
-      `[gate-c] C9 cap=$${cap} (was 0.50) accrued=$${accrued} -> classification=`
+      `[gate-c] C9 cap=$${cap} (schedule 0.50) accrued=$0 -> classification=`
       + `${ended.classification} alert=${alerts[0]!.kind} gateway=402/tokens:0 `
-      + `usage rows=${usage.length} (all http 200, stop_reason set, no midStream)`,
+      + `forwarded=${forwarded.length} usage rows=${usage.length} (no row, no midStream)`,
     );
   }, 600_000);
 
