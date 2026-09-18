@@ -14,9 +14,11 @@ up as a measurement).
 | P2 | Making the compose project name a variable with the legacy value as default leaves the live stack's volume names unchanged | `confirmed` |
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
+| P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 | F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
+| F21 | Mobrain's `SEARCH_MODES` offers ids `fast` and `thorough`, but the pinned gbrain `0.50.5.0` accepts only `conservative \| balanced \| tokenmax`; `search.mode` is stored verbatim and the resolver silently falls back to `balanced`, so the product's mode picker does not change the search pipeline | `confirmed` — found by Task 9, not fixed there |
 
 ---
 
@@ -206,6 +208,67 @@ IMAGE_NAMESPACE=mobrain GBRAIN_VERSION=0.50.5.0 HARNESS_VERSION=2.1.274 APP_VERS
 
 ---
 
+## P5 — the search-mode cost spread is not measurable on this deployment: empty ledger, thin corpus, and two mode names the binary refuses
+
+**Task 9.** The probe `scripts/measure-search-modes.ts` sets each mode through the
+existing `config.set` operation, reads `readBrainUsage(1)` as a baseline, runs the
+**same fixed 20-query** workload through the `search` operation, reads the ledger
+again, and takes the delta. It restores the original mode in a `finally` and prints
+the total real spend. Command, verbatim, exactly as the plan specifies:
+
+```bash
+bun run scripts/measure-search-modes.ts 2>&1 | tee /tmp/search-modes.txt
+```
+
+Verbatim output:
+
+```text
+MEASURED search-mode original="fast"
+MEASURED search-mode fast: deltaCost=$0.0000000 calls=+0 models=[none] queries=20 failures=0 corpus=4spaces/7pages/7chunks invalid=true
+MEASURED search-mode fast: the pinned binary refused this value — [mode-switch] Invalid search.mode value: "fast". | [mode-switch] Valid options: conservative | balanced | tokenmax
+MEASURED search-mode balanced: deltaCost=$0.0000000 calls=+0 models=[none] queries=20 failures=0 corpus=4spaces/7pages/7chunks invalid=false
+MEASURED search-mode thorough: deltaCost=$0.0000000 calls=+0 models=[none] queries=20 failures=0 corpus=4spaces/7pages/7chunks invalid=true
+MEASURED search-mode thorough: the pinned binary refused this value — [mode-switch] Invalid search.mode value: "thorough". | [mode-switch] Valid options: conservative | balanced | tokenmax
+MEASURED search-mode restored="fast" ok=true
+MEASURED search-mode total real spend across 3 modes: $0.0000000 (get_usage ledger, window=1 day)
+```
+
+Every delta is **exactly zero** and the `get_usage` ledger is empty
+(`calls=+0`, `models=[none]`), so there is no ratio to write. The corpus —
+4 sources (the implicit `default` plus the 3 Spaces `customers` / `internal` /
+`shared`), **7 pages / 7 chunks** — is the thin post-e2e brain, not the populated
+F4 corpus. Per the plan and D7 this is the honest answer: a 25× claim cannot be
+validated on 7 pages, and Slice 2's own warning (`docs/slice-2-findings.md:93`)
+says a flat ratio on a tiny corpus is not a scale proof. **`measuredCost` stays
+`null` for all three modes**, with `measuredAt: null` and `measuredOn: null`; the
+`SEARCH_MODES honesty (D7)` test's "cheapest measured mode is exactly 1" leg is
+therefore vacuously true (nothing is measured), which the test explicitly allows.
+
+### The probe also surfaced a real defect (F21)
+
+`invalid=true` on `fast` and `thorough` is not a probe bug. The pinned binary's
+own `config set` wrote to stderr:
+
+```text
+[mode-switch] Invalid search.mode value: "fast".
+[mode-switch] Valid options: conservative | balanced | tokenmax
+```
+
+Read against the pinned artifact only (G2 — no import, no table read, no
+screen-scrape of human output): `gbrain 0.50.5.0`'s
+`src/core/search/mode.ts` declares
+`export type SearchMode = 'conservative' | 'balanced' | 'tokenmax'`, and
+`isSearchMode` accepts exactly those. `config set` stores an unknown string
+verbatim, but the resolver falls back to `balanced` for an unset/invalid value.
+So on this product, selecting **Fast** or **Thorough** in the wizard runs
+`balanced`; only the `balanced` button does what it says. This is why two of the
+three deltas could not differ even if the corpus were rich — the pipeline never
+changed. Recorded as **F21**, not fixed in Task 9 (renaming the product's mode
+vocabulary touches the wizard contract, its tests and the console, which is a
+different task's blast radius). No number was manufactured to hide it.
+
+---
+
 ## U2 — `operator` carries `admin`; `get_usage` needs no elevation to `full`
 
 **Task 10, Step 1/3.** Upstream's `get_usage` operation declares scope `admin`
@@ -355,4 +418,38 @@ brain.totals.calls=0
 
 The `brain` block is no longer null and `coverage.brainReachable` is `true`;
 `calls=0` is the empty ledger, not the F20 failure.
+
+---
+
+## F21 — the wizard's `fast` and `thorough` search modes do not exist in the pinned binary
+
+**Found by Task 9's probe, P5 above.** `src/control/lifecycle.ts`'s `SEARCH_MODES`
+was written in Slice 1 with ids `fast` / `balanced` / `thorough` and upstream's
+claimed `relativeCost` of `1 / 6 / 25`. The pinned gbrain `0.50.5.0` accepts only
+`conservative | balanced | tokenmax`; `config set search.mode fast` and
+`... thorough` exit 0 but the binary answers on stderr
+
+```text
+[mode-switch] Invalid search.mode value: "fast".
+[mode-switch] Valid options: conservative | balanced | tokenmax
+```
+
+and the search-time resolver falls back to `balanced` for an invalid value. Two
+product consequences, both measured or directly read from the pinned artifact:
+
+1. `wizard POST /search-mode` validates against `SEARCH_MODES` (`src/control/routes/wizard.ts:123`)
+   and then `POST /finish` passes the id straight to `config set search.mode`
+   (`src/control/routes/wizard.ts:245`), so a Fast or Thorough choice is accepted,
+   stored verbatim, and silently ignored by the retrieval pipeline.
+2. The cost spread the wizard advertises (`relativeCost` 1/6/25) is therefore not
+   just unmeasured — for two of the three buttons, the mode behind it is not the
+   one the button names.
+
+Not fixed in Task 9: correcting it means re-keying `SEARCH_MODES` IDs to the
+binary's real vocabulary (or adding a translation layer), updating the wizard
+tests that post `mode: 'fast'`, and deciding whether the human-facing labels
+`Fast` / `Thorough` survive as display text over `conservative` / `tokenmax`.
+That is a product decision with its own task, and Task 9 is a probe. The probe's
+job was to measure the spread or record that it could not; it did both, and the
+null is real.
 

@@ -8,6 +8,11 @@ process.env.CONTROL_DATABASE_URL ??=
 // Slice 0 stack is down; unit-cover seedSpaceRepo separately. Mock the ops
 // boundary so wizard control-plane logic (lifecycle, secrets, Space=source)
 // is exercised without a live gbrain binary.
+//
+// The FULL ops surface is listed, not just the calls this file makes: the app's
+// import graph links routes whose modules name every export, and a partial
+// `mock.module` factory makes this file fail to load when it runs alone (the
+// Slice 4 `mock.module` hazard). Mirrors test/integration/spend.test.ts.
 const callOpsCalls: { op: string; opts?: { json?: boolean; timeoutMs?: number } }[] = [];
 let resetBrainSchemaCalls = 0;
 
@@ -23,14 +28,22 @@ mock.module('../../src/control/opsClient.ts', () => ({
       json: null,
     };
   },
+  brainUsage: async () => { throw new Error('ops unreachable'); },
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   seedSpace: async () => {},
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
   takeGrantCredentials: async () => ({}),
+  deleteCredentialJournal: async () => ({ deleted: true }),
+  auditTail: async () => [],
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
+  gitRange: async () => ({ sourceId: '', before: '', after: '', commits: [], files: [] }),
+  gitPathExists: async () => ({ sourceId: '', paths: [] }),
+  gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
 }));
 
 const { default: app } = await import('../../src/control/app.ts');

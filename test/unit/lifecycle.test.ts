@@ -47,3 +47,26 @@ describe('search mode cost matrix', () => {
     expect(Math.max(...costs) / Math.min(...costs)).toBeGreaterThanOrEqual(10);
   });
 });
+
+describe('SEARCH_MODES honesty (D7)', () => {
+  test('every mode declares whether its cost was measured, and where', () => {
+    for (const m of SEARCH_MODES) {
+      expect(typeof m.relativeCost).toBe('number');           // upstream's claim
+      expect('measuredCost' in m).toBe(true);                  // ours, or null
+      if (m.measuredCost !== null) {
+        expect(m.measuredAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(typeof m.measuredOn).toBe('string');            // the corpus
+        expect(m.measuredOn!.length).toBeGreaterThan(0);
+      } else {
+        expect(m.measuredAt).toBeNull();
+        expect(m.measuredOn).toBeNull();
+      }
+    }
+  });
+
+  test('the cheapest measured mode is the baseline, exactly 1', () => {
+    const measured = SEARCH_MODES.filter((m) => m.measuredCost !== null);
+    if (measured.length === 0) return;                         // nothing measured yet is legal
+    expect(Math.min(...measured.map((m) => m.measuredCost!))).toBe(1);
+  });
+});

@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
+import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 
-type SearchMode = { id: string; label: string; relativeCost: number; description: string };
+type SearchMode = {
+  id: string; label: string; relativeCost: number;
+  measuredCost: number | null; measuredAt: string | null; measuredOn: string | null;
+  description: string;
+};
 type State = {
   lifecycle: string; nextStep: string | null; searchModes: SearchMode[];
   spaces: { sourceId: string; name: string }[]; isolationNotice: string;
@@ -24,6 +29,9 @@ export function Wizard({ onReady }: { onReady: () => void }) {
 
   if (!state) return <div className="text-muted">Loading…</div>;
 
+  const modes = state.searchModes;
+  const measured = modes.filter((m) => m.measuredCost !== null);
+
   return (
     <div className="max-w-2xl space-y-8">
       <header>
@@ -40,12 +48,21 @@ export function Wizard({ onReady }: { onReady: () => void }) {
       {state.nextStep === 'mode-selected' && (
         <section className="space-y-3">
           <h2 className="font-medium">Choose a search mode</h2>
-          <p className="text-sm text-muted">
-            This is the single biggest driver of your monthly AI spend. The most thorough mode
-            costs roughly {Math.max(...state.searchModes.map((m) => m.relativeCost))}× the cheapest.
-            You can change it later.
-          </p>
-          {state.searchModes.map((m) => (
+          {measured.length === modes.length ? (
+            <p className="text-sm text-neutral-600">
+              On this deployment, the most expensive mode costs about{' '}
+              {Math.max(...measured.map((m) => m.measuredCost!))}× the cheapest.{' '}
+              <span className="text-neutral-500">{MEASURED_COST_DISCLAIMER}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-600">
+              Not measured on this deployment. Upstream reports roughly{' '}
+              {Math.max(...modes.map((m) => m.relativeCost))}× between the cheapest and most
+              expensive mode; your own spread will differ. The Spend page shows what you
+              actually pay once the brain has run for a few days.
+            </p>
+          )}
+          {modes.map((m) => (
             <button key={m.id} className="card w-full text-left" disabled={busy}
                     onClick={() => step('/wizard/search-mode', { mode: m.id })}>
               <div className="flex justify-between">
