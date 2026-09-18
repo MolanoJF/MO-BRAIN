@@ -1,3 +1,5 @@
+import type { DiffSummary, ReadSpaceMove, SpaceHeads } from '../agent/types.ts';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -37,6 +39,31 @@ export const api = {
 };
 
 /**
+ * The signed-in identity, from Better Auth's own session endpoint.
+ *
+ * D7 needs it and cannot get it anywhere else: the revert is signed with the
+ * acting admin's git identity (`actorIdentity(ctx.userId)` in
+ * `src/control/routes/runs.ts`), and for a revert THIS page just performed, that
+ * actor is by construction the session's own user — the one identity the console
+ * reads from the server rather than inventing. A signed-out visitor gets `null`,
+ * never a placeholder name.
+ */
+export type SessionUser = { email: string; name: string | null };
+
+export const sessionApi = {
+  me: async (): Promise<SessionUser | null> => {
+    // Better Auth answers `{session, user}` or `null`; anything else (a 401 from
+    // a deployment that mounts no session route) reads as "no identity known".
+    const body = await api
+      .get<{ user?: { email?: unknown; name?: unknown } } | null>('/auth/get-session')
+      .catch(() => null);
+    const user = body?.user;
+    if (typeof user?.email !== 'string' || user.email === '') return null;
+    return { email: user.email, name: typeof user.name === 'string' ? user.name : null };
+  },
+};
+
+/**
  * The schedules surface (`src/control/routes/schedules.ts`). Types mirror the
  * routes' projections: the schedule list carries its Connection denormalization
  * because `/api/connections` is admin-only, and run history carries `summary`
@@ -55,7 +82,13 @@ export type ScheduleRow = {
   id: string;
   name: string;
   preset: string | null;
-  operation: string;
+  /**
+   * `schedules.operation` is nullable since Task 4: an `agent_prompt` schedule
+   * runs a model, not a gbrain command, so it has no operation at all. The type
+   * said `string` until Task 13 and that was a lie the page could have relied on
+   * (`PresetRow.operation` already says `string | null` for the same reason).
+   */
+  operation: string | null;
   kind: string;
   connectionId: string | null;
   intervalSeconds: number | null;
@@ -138,6 +171,19 @@ export type CreateScheduleBody = {
   catchupPolicy?: string;
   overlapPolicy?: string;
   reportPolicy?: string;
+  /**
+   * D3 — the agent payload, which `AGENT_CREATE_KEYS` in
+   * `src/control/routes/schedules.ts` accepts and which nothing here declared
+   * until an operator asked for it. The set is CLOSED on purpose: the route
+   * refuses an unknown key rather than ignoring it, so a field this type does
+   * not name is a field no schedule can carry (a tool allowlist, a shell
+   * option). `agentBudgetUsd` stays text, like the column, so a cap never
+   * round-trips through a float.
+   */
+  agentPrompt?: string;
+  agentModel?: string;
+  agentMaxTokens?: number;
+  agentBudgetUsd?: string;
 };
 
 /** Only the columns an operator may change: a fenced param is never sent. */
@@ -309,4 +355,206 @@ export const upgradeApi = {
   },
   ack: (itemId: string) => api.post<{ item: ChecklistItemRow }>(`/upgrades/checklist/${encodeURIComponent(itemId)}/ack`),
   decline: (itemId: string) => api.post<{ item: ChecklistItemRow }>(`/upgrades/checklist/${encodeURIComponent(itemId)}/decline`),
+};
+
+/**
+ * The runs surface (`src/control/routes/runs.ts`, Tasks 6 and 13).
+ *
+ * The route's projection IS the contract: prompt, events, usage, diff, cost and
+ * attribution arrive in ONE response, and never the run token, the gateway token
+ * or a raw model request body. What this adapter adds is only what the page
+ * cannot honestly do for itself:
+ *   - `agent_runs.diff_summary`, `heads_before` and `heads_after` are jsonb, so
+ *     they leave the route as `unknown`. They are read into the agent lane's own
+ *     types here (`src/agent/types.ts`, type-only import — nothing of the server
+ *     reaches the bundle), once, instead of being re-cast in every JSX branch;
+ *   - `costUsd` is `string | null` and NULL means **could not be priced**
+ *     (honesty rule 3), so it is carried through as NULL and never coerced to 0;
+ *   - `/health`'s `runner` block is read into a typed row whose `state` stays
+ *     verbatim, including a value this build does not know — the page's label
+ *     function, not the adapter, decides what is green.
+ *
+ * Money stays a string end to end, exactly as `agent_runs.budget_usd` and
+ * `agent_run_usage.cost_usd` store it: a float round-trip is the one way a cap
+ * can move.
+ */
+
+export type AgentRunRow = {
+  runId: string;
+  scheduleId: string;
+  scheduleName: string | null;
+  /** `schedule_runs.state` — the scheduler's vocabulary, not a second one. */
+  state: string;
+  attempt: number;
+  slot: string;
+  fireAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  model: string;
+  harnessVersion: string;
+  /** The cap this run was claimed under. A string, like every other amount here. */
+  budgetUsd: string;
+  /** NULL = could not be priced. Never render as $0.00 (honesty rule 3). */
+  costUsd: string | null;
+  /** D11's class, read from the row — never reconstructed from the transcript (L14). */
+  failureClass: string | null;
+  numTurns: number;
+  revertedAt: string | null;
+  revertCommit: string | null;
+};
+
+/** One `agent_run_events` row: the REDACTED harness frame, as structure. */
+export type AgentRunEventRow = { seq: number; at: string; kind: string; data: unknown };
+
+/** One `agent_run_usage` row: one metered model call through the gateway. */
+export type AgentRunUsageRow = {
+  seq: number;
+  at: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: string | null;
+  /** `max_tokens` is a truncation the harness caused; our own cap is `budget_exceeded`. */
+  stopReason: string | null;
+  httpStatus: number | null;
+};
+
+export type AgentRunDetail = AgentRunRow & {
+  connectionId: string | null;
+  clientName: string | null;
+  /** `schedules.agent_prompt` — the exact words the harness was handed. */
+  prompt: string | null;
+  events: AgentRunEventRow[];
+  usage: AgentRunUsageRow[];
+  failureDetail: unknown;
+  diff: DiffSummary | null;
+  heads: { before: SpaceHeads; after: SpaceHeads };
+  tokenRevokedAt: string | null;
+};
+
+/**
+ * `/api/health`'s runner block, as D12 defines it: three states on the wire,
+ * plus `unreported` for a control plane that answers nothing at all. Only
+ * `connected` is ever green (honesty rule 8) and a state this build does not
+ * know keeps its own name rather than being mapped onto a friendlier one.
+ */
+export type RunnerStatusRow = { state: string; lastSeenAt: string | null; version: string | null };
+
+/** `revertRun`'s success, from `src/agent/revert.ts`. Refusals arrive as 409s. */
+export type RevertSuccess = {
+  reverted: true;
+  runId: string;
+  sourceId: string;
+  revertCommit: string;
+  revertedAt: string;
+  files: Array<{ status: string; path: string }>;
+  /**
+   * F16: `purge` is the remove-by-name step (`PagePurge` in
+   * `src/agent/revert.ts`) — the one a re-sync cannot stand in for, because the
+   * page an agent run writes is created brain-first — and it records a SKIP as
+   * loudly as a removal. The console renders both, so a git-only revert cannot
+   * be mistaken for one that moved the index.
+   */
+  index: {
+    purge: Array<{ slug: string; outcome: string; detail: string }>;
+    sync: unknown;
+    embed: unknown;
+  };
+};
+
+/** The route's own shapes, so the jsonb columns can be narrowed exactly once. */
+type ServerRunEvent = { seq: number; at: string; kind: string; data: unknown };
+type ServerRunUsage = AgentRunUsageRow;
+type ServerRunDetail = AgentRunRow & {
+  connectionId: string | null;
+  clientName: string | null;
+  prompt: string | null;
+  events: ServerRunEvent[];
+  usage: ServerRunUsage[];
+  failureDetail: unknown;
+  diff: unknown;
+  heads: { before: unknown; after: unknown };
+  tokenRevokedAt: string | null;
+};
+
+/**
+ * `diff_summary` read defensively. A run that never finished has none; a summary
+ * written by an older build may be missing a field. The console's attribution
+ * hedge reads `foreignCommitCount` against `commits.length`, and `undefined`
+ * there would render as "NaN of NaN commits" — an absence the page must be able
+ * to name, so a malformed summary reads as NO summary rather than a partial one.
+ */
+export function toDiffSummary(raw: unknown): DiffSummary | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const outer = raw as { write?: unknown; readSpaceMoves?: unknown; concurrentWriters?: unknown };
+  if (outer.write === null || typeof outer.write !== 'object') return null;
+  const write = outer.write as Record<string, unknown>;
+  if (typeof write.sourceId !== 'string' || !Array.isArray(write.commits)) return null;
+  const moves = Array.isArray(outer.readSpaceMoves) ? outer.readSpaceMoves : [];
+  return {
+    write: {
+      sourceId: write.sourceId,
+      before: typeof write.before === 'string' ? write.before : '',
+      after: typeof write.after === 'string' ? write.after : '',
+      commits: write.commits as DiffSummary['write']['commits'],
+      files: Array.isArray(write.files) ? (write.files as DiffSummary['write']['files']) : [],
+      concurrentWriters: write.concurrentWriters === true,
+      foreignCommitCount: typeof write.foreignCommitCount === 'number' ? write.foreignCommitCount : 0,
+      foreignAuthors: Array.isArray(write.foreignAuthors)
+        ? write.foreignAuthors.filter((a): a is string => typeof a === 'string')
+        : [],
+    },
+    readSpaceMoves: moves.filter(
+      (m): m is ReadSpaceMove => typeof (m as ReadSpaceMove | null)?.sourceId === 'string',
+    ),
+    concurrentWriters: outer.concurrentWriters === true,
+  };
+}
+
+/** `heads_before` / `heads_after`: a Space id -> the commit HEAD pointed at. */
+export function toSpaceHeads(raw: unknown): SpaceHeads {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === 'string'),
+  );
+}
+
+/** `unreported` is the console's word for a control plane that says nothing —
+ *  never `disabled` (which claims the lane is off) and never green. */
+export function toRunnerStatus(raw: unknown): RunnerStatusRow {
+  if (raw === null || typeof raw !== 'object') return { state: 'unreported', lastSeenAt: null, version: null };
+  const r = raw as { state?: unknown; lastSeenAt?: unknown; version?: unknown };
+  return {
+    state: typeof r.state === 'string' && r.state !== '' ? r.state : 'unreported',
+    lastSeenAt: typeof r.lastSeenAt === 'string' ? r.lastSeenAt : null,
+    version: typeof r.version === 'string' ? r.version : null,
+  };
+}
+
+export const runApi = {
+  list: (limit?: number) =>
+    api.get<{ runs: AgentRunRow[] }>(`/runs${limit === undefined ? '' : `?limit=${limit}`}`),
+  detail: async (runId: string): Promise<AgentRunDetail> => {
+    const r = await api.get<ServerRunDetail>(`/runs/${encodeURIComponent(runId)}`);
+    return {
+      ...r,
+      diff: toDiffSummary(r.diff),
+      heads: { before: toSpaceHeads(r.heads?.before), after: toSpaceHeads(r.heads?.after) },
+    };
+  },
+  /** D10: nothing auto-reverts. `confirm` is the second explicit confirmation a
+   *  range containing another writer's commits requires, and it is a query param
+   *  on the route rather than a body — there is no body. */
+  revert: (runId: string, confirm?: 'concurrent') =>
+    api.post<RevertSuccess>(
+      `/runs/${encodeURIComponent(runId)}/revert${confirm === 'concurrent' ? '?confirm=concurrent' : ''}`,
+    ),
+  /** The runner's three states. `/api/health` is unauthenticated, so this asks it
+   *  for nothing else — kinds and counts are the whole vocabulary. */
+  runner: async (): Promise<RunnerStatusRow> => {
+    const r = await api.get<{ runner?: unknown }>('/health');
+    return toRunnerStatus(r.runner);
+  },
 };

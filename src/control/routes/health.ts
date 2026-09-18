@@ -3,6 +3,7 @@ import { desc, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
 import { GBRAIN_PIN, verifyRuntimePin, type PinVerification } from '../../contracts/pin.ts';
+import { runnerStatus, runnerTokenConfigured, type RunnerStatus } from '../../agent/runners.ts';
 
 export const health = new Hono();
 
@@ -49,17 +50,49 @@ async function openAlerts(): Promise<
   }
 }
 
+/**
+ * The runner lane's three states (honesty rule 8), KINDS ONLY — the same
+ * discipline `openAlerts()` follows and for the same reason: `/api/health` is
+ * unauthenticated, so no token, no client id and no connection detail may
+ * appear here. `state`, `lastSeenAt` and `version` are the whole vocabulary
+ * D12 defines, and there is nothing else to leak.
+ *
+ * `version` is real since D2: it is the harness version the last-seen runner
+ * reported in the very claim request that recorded it, and it is the same
+ * string that container announces on the wire — not a runner id, not a token.
+ * The runner's own identity (`runner_presence.runner_id`) is deliberately NOT
+ * projected here.
+ *
+ * A ledger this probe cannot read is not a connected runner: the fallback is the
+ * env-only reading, which is never green, and `components.controlDb` already
+ * reports the failure that caused it.
+ */
+async function safeRunnerStatus(dbReadable: boolean): Promise<RunnerStatus> {
+  if (!dbReadable) return { state: 'never_claimed', lastSeenAt: null, version: null };
+  try {
+    return await runnerStatus();
+  } catch {
+    return {
+      state: runnerTokenConfigured() ? 'never_claimed' : 'disabled',
+      lastSeenAt: null,
+      version: null,
+    };
+  }
+}
+
 health.get('/health', async (c) => {
   const components: Record<string, 'ok' | 'down'> = { controlDb: 'down', ops: 'down' };
 
   try { await getDb().execute(sql`select 1`); components.controlDb = 'ok'; } catch { /* reported as down */ }
 
-  if (await opsHealthy()) {
-    components.ops = 'ok';
-    try {
-      await callOps('toolsJson', {}, { timeoutMs: 10_000 });
-    } catch { /* opsHealth already confirmed reachability; nothing to report here */ }
-  }
+  // F14: this used to also `await callOps('toolsJson', …)` and discard the
+  // result. It was an extra `gbrain --tools-json` process on the ops side per
+  // call — measured 2.6–4.5 s and a 171 870-byte body — on an endpoint served
+  // without a session, and it reported nothing: `components.ops` is
+  // `opsHealthy()`'s verdict, and the two probes below already fail visibly
+  // when the RPC lane is down (`pin.observed`/`pin.matches` null, `repos`
+  // empty). Removing it is a Slice 3 defect fix, not a change of contract.
+  if (await opsHealthy()) components.ops = 'ok';
 
   let pin: PinVerification = { declared: GBRAIN_PIN, observed: null, matches: null };
   if (components.ops === 'ok') {
@@ -76,9 +109,13 @@ health.get('/health', async (c) => {
 
   const ok = Object.values(components).every((s) => s === 'ok');
   const scheduleAlerts = components.controlDb === 'ok' ? await openAlerts() : [];
+  const runner = await safeRunnerStatus(components.controlDb === 'ok');
   // Never include a connection string, a token or an env dump here.
   return c.json(
-    { ok, components, gbrainVersion: GBRAIN_PIN, pin, repos, scheduleAlerts, at: new Date().toISOString() },
+    {
+      ok, components, gbrainVersion: GBRAIN_PIN, pin, repos, scheduleAlerts, runner,
+      at: new Date().toISOString(),
+    },
     ok ? 200 : 503,
   );
 });

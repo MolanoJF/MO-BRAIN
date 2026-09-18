@@ -381,12 +381,15 @@ describe('Slice 3 seam gate B', () => {
     expect((await readJson<{ error: string }>(refused, 'PATCH EST')).error).toBe('invalid_timezone');
   });
 
-  test.skipIf(!dockerAvailable)("B3. presets list includes three user presets and the org's system ones", async () => {
+  test.skipIf(!dockerAvailable)("B3. presets list includes the user presets and the org's system ones", async () => {
     const body = await readJson<{ presets: Array<{ id: string; system?: true }>; system: string[] }>(
       await get('/api/schedule-presets'), 'GET /api/schedule-presets',
     );
+    // Slice 4 added the fourth user preset (the one agent_prompt shape). The
+    // system ones stay conditional, so they are asserted by membership below
+    // rather than by count.
     expect(body.presets.filter((p) => !p.system).map((p) => p.id).sort())
-      .toEqual(['live-sync', 'nightly-dream', 'weekly-health']);
+      .toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
     for (const id of body.system) {
       expect(body.presets.find((p) => p.id === id)?.system).toBe(true);
     }
@@ -1024,7 +1027,7 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c8-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    expect(await claimNextRun('gate-c-worker', now)).toBe('none');
+    expect(await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] })).toBe('none');
     expect((await runRow(waiting)).state).toBe('skipped_overlap');
     expect((await runRow(inFlight)).state).toBe('running'); // untouched
   }, 300_000);
@@ -1037,11 +1040,11 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c9-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    expect(await claimNextRun('gate-c-worker', now)).toBe('none');
+    expect(await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] })).toBe('none');
     expect((await runRow(waiting)).state).toBe('pending');
 
     await finishRun(inFlight, { state: 'succeeded', classification: 'ok', exitCode: 0 });
-    const claimed = await claimNextRun('gate-c-worker', now);
+    const claimed = await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] });
     expect(claimed).not.toBe('none');
     expect(claimed === 'none' ? null : claimed.run.id).toBe(waiting);
   }, 300_000);
@@ -1054,7 +1057,7 @@ describe('Slice 3 seam gate C', () => {
     const waiting = await insertPending(scheduleId, 'c10-next', now - 10_000);
 
     await requireSoleClaimablePending(now, waiting);
-    const claimed = await claimNextRun('gate-c-worker', now);
+    const claimed = await claimNextRun('gate-c-worker', now, { jobTypes: ['gbrain_command'] });
     expect(claimed === 'none' ? null : claimed.run.id).toBe(waiting);
 
     const previous = await runRow(inFlight);

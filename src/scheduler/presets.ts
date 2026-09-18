@@ -22,14 +22,37 @@ export type PresetDefaults = {
   notifies?: boolean;
 };
 
+/**
+ * The agent payload a preset carries. The harness pin is NOT here: it is derived
+ * from `HARNESS_PIN` at creation, exactly as `--source` is fenced for a command,
+ * so a preset cannot pin a build the deployment is not running.
+ */
+export type PresetAgent = {
+  /** Thin on purpose: a pointer at what to do, not an inlined essay. */
+  prompt: string;
+  /** A key of MODEL_PRICING. An unpriced model is refused at creation (honesty rule 3). */
+  model: string;
+  maxTokens: number;
+  /** Text, like the column: money never becomes a float. */
+  budgetUsd: string;
+};
+
 export type Preset = {
   id: string;
   title: string;
   description: string;
   kind: 'interval' | 'calendar';
-  /** null only for morning-briefing, which runs no gbrain command. */
+  /**
+   * The payload shape this preset stores (D2). Defaults to `gbrain_command`:
+   * `agent` and `jobType: 'agent_prompt'` go together, because
+   * `shape_matches_job_type` allows exactly one shape per row.
+   */
+  jobType?: 'agent_prompt';
+  /** null only for the internal drains, which run no gbrain command. */
   operation: string | null;
   params: Record<string, unknown>;
+  /** Set iff `jobType === 'agent_prompt'`. */
+  agent?: PresetAgent;
   defaults: PresetDefaults;
   tunableInterval?: number[];
   requiresRole?: 'admin';
@@ -129,6 +152,44 @@ export const PRESETS: Record<string, Preset> = {
       timeoutSeconds: 300,
     },
     system: true,
+  },
+
+  /**
+   * The one agent preset. "Don't over-cron" is the guide's own advice
+   * (docs/guides/cron-schedule.md:329), and this is the lane where over-cronning
+   * is expensive: every fire spends the organization's API budget unattended.
+   * One nightly job, on the cheapest priced model, with a hard cap.
+   *
+   * It runs no gbrain command, so `operation` is null — `shape_matches_job_type`
+   * forbids an operation on an agent row — and its harness version is derived at
+   * creation, never carried here.
+   */
+  'nightly-agent-briefing': {
+    id: 'nightly-agent-briefing',
+    title: 'Nightly agent briefing',
+    description:
+      'An agent run: the runner hands this prompt to the pinned harness against your '
+      + "brain, using your organization's API key, with nobody watching. It can only call "
+      + 'the gbrain tools your Connection is allowed — never a shell — and every run costs '
+      + 'real money, capped per run.',
+    kind: 'calendar',
+    jobType: 'agent_prompt',
+    operation: null,
+    params: {},
+    agent: {
+      prompt:
+        "Read the pages under this Connection's write Space that changed in the last 24 "
+        + 'hours and write one briefing page at reports/nightly-briefing/: what changed, '
+        + 'what looks wrong, and what needs a human. One page. Do not edit anything else.',
+      model: 'claude-haiku-4-5',
+      maxTokens: 16384,
+      budgetUsd: '2',
+    },
+    defaults: {
+      calendarHour: 3, calendarMinute: 5, calendarDaysOfWeek: null, slotMinute: 5,
+      catchupPolicy: 'skip', overlapPolicy: 'skip', reportPolicy: 'always',
+      timeoutSeconds: 1800,
+    },
   },
 };
 

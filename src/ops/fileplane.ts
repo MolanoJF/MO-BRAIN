@@ -51,6 +51,37 @@ export async function takeGrantCredentialsFile(requested: unknown): Promise<unkn
   return parsed;
 }
 
+/** gbrain's own guard for a delivery client id (`core/harness/delivery.ts`). */
+const DELIVERY_CLIENT_RE = /^gbrain_cl_[A-Za-z0-9_-]+$/;
+
+/**
+ * Delete the private credential journal `mcp grant` left for a client we have
+ * just revoked: `<configDir>/credential-deliveries/<client_id>.json`, written
+ * before the grant committed (`core/harness/delivery.ts`). Revoking the client
+ * does NOT remove it (F7, re-measured: the file survives `revoke-client`), so
+ * after a revoke the journal is the last copy of a dead secret on the file
+ * plane. Deleting it is the only thing that closes that window.
+ *
+ * The path is COMPUTED here from a validated client id — the request carries no
+ * path at all, so there is no traversal surface (same shape as
+ * `readSupervisorAuditTail`, and unlike `takeGrantCredentialsFile`, which must
+ * accept a path because gbrain chose where to write it).
+ */
+export async function deleteCredentialDelivery(clientId: unknown): Promise<{ deleted: boolean }> {
+  if (typeof clientId !== 'string' || !DELIVERY_CLIENT_RE.test(clientId)) {
+    throw new Error('invalid client id');
+  }
+  try {
+    await unlink(join(GBRAIN_HOME, '.gbrain', 'credential-deliveries', `${clientId}.json`));
+    return { deleted: true };
+  } catch (e) {
+    // Absent is the normal case for a client whose journal was never written
+    // (or already deleted) — not an error, and never a reason to fail a revoke.
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { deleted: false };
+    throw e;
+  }
+}
+
 function reposRoot(): string {
   return process.env.BRAIN_REPOS ?? '/srv/brain-repos';
 }

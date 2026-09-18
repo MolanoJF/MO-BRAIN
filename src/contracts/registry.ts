@@ -515,6 +515,55 @@ export const OPERATIONS: Record<string, OperationSpec> = {
   },
 
   /**
+   * F16 — the page-level removal D10's step 3 needs, and the one `sync` cannot
+   * substitute for. The reverted page an agent run writes is brain-first: MCP
+   * `put_page` creates the row and embeds it inline, and the file is only
+   * write-through. A revert's `sync` reconciles the *anchor..HEAD* delta, so a
+   * file whose addition and removal both landed inside that delta nets to
+   * nothing — MEASURED: after the revert commit `sync --source internal --json`
+   * answers `{"sync_status":"up_to_date","deleted":0}` and the reverted page
+   * still answers `search`, while `embed --stale` only ever re-embeds. The
+   * reverted page therefore has to be removed BY NAME, which is what this verb
+   * is for.
+   *
+   * Measured at the pin (`gbrain delete --help`, plus real calls):
+   *   - the slug is POSITIONAL: `delete <slug> --source-id <id> --purge`;
+   *   - `--json` is implemented: exit 0 prints
+   *     `{status:"purged", slug, source_id, write_through:{removed,path,skipped}, residuals}`
+   *     — `write_through.skipped: "file_not_present"` is the reverted shape (the
+   *     commit already removed the file), and the caller PARSES this receipt
+   *     rather than trusting the flag (L6);
+   *   - an absent slug exits 1 with `Error [page_not_found]: …` on STDERR and NO
+   *     JSON receipt, which is why the caller reads stderr for that one code;
+   *   - `--purge` is honored only for the trusted LOCAL CLI (the op refuses a
+   *     remote caller with `permission_denied` and keeps the soft-delete path).
+   *     gbrain-ops IS that local CLI, so this verb is reachable exactly here and
+   *     nowhere on the MCP surface — note F11: `delete_page` is in a grant's
+   *     allowedOperations while the granted SURFACE does not carry it;
+   *   - `--source-id` is REQUIRED here, not optional: a multi-source brain can
+   *     hold the same slug in several sources and the reverted page belongs to
+   *     the write Space's own source. Defaulting to `ctx.sourceId` would purge
+   *     the wrong row (the `#4329` failure mode upstream fixed).
+   */
+  'page.delete': {
+    id: 'page.delete',
+    argv: ['delete'],
+    params: [
+      { name: 'slug', flag: '', kind: 'value', required: true },
+      { name: 'sourceId', flag: '--source-id', kind: 'value', required: true },
+      { name: 'purge', flag: '--purge', kind: 'flag' },
+    ],
+    supportsJson: true,
+    // `gbrain delete <slug> --purge --dry-run --json` answers
+    // `{dry_run:true, action:"purge_page", slug}` and exits 0 (measured), but
+    // `--help` does not document it and the revert never asks for a preview of a
+    // removal it must actually perform: it is not claimed here.
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
    * The shipped nightly maintenance cycle: lint, backlinks, extract, sync,
    * embed, synthesize (docs/guides/cron-schedule.md — "schedule THIS instead of
    * hand-rolling the dream cycle"). `--dry-run` previews with no writes and no

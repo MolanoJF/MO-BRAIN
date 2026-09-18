@@ -1,5 +1,5 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
-import type { RepoStatus } from '../ops/git.ts';
+import type { GitRange, RepoStatus, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
 
 export type { RepoStatus };
 
@@ -65,6 +65,39 @@ export async function inspectRepos(): Promise<RepoStatus[]> {
   return Array.isArray(payload.repos) ? payload.repos : [];
 }
 
+/**
+ * D10 — the read-only brain diff for one Space: `git log` plus
+ * `git diff --name-status` over `<before>..<after>`. A ref ops cannot resolve
+ * comes back as a thrown `unknown ref: …`, never an empty range.
+ */
+export async function gitRange(sourceId: string, before: string, after: string): Promise<GitRange> {
+  return post('/git/range', { sourceId, before, after }, 60_000);
+}
+
+/**
+ * F16 — the revert's purge guard. Read-only: what the write Space's WORKING
+ * TREE holds at each path, tracked or not. Ops REFUSES (throws) rather than
+ * answering `onDisk: false` when the Space, the repo or a path cannot be read,
+ * so a caller must never treat a thrown call as "the file is gone" — but it can
+ * treat a returned `onDisk: false` as the filesystem's own word.
+ */
+export async function gitPathExists(sourceId: string, paths: readonly string[]): Promise<TreeProbe> {
+  return post('/git/path-exists', { sourceId, paths }, 60_000);
+}
+
+/**
+ * D10 steps 1+2 — the range comes back as ONE new commit signed by `actor`.
+ * `nothing_to_revert` and `conflict` are RESULTS, not thrown errors: they are
+ * refusals the console renders as choices, and only the latter's `detail` is
+ * git's own words. An invalid `sourceId` or an unresolvable ref throws.
+ *
+ * The revert is one locked sequence inside ops; a range can be large, so this
+ * budgets more than a single git read.
+ */
+export async function gitRevertRange(req: RevertRequest): Promise<RevertOutcome> {
+  return post('/git/revert-range', req, 120_000);
+}
+
 export async function putSchemaPack(name: string, yaml: string): Promise<void> {
   await post('/fileplane/schema-pack', { name, yaml }, 60_000);
 }
@@ -85,6 +118,16 @@ export async function resetBrainSchema(): Promise<void> {
 export async function takeGrantCredentials(path: string): Promise<unknown> {
   const payload = await post<{ credentials?: unknown }>('/fileplane/take-grant-credentials', { path }, 30_000);
   return payload.credentials;
+}
+
+/**
+ * F7: delete the private credential journal `mcp grant` retained for a client we
+ * have just revoked. Revoking the client does not remove the journal, so this is
+ * the step that stops a dead secret from sitting on the file plane. The path is
+ * computed ops-side from the client id — no path crosses the RPC.
+ */
+export async function deleteCredentialJournal(clientId: string): Promise<{ deleted: boolean }> {
+  return post('/fileplane/delete-credential-journal', { clientId }, 30_000);
 }
 
 /** Tail the supervisor's own audit log (Task 6) — the only way to tell a

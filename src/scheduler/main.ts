@@ -43,7 +43,11 @@ export async function tickOnce(sql: postgres.Sql, nowMs: number): Promise<void> 
 
 /** Returns true when it did work, so the caller can drain a backlog promptly. */
 export async function workerOnce(nowMs: number): Promise<boolean> {
-  const claimed = await claimNextRun(WORKER_ID, nowMs);
+  // D2: this consumer owns the command lane only. The filter lives inside the
+  // claim's FOR UPDATE SKIP LOCKED select, so an `agent_prompt` row — which the
+  // runner claims over HTTP — is never locked here, never counted against a
+  // queue cap and never starves this lane.
+  const claimed = await claimNextRun(WORKER_ID, nowMs, { jobTypes: ['gbrain_command'] });
   if (claimed === 'none') return false;
   try {
     await executeRun(claimed);

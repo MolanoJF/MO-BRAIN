@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'bun:test';
-import { verifySupervisorDrained } from '../../src/upgrade/quiesce.ts';
-import type { OpsCaller } from '../../src/upgrade/quiesce.ts';
+import { QUIESCE_ORDER, drainLane, restoreLane, verifySupervisorDrained } from '../../src/upgrade/quiesce.ts';
+import type { ComposeModel, OpsCaller } from '../../src/upgrade/quiesce.ts';
+import { SWAP_SERVICES } from '../../scripts/upgrade.ts';
 
 function fakeOps(lines: string[], status: { running: boolean; workers: unknown[] } | null): OpsCaller {
   return {
@@ -171,5 +172,61 @@ describe('verifySupervisorDrained: windowed classifier', () => {
     expect(proof.clean).toBe(false);
     expect(proof.exitCode).toBeNull();
     expect(proof.decidingEvent).toBeNull();
+  });
+});
+
+// D13 / Task 14. The lane's ordering is a decision, not an accident: the runner
+// is the one consumer that keeps writing to the brain after the scheduler stops
+// materializing, so it drains FIRST.
+describe('the quiesce lane (D13)', () => {
+  test('the runner drains first, before the scheduler', () => {
+    expect(QUIESCE_ORDER[0]).toBe('agent-runner');
+    expect(QUIESCE_ORDER.indexOf('agent-runner'))
+      .toBeLessThan(QUIESCE_ORDER.indexOf('scheduler'));
+  });
+
+  test('a gbrain pin move does not rebuild the runner — its image carries no gbrain', () => {
+    expect(SWAP_SERVICES as readonly string[]).not.toContain('agent-runner');
+  });
+
+  // D12: the runner is behind the `runner` profile, OFF by default. The lane
+  // may only ever name a service this compose project actually has.
+  test('a service outside the active compose model is never in the lane', () => {
+    const writers = new Set(['scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops']);
+    const runnerOff: ComposeModel = { active: writers, containers: new Set() };
+    const runnerOn: ComposeModel = {
+      active: new Set(['agent-runner', ...writers]), containers: new Set(),
+    };
+
+    expect(drainLane(runnerOff)).toEqual([...QUIESCE_ORDER].filter((s) => s !== 'agent-runner'));
+    expect(restoreLane(runnerOff)).toEqual([...QUIESCE_ORDER].filter((s) => s !== 'agent-runner').reverse());
+    // Profile enabled: the runner is drained first and restored last.
+    expect(drainLane(runnerOn)).toEqual([...QUIESCE_ORDER]);
+    expect(restoreLane(runnerOn)).toEqual([...QUIESCE_ORDER].reverse());
+
+    // A runner container can exist while its profile is off (`up -d --no-deps`
+    // starts a profile-gated service either way). It is still a live writer, so
+    // it is drained — and never restarted, because the operator's own model
+    // says the runner is not part of this deployment.
+    const stray: ComposeModel = { active: writers, containers: new Set(['agent-runner']) };
+    expect(drainLane(stray)[0]).toBe('agent-runner');
+    expect(restoreLane(stray)).toEqual([...QUIESCE_ORDER].filter((s) => s !== 'agent-runner').reverse());
+
+    // A project compose cannot render is not evidence that a writer is absent:
+    // the pre-Task-14 behaviour stands for the DRAIN (stop everything in the
+    // order) rather than silently skipping a drain. The RESTORE direction is
+    // the one that starts containers, so it is the one that must not trust the
+    // missing model: `up -d --no-deps agent-runner` starts a profile-gated
+    // service regardless of the profile (measured), so an unknown model
+    // restores every requested service EXCEPT the runner. An assertion that
+    // still accepts agent-runner here is pinning a path to the runner.
+    expect(drainLane('unknown')).toEqual([...QUIESCE_ORDER]);
+    expect(restoreLane('unknown')).toEqual(
+      [...QUIESCE_ORDER].filter((s) => s !== 'agent-runner').reverse(),
+    );
+    expect(restoreLane('unknown')).not.toContain('agent-runner');
+    // An explicit resume() request cannot name what the project does not have.
+    expect(restoreLane({ active: new Set(['scheduler']), containers: new Set() },
+      ['scheduler', 'control-plane'])).toEqual(['scheduler']);
   });
 });

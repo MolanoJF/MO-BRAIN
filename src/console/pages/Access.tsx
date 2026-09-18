@@ -5,6 +5,20 @@ type Member = { membershipId: string; email: string; role: string };
 type Space = { id: string; sourceId: string; name: string };
 type Cell = { membershipId: string; spaceId: string; access: 'write' | 'read' };
 
+/**
+ * D12, in plain words, on the page where access is granted. It is the sentence
+ * `scripts/install.sh` asks, minus the question mark: the console cannot enable
+ * the runner — it is a compose profile, chosen on the host — so asking "Enable
+ * it?" here would be a button that does not exist. What the sentence is doing is
+ * telling an operator who is about to widen someone's access what the deployment
+ * may already be running with the organization's key.
+ */
+export const AGENT_RUNNER_WARNING =
+  'This container runs model-written code against your brain, using your organization\'s API key, on a schedule, '
+  + 'with nobody watching. It is off unless the deployment was installed with the runner profile '
+  + '(COMPOSE_PROFILES=runner in .env, alongside RUNNER_TOKEN). A deployment that only connects members\' own '
+  + 'agents loses nothing by leaving it off, and nothing on this page can switch it on.';
+
 export function Access() {
   const [members, setMembers] = useState<Member[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -34,6 +48,12 @@ export function Access() {
       </header>
 
       {error && <div className="text-danger text-sm">{error}</div>}
+
+      {/* D12: what enabling the runner means, before anyone reads the matrix. */}
+      <section className="card border-warning">
+        <h2 className="text-sm font-semibold text-warning">The agent runner</h2>
+        <p className="text-sm">{AGENT_RUNNER_WARNING}</p>
+      </section>
 
       {spaces.length === 0 ? (
         <p className="text-sm text-muted">No Spaces yet.</p>

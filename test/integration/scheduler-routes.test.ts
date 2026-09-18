@@ -6,6 +6,11 @@ process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
 process.env.CONTROL_DATABASE_URL ??=
   'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 process.env.PUBLIC_URL ??= 'http://127.0.0.1:3131';
+// D12: the runner lane is CONFIGURED as soon as the token is non-empty. Without
+// this the whole file would run in the `disabled` state and every agent_prompt
+// create would be a 409 — which is what the disabled probe below asserts on
+// purpose, by unsetting it.
+process.env.RUNNER_TOKEN ??= 'it-not-a-real-runner-token';
 
 type CallOpts = { json?: boolean; dryRun?: boolean; timeoutMs?: number };
 type OpsResult = {
@@ -37,9 +42,34 @@ mock.module('../../src/control/opsClient.ts', () => ({
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
   takeGrantCredentials: async () => ({}),
+  // Task 5's revoke path (connections.ts) imports this alongside the others; a
+  // mock that omits a real export makes the whole graph unloadable.
+  deleteCredentialJournal: async () => ({ deleted: true }),
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
+  // Same rule, and the graph is loaded before this suite's own tests run:
+  // `src/agent/revert.ts` re-exports `classifyExit` from `scheduler/execute.ts`,
+  // which imports `writeReport` here. Without it the whole file dies at load
+  // with `Export named 'writeReport' not found` and none of the assertions
+  // below ever run. The health path never calls it; it exists so the mock
+  // mirrors the module it replaces.
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
+  gitRange: async (sourceId: string) => ({
+    sourceId, before: '', after: '', commits: [], files: [],
+  }),
+  gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
+  // Task 10's revert probes the tree before it removes a page, and `revert.ts` is
+  // loaded by the app graph (`routes/runs.ts`), so this export must exist even
+  // though no probe here exercises a revert: answering "neither on disk nor in
+  // git" is the state a route test that never reverts wants anyway.
+  gitPathExists: async (sourceId: string, paths: readonly string[]) => ({
+    sourceId,
+    root: `/repos/${sourceId}`,
+    paths: paths.map((path) => ({ path, onDisk: false, inGit: false })),
+  }),
+  auditTail: async () => [],
 }));
 
 // mock.module must be registered before the app's import graph loads, so these
@@ -49,6 +79,11 @@ const { default: app } = await import('../../src/control/app.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { revokeConnection } = await import('../../src/control/connections.ts');
 const { materializeDue } = await import('../../src/scheduler/materialize.ts');
+// Same ordering rule as the block above: these read env at module scope too.
+const { runnerStatus, recordRunnerSeen, RUNNER_SEEN_WINDOW_MS } =
+  await import('../../src/agent/runners.ts');
+const { HARNESS_PIN } = await import('../../src/runner/pin.ts');
+const { MODEL_PRICING } = await import('../../src/gateway/pricing.ts');
 const { eq, and, inArray } = await import('drizzle-orm');
 
 pinDb();
@@ -177,6 +212,11 @@ beforeEach(async () => {
   await getDb().delete(schema.schedules).where(eq(schema.schedules.organizationId, ORG));
   await getDb().delete(schema.scheduleAlerts).where(eq(schema.scheduleAlerts.organizationId, ORG));
   await getDb().delete(schema.auditLog).where(eq(schema.auditLog.organizationId, ORG));
+  // D2's sighting record is deployment-wide, not org-scoped: it is written by
+  // `POST /api/runs/claim`, which names a runner and no organization. Every
+  // other file in this directory claims runs through that route, so "no runner
+  // has ever been seen" has to be CONSTRUCTED here rather than assumed.
+  await getDb().delete(schema.runnerPresence);
 });
 
 afterAll(async () => {
@@ -247,6 +287,95 @@ async function insertSchedule(over: Record<string, unknown> = {}): Promise<strin
     ...over,
   });
   return id;
+}
+
+// --- the agent lane (D12, honesty rule 8) -----------------------------------
+
+/**
+ * A CONNECTED runner, as the ledger records one: an `agent_prompt` schedule (the
+ * payload-shape CHECK requires its five agent columns) and a run that runner has
+ * claimed with an unexpired lease. That claim is the only evidence the control
+ * plane honestly has, so it is what the create gate looks for.
+ */
+async function seedAgentLane(over: { leaseMs?: number } = {}): Promise<string> {
+  const scheduleId = randomUUID();
+  await getDb().insert(schema.schedules).values({
+    id: scheduleId,
+    organizationId: ORG,
+    connectionId: memberConn,
+    name: uniqueName('agent-lane'),
+    jobType: 'agent_prompt',
+    operation: null,
+    agentPrompt: 'lane probe',
+    agentModel: 'claude-haiku-4-5',
+    agentMaxTokens: 1024,
+    agentBudgetUsd: '1',
+    agentHarnessVersion: HARNESS_PIN,
+    kind: 'interval',
+    intervalSeconds: 3600,
+    anchorAt: new Date(),
+    createdBy: 'test',
+  });
+
+  const runId = randomUUID();
+  await getDb().insert(schema.scheduleRuns).values({
+    id: runId,
+    scheduleId,
+    organizationId: ORG,
+    slot: `lane:${randomUUID().slice(0, 8)}`,
+    fireAt: new Date(),
+    state: 'running',
+    claimedBy: 'runner-test-0123abcd',
+    startedAt: new Date(),
+    leaseExpiresAt: new Date(Date.now() + (over.leaseMs ?? 300_000)),
+  });
+  return runId;
+}
+
+/** A runner's claim on a gbrain_command row: the OTHER lane's consumer. */
+async function seedCommandLane(): Promise<void> {
+  const scheduleId = await insertSchedule();
+  await getDb().insert(schema.scheduleRuns).values({
+    id: randomUUID(),
+    scheduleId,
+    organizationId: ORG,
+    slot: `sched:${randomUUID().slice(0, 8)}`,
+    fireAt: new Date(),
+    state: 'running',
+    claimedBy: 'scheduler-test-worker',
+    startedAt: new Date(),
+    leaseExpiresAt: new Date(Date.now() + 300_000),
+  });
+}
+
+function agentBody(over: Record<string, unknown> = {}) {
+  return {
+    name: uniqueName('nightly-briefing'),
+    connectionId: memberConn,
+    jobType: 'agent_prompt',
+    agentPrompt: 'Read the pages that changed in this Space tonight and write one briefing page.',
+    agentModel: 'claude-haiku-4-5',
+    agentMaxTokens: 4096,
+    agentBudgetUsd: '2',
+    kind: 'calendar',
+    calendarHour: 3,
+    calendarMinute: 5,
+    calendarDaysOfWeek: null,
+    ...over,
+  };
+}
+
+/** `RUNNER_TOKEN` is read per call, so a probe can move the lane in and out of `disabled`. */
+async function withRunnerToken<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.RUNNER_TOKEN;
+  if (value === undefined) delete process.env.RUNNER_TOKEN;
+  else process.env.RUNNER_TOKEN = value;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.RUNNER_TOKEN;
+    else process.env.RUNNER_TOKEN = before;
+  }
 }
 
 describe('RBAC', () => {
@@ -533,6 +662,354 @@ describe('validation', () => {
   });
 });
 
+describe('the runner lane: three states, and only one of them is green', () => {
+  test('an unconfigured lane is `disabled` — and an empty bearer is not configured either', async () => {
+    expect(await withRunnerToken(undefined, runnerStatus))
+      .toEqual({ state: 'disabled', lastSeenAt: null, version: null });
+    // Compose interpolates `${RUNNER_TOKEN:-}` to the empty string on every
+    // runner-less deployment, and an empty bearer must never authenticate — so
+    // empty IS the lane being off, not "configured, nothing claimed yet".
+    expect(await withRunnerToken('', runnerStatus))
+      .toEqual({ state: 'disabled', lastSeenAt: null, version: null });
+    expect(await withRunnerToken('   ', runnerStatus))
+      .toEqual({ state: 'disabled', lastSeenAt: null, version: null });
+  });
+
+  test('a configured lane nothing has ever claimed is `never_claimed`, with no lastSeenAt', async () => {
+    expect(await runnerStatus()).toEqual({ state: 'never_claimed', lastSeenAt: null, version: null });
+  });
+
+  test('a claim with a live lease is `connected`; the scheduler claiming its own lane is not evidence', async () => {
+    // The scheduler claims `gbrain_command` rows with the same two columns. A
+    // health probe that counted them would report a runner that does not exist.
+    await seedCommandLane();
+    expect((await runnerStatus()).state).toBe('never_claimed');
+
+    const runId = await seedAgentLane();
+    const status = await runnerStatus();
+    expect(status.state).toBe('connected');
+    // The claim moment is the honest `lastSeenAt`: heartbeat renews
+    // `lease_expires_at` but records no timestamp of its own.
+    const [row] = await getDb().select().from(schema.scheduleRuns)
+      .where(eq(schema.scheduleRuns.id, runId));
+    expect(status.lastSeenAt!.toISOString()).toBe(row!.startedAt!.toISOString());
+    // The ledger records WHO claimed (`claimed_by`), never which harness build.
+    // An absent version is honest; a fabricated one would not be.
+    expect(status.version).toBeNull();
+  });
+
+  test('a lapsed lease is not `connected`, and lastSeenAt still says a runner was here', async () => {
+    await seedAgentLane({ leaseMs: -60_000 });
+    const status = await runnerStatus();
+    expect(status.state).toBe('never_claimed');
+    expect(status.lastSeenAt).toBeInstanceOf(Date);
+    expect(status.version).toBeNull();
+  });
+
+  // D2. The sighting is the claim REQUEST, which arrives before any run exists:
+  // that is what makes an idle-but-present runner visible, and it is what the
+  // old live-lease definition of `connected` got wrong.
+  test('a runner that has been seen is `connected`, with the version it announced', async () => {
+    const announcedAt = Date.now();
+    await recordRunnerSeen('runner-seen-0123abcd', HARNESS_PIN, announcedAt);
+
+    const status = await runnerStatus();
+    expect(status.state).toBe('connected');
+    expect(status.version).toBe(HARNESS_PIN);
+    // The sighting's own moment, and no claim anywhere: `lastSeenAt` is the row's
+    // timestamp, not a run it never had.
+    expect(status.lastSeenAt!.getTime()).toBe(announcedAt);
+    expect((await getDb().select().from(schema.scheduleRuns)
+      .where(eq(schema.scheduleRuns.organizationId, ORG))).length).toBe(0);
+  });
+
+  test('a sighting older than the window is not `connected` — and lastSeenAt still says it was here', async () => {
+    await recordRunnerSeen(
+      'runner-gone-0123abcd', HARNESS_PIN, Date.now() - RUNNER_SEEN_WINDOW_MS - 1_000,
+    );
+    const status = await runnerStatus();
+    expect(status.state).toBe('never_claimed');
+    expect(Date.now() - status.lastSeenAt!.getTime()).toBeGreaterThan(RUNNER_SEEN_WINDOW_MS);
+    expect(status.version).toBe(HARNESS_PIN);
+  });
+
+  test('a request with no runner id, or no version, is not a sighting at all', async () => {
+    // Both are refused as request shape by the claim route (`runner_never_seen`,
+    // `harness_version_required`), so neither may leave a row: a sighting with no
+    // identity would put an empty string in /api/health's `version`.
+    await recordRunnerSeen('', HARNESS_PIN);
+    await recordRunnerSeen('runner-partial-0123abcd', '   ');
+    expect(await runnerStatus()).toEqual({ state: 'never_claimed', lastSeenAt: null, version: null });
+    expect((await getDb().select().from(schema.runnerPresence)).length).toBe(0);
+  });
+});
+
+describe('agent_prompt schedules', () => {
+  test('the preset supplies the payload, and the row is the whole shape', async () => {
+    await seedAgentLane();
+    const res = await hit('POST', '/api/schedules', adminCookie, {
+      name: uniqueName('nightly-agent'),
+      connectionId: memberConn,
+      preset: 'nightly-agent-briefing',
+      kind: 'calendar',
+      calendarHour: 3,
+      calendarMinute: 5,
+    });
+    expect(res.status).toBe(201);
+    const created = await res.json() as {
+      id: string; agentPrompt: string; agentModel: string; agentBudgetUsd: string;
+    } & Record<string, unknown>;
+    expect(created).toMatchObject({
+      jobType: 'agent_prompt',
+      // shape_matches_job_type: an agent row has no gbrain operation at all.
+      operation: null,
+      preset: 'nightly-agent-briefing',
+      agentModel: 'claude-haiku-4-5',
+      agentMaxTokens: 16384,
+      agentBudgetUsd: '2',
+      agentHarnessVersion: HARNESS_PIN,
+    });
+    expect(created.agentPrompt).toMatch(/briefing/);
+    expect(Object.keys(MODEL_PRICING.models)).toContain(created.agentModel);
+
+    const stored = await scheduleRow(created.id);
+    expect(stored.jobType).toBe('agent_prompt');
+    expect(stored.operation).toBeNull();
+    expect(stored.agentPrompt).toBe(created.agentPrompt);
+    expect(stored.agentBudgetUsd).toBe('2');
+    // Timing is orthogonal to the payload shape, and stays so.
+    expect(stored.kind).toBe('calendar');
+    expect(stored.slotMinute).toBe(5);
+  });
+
+  test('an explicit payload is stored as given, against OUR declared pin', async () => {
+    await seedAgentLane();
+    const id = await createSchedule(agentBody({
+      agentModel: 'claude-sonnet-4-6', agentMaxTokens: 8192, agentBudgetUsd: '0.25',
+    }));
+    expect(await scheduleRow(id)).toMatchObject({
+      jobType: 'agent_prompt',
+      operation: null,
+      agentModel: 'claude-sonnet-4-6',
+      agentMaxTokens: 8192,
+      agentBudgetUsd: '0.25',
+      agentHarnessVersion: HARNESS_PIN,
+    });
+  });
+
+  test('an unknown payload field is refused — and that is what keeps D5\'s Bash door shut', async () => {
+    await seedAgentLane();
+    const refused: Array<[string, unknown]> = [
+      // There is no field for a tool allowlist, a Bash toggle, or fenced params;
+      // a payload that carries one is refused as an unknown field rather than
+      // stored and ignored.
+      ['agentAllowedTools', ['Bash']],
+      ['agentBash', true],
+      ['params', { source: 'someone-elses-space' }],
+      // The harness pin is derived, exactly as `source` is fenced for a command:
+      // a caller cannot claim a pin it does not have.
+      ['agentHarnessVersion', '0.0.1'],
+    ];
+    for (const [field, value] of refused) {
+      const res = await hit('POST', '/api/schedules', adminCookie,
+        agentBody({ name: uniqueName('bad-field'), [field]: value }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'unknown_agent_field', field });
+    }
+    // Refused, never stored: only the lane's own row exists.
+    const rows = await getDb().select().from(schema.schedules)
+      .where(eq(schema.schedules.organizationId, ORG));
+    expect(rows.length).toBe(1);
+  });
+
+  test('a model absent from the pinned price table is refused at creation, not at 3am', async () => {
+    await seedAgentLane();
+    const res = await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ agentModel: 'claude-hypothetical-9' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: 'unpriced_model', model: 'claude-hypothetical-9', pricedAt: MODEL_PRICING.pricedAt,
+    });
+
+    // A dated id IS priced (rateFor matches it), so it is not "absent".
+    expect((await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ agentModel: 'claude-haiku-4-5-20251001' }))).status).toBe(201);
+  });
+
+  test('an out-of-range budget or output cap is refused at creation', async () => {
+    await seedAgentLane();
+    for (const agentBudgetUsd of ['0', '-1', '500', '100.0000001', 'free', '', '1e3']) {
+      const res = await hit('POST', '/api/schedules', adminCookie,
+        agentBody({ name: uniqueName('bad-budget'), agentBudgetUsd }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'invalid_agent_budget_usd' });
+    }
+    for (const agentMaxTokens of [0, 12, 1_000_000, 4096.5, 'many']) {
+      const res = await hit('POST', '/api/schedules', adminCookie,
+        agentBody({ name: uniqueName('bad-tokens'), agentMaxTokens }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'invalid_agent_max_tokens' });
+    }
+    // The bounds themselves are allowed: a range probe must not be off by one.
+    expect((await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ calendarMinute: 10, agentBudgetUsd: '0.01', agentMaxTokens: 256 }))).status).toBe(201);
+    expect((await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ calendarMinute: 15, agentBudgetUsd: '100', agentMaxTokens: 64000 }))).status).toBe(201);
+  });
+
+  test('a command preset cannot be smuggled into an agent row', async () => {
+    await seedAgentLane();
+    const res = await hit('POST', '/api/schedules', adminCookie, agentBody({ preset: 'live-sync' }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: 'preset_job_type_mismatch', preset: 'live-sync', jobType: 'agent_prompt',
+    });
+    // The server would otherwise drop `sync`'s params on the floor and store a
+    // row shaped like neither lane.
+    expect((await getDb().select().from(schema.schedules)
+      .where(eq(schema.schedules.organizationId, ORG))).length).toBe(1);
+  });
+
+  test('no consumer, no schedule: `never_claimed` and `disabled` both refuse a create', async () => {
+    const never = await hit('POST', '/api/schedules', adminCookie, agentBody());
+    expect(never.status).toBe(409);
+    const neverBody = await never.json() as { error: string; detail: string };
+    expect(neverBody).toMatchObject({
+      error: 'runner_not_enabled', state: 'never_claimed', lastSeenAt: null,
+    });
+    // D2: the refusal names the fact the gate TESTS — a sighting inside the
+    // window. It must not say "nothing has claimed any agent run", which was
+    // false about the running, long-polling runner this defect was found with.
+    expect(neverBody.detail).not.toContain('nothing has claimed');
+    expect(neverBody.detail).toContain(`${Math.round(RUNNER_SEEN_WINDOW_MS / 1000)}s`);
+
+    await withRunnerToken('', async () => {
+      const off = await hit('POST', '/api/schedules', adminCookie,
+        agentBody({ name: uniqueName('disabled-lane') }));
+      expect(off.status).toBe(409);
+      expect(await off.json()).toMatchObject({
+        error: 'runner_not_enabled', state: 'disabled', lastSeenAt: null,
+      });
+    });
+
+    // The gbrain_command lane has its own consumer — the scheduler — so it is
+    // not gated by the runner at all.
+    expect((await hit('POST', '/api/schedules', adminCookie, intervalBody())).status).toBe(201);
+
+    const rows = await getDb().select().from(schema.schedules)
+      .where(eq(schema.schedules.organizationId, ORG));
+    expect(rows.map((r) => r.jobType)).toEqual(['gbrain_command']);
+  });
+
+  // D2, the reversal this fix is FOR: a runner that is long-polling the claim
+  // route has been SEEN, and the first agent schedule becomes creatable — with no
+  // run in flight, and nothing but the sighting making the lane green.
+  test('a runner that is seen but idle makes an agent schedule creatable', async () => {
+    await recordRunnerSeen('runner-idle-0123abcd', HARNESS_PIN);
+
+    const res = await hit('POST', '/api/schedules', adminCookie, agentBody());
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ jobType: 'agent_prompt', operation: null });
+    // The row exists because the sighting does — no claim was needed, and no
+    // claim happened.
+    expect((await getDb().select().from(schema.scheduleRuns)
+      .where(eq(schema.scheduleRuns.organizationId, ORG))).length).toBe(0);
+
+    // And the same stack refuses the moment the sighting ages out of the window:
+    // the gate is the WINDOW, not "ever".
+    await getDb().delete(schema.runnerPresence);
+    await recordRunnerSeen(
+      'runner-idle-0123abcd', HARNESS_PIN, Date.now() - RUNNER_SEEN_WINDOW_MS - 1_000,
+    );
+    const stale = await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ name: uniqueName('stale-lane') }));
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: 'runner_not_enabled', state: 'never_claimed' });
+  });
+
+  test('a runner whose lease lapsed is refused too, and the refusal says when it was last seen', async () => {
+    await seedAgentLane({ leaseMs: -60_000 });
+    const res = await hit('POST', '/api/schedules', adminCookie, agentBody());
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: string; state: string; lastSeenAt: string | null };
+    expect(body.error).toBe('runner_not_enabled');
+    // No fourth word exists for "configured, claimed once, lease lapsed": the
+    // state is the non-green one and `lastSeenAt` is what tells them apart.
+    expect(body.state).toBe('never_claimed');
+    expect(body.lastSeenAt).not.toBeNull();
+  });
+});
+
+describe('the timing rules are unchanged, whatever the payload shape', () => {
+  test('an agent_prompt schedule is accepted under the same quiet hours a gbrain_command one is', async () => {
+    const quiet = { quietHoursStart: 22, quietHoursEnd: 6 };
+    expect((await hit('PATCH', '/api/org/schedule-settings', adminCookie, quiet)).status).toBe(200);
+    await seedAgentLane();
+
+    // Quiet hours HOLD output; they never refuse a create, in either lane.
+    expect((await hit('POST', '/api/schedules', adminCookie,
+      calendarBody(3, 5, { notifies: true }))).status).toBe(201);
+    const agent = await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ calendarMinute: 10, notifies: true }));
+    expect(agent.status).toBe(201);
+
+    const [org] = await getDb().select().from(schema.organizations)
+      .where(eq(schema.organizations.id, ORG));
+    expect({ quietHoursStart: org!.quietHoursStart, quietHoursEnd: org!.quietHoursEnd }).toEqual(quiet);
+    const created = await agent.json() as { id: string };
+    expect(await scheduleRow(created.id)).toMatchObject({
+      notifies: true, jobType: 'agent_prompt', kind: 'calendar',
+    });
+  });
+
+  test('the one-sub-hourly-lane rule still refuses the second sub-hourly schedule', async () => {
+    await seedAgentLane();
+    // The lane is TIMING, not payload shape: an agent interval schedule takes it
+    // exactly as a gbrain_command one does.
+    const first = await createSchedule(agentBody({ kind: 'interval', intervalSeconds: 300 }));
+    const res = await hit('POST', '/api/schedules', adminCookie, intervalBody({ intervalSeconds: 600 }));
+    expect(res.status).toBe(409);
+    const refusal = await res.json() as { error: string; holder?: string; detail?: string };
+    expect(refusal.error).toBe('sub_hourly_limit');
+    expect(refusal.holder).toBe((await scheduleRow(first)).name);
+    expect(refusal.detail).toMatch(/sub-hourly/);
+  });
+
+  test('the stagger grid refuses an agent_prompt slot the way it refuses a command slot', async () => {
+    await seedAgentLane();
+    await createSchedule(calendarBody(3, 5));
+    const res = await hit('POST', '/api/schedules', adminCookie, agentBody({ calendarMinute: 5 }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'slot_taken', nextFree: 10 });
+  });
+});
+
+describe('health reports the runner lane, and nothing else about it', () => {
+  test('a connected lane is green on state alone, with no token, client id or claim id', async () => {
+    await seedAgentLane();
+    const body = await (await hit('GET', '/api/health')).json() as {
+      runner: { state: string; lastSeenAt: string | null; version: string | null };
+    };
+    expect(body.runner.state).toBe('connected');
+    expect(body.runner.lastSeenAt).not.toBeNull();
+    expect(body.runner.version).toBeNull();
+    // /api/health is unauthenticated: kinds and counts only, the same
+    // discipline `openAlerts()` follows (S3c).
+    expect(Object.keys(body.runner).sort()).toEqual(['lastSeenAt', 'state', 'version']);
+    const text = JSON.stringify(body);
+    expect(text).not.toContain('it-not-a-real-runner-token');
+    expect(text).not.toContain('runner-test-0123abcd');
+    expect(text).not.toContain(memberConn);
+  });
+
+  test('a runner-less deployment reads `disabled`, never "fine"', async () => {
+    await withRunnerToken('', async () => {
+      const body = await (await hit('GET', '/api/health')).json() as { runner: { state: string } };
+      expect(body.runner.state).toBe('disabled');
+    });
+  });
+});
+
 describe('run-now and history', () => {
   test('run-now inserts a pending run with a manual slot, never a fake scheduled one', async () => {
     const id = await createSchedule(intervalBody());
@@ -702,13 +1179,17 @@ describe('run-now and history', () => {
 
   test('the preset catalogue names the org\'s system presets', async () => {
     const body = await (await hit('GET', '/api/schedule-presets', viewerCookie)).json() as {
-      presets: Array<{ id: string; system?: boolean; operation: string | null }>;
+      presets: Array<{ id: string; system?: boolean; operation: string | null; jobType?: string }>;
       system: string[];
     };
     expect(body.presets.filter((p) => !p.system).map((p) => p.id).sort())
-      .toEqual(['live-sync', 'nightly-dream', 'weekly-health']);
+      .toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
     expect(body.presets.map((p) => p.id)).toContain('morning-briefing');
     expect(body.system).toEqual([]);
+    // One agent preset, and it is the only one: "don't over-cron" is the guide's
+    // own advice, and a family of them is what it warns against.
+    expect(body.presets.filter((p) => p.jobType === 'agent_prompt').map((p) => p.id))
+      .toEqual(['nightly-agent-briefing']);
 
     // A `notifies` schedule is the briefing's precondition.
     await createSchedule(intervalBody({ notifies: true }));

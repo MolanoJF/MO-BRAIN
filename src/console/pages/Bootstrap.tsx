@@ -1,7 +1,14 @@
 import { useState } from 'react';
-import { api } from '../api.ts';
+import { api, ApiError } from '../api.ts';
 
-export function Bootstrap({ onDone }: { onDone: () => void }) {
+/**
+ * The fresh-install path, and ONLY that. D1: this form used to be the whole of
+ * the console's answer to a signed-out visitor, so a returning operator filled it
+ * in and got the raw code `already_bootstrapped` back. That refusal is now a
+ * ROUTE: `onSignIn` hands them to the sign-in page, which is where a
+ * bootstrapped, sessionless visitor belongs.
+ */
+export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [orgName, setOrgName] = useState('');
@@ -15,7 +22,10 @@ export function Bootstrap({ onDone }: { onDone: () => void }) {
       await api.post('/bootstrap', { email, password, orgName });
       await api.post('/auth/sign-in/email', { email, password });
       onDone();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Bootstrap failed'); }
+    } catch (err) {
+      if (err instanceof ApiError && err.body.error === 'already_bootstrapped') return onSignIn();
+      setError(err instanceof Error ? err.message : 'Bootstrap failed');
+    }
     finally { setBusy(false); }
   };
 

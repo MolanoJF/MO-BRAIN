@@ -12,9 +12,10 @@ import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import {
   patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile, readSupervisorAuditTail,
+  deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
-import { commitAs, inspectRepos } from './git.ts';
+import { commitAs, diffRange, inspectRepos, probeTreePaths, revertRange } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -162,6 +163,16 @@ Bun.serve({
         return json({ credentials });
       }
 
+      // F7: a revoked grant's private credential journal is the last copy of a
+      // dead secret, and revoking the client does not remove it. The request
+      // carries a client id, never a path.
+      if (url.pathname === '/fileplane/delete-credential-journal') {
+        const clientId = typeof body === 'object' && body !== null && 'clientId' in body
+          ? body.clientId
+          : undefined;
+        return json(await deleteCredentialDelivery(clientId));
+      }
+
       // Actor is identity data fed to `git -c`; never interpolated into a shell (G2).
       if (url.pathname === '/git/commit') {
         const { sourceId, actor, message } = body as {
@@ -180,6 +191,58 @@ Bun.serve({
 
       if (url.pathname === '/git/inspect') {
         return json({ repos: await inspectRepos() });
+      }
+
+      // D9: the brain diff is the git range. Read-only, and a bad ref is an
+      // explicit error rather than an empty range (`diffRange` checks exits).
+      if (url.pathname === '/git/range') {
+        const { sourceId, before, after } = body as { sourceId?: unknown; before?: unknown; after?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof before !== 'string' || !before) return json({ error: 'before required' }, 400);
+        if (typeof after !== 'string' || !after) return json({ error: 'after required' }, 400);
+        return json(await diffRange(sourceId, before, after, { sql }));
+      }
+
+      // F16: the revert's purge guard. `gbrain delete <slug> --purge` unlinks a
+      // page's markdown file when it is there, so a reverted path some writer
+      // has since re-created is LIVE work. Read-only, and it answers from the
+      // WORKING TREE — the revert's own file list is a memory of git. An
+      // invalid sourceId, an unreadable repo or an unstat-able path throws (400)
+      // rather than answering `onDisk: false`, which a caller would read as
+      // permission to delete.
+      if (url.pathname === '/git/path-exists') {
+        const { sourceId, paths } = body as { sourceId?: unknown; paths?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (!Array.isArray(paths) || paths.length === 0) {
+          return json({ error: 'paths must be a non-empty array' }, 400);
+        }
+        if (!paths.every((p) => typeof p === 'string')) {
+          return json({ error: 'every path must be a string' }, 400);
+        }
+        return json(await probeTreePaths(sourceId, paths as string[], { sql }));
+      }
+
+      // D10 steps 1+2: the revert and the commit that signs it are ONE locked
+      // sequence in `revertRange` — composing `commitAs` around a repo lock here
+      // would reserve a second pooled connection and deadlock a small pool. The
+      // two refusals (`conflict`, `nothing_to_revert`) come back as results, not
+      // as thrown errors: they are choices the console renders.
+      if (url.pathname === '/git/revert-range') {
+        const { sourceId, before, after, actor, message } = body as {
+          sourceId?: unknown; before?: unknown; after?: unknown; message?: unknown;
+          actor?: { name?: unknown; email?: unknown };
+        };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof before !== 'string' || !before) return json({ error: 'before required' }, 400);
+        if (typeof after !== 'string' || !after) return json({ error: 'after required' }, 400);
+        if (typeof message !== 'string' || !message) return json({ error: 'message required' }, 400);
+        if (!actor || typeof actor.name !== 'string' || typeof actor.email !== 'string') {
+          return json({ error: 'actor name and email required' }, 400);
+        }
+        return json(await revertRange(
+          { sourceId, before, after, message, actor: { name: actor.name, email: actor.email } },
+          { sql },
+        ));
       }
 
       // Overlap policy 'kill_previous'. Aborting the control-plane fetch does

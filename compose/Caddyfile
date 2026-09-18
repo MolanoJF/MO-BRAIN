@@ -47,3 +47,72 @@
 		reverse_proxy control-plane:3150
 	}
 }
+
+# ---------------------------------------------------------------------
+# D6: the runner reaches gbrain ONLY through Caddy — and `localhost` (which
+# is what `claim.mcp.url` used to be built from, via PUBLIC_URL) is not a
+# name the runner can dial. /etc/hosts inside the container maps `localhost`
+# to its own loopback and wins over Docker's embedded resolver, so
+# https://localhost/mcp hits the runner itself: measured from inside
+# brainstand-agent-runner-1, `localhost:443 -> ECONNREFUSED`, while `caddy`
+# resolves (Docker DNS) and Caddy's :443 answers it.
+#
+# `tls internal` is required, not cosmetic: `caddy` is a private name, so
+# public ACME for it can only fail, and must not be attempted. Caddy issues
+# from the same local CA the dev runner already trusts through
+# NODE_EXTRA_CA_CERTS. In production nothing dials this name at all: the
+# runner reaches Caddy as ${DOMAIN}, an alias on runner-net with a real
+# certificate, so this block is inert there.
+#
+# Deliberately the same handler set as the ${DOMAIN} site, duplicated rather
+# than shared, because exactly one thing differs: gbrain-serve is handed the
+# canonical Host rather than the internal name it was dialled by. This build
+# answers identically for `Host: caddy`, `Host: localhost` and a foreign name
+# (measured from gbrain-ops: GET /health 200/200/200, POST /mcp 401/401/401 —
+# no 400, no 421) because it derives its public origin from --public-url, so
+# the header_up is insurance for a build that DOES validate Host, not a fix
+# for a live rejection. It also keeps the internal name out of gbrain's view.
+# The ${DOMAIN} site above is untouched by this block, and its `handle`
+# structure — including why the /admin 404 must be one, not a bare
+# top-level `respond` — is unchanged here.
+# ---------------------------------------------------------------------
+caddy {
+	tls internal
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Same S1 guard as the public site: gbrain's embedded /admin SPA is a
+	# second control plane, and this name is reachable from runner-net.
+	# MUST stay a `handle` block — a bare top-level `respond` sorts after
+	# `handle` and would sit behind the catch-all below.
+	@admin_denied path /admin /admin/* /admin/api/* /admin/events
+	handle @admin_denied {
+		respond 404
+	}
+
+	# gbrain-serve sees the canonical Host, not the internal name it was
+	# dialled by. Everything else about this proxy matches the public site.
+	@gbrain path /mcp /mcp/* /authorize /authorize/* /token /register /revoke \
+		/.well-known/* /ingest /webhooks/* /health /metrics
+	handle @gbrain {
+		reverse_proxy gbrain-serve:3131 {
+			header_up Host {$DOMAIN}
+		}
+	}
+
+	handle /api/* {
+		reverse_proxy control-plane:3150
+	}
+
+	handle {
+		reverse_proxy control-plane:3150
+	}
+}

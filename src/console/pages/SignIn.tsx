@@ -1,0 +1,76 @@
+import { useState } from 'react';
+import { api, ApiError } from '../api.ts';
+
+/**
+ * A sign-in refusal an operator can act on.
+ *
+ * The route is Better Auth's, and its bad-credential answer is
+ * `401 {message, code}` — not this console's `{error}` shape — so `ApiError`'s
+ * message degrades to `HTTP 401`, which is a status code, not a sentence. The
+ * two refusals a human can do something about are therefore named here: wrong
+ * credentials (retry) and rate limiting (wait). Anything else keeps whatever the
+ * server itself said — its `message` first, since that is the human one — because
+ * a guess would be worse than the truth. A 403 is deliberately NOT mapped to
+ * "wrong password": Better Auth uses it for an untrusted origin, and telling an
+ * operator to retype a correct password is the kind of lie this console does not
+ * tell.
+ */
+export function signInError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      return 'That email and password do not match an account. Check them and try again.';
+    }
+    if (err.status === 429) {
+      return 'Too many sign-in attempts. Wait a minute and try again.';
+    }
+    const said = typeof err.body.message === 'string' ? err.body.message.trim() : '';
+    const code = typeof err.body.error === 'string' ? err.body.error.trim() : '';
+    return said || code || err.message;
+  }
+  return err instanceof Error ? err.message : 'Sign-in failed';
+}
+
+/**
+ * The returning operator's door (D1).
+ *
+ * The shipped bundle had no sign-in page at all: `refresh()` read the 401 from
+ * `GET /api/wizard/state` as "this install is empty" and sent every signed-out
+ * visitor to *Create the first admin*, which then answered the raw code
+ * `already_bootstrapped`. A bootstrapped deployment now lands HERE instead, and
+ * this is the only page in the console that posts `/api/auth/sign-in/email` —
+ * the same route the e2e suite signs in with, so there is one wire contract.
+ *
+ * `onDone` is `refresh()` again: the session cookie is now set, so the same
+ * probe that chose this screen chooses the app.
+ */
+export function SignIn({ onDone }: { onDone: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      await api.post('/auth/sign-in/email', { email, password });
+      onDone();
+    } catch (err) { setError(signInError(err)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit} className="mx-auto mt-16 max-w-md space-y-4 p-6">
+      <h1 className="text-xl font-semibold">Sign in</h1>
+      <p className="text-sm text-muted">
+        This brain is already set up. Sign in with your own account to reach the console.
+      </p>
+      <input className="field" type="email" placeholder="Email" value={email}
+             onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
+      <input className="field" type="password" placeholder="Password" value={password}
+             onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+      {error && <div className="text-danger text-sm">{error}</div>}
+      <button className="btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+    </form>
+  );
+}

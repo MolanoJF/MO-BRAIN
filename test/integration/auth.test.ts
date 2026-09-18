@@ -24,6 +24,10 @@ const DECLARED_TABLES = new Set([
   'schedules', 'schedule_runs', 'schedule_alerts', 'held_notifications',
   // Slice 3.5 upgrades.
   'upgrade_runs', 'upgrade_events', 'upgrade_checklist_items',
+  // Slice 4 agent runner.
+  'agent_runs', 'agent_run_events', 'agent_run_usage',
+  // Slice 4 D2: the runner's own sighting record (one row per runner).
+  'runner_presence',
   '__drizzle_migrations',
 ]);
 

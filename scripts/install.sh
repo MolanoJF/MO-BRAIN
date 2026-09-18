@@ -5,7 +5,10 @@
 set -euo pipefail
 
 ENV_PATH="${BRAINSTAND_ENV_PATH:-.env}"
-GBRAIN_VERSION="${GBRAIN_VERSION:-0.50.0.0}"
+GBRAIN_VERSION="${GBRAIN_VERSION:-0.50.5.0}"
+# G1: the second pinned dependency (D4). Required with no compose default, so
+# a deployment that never enables the runner still names a harness version.
+HARNESS_VERSION="${HARNESS_VERSION:-2.1.274}"
 
 if [ -e "$ENV_PATH" ]; then
   echo "Refusing to overwrite an existing $ENV_PATH." >&2
@@ -23,12 +26,26 @@ if [ -z "$DOMAIN" ]; then
   exit 2
 fi
 
+# D12: the runner is optional, and the question is asked in plain words because
+# a yes here hands a container the org's key and nobody watching. Anything but
+# an explicit yes (including EOF on a non-interactive install) leaves it off.
+ENABLE_RUNNER=""
+read -r -p "This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]: " ENABLE_RUNNER || true
+
 gen() { head -c 48 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-48; }
+
+# The token IS the switch: empty means the control plane answers 503
+# runner_disabled, and an empty bearer never authenticates.
+RUNNER_TOKEN=""
+case "$ENABLE_RUNNER" in
+  [yY] | [yY][eE][sS]) RUNNER_TOKEN="$(gen)" ;;
+esac
 
 umask 077
 cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
 GBRAIN_VERSION=${GBRAIN_VERSION}
+HARNESS_VERSION=${HARNESS_VERSION}
 BRAINSTAND_VERSION=dev
 WORKER_CONCURRENCY=2
 
@@ -36,7 +53,14 @@ POSTGRES_PASSWORD=$(gen)
 OPS_RPC_TOKEN=$(gen)
 ENCRYPTION_KEY=$(gen)
 BETTER_AUTH_SECRET=$(gen)
+
+# D12: the agent runner is off while this is empty (see .env.example).
+RUNNER_TOKEN=${RUNNER_TOKEN}
 EOF
+
+if [ -n "$RUNNER_TOKEN" ]; then
+  printf '\nCOMPOSE_PROFILES=runner\n' >> "$ENV_PATH"
+fi
 chmod 600 "$ENV_PATH"
 
 cat <<EOF
@@ -48,6 +72,10 @@ Without it, every stored secret is unrecoverable. With both in one place,
 a leaked backup is a credential dump.
 
 EOF
+
+if [ -n "$RUNNER_TOKEN" ]; then
+  echo "Agent runner enabled: generated RUNNER_TOKEN and added COMPOSE_PROFILES=runner to $ENV_PATH."
+fi
 
 if [ "${BRAINSTAND_SKIP_UP:-0}" = "1" ]; then
   echo "Skipping docker compose up (BRAINSTAND_SKIP_UP=1)."

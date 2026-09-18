@@ -6,6 +6,7 @@ import {
 } from '../api.ts';
 import { SCHEDULER_COMMANDS } from '../../scheduler/commands.ts';
 import { snapToSlot, footprintsCollide } from '../../scheduler/stagger.ts';
+import { MODEL_PRICING, PRICED_AT, rateFor } from '../../gateway/pricing.ts';
 
 /* -------------------------------------------------------------------------
  * Pure helpers. Exported so test/unit/console-schedules.test.ts can assert the
@@ -26,7 +27,7 @@ const TONE_CLASS: Record<Tone, string> = {
 const ADMIN_RANK = 2;
 const RANK: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
 
-export type CommandScope = 'source' | 'brain-wide';
+export type CommandScope = 'source' | 'brain-wide' | 'agent';
 
 /**
  * Honesty rule 1, in the operator's words. The scope is a control-plane argv
@@ -38,6 +39,39 @@ export const CONTROL_LANE_DISCLOSURE =
   + 'The Connection you pick decides which Space is synced, where the report is written, '
   + "and whose name is on the commit — it is not a permission gbrain enforces for these commands.";
 
+/**
+ * D12's plain words, for the OTHER lane. An agent run does not go through the
+ * ops service account and is not a command at all, so the disclosure above would
+ * be a lie here: it is a model-written run, executed by the runner, spending the
+ * organization's budget with nobody watching.
+ */
+export const AGENT_LANE_DISCLOSURE =
+  'An agent schedule hands this prompt to the runner, which runs the pinned Claude Code harness '
+  + "against your brain with your organization's API key. It can call only the gbrain tools your "
+  + 'Connection is allowed — no shell, no file writes, no other network — and every run costs real '
+  + 'money against a per-run budget, with nobody watching it.';
+
+/** Mirrors `PresetAgent` in src/scheduler/presets.ts without importing it. */
+export type AgentPayload = {
+  prompt: string;
+  model: string;
+  maxTokens: number;
+  /** Text, like the column: money never becomes a float. */
+  budgetUsd: string;
+};
+
+/**
+ * The preset as the API actually sends it: `PresetRow` (src/console/api.ts) plus
+ * the agent lane's two fields, which that type does not declare yet. Structural
+ * rather than imported for the same reason `RANK` mirrors `ROLE_RANK` by hand —
+ * the console must not pull the scheduler's db stack into the browser bundle.
+ */
+export type PresetShape = {
+  operation?: string | null;
+  jobType?: string;
+  agent?: AgentPayload;
+};
+
 /** The scheduler allowlist is the single source of truth for scope. */
 export function commandScope(operation: string | null | undefined): CommandScope | null {
   if (!operation) return null;
@@ -45,18 +79,197 @@ export function commandScope(operation: string | null | undefined): CommandScope
 }
 
 /**
- * The briefing preset runs no gbrain command at all, so it reads no brain and
- * is fenceable like any source-scoped job.
+ * The two internal drains run no gbrain command at all, so they read no brain
+ * and are fenceable like any source-scoped job. The agent lane is its own scope:
+ * it runs a model, not a command, and its banner says so.
  */
-export function presetScope(preset: { operation?: string | null }): CommandScope {
+export function presetScope(preset: PresetShape): CommandScope {
+  if (preset.jobType === 'agent_prompt') return 'agent';
   return commandScope(preset.operation ?? null) ?? 'source';
 }
 
 /**
+ * The agent run a preset buys, or null when the preset is a command. The preset
+ * is the DEFAULT the form is pre-filled with (D3), and the harness pin is
+ * derived at creation.
+ */
+export function agentPayloadOf(preset: PresetShape | null | undefined): AgentPayload | null {
+  return preset && preset.jobType === 'agent_prompt' && preset.agent ? preset.agent : null;
+}
+
+/* -------------------------------------------------------------------------
+ * D3: the agent payload is the operator's, not just the preset's.
+ *
+ * The four fields the route accepts (`AGENT_CREATE_KEYS` in
+ * `src/control/routes/schedules.ts`) are editable here, pre-filled from the
+ * preset so a one-click create still works. The model picker reads the SHIPPED
+ * pinned table itself — `src/gateway/pricing.ts` is pure data with no imports,
+ * so importing it costs the bundle nothing and there is no hand-copied mirror to
+ * drift from the pin. Every refusal below is the route's own sentence, in the
+ * route's own words, so the form never invents a second vocabulary.
+ * ---------------------------------------------------------------------- */
+
+/** The models the pinned table prices, in the table's own order. */
+export const PRICED_MODELS: string[] = Object.keys(MODEL_PRICING.models);
+
+/**
+ * Mirrors the route's own bounds (`AGENT_PROMPT_MAX_CHARS`,
+ * `AGENT_MAX_TOKENS_MIN/MAX`, `AGENT_BUDGET_MAX_USD`, `AGENT_BUDGET_RE`). They
+ * are mirrored rather than imported for the reason `RANK` mirrors `ROLE_RANK`:
+ * the route module pulls the control DB stack, which must not reach the bundle.
+ */
+export const AGENT_PROMPT_MAX_CHARS = 4000;
+export const AGENT_MAX_TOKENS_MIN = 256;
+export const AGENT_MAX_TOKENS_MAX = 64_000;
+export const AGENT_BUDGET_MAX_USD = 100;
+const AGENT_BUDGET_RE = /^\d+(\.\d{1,6})?$/;
+
+/** The form's own draft of the payload: numbers and money arrive as text. */
+export type AgentDraft = {
+  prompt: string;
+  model: string;
+  maxTokens: string;
+  budgetUsd: string;
+};
+
+/** The preset's payload as a form draft — the default the form opens on. */
+export function agentDraftOf(payload: AgentPayload): AgentDraft {
+  return {
+    prompt: payload.prompt,
+    model: payload.model,
+    maxTokens: String(payload.maxTokens),
+    budgetUsd: payload.budgetUsd,
+  };
+}
+
+/**
+ * The route's `intOf`, kept whole: an integer string is a number, and anything
+ * else — including `12.5`, `1e3` and `''` — is not an integer.
+ */
+function intOf(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  return Number.isInteger(n) ? n : null;
+}
+
+export type AgentRefusal = { field: string; detail: string };
+
+/**
+ * What the route would refuse about this draft, in the route's own words. The
+ * form refuses it first, so an operator never learns the shape of the payload
+ * from a 400 — and the two can never disagree about the bounds.
+ */
+export function agentFormRefusals(draft: AgentDraft): AgentRefusal[] {
+  const refusals: AgentRefusal[] = [];
+
+  if (draft.prompt.trim() === '' || draft.prompt.length > AGENT_PROMPT_MAX_CHARS) {
+    refusals.push({
+      field: 'agentPrompt',
+      detail: `a non-empty prompt of at most ${AGENT_PROMPT_MAX_CHARS} characters — a pointer `
+        + 'at what to do, not an inlined essay',
+    });
+  }
+
+  if (draft.model === '' || rateFor(draft.model) === null) {
+    refusals.push({
+      field: 'agentModel',
+      detail: `Not in the price table pinned on ${PRICED_AT}, so a run on it `
+        + 'would have an unknowable cost. Pick a priced model.',
+    });
+  }
+
+  const maxTokens = intOf(draft.maxTokens);
+  if (maxTokens === null || maxTokens < AGENT_MAX_TOKENS_MIN || maxTokens > AGENT_MAX_TOKENS_MAX) {
+    refusals.push({
+      field: 'agentMaxTokens',
+      detail: `an integer in [${AGENT_MAX_TOKENS_MIN}, ${AGENT_MAX_TOKENS_MAX}]`,
+    });
+  }
+
+  if (!AGENT_BUDGET_RE.test(draft.budgetUsd) || !(Number(draft.budgetUsd) > 0)
+    || Number(draft.budgetUsd) > AGENT_BUDGET_MAX_USD) {
+    refusals.push({
+      field: 'agentBudgetUsd',
+      detail: `a decimal greater than 0 and at most ${AGENT_BUDGET_MAX_USD} USD, `
+        + 'with at most six decimal places',
+    });
+  }
+
+  return refusals;
+}
+
+/** The four keys the create body carries, normalized the way the route does. */
+export function agentCreateFields(draft: AgentDraft): Required<Pick<
+  CreateScheduleBody, 'agentPrompt' | 'agentModel' | 'agentMaxTokens' | 'agentBudgetUsd'
+>> {
+  return {
+    agentPrompt: draft.prompt,
+    agentModel: draft.model,
+    agentMaxTokens: intOf(draft.maxTokens) ?? 0,
+    agentBudgetUsd: draft.budgetUsd,
+  };
+}
+
+/**
+ * D9 — the Connection line and its member's role, said ONCE. The old rendering
+ * appended the label "member" to the role's own value, so a member Connection
+ * read "— member member"; the label is now the word the value is not.
+ */
+export function memberRoleLine(role: string | null | undefined): string {
+  return `member role: ${role && role !== '' ? role : 'unknown'}`;
+}
+
+/* -------------------------------------------------------------------------
+ * D5: two clocks for one occurrence, both labelled.
+ *
+ * The ledger shows the scheduler's `slot` — the ORG-local wall clock the job was
+ * materialized for — and the absolute `fire_at` instant. Rendering the second in
+ * the viewer's own zone is useful and must stay; rendering it unlabelled beside
+ * the first is what made two correct numbers read as a disagreement. So both are
+ * named, and the viewer's zone with them (the discipline `quietHoursBadge`
+ * already follows for the org's).
+ * ---------------------------------------------------------------------- */
+
+/** The viewer's IANA zone, or null where the browser will not say. */
+function viewerZone(): string | null {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone && zone !== '' ? zone : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One occurrence, two labelled clocks. `slot` is the org-local wall clock the
+ * scheduler materialized the run for; `fireAt` is the same instant, which is
+ * only readable in the viewer's zone. Passing `zone` explicitly is what makes
+ * the wording testable without a browser locale.
+ */
+export function slotClocks(
+  slot: string,
+  fireAt: string,
+  zone: string | null | undefined = undefined,
+): { org: string; viewer: string } {
+  const tz = zone === undefined ? viewerZone() : zone;
+  return {
+    org: `org clock ${slot}`,
+    viewer: `your clock ${new Date(fireAt).toLocaleString()}${tz === null || tz === '' ? '' : ` (${tz})`}`,
+  };
+}
+
+/**
  * Honesty rule 2: a brain-wide command cannot be fenced to a Space. Picking one
- * swaps the disclosure for the whole-brain warning rather than adding to it.
+ * swaps the disclosure for the whole-brain warning rather than adding to it. An
+ * agent run is fenceable (its tools come from the Connection), so it keeps its
+ * own disclosure and names the Space it can reach.
  */
 export function bannerFor(input: { scope?: string | null; writeSpace?: string | null }): string {
+  if (input.scope === 'agent') {
+    return `${AGENT_LANE_DISCLOSURE} The Connection you pick decides which Space it can `
+      + `reach — ${input.writeSpace || 'no Space'} — and whose name is on the commit.`;
+  }
   if (input.scope === 'source') return CONTROL_LANE_DISCLOSURE;
   const space = input.writeSpace;
   const tail = "gbrain's control lane cannot fence a brain-wide command to a Space, so it needs "
@@ -70,7 +283,9 @@ export function bannerFor(input: { scope?: string | null; writeSpace?: string | 
 export function confirmBlockedFor(
   input: { scope?: string | null; memberRole?: string | null },
 ): boolean {
-  if (input.scope === 'source') return false;
+  // The agent lane needs no admin: its tool surface is the Connection's own
+  // compiled scoping. The brain-wide lane is the one that reads everything.
+  if (input.scope === 'source' || input.scope === 'agent') return false;
   if (input.scope === 'brain-wide') {
     return (RANK[input.memberRole ?? ''] ?? 0) < ADMIN_RANK;
   }
@@ -295,6 +510,13 @@ export function holdBadge(
 /**
  * Requirement 7. A rejected push, a revoked Connection and an expired lease pin
  * above everything else — they are the four that mean work silently stopped.
+ *
+ * Slice 4's agent kinds are deliberately NOT pinned, and the decision is here
+ * so it is not re-litigated: each one has a run row on the Schedules page and a
+ * detail view on Runs, so it is never silent. `agent_budget_exceeded` and
+ * `agent_run_failed` carry the danger tone below instead, and D12's
+ * runner-less deployment (a supported configuration) must not have a banner
+ * pinned at the top of every schedule page.
  */
 const PINNED_ALERT_KINDS = [
   'push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked',
@@ -312,6 +534,20 @@ const ALERT_LABEL: Record<string, string> = {
   overlap_queue_full: 'Overlap queue full — queued runs were dropped',
   overlap_killed_previous: 'Overlapping run cancelled (kill_previous)',
   report_write_failed: 'Report write failed — the run has no report',
+  // Slice 4, Task 11. The five agent kinds are registered here by hand, and
+  // `test/unit/console-schedules.test.ts` fails if one is missing: an
+  // unregistered kind falls through to the de-underscored fallback below and
+  // reads as an enum instead of a reason.
+  agent_budget_exceeded:
+    'Agent run stopped — the budget cap for this run was reached',
+  agent_run_failed:
+    'Agent run failed — the harness exited non-zero or its stream carried error frames',
+  agent_read_space_moved:
+    'A read Space moved under an agent run — read isolation is broken, so the run is a finding',
+  runner_never_seen:
+    'Agent runner never claimed — agent schedules cannot run until one connects',
+  harness_pin_mismatch:
+    'Harness version mismatch — a runner refused the claim rather than run an unknown binary',
 };
 
 export function alertLabel(kind: string): string {
@@ -327,6 +563,12 @@ const ALERT_TONE: Record<string, Tone> = {
   lease_expired: 'danger',
   connection_revoked: 'danger',
   report_write_failed: 'danger',
+  // Slice 4, Task 11: the two agent kinds that mean work stopped — the money
+  // ran out, or the run failed. A `warning` here would be a shrug at a run the
+  // operator is paying for. The other three agent kinds are informational and
+  // take the default.
+  agent_budget_exceeded: 'danger',
+  agent_run_failed: 'danger',
   overlap_queue_full: 'warning',
   overlap_killed_previous: 'warning',
   run_cancelled: 'warning',
@@ -518,6 +760,12 @@ export function Schedules() {
   const [days, setDays] = useState('');
   const [notifies, setNotifies] = useState(false);
   const [createRefusal, setCreateRefusal] = useState<Refusal | null>(null);
+  /**
+   * D3: the operator's own agent payload, tagged with the preset it was edited
+   * from — so switching presets re-opens on the new preset's values (the payload
+   * IS the preset until it is touched) and the four fields are never stale.
+   */
+  const [agentDraft, setAgentDraft] = useState<{ presetId: string; draft: AgentDraft } | null>(null);
 
   const [tzDraft, setTzDraft] = useState('');
   const [quietStart, setQuietStart] = useState(23);
@@ -583,6 +831,9 @@ export function Schedules() {
     () => presets.find((p) => p.id === presetId) ?? null,
     [presets, presetId],
   );
+  // D12/honesty rule 3: an agent schedule spends money, so the run the operator
+  // is buying is on screen before the Create button, not discovered on a bill.
+  const agentPayload = useMemo(() => agentPayloadOf(preset), [preset]);
   const chosen = connections.find((c) => c.id === connectionId) ?? null;
   const scope = preset
     ? presetScope(preset)
@@ -593,11 +844,28 @@ export function Schedules() {
       + `"${chosen.memberRole ?? 'unknown'}" — admin or owner is required.`
     : null;
 
+  // D3: the preset's payload is the DEFAULT; an edited draft wins until the
+  // preset changes. Fall back to the preset even if `presets` has not loaded
+  // yet, so the fields are never blank for an agent preset.
+  const draft: AgentDraft | null = agentPayload === null || preset === null
+    ? null
+    : agentDraft?.presetId === preset.id
+      ? agentDraft.draft
+      : agentDraftOf(agentPayload);
+  const refusals = draft === null ? [] : agentFormRefusals(draft);
+  const editAgent = (patch: Partial<AgentDraft>) => {
+    if (draft === null || preset === null) return;
+    setAgentDraft({ presetId: preset.id, draft: { ...draft, ...patch } });
+    setCreateRefusal(null);
+  };
+
   const pickPreset = (id: string) => {
     setPresetId(id);
     setCreateRefusal(null);
     const next = presets.find((p) => p.id === id);
     if (!next) return;
+    // A different preset is a different payload: drop the edits with it.
+    setAgentDraft(null);
     const defaults = next.defaults;
     if (typeof defaults.intervalSeconds === 'number') setIntervalSeconds(defaults.intervalSeconds);
     if (typeof defaults.calendarHour === 'number') setCalendarHour(defaults.calendarHour);
@@ -620,6 +888,10 @@ export function Schedules() {
     setNotice(null);
     const body: CreateScheduleBody = { name, connectionId, preset: presetId };
     if (notifies) body.notifies = true;
+    // D3: what the form shows IS the payload the run will carry. The four keys
+    // are sent even when untouched — a one-click create on an agent preset
+    // sends the preset's own values, and the route accepts them all the same.
+    if (draft !== null) Object.assign(body, agentCreateFields(draft));
     if (preset?.kind === 'interval') {
       body.intervalSeconds = intervalSeconds;
     } else if (preset?.kind === 'calendar') {
@@ -842,11 +1114,67 @@ export function Schedules() {
         {preset && <p className="text-sm text-muted">{preset.description}</p>}
         {preset && preset.defaults && (
           <p className="text-xs text-muted font-mono">
-            {preset.kind} · operation {preset.operation ?? 'none (internal drain)'}
+            {preset.kind} · operation {preset.operation ?? (agentPayload ? 'agent_prompt' : 'none (internal drain)')}
             {preset.params && Object.keys(preset.params).length > 0
               ? ` · params ${JSON.stringify(preset.params)}`
               : ''}
           </p>
+        )}
+
+        {/* D3: the agent payload is editable, pre-filled from the preset. The
+            harness pin stays derived at creation, and an unpriced model is
+            refused here in the server's own words rather than by a run at 3am. */}
+        {draft !== null && agentPayload !== null && (
+          <div className="card space-y-3">
+            <p className="text-sm font-medium">What this run will do</p>
+            <label className="text-sm block">Prompt
+              <textarea className="field mt-1 font-mono h-40" value={draft.prompt}
+                        onChange={(e) => editAgent({ prompt: e.target.value })} />
+            </label>
+            <div className="grid grid-cols-3 gap-3">
+              <label className="text-sm">Model (priced on {PRICED_AT})
+                <select className="field mt-1 font-mono" value={draft.model}
+                        onChange={(e) => editAgent({ model: e.target.value })}>
+                  {/* The preset's own model first: a one-click create sends it. */}
+                  {(PRICED_MODELS.includes(draft.model) ? PRICED_MODELS : [draft.model, ...PRICED_MODELS])
+                    .map((model) => (
+                      <option key={model} value={model}>
+                        {rateFor(model) === null ? `${model} — not priced` : model}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="text-sm">Output cap (tokens)
+                <input className="field mt-1 font-mono" type="number"
+                       value={draft.maxTokens}
+                       onChange={(e) => editAgent({ maxTokens: e.target.value })} />
+              </label>
+              <label className="text-sm">Budget per run (USD)
+                <input className="field mt-1 font-mono" value={draft.budgetUsd}
+                       onChange={(e) => editAgent({ budgetUsd: e.target.value })} />
+              </label>
+            </div>
+            <p className="text-xs text-muted">
+              These four are the run's payload: the runner hands the prompt to the pinned Claude
+              Code harness under this model, cap and budget, and the harness version is this
+              deployment's pin — a runner whose own pin differs refuses the run instead of running
+              an unknown binary. The preset's own values are the defaults; the model picker is the
+              shipped price table ({PRICED_MODELS.length} models, pinned {PRICED_AT}), and a model
+              absent from it is refused here in the same words the server uses.
+            </p>
+            {refusals.length > 0 && (
+              <div className="card border-warning space-y-1">
+                <p className="text-sm text-warning">
+                  This payload would be refused at creation, so Create is off:
+                </p>
+                {refusals.map((r) => (
+                  <p key={r.field} className="text-xs text-muted font-mono">
+                    {r.field}: {r.detail}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         <label className="text-sm">Name (becomes reports/&lt;name&gt;/)
@@ -867,7 +1195,7 @@ export function Schedules() {
         </label>
         {chosen ? (
           <p className="text-sm text-muted font-mono">
-            {connectionLine(chosen)} — member {chosen.memberRole ?? 'unknown'}
+            {connectionLine(chosen)} — {memberRoleLine(chosen.memberRole)}
           </p>
         ) : (
           <p className="text-sm text-muted">
@@ -937,7 +1265,8 @@ export function Schedules() {
         </div>
 
         <button className="btn-primary"
-                disabled={busy || !name || !connectionId || blocked || connections.length === 0}
+                disabled={busy || !name || !connectionId || blocked || connections.length === 0
+                  || refusals.length > 0}
                 onClick={() => void submit()}>
           {busy ? 'Creating…' : 'Create schedule'}
         </button>
@@ -1040,12 +1369,13 @@ function RunHistory({
       {runs.map((run) => {
         const reason = runReason(run, context);
         const summary = summaryLine(run);
+        const clocks = slotClocks(run.slot, run.fireAt);
         return (
           <div key={run.id} className="border-b border-subtle pb-2 text-sm">
             <div className="flex items-baseline justify-between gap-3">
               <span className={TONE_CLASS[runStateTone(run.state)]}>{runStateLabel(run.state)}</span>
               <span className="font-mono text-xs text-muted">
-                {run.slot} · {new Date(run.fireAt).toLocaleString()}
+                {clocks.org} · {clocks.viewer}
                 {run.exitCode === null || run.exitCode === undefined
                   ? ''
                   : ` · exit ${run.exitCode}`}

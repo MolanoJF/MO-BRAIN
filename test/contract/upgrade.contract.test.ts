@@ -13,7 +13,8 @@ import { detectUpdate } from '../../src/upgrade/detect.ts';
 import { compareDoctor, type DoctorParity } from '../../src/upgrade/digest.ts';
 import { sha256File, verifyManifest } from '../../src/upgrade/manifest.ts';
 import { dockerVolumeDriver } from '../../src/upgrade/snapshot.ts';
-import { verifySupervisorDrained, type OpsCaller } from '../../src/upgrade/quiesce.ts';
+import { verifySupervisorDrained, composeModel, drainLane, restoreLane, QUIESCE_ORDER, type OpsCaller } from '../../src/upgrade/quiesce.ts';
+import { IN_FLIGHT_RUNS_SQL } from '../../scripts/upgrade.ts';
 import type { SnapshotManifest } from '../../src/upgrade/types.ts';
 
 // Gate A (Task 15) extends this SAME file with describe('Slice 3.5 seam gate
@@ -291,7 +292,13 @@ describe('Slice 3.5 seam gate A', () => {
     const byId = Object.fromEntries(doc.operations.map((o: any) => [o.id, o]));
     expect(byId['checkUpdate']).toBeDefined();
     expect(byId['postUpgrade']).toBeDefined();
-    expect(doc.operations.length).toBe(33); // 31 at Slice 3 close + 2
+    // 33 at Slice 3.5 close (31 at Slice 3 close + `checkUpdate` and
+    // `postUpgrade`) + 1: Slice 4 added `page.delete` — F16's
+    // `delete <slug> --source-id <id> --purge`, the operation the revert's
+    // re-index needs to remove the page an agent run wrote
+    // (docs/slice-4-findings.md, F16). The pinned
+    // contracts/v0.50.5.0/operations.json carries it.
+    expect(doc.operations.length).toBe(34);
     // U1/U3: neither declares a dry run, and only checkUpdate has --json.
     expect(byId['checkUpdate'].supportsJson).toBe(true);
     expect(byId['postUpgrade'].supportsJson).toBe(false);
@@ -557,4 +564,83 @@ describe('Slice 3.5 seam gate A', () => {
       rmSync(OUT, { recursive: true, force: true });
     }
   }, 300_000);
+});
+
+// ===========================================================================
+// Task 14 — the upgrade lane's boundary. Two facts that source text cannot
+// prove: the query the new preflight refusal runs is valid against THIS
+// control schema (the L9/F3 failure class), and the quiesce lane is derived
+// from THIS host's compose model, so the runner entry appears exactly when the
+// runner profile does (D12 off by default, D13 first when it is on).
+// ===========================================================================
+describe('Slice 4 upgrade lane (Task 14)', () => {
+  // The prefix the host CLI itself builds (scripts/upgrade.ts's COMPOSE), not
+  // the dev override: this is the project a real upgrade quiesces.
+  const HOST_COMPOSE = [
+    'docker', 'compose', '--env-file', '.env', '-f', 'compose/docker-compose.yml',
+  ];
+  const psqlArgv = (sql: string) => [
+    ...HOST_COMPOSE, 'exec', '-T', 'postgres', 'psql', '-U', 'gbrain', '-d', 'control', '-tAc', sql,
+  ];
+
+  test.skipIf(!dockerAvailable)('the in-flight-run query answers from the live control ledger', async () => {
+    const r = await run(psqlArgv(IN_FLIGHT_RUNS_SQL), 60_000);
+    expect(r.exitCode).toBe(0);
+    const inFlight = JSON.parse(r.stdout.trim()) as { id: string; state: string }[];
+    expect(Array.isArray(inFlight)).toBe(true);
+    for (const row of inFlight) expect(row.state).toBe('running');
+
+    // The refusal fires on a HELD claim and on nothing else. An independent
+    // count of `state = 'running'` must agree, so the row set cannot be
+    // whatever the query happens to select: `pending` is a materialized FUTURE
+    // occurrence (a row every enabled schedule has all day), and refusing on it
+    // would refuse every upgrade forever.
+    const running = await run(psqlArgv("select count(*) from schedule_runs where state = 'running'"), 60_000);
+    expect(running.exitCode).toBe(0);
+    expect(inFlight.length).toBe(Number(running.stdout.trim()));
+    console.log(`MEASURED in-flight runs on this ledger: ${inFlight.length} `
+      + `(ids: ${JSON.stringify(inFlight.map((row) => row.id))})`);
+  }, 120_000);
+
+  test.skipIf(!dockerAvailable)('the quiesce lane is derived from this host\'s compose model', async () => {
+    const model = await composeModel(HOST_COMPOSE);
+    if (model === 'unknown') throw new Error('the live compose project could not be rendered');
+
+    // Every writer the lane has always drained is in this project; the runner
+    // is the only entry whose presence follows a profile.
+    for (const svc of ['scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops']) {
+      expect(model.active.has(svc)).toBe(true);
+    }
+
+    const runnerOn = model.active.has('agent-runner');
+    const lane = drainLane(model);
+    const back = restoreLane(model);
+    console.log(`MEASURED quiesce lane on this host: drain [${lane.join(', ')}] `
+      + `restore [${back.join(', ')}] (runner profile ${runnerOn ? 'ON' : 'OFF'}, `
+      + `runner container ${model.containers.has('agent-runner') ? 'present' : 'absent'})`);
+
+    if (runnerOn) {
+      // D13: the one consumer that keeps writing after the scheduler stops
+      // materializing drains first, and is restored last.
+      expect(lane).toEqual([...QUIESCE_ORDER]);
+      expect(lane[0]).toBe('agent-runner');
+      expect(back).toEqual([...QUIESCE_ORDER].reverse());
+    } else {
+      // D12: the runner is off by default, and the lane may never name a
+      // service this project does not have — `docker compose stop` on one exits
+      // non-zero, and quiesce() throws on a non-zero stop, so a bare
+      // QUIESCE_ORDER addition would break every deployment without a runner.
+      // resume() reads the same model, which is what keeps an upgrade from
+      // starting a container the operator chose not to have.
+      expect(back).not.toContain('agent-runner');
+      expect(back).toEqual([...QUIESCE_ORDER].filter((svc) => svc !== 'agent-runner').reverse());
+      if (model.containers.has('agent-runner')) {
+        // A runner left over from before the profile was disabled is still a
+        // live writer: drained, never restored.
+        expect(lane[0]).toBe('agent-runner');
+      } else {
+        expect(lane).toEqual([...QUIESCE_ORDER].filter((svc) => svc !== 'agent-runner'));
+      }
+    }
+  }, 120_000);
 });

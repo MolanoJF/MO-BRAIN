@@ -3,11 +3,21 @@ import { join } from 'node:path';
 import type { UpgradeContext } from './types.ts';
 import { callOps, auditTail as httpAuditTail } from '../control/opsClient.ts';
 
-/** Stop order (D3): every writer drains before the last one — gbrain-ops —
+/** Stop order (D3, D13): every writer drains before the last one — gbrain-ops —
  *  goes down, leaving Postgres as the only live process. resume() runs the
- *  reverse. */
+ *  reverse.
+ *
+ *  `agent-runner` is FIRST (D13): it is the one consumer that keeps writing to
+ *  the brain after the scheduler stops materializing — a harness holds its run
+ *  open and writes pages through its own token — so it has to be down before
+ *  anything that could materialize more work for it. It is also never a path to
+ *  an upgrade (G5): `SWAP_SERVICES` (scripts/upgrade.ts) does not name it,
+ *  because the runner image carries no gbrain binary and a pin move cannot
+ *  rebuild it. Being behind the `runner` profile (D12, off by default) is not a
+ *  contradiction — see `composeModel`/`drainLane` below for how a service this
+ *  project does not have is handled. */
 export const QUIESCE_ORDER = [
-  'scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops',
+  'agent-runner', 'scheduler', 'gbrain-worker', 'control-plane', 'gbrain-serve', 'gbrain-ops',
 ] as const;
 
 /**
@@ -16,12 +26,29 @@ export const QUIESCE_ORDER = [
  * (compose/docker-compose.yml:136) — right for a routine redeploy, wrong for
  * an upgrade quiesce: `executeRun` is always awaited to completion
  * (src/scheduler/main.ts, RECON) and a `dream` run can run up to 7200s. This
- * task does not make quiesce wait out a live run — that is Task 11
- * preflight's job (refuse the upgrade while a `schedule_runs` row is
- * `running`). This bound exists only so a run preflight already accepted as
- * short is never truncated by a race against quiesce's own SIGTERM.
+ * task does not make quiesce wait out a live run — that is Task 11 preflight's
+ * job (refuse the upgrade while a `schedule_runs` row is `running`). That check
+ * was claimed here for a whole slice and did not exist; Slice 4 Task 14 added it
+ * (`inFlightRuns` in scripts/upgrade.ts) and recorded it as a Slice 3.5 defect
+ * this slice found (docs/slice-4-findings.md, merged from
+ * local://finding-task14.md). This bound exists only so a run
+ * preflight already accepted as short is never truncated by a race against
+ * quiesce's own SIGTERM.
  */
 const STOP_GRACE_S: Record<(typeof QUIESCE_ORDER)[number], number> = {
+  // The runner's drain is a teardown, not a run, and it is deliberately not the
+  // scheduler's 90 (that number exists because `executeRun` is awaited to
+  // completion; the runner has no equivalent wait — preflight refuses the
+  // upgrade while any run row is `running`, so nothing here is waiting a run
+  // out). What is left at this stop: the claim loop ends on the signal, the
+  // in-flight harness is SIGTERMed inside the runner's own bounded child grace,
+  // and the run token is revoked through the control plane — which is still UP,
+  // because the runner is FIRST in this order, so that revoke is one loopback
+  // HTTP call rather than a service that has to come back. 60s is margin around
+  // that teardown AND it is the service's own declared `stop_grace_period`
+  // (D6), so quiesce's `-t` is never the tighter bound that SIGKILLs a drain
+  // compose itself promises room for.
+  'agent-runner': 60,
   scheduler: 90,
   'gbrain-worker': 90, // matches scripts/backup.ts's existing precedent exactly
   'control-plane': 30,
@@ -48,6 +75,88 @@ const DEFAULT_COMPOSE = [
 
 function composeArgv(ctx: QuiesceContext): readonly string[] {
   return ctx.compose && ctx.compose.length > 0 ? ctx.compose : DEFAULT_COMPOSE;
+}
+
+/**
+ * What this compose project has, from two questions that are NOT the same:
+ *
+ *  · `active` — `config --services`, the services in the active profile model
+ *    (COMPOSE_PROFILES from the environment or from `.env`). This is what a
+ *    resume may restore, and it is why a default deployment never ends up with
+ *    the runner it never asked for.
+ *  · `containers` — `ps -a --services`, the services with a container in this
+ *    project whether or not their profile is active. A runner container can
+ *    exist while its profile is off — `up -d --no-deps <profile-gated service>`
+ *    STARTS it either way (measured) — and a live writer has to be drained
+ *    whatever the profile says.
+ *
+ * `'unknown'` = the project could not be rendered. That is NOT the same as "no
+ * services": a compose project that cannot be read is not evidence that a
+ * writer is absent, so drainLane still stops every service in QUIESCE_ORDER.
+ * That fallback is harmless even for a profile-gated member: `stop` of a
+ * service whose profile is off exits 0 — it does NOT fail, so nothing
+ * surfaces at the first stop that "cannot succeed" (measured:
+ * `docker compose --env-file .env -f compose/docker-compose.yml stop -t 1
+ * agent-runner` exits 0 with the runner profile off). restoreLane is the
+ * direction that STARTS containers, and there the same profile-gated member
+ * must be excluded even when the model is unknown: `up -d --no-deps` ignores
+ * the profile and would switch the runner on (measured), so an unreadable
+ * project must not become a path to it either.
+ */
+export type ComposeModel =
+  | { active: ReadonlySet<string>; containers: ReadonlySet<string> }
+  | 'unknown';
+
+function serviceNames(stdout: string): ReadonlySet<string> {
+  return new Set(stdout.split('\n').map((line) => line.trim()).filter(Boolean));
+}
+
+export async function composeModel(compose: readonly string[]): Promise<ComposeModel> {
+  const [model, containers] = await Promise.all([
+    sh([...compose, 'config', '--services'], 60_000),
+    sh([...compose, 'ps', '-a', '--services'], 60_000),
+  ]);
+  if (model.exitCode !== 0) return 'unknown';
+  const active = serviceNames(model.stdout);
+  if (active.size === 0) return 'unknown';
+  return { active, containers: containers.exitCode === 0 ? serviceNames(containers.stdout) : new Set() };
+}
+
+/**
+ * What a quiesce has to stop on THIS project, in stop order: every service in
+ * the order that the active model declares or that already has a container.
+ * `docker compose stop <service this project does not have>` exits non-zero
+ * ("no such service: agent-runner") and quiesce() throws on a non-zero stop, so
+ * naming one unconditionally would break the upgrade lane on every deployment
+ * without the runner — measured, not assumed.
+ */
+export function drainLane(
+  model: ComposeModel, requested: readonly string[] = QUIESCE_ORDER,
+): string[] {
+  return QUIESCE_ORDER.filter((svc) => requested.includes(svc) && (
+    model === 'unknown' || model.active.has(svc) || model.containers.has(svc)
+  ));
+}
+
+/**
+ * What a resume may start, in the reverse of the stop order (the last service
+ * down comes back first). The active model ONLY, never `containers`: a runner
+ * the operator's configuration excludes must not be switched on by an upgrade —
+ * G5's rule read the other way round, because an upgrade is not a path to an
+ * agent runner either.
+ *
+ * An `unknown` model is every requested service EXCEPT the profile-gated
+ * runner: an unreadable project is not evidence that the operator enabled the
+ * `runner` profile, and `up -d --no-deps agent-runner` would start it anyway
+ * (measured) — the container that executes model-written code with the
+ * organisation's key.
+ */
+export function restoreLane(
+  model: ComposeModel, requested: readonly string[] = QUIESCE_ORDER,
+): string[] {
+  return QUIESCE_ORDER.filter((svc) => requested.includes(svc) && (
+    model === 'unknown' ? svc !== 'agent-runner' : model.active.has(svc)
+  )).reverse();
 }
 
 async function sh(argv: string[], timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }> {
@@ -294,6 +403,12 @@ export async function verifySupervisorDrained(
   };
 }
 
+/** `stopped` is the lane's whole ORDER, including a service this project does
+ *  not have (behind a profile the operator never enabled): the evidence is that
+ *  every writer in the order is down, and one that was never up is trivially
+ *  down. What was actually issued a stop is `drainLane(model)`; Gate C's
+ *  journal assertion and test/integration/quiesce.test.ts both pin this list to
+ *  QUIESCE_ORDER. */
 export type QuiesceEvidence = { stopped: string[]; proof: SupervisorDrainProof; elapsedMs: number };
 
 /** Stop every writer, in order, leaving Postgres as the only live process (D3). */
@@ -303,21 +418,25 @@ export async function quiesce(ctx: QuiesceContext): Promise<QuiesceEvidence> {
   const stopped: string[] = [];
   let proof: SupervisorDrainProof | null = null;
   const ops = relayOpsCaller(compose);
+  // Resolved BEFORE the first stop, while compose can still answer.
+  const lane = drainLane(await composeModel(compose));
 
   for (const svc of QUIESCE_ORDER) {
     const grace = STOP_GRACE_S[svc];
-    // The quiesce window opens when the stop is REQUESTED; only audit events
-    // at or after this instant may decide the drain verdict (a stale event
-    // from an earlier cycle must not).
-    const stopRequestedAt = new Date().toISOString();
-    const r = await sh([...compose, 'stop', '-t', String(grace), svc], (grace + 30) * 1000);
-    if (r.exitCode !== 0) throw new Error(`quiesce: stopping ${svc} failed: ${r.stderr}`);
+    if (lane.includes(svc)) {
+      // The quiesce window opens when the stop is REQUESTED; only audit events
+      // at or after this instant may decide the drain verdict (a stale event
+      // from an earlier cycle must not).
+      const stopRequestedAt = new Date().toISOString();
+      const r = await sh([...compose, 'stop', '-t', String(grace), svc], (grace + 30) * 1000);
+      if (r.exitCode !== 0) throw new Error(`quiesce: stopping ${svc} failed: ${r.stderr}`);
+      // gbrain-ops and gbrain-worker share the gbrain-home volume, and ops
+      // itself is not stopped until the LAST iteration of this loop — so this
+      // read is still reachable right after the worker (the previous entry)
+      // goes down.
+      if (svc === 'gbrain-worker') proof = await verifySupervisorDrained({ ops, since: stopRequestedAt });
+    }
     stopped.push(svc);
-    // gbrain-ops and gbrain-worker share the gbrain-home volume, and ops
-    // itself is not stopped until the LAST iteration of this loop — so this
-    // read is still reachable right after the worker (the previous entry)
-    // goes down.
-    if (svc === 'gbrain-worker') proof = await verifySupervisorDrained({ ops, since: stopRequestedAt });
   }
 
   if (!proof) throw new Error('quiesce finished without ever verifying the supervisor drain');
@@ -329,12 +448,17 @@ export async function quiesce(ctx: QuiesceContext): Promise<QuiesceEvidence> {
  * may resume exactly one — a first-class operation, not a special case.
  * `up -d`, not `start`: a pin swap changes the image tag a stopped
  * container would otherwise keep ignoring.
+ *
+ * What is restored is the ACTIVE model (`restoreLane`), so a service behind a
+ * profile the operator never enabled is not started by an upgrade: `up -d
+ * --no-deps` would start a profile-gated service either way (measured), which
+ * would turn the agent runner on for a deployment that chose not to have one.
  */
 export async function resume(
   ctx: QuiesceContext, services: readonly string[] = QUIESCE_ORDER,
 ): Promise<void> {
   const compose = composeArgv(ctx);
-  const order = [...QUIESCE_ORDER].reverse().filter((svc) => services.includes(svc));
+  const order = restoreLane(await composeModel(compose), services);
   for (const svc of order) {
     const r = await sh([...compose, 'up', '-d', '--no-deps', svc], 120_000);
     if (r.exitCode !== 0) throw new Error(`resume: starting ${svc} failed: ${r.stderr}`);

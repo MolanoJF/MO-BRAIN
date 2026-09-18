@@ -26,8 +26,8 @@ jobs:
       matrix:
         # pinned-current is the supported version; pinned-next is the tripwire.
         # A pinned-next failure opens a drift issue; it never blocks a PR.
-        gbrain: ['0.50.0.0', '0.51.0.0']
-    continue-on-error: ${{ matrix.gbrain != '0.50.0.0' }}
+        gbrain: ['0.50.5.0', '0.51.0.0']
+    continue-on-error: ${{ matrix.gbrain != '0.50.5.0' }}
     env:
       GBRAIN_VERSION: ${{ matrix.gbrain }}
       POSTGRES_PASSWORD: ci-not-a-real-secret
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: contract
     env:
-      GBRAIN_VERSION: '0.50.0.0'
+      GBRAIN_VERSION: '0.50.5.0'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: restore
     env:
-      GBRAIN_VERSION: '0.50.0.0'
+      GBRAIN_VERSION: '0.50.5.0'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token

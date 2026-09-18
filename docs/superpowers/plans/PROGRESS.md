@@ -2,9 +2,9 @@
 
 **New session? Start with [HANDOFF.md](../../../HANDOFF.md).**
 
-**Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical)
-**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3.
-**Branch:** `main` — the only branch. Slices 0–3.5 are all merged into it (Slice 3.5 at `202a658`). **Slice 3.5 is complete — all six verification commands green** (`test/unit` 421/0, `test/integration` 314+1 skip/0, `test/contract` 83/0, `test/e2e` 77/0 twice consecutively from the 0.50.5.0 state, `lint:forbidden` and `tsc --noEmit` clean).
+**Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical) · [Slice 4](./2026-09-17-slice-4-agent-runner.md)
+**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3. [docs/slice-4-findings.md](../../slice-4-findings.md) — U1–U8 and P1–P9 statuses, F1–F19, Gate C's measured numbers and real spend.
+**Branch:** `slice-4-agent-runner` — **Slice 4 is complete here and is NOT yet merged to `main`** (Slices 0–3.5 are merged on `main`; Slice 3.5 at `202a658`). Slice 4's six verification commands and the two build gates are run and pasted in the Slice 4 section below, with their baselines — **all six are green** (the last two were re-measured after the fix commit `9efc992`). **Next stage is Slice 5 — its plan is not written, and it is blocked on Open Question 2.**
 
 ---
 
@@ -474,7 +474,368 @@ capability-snapshot half of Task 8 is unexercised by the product, and the family
 
 ---
 
-## Session log
+## Slice 4 — COMPLETE ✅ (branch `slice-4-agent-runner`, **not yet merged**)
+
+Agent runner — the optional container that hands a prompt to the pinned Claude Code harness against the
+brain, on a schedule, with nobody watching. **Complete on `slice-4-agent-runner`; that branch is not yet
+merged to `main`.** All three gates are green, the six verification commands and the two build gates are
+pasted below, and the one promise this slice's exit gate disproved was **fixed**, not smoothed over.
+
+The first exit-gate run was red and the red was real: C6's third clause — "a subsequent `search` no
+longer returns the reverted page" — failed on the shipped product. Everything that came out of it was
+closed inside the slice, and all of it is recorded in
+[`docs/slice-4-findings.md`](../../slice-4-findings.md):
+
+- **F15** — the revert's re-index cannot remove the page an agent run writes. A page created brain-first
+  (`put_page`; the file is only write-through) survives the revert: the file's ADDITION and its REMOVAL
+  both land inside the `anchor..HEAD` window a delta `sync` reconciles, so they net to nothing,
+  `filtered.deleted` never holds the path, and the route reports success while the reverted page keeps
+  answering searches. F15's own repro is model-free, in gbrain's own verbs.
+- **F16** — the fix. A new operation, **`page.delete`** (`delete <slug> --source-id <id> --purge
+  [--json]`), and `revertRun`'s step 3 is now *the pages the revert removed, by name → `sync` →
+  `embed --stale`*, with `RevertSuccess.index` carrying all three. The purge refuses to touch a slug the
+  tree still holds (`POST /git/path-exists`), refuses a remote caller's `--purge`, and reports
+  `purged` / `absent` / `skipped_file_present` / `skipped_not_a_page` / `refused_unreadable` / `failed`.
+  C6's three clauses were **unchanged**.
+- **F17** — C9 raced the harness's next call, structurally: `agent_run_usage` only holds a call once it
+  has ENDED, so the leg's cap write could never land before the harness began call N+1. The leg now
+  writes the cap in the window the runner's own claim sequence opens (detection and write are one
+  statement). Nothing in `src/` changed for it.
+
+| Gate | Result |
+|---|---|
+| A — the seam, headless | **PASS** — `test/contract/runner.contract.test.ts`, **57 pass / 0 fail** alone (347 `expect()` calls, 55.67s) |
+| B — HTTP end to end (B1–B12 + the anti-silent-skip tripwire) | **PASS** — `test/e2e/slice4.e2e.test.ts` |
+| C — the exit gate (C1–C12) | **PASS** — the same file, **27 pass / 0 fail** in F17's acceptance run on the real runner container, the real pinned harness and the real brain; both of this pass's family runs are **104 pass / 0 fail** |
+
+**Exit gate (roadmap, verbatim):** a nightly `agent_prompt` produces a run record with cost, token
+counts and a brain diff; **killing the runner mid-run reclaims the lease without double-writing**;
+exceeding the budget cap stops the run and alerts rather than silently truncating.
+
+### The exit gate's three promises, measured
+
+| Promise | Measured outcome |
+|---|---|
+| A run record with cost, token counts and a brain diff | **GREEN** — C1–C5. The row materializes at its org-local slot through Slice 3's own materializer (`2026-09-17T03:00` org time, `fire_at …T07:00:00+00:00`); the runner claims it; `cost_usd` = `SUM(agent_run_usage.cost_usd)` computed in SQL on both sides; C4 shows the write Space's range naming the page and **every read Space's range empty**; C5 carries prompt, tool call, 2 usage rows, `costUsd` and the diff file list in **one** `GET /api/runs/:id`. |
+| Killing the runner mid-run reclaims the lease without double-writing | **GREEN** — C7 kills the container mid-run: `lease_expired` / `infra_failed`, an alert, and the run's gbrain bearer going **200 → 401** across the reclaim. C8 is the double-write proof: `schedule_runs` holds attempts 1 and 2, each page exists exactly once in the run's own directory, one commit added it, the agent's text appears exactly once. **Stated, not smoothed:** the retry occurrence is written by the **gate** (`createRetryRow`'s shape), because `reclaimExpiredLeases` deliberately never re-runs a dead runner's agent run — F15 records that as a finding, not a pass. |
+| Exceeding the budget cap stops the run and alerts rather than silently truncating | **GREEN** — C9, made deterministic by F17: the gateway's own log line is `402` with `tokens: 0` / `costUsd: null` and **zero 2xx lines** (refusal before forwarding), `schedule_runs.state failed` / `classification budget_exceeded`, `agent_runs.failure_class budget_exceeded`, exactly one `agent_budget_exceeded` alert with no `midStream`, and `agent_run_usage` **zero rows** — not a truncated one. |
+| *(the earlier red, and the fix it forced: the revert's re-index)* | **GREEN after F16** — C6's measured before/after, from a real `gbrain search`: `before=[gate-c/mu6jhb9j/nightly, …]` → `after=[…] (slug gone)`, with the reverted page absent and the other pages untouched. The route's `sync` still reports `up_to_date` / `deleted: 0`, which is the point: the deletion is what moved the index, and the receipt now says so. |
+
+### Money — measured, not estimated
+
+Every leg runs the REAL harness against the REAL brain. Gate C's own teardown logged, per run:
+`gate-c-nightly` 2 calls `$0.0263061` · `gate-c-kill` attempt 1 `lease_expired` 1 call `$0.0123261` ·
+attempt 2 2 calls `$0.0156738` · **`gate-c-budget` (C9) `failed` / `budget_exceeded`, 0 calls,
+`cost: null`** · `gate-c-bash` 1 call `$0.0109512` — **`$0.0652572` over 5 runs for this pass's first
+directory run**; the second run's five rows are `$0.0265811` · `$0.0099937` · `$0.0158596` · `null` ·
+`$0.0106424` = **`$0.0630768`**, and Gate B's metered leg costs `$0.00004` per run. The slice's whole
+measured spend, over all of Task 17's acceptance runs, is **≈ `$0.52` against the `$5.00` ceiling**; C9's
+own leg is `$0.0000000` because the refusal happens before any upstream connection.
+
+### Verification — the six commands and the two build gates
+
+Environment: the dev stack up on `0.50.5.0` (`compose/docker-compose.yml` + `compose/docker-compose.dev.yml`),
+`CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control` (the `bs-fp-pg`
+scratch Postgres) exported for the integration run, secrets from the repo `.env`. Every command was run
+alone, one at a time, with nothing else touching the stack. No `docker compose down -v` was run by hand —
+every volume teardown is a suite's own, inside its test body.
+
+**Two of these numbers are re-measured; the rest are the close-out pass's.** The close-out pass left
+`test/integration` red (423 / 1 skip / 5 fail) and `test/contract` red (141 / 1 fail); both were fixed in
+commit **`9efc992`**, and a follow-up pass **re-ran those two commands alone** on 2026-09-18, in the
+documented order, with `git status --porcelain` holding no test edits. Their tails below are that pass's,
+verbatim. The other four commands and the two build gates were **not** re-run by it — their numbers are
+unchanged from the close-out pass and are marked as such. The port publication was checked before each
+of the two runs (`docker port brainstand-gbrain-ops-1` → `3140/tcp -> 0.0.0.0:3140`); after
+`test/integration` it had been dropped, as the ordering note below predicts, and the documented dev
+stack was re-upped before `test/contract`.
+
+```
+$ bun run lint:forbidden
+lint:forbidden clean
+
+$ bunx tsc --noEmit
+(exit 0, no output)
+
+$ bun test test/unit                        # close-out pass, not re-run by the follow-up pass
+ 602 pass
+ 0 fail
+ 2171 expect() calls
+Ran 602 tests across 45 files. [2.45s]
+
+$ CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control bun test test/integration
+ 428 pass
+ 1 skip
+ 0 fail
+ 1782 expect() calls
+Ran 429 tests across 30 files. [53.60s]
+
+$ bun test test/contract
+ 142 pass
+ 0 fail
+ 594 expect() calls
+Ran 142 tests across 14 files. [381.64s]
+
+$ bun test --parallel=1 test/e2e           # first of the two consecutive runs (close-out pass, not re-run)
+ 104 pass
+ 0 fail
+ 1006 expect() calls
+Ran 104 tests across 6 files. [1236.81s]
+
+$ bun test --parallel=1 test/e2e           # the second, from the state the first left (close-out pass)
+ 104 pass
+ 0 fail
+ 1006 expect() calls
+Ran 104 tests across 6 files. [1277.94s]
+
+$ bash test/build/pin.test.sh              # via Git bash
+--- expecting SUCCESS at pin 0.50.5.0
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected
+
+$ bash test/build/harness-pin.test.sh      # via Git bash
+--- expecting SUCCESS at pin 2.1.274
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected at the harness install
+```
+
+**Against the plan's baselines** (≥ 421 unit · ≥ 314+1 skip integration · ≥ 83 contract · ≥ 77 e2e, each
+with 0 fail):
+
+| Command | Baseline | Measured | Verdict |
+|---|---|---|---|
+| `lint:forbidden` | clean | clean | — |
+| `tsc --noEmit` | clean | clean | — |
+| `test/unit` | ≥ 421 / 0 | **602 / 0** | **+181** |
+| `test/integration` | ≥ 314+1 skip / 0 | **428 / 1 skip / 0 of 429** | **+114 pass on the baseline; green** |
+| `test/contract` | ≥ 83 / 0 | **142 / 0 of 142** | **+59 pass on the baseline; green** |
+| `test/e2e` | ≥ 77 / 0, twice | **104 / 0** twice consecutively | **+27** |
+| `pin.test.sh` / `harness-pin.test.sh` | both arms PASS | both arms PASS | — |
+
+### The final-verification pass (2026-09-18, after the sign-in page and the runner-presence gate landed)
+
+Re-measured on the frozen tree, one command at a time, nothing else against the stack, after the two
+uncommitted product changes of that day (`src/console/pages/SignIn.tsx` + the console's `phaseFor`, and
+`src/agent/runners.ts` + `0007_runner_presence.sql` + the runs/health/schedules routes). Verbatim tails:
+
+```
+$ bun run lint:forbidden
+lint:forbidden clean                          # exit 0
+
+$ bunx tsc --noEmit
+(exit 0, no output)
+
+$ bun test test/unit
+ 628 pass
+ 0 fail
+ 2267 expect() calls
+Ran 628 tests across 46 files. [2.05s]
+
+$ CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control bun test test/integration
+ 434 pass
+ 1 skip
+ 0 fail
+ 1804 expect() calls
+Ran 435 tests across 30 files. [50.80s]
+
+$ bun test test/contract                     # after the dev stack was re-upped (docker port -> 3140/tcp -> 0.0.0.0:3140)
+ 142 pass
+ 0 fail
+ 594 expect() calls
+Ran 142 tests across 14 files. [384.82s]
+
+$ bash test/build/pin.test.sh                # via Git bash, GBRAIN_VERSION=0.50.5.0
+--- expecting SUCCESS at pin 0.50.5.0
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected
+
+$ bash test/build/harness-pin.test.sh        # via Git bash, HARNESS_VERSION=2.1.274
+--- expecting SUCCESS at pin 2.1.274
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected at the harness install
+```
+
+`test/unit` is **628 / 0** (+26 on the close-out pass's 602: the new `test/unit/console-app.test.ts` and
+the console-polish unit tests) and `test/integration` **434 pass / 1 skip / 0 fail of 435** (+6 on 428).
+`test/contract` is unchanged at **142 / 0 of 142**. Both build gates pass both arms.
+
+**`bun test --parallel=1 test/e2e` first came back red twice, and the cause was the credential, not the
+tree.** Both of those runs measured **93 pass / 11 fail** (B5–B8 and C3–C8, C11) with
+`[gate-c] Gate C total model spend = $0.0000000 over 4 run(s)`: every money leg failed because the
+gateway's upstream answered, verbatim, `{"type":"error","error":{"type":"authentication_error","message":
+"OAuth access token has been revoked."}}` — the org's stored `anthropic_api_key` is this machine's Claude
+Code OAuth access token (the runbook's own measured fact) and the CLI's morning refresh revoked it. The
+credential was re-provisioned host-side from `~/.claude/.credentials.json` (value never printed; the
+token authenticated upstream directly with the gateway's own auth shape, `200`), and the two consecutive
+directory runs then measured:
+
+```
+$ bun test --parallel=1 test/e2e           # first, after the credential was re-provisioned
+ 104 pass
+ 0 fail
+ 1011 expect() calls
+Ran 104 tests across 6 files. [1336.39s]
+[gate-c] Gate C total model spend = $0.0656777 over 5 run(s)
+
+$ bun test --parallel=1 test/e2e           # the second, from the state the first left
+ 104 pass
+ 0 fail
+ 1011 expect() calls
+Ran 104 tests across 6 files. [1327.58s]
+[gate-c] Gate C total model spend = $0.0660306 over 5 run(s)
+```
+
+Both are far above the plan's `≥ 77 pass / 0 fail` baseline, and the second started from exactly the
+state the first left (its teardown deletes every fixture and leaves the write Space clean and the lane
+enabled). **The two green runs cost `$0.0656777` + `$0.0660306` = `$0.1317083` of real model spend**;
+the two red passes cost `$0.0000000` (the refusal happens before any upstream connection). One further
+note the next session needs: the e2e family's own cycles (`restore.e2e.test.ts`'s control-DB reload, the
+upgrade gate's rollback) **undo a credential rotation** — measured: a version stored at 11:41:55 was gone
+after the next pass's cycle, four separate re-provisions were needed across these runs, and the gate's
+`beforeAll` requires **exactly one** `anthropic_api_key` row for the org, so a repair must replace that
+row rather than add a version (adding one produced `PRECONDITION FAILED: … (found 2 rows)`). Full
+account: `docs/runbooks/agent-runner.md`, "Rotating the Anthropic key"; `HANDOFF.md`'s live-state block.
+
+The integration `1 skip` is the platform opt-out, not a silent gap: `[fileplane.test.ts] Skipping
+"config.json is written 0600" on win32: NTFS has no POSIX permission bits`. The unit run also echoes two
+Postgres `NOTICE`s (`schema "drizzle" already exists, skipping`) from its own probe — notices, not
+failures.
+
+### The five integration failures and the contract failure — found by the close-out pass, fixed in `9efc992`
+
+The close-out pass measured 5 integration failures and 1 contract failure, reproduced them, and named
+their causes; `test/` and `src/` were outside its scope, so it recorded them open. Commit **`9efc992`**
+("test(slice4): close the last six verification failures") then fixed all of them **without weakening a
+test or a gate**, and the follow-up pass re-ran both suites alone: **428 pass / 1 skip / 0 fail of 429**
+and **142 pass / 0 fail of 142**. Below is the recorded history with its fix, and the systemic gap the
+fix does not close.
+
+**1 — three contract-drift legs in `test/integration/claim.test.ts` (fixed).** `src/control/connections.ts`
+(commit `9bd33de`, Slice 4 Task 5) now provisions **two** gbrain clients per Connection — the member's and
+a **server-side** one whose credentials handoff is taken **first** — so a winning claim grants twice and
+hands off two credential files. `test/integration/connections.test.ts` was updated in that commit while
+**`claim.test.ts` was not**, so its three assertions still pinned one grant / one receipt per Connection:
+`concurrent claims — exactly one wins` (expected 1, got 2), `membership with two pending Connections
+provisions both` (expected 2, got 4) and `credentials from takeGrantCredentials …` (an extra
+`/srv/gbrain-home/.creds-<id>-server.json`). The assertions now name the contract they pin — the grant
+pair (`clientName(membershipId, sourceId)` then `serverClientName(clientName(...))`) and the take pair
+(`serverCredentialsOutPath(id)` before `grantCredentialsOutPath(id)`) — instead of the count they
+happened to see.
+
+**2 — `capability snapshots and drift > with only one version recorded, driftBetween refuses` (fixed).**
+`capability_snapshots` is keyed by version text with **no owner column**, and this slice's new
+`test/integration/agent-runs.test.ts:181` legitimately seeds the **running pin's** catalog (`0.50.5.0`)
+so D5 has a tool surface to read. Under `bun test test/integration` the files run concurrently, so that
+row landed between `capability.test.ts`'s `recordCapabilitySnapshot(FROM)` and its
+`driftBetween(FROM, TO)`: the "only one version recorded" premise stopped being true, and `driftBetween`
+correctly did not refuse. Worse, `capability.test.ts`'s own `afterAll` deleted precisely the bare
+`0.50.0.0` / `0.50.5.0` rows a sibling had written. Its fixture is now scoped by a **per-run suffix**
+(`0.50.0.0-<run>` / `0.50.5.0-<run>`), so the premise is a property of its own rows; the delta under test
+is unchanged, because `driftBetween` compares version **strings** and reads every other field off the
+rows.
+
+**3 — `backup > the manifest records that the worker was quiesced` (fixed — and this one was NOT the race
+it appeared to be).** The manifest read `quiesced: false` from a provably quiesced stack. The cause is not
+timing: **six files in `test/integration` mock `src/control/opsClient.ts` process-wide** (`agent-runs`,
+`claim`, `connections`, `routes`, `scheduler-routes`, `wizard`), and **Bun applies a module mock to
+whichever file links the module next** — so `scripts/backup.ts`'s real `jobs.supervisorStatus` call was
+answered by a sibling's fake. Measured with the fix reverted: the reply came back
+`{ok:true, exitCode:0, argv:["gbrain"], stdout:"{}"}` while `docker compose ps` showed scheduler and
+`gbrain-worker` **stopped**, and the reply's shape named `agent-runs.test.ts`'s `ok({})` fake as the
+respondent. **Recorded as a hazard, not as a flake: any file that needs the real ops client is a race
+victim of whichever sibling file links `opsClient.ts` first.** Two mitigations landed, neither of them a
+weakening:
+
+- **`test/helpers/stack.ts`'s cross-process exclusion lock** (`withStackExclusion`) — an atomic `mkdir`
+  lock under the OS temp dir, pid-stamped and stale-broken — held by the only two files that mutate which
+  services run (`backup.test.ts`, `quiesce.test.ts`). It serializes **service state**, so one file's
+  stop/start can no longer decide another file's verdict. `--parallel=1` is not an available substitute:
+  in one process the suite's own partial `mock.module` calls poison each other (measured below).
+- **`backup.test.ts` runs the real `scripts/backup.ts` in its own process** (`Bun.spawn(['bun','-e',…])`),
+  which has no registered mocks — the only isolation Bun offers here, and how an operator runs that host
+  script anyway. Its `quiesced` read is therefore real again.
+
+**The systemic fix is NOT done, and it belongs to Slice 5.** The right shape is to route the runtime's ops
+access through an **injectable caller**, exactly as `src/upgrade/quiesce.ts` already does with its
+`OpsCaller` type (`httpOpsCaller()` by default, `relayOpsCaller(compose)` for the in-container lane,
+`opts.ops` to inject). With that seam a test injects a fake **deliberately** instead of a process-wide
+`mock.module` answering a real call; until it exists, the lock and the fresh process are containment, not
+the cure.
+
+**4 — `test/contract`: one stale count pin (fixed).** `test/contract/upgrade.contract.test.ts:295`
+asserted `expect(doc.operations.length).toBe(33); // 31 at Slice 3 close + 2`; the pinned
+`contracts/v0.50.5.0/operations.json` holds **34**, because F16 added `page.delete` to the registry. The
+pin now reads **34 with the reason written next to it** (33 at Slice 3.5 close + `page.delete`), and the
+two operations the test is actually about (`checkUpdate`, `postUpgrade`) still assert as before.
+
+**The ordering hazard is real, unchanged, and was hit again by the follow-up pass.** The close-out pass's
+first `test/contract` run came back **130 pass / 12 fail**, every failure `ConnectionRefused` against
+`http://127.0.0.1:3140/rpc`: `test/integration/quiesce.test.ts` runs its real quiesce/resume round trip
+through `docker compose -f compose/docker-compose.yml` **only** — no dev override — and `resume()`'s
+`up -d --no-deps` therefore **recreates `gbrain-ops` without the dev override's `3140:3140` publication**
+(measured: `HostConfig.PortBindings = {}`). After the follow-up pass's `test/integration` run,
+`docker port brainstand-gbrain-ops-1` printed **nothing**; the documented dev stack was brought back up
+(`docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d
+--wait`, after which the binding is `3140:3140` and `/rpc` answers `401` without the bearer) before
+`test/contract`, which then ran green. **Run `test/integration` before, not after, the host-run suites, or
+re-up the dev stack in between.**
+
+**A `--parallel=1` diagnostic is not an apples-to-apples control.** Run by the close-out pass on the red
+state it gave **318 pass / 1 skip / 8 fail / 4 errors**: with one process for all files, the suite's own
+partial `mock.module` calls poison each other (`SyntaxError: Export named 'deleteCredentialJournal' not
+found in module 'src/control/opsClient.ts'` ×2, `gitPathExists` ×1, `SingleSnapshotError` ×1), so 4 files
+never load and 102 tests never run. The plan's baseline command is the default-parallel one for exactly
+this reason.
+
+### Carried into Slice 5
+
+- **`scripts/backup.ts`'s quiesce probe reads `quiesced` through the ops client whose default URL is a
+  container name** — `src/control/opsClient.ts:6`, `process.env.OPS_RPC_URL ?? 'http://gbrain-ops:3140'`.
+  Correct inside the compose network, unresolvable on a **production host**, where the dev override's
+  `3140:3140` publication does not exist; the host-run `scripts/backup.ts` therefore only works if the
+  operator exports `OPS_RPC_URL`, and its probe's `catch { quiesced = true; }` turns a connection failure
+  into a **pass** rather than a refusal. Pre-existing (not this slice's) and **unmeasured on a production
+  host** — a Slice 5 row: either the host script learns the deployment's own ops URL, or the probe fails
+  loudly instead of guessing.
+- **`test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run**:
+  `seedCapabilitySnapshot()` (line 179) inserts the running pin's catalog so D5 has a tool surface, and
+  nothing deletes it. The table is keyed by version text with no owner column, so rows accumulate
+  (`0.50.5.0`, one per run) — and after `9efc992` `capability.test.ts` no longer deletes the bare rows
+  either (it is scoped to its own suffixed pair). Give the table an owner, or give the fixture a teardown.
+- **The `mock.module` hazard above has no systemic cure yet.** Routing the runtime's ops access through an
+  injectable caller — the shape `src/upgrade/quiesce.ts`'s `OpsCaller` already uses — is Slice 5's work;
+  today's containment is `test/helpers/stack.ts`'s service-state lock plus `backup.test.ts`'s fresh
+  process, and a new file that needs the **real** ops client can still be answered by a sibling's mock.
+- **`test/contract/upgrade.contract.test.ts:295`'s pin now reads `34`** (with the reason in the comment) —
+  nothing outstanding; Slice 5 must keep it true if it adds an operation.
+- **`test/integration/quiesce.test.ts` resumes through the base compose file**, so it silently drops the
+  dev override's port publications. Slice 5's provisioner work should decide whether the quiesce lane
+  takes the deployment's own compose invocation rather than a hard-coded one.
+- **No product path retries a `lease_expired` agent run** (F15). C8's second attempt is written by the
+  gate. The retry policy exists and is classified; nothing calls it for that class.
+- **The runner is not restored by a quiesce/resume cycle** (D12/D13): `restoreLane` deliberately does not
+  bring back a service whose profile is inactive, so `agent-runner` exits 0 on the quiesce and stays
+  down. A restore or an upgrade therefore **leaves the lane off** until an operator starts it.
+- **`page.delete --purge` is local-CLI-only** by design (a remote caller gets `permission_denied`), and an
+  ABSENT slug exits **1** with `page_not_found` on stderr and no JSON receipt — a caller reading only the
+  exit code cannot tell "there was no page" from "the delete failed".
+- **C11 cannot discriminate a denied-tool event at this pin**: `--tools ""` removes the built-in surface
+  at the source, so `permission_denials` is `[]` and there is no `tool_use` at all. The runbook was
+  corrected to say so rather than to keep the "produces a denied-tool event" claim.
+- **The `runner_never_seen` alert kind has no product writer**; the claim refusal code of the same name is
+  a different surface, and the runbook says so.
+- **`capability_snapshots`' multi-tenant story** (carried from Slice 3.5) is still open — the writer
+  exists now, the per-tenant rendering does not.
+- **The remaining Slice 3/3.5 carry-overs that this slice did not consume**, restated rather than dropped:
+  no schema-version surface in any published contract (U6); `check-update` reads master's `VERSION` and is
+  deliberately not schedulable; one snapshot driver (`docker-volume`); multi-version upgrade jumps
+  untested; the `blocked` run state declared but never written; spend not rolled up per member/org.
+
+---
 
 - 2026-09-14 — Plans written (roadmap + Slice 0 + Slice 1). Self-review found 3 gaps before execution.
 - 2026-09-14 — Docker absent; executed the Docker-independent subset (Tasks 1 partial, 3, 11 pure, 14). 3 plan defects found.
@@ -491,3 +852,5 @@ capability-snapshot half of Task 8 is unexercised by the product, and the family
 - 2026-09-16 — Task 19 Step 5 final run, **all six commands green**: `lint:forbidden` + `tsc --noEmit` clean, `test/unit` 292/0, `test/integration` 255 pass + 1 skip (win32 0600 opt-out) / 0, `test/contract` 69/0 (18 in the slice-3 file), `bun test --parallel=1 test/e2e` 54/0 across 4 files — twice, the second from a cold stack. The two remaining reds were closed by **F4** (the wizard now passes `federated: true` at both `sources.add` call sites — a Slice 1/2 product gap the exit gate exposed, `src/control/routes/wizard.ts`) and **F5** (`slice1.e2e`'s `beforeAll` now waits for `/.well-known/gbrain` 200 as well as the console health — `test/e2e/slice1.e2e.test.ts`). Both plan copies carry matching `Corrected 2026-09-16` blockquotes and are byte-identical. **SLICE 3 COMPLETE.** Next: Slice 3.5.
 - 2026-09-16 — Slice 3.5 executed on `slice-3.5-upgrades`. Gate A `test/contract/upgrade.contract.test.ts` 14/0, Gate B+C `test/e2e/slice35.e2e.test.ts` 23/0, and the six-command verification run: `lint:forbidden` + `tsc --noEmit` clean, `test/unit` 421/0, `test/integration` 314+1 skip/0, `test/contract` 83/0, `test/e2e` **68 pass / 9 fail** (B9 + C4 + the C6–C12 cascade; root-caused to F7 — `capability_snapshots` has no product writer, and C6's preflight needs a healthy `doctor` after the failure leg). The dev stack is left healthy on **0.50.5.0** (`/api/health` 200, `pin.matches: true`, `gbrain-ops` binary `gbrain 0.50.5.0`). Three defects fixed during the slice: the nested journal path the reconciler could never read, the rollback busy loop (a circular dynamic import re-entering the CLI entry), and Bun's start-time environment snapshot shadowing the pin the swap had just rewritten. Findings: [`docs/slice-3.5-findings.md`](../../slice-3.5-findings.md); runbook: [`docs/runbooks/upgrade.md`](../../runbooks/upgrade.md). Next: Slice 4.
 - 2026-09-17 — Slice 3.5 closed. The 68/9 red was real and is fixed: **F7** (the run now captures both pins' capability and the reconciler imports them; C6 repairs the residue its own fixture caused), **F8** (the digest's `filePlane` no longer hashes gbrain's runtime state, so a correct rollback compares equal again), **F9** (the gate normalizes its entry state and pairs the fixture with its undo in `try/finally` + `afterAll`). **All six commands green**, and `bun test --parallel=1 test/e2e` is **77 pass / 0 fail twice consecutively** from the 0.50.5.0 state the gate itself leaves. Fast-forwarded to `main` (`202a658`); feature branch deleted. **SLICE 3.5 COMPLETE.** Next: Slice 4.
+- 2026-09-18 — Slice 4 closed on `slice-4-agent-runner` (**not merged to `main`**). Gates A/B/C green (Gate A **57/0** alone; Gate C's file **27/0** in F17's acceptance run; the family `bun test --parallel=1 test/e2e` **104/0 twice consecutively** — 1236.81s then 1277.94s — with `$0.0652572` + `$0.0630768` of real model spend, Gate C's 5-run teardown logging each figure). The six commands and the two build gates: `lint:forbidden` clean · `tsc --noEmit` clean · `test/unit` **602/0** (+181 on the 421 baseline) · `test/integration` **423 pass / 1 skip / 5 fail of 429** and `test/contract` **141 pass / 1 fail of 142** — red, reported not smoothed, and **both closed the same day in `9efc992`**: three stale `claim.test.ts` counts against Task 5's deliberate second, server-side client per Connection; one `capability_snapshots` fixture shared with this slice's new `agent-runs.test.ts`; `backup.test.ts` answered by a sibling file's process-wide `mock.module` of the ops client (**a hazard, not the race it looked like**); and the `doc.operations.length` pin, now 34 with its reason in the comment · both build gates' two arms PASS. A first `test/contract` run came back **130/12** with every failure `ConnectionRefused` to `http://127.0.0.1:3140/rpc`: `test/integration/quiesce.test.ts` resumes through `compose/docker-compose.yml` **alone**, and `up -d --no-deps` recreates `gbrain-ops` without the dev override's `3140:3140` publication. **The exit gate's third promise (the budget cap) is green; the revert promise was RED and needed a real product fix the gate found** — F15 named it, F16 added the `page.delete` operation and made the revert name the pages it removed, F17 removed C9's structural race; C6's three clauses were never softened. Docs landed with the slice: `docs/slice-4-findings.md` (U1–U8 and P1–P9 statuses, F1–F17, Gate C's numbers and spend), `docs/runbooks/agent-runner.md`, this file, `HANDOFF.md` and the roadmap. **SLICE 4 COMPLETE (unmerged).** Next: Slice 5.
+- 2026-09-18 — **Slice 4 verification closed green** (same day). `9efc992` fixed the last six failures without weakening a test or a gate: `claim.test.ts` pins the two-clients-per-Connection contract by name, `capability.test.ts` scopes its fixture with a per-run version suffix, `backup.test.ts` holds `test/helpers/stack.ts`'s new cross-process stack-exclusion lock and runs the real `scripts/backup.ts` in its own process (the only isolation Bun offers against a sibling's process-wide `mock.module` of the ops client), and `upgrade.contract.test.ts:295` moved 33 → 34 with the reason in the comment. Re-measured alone, in the documented order, by a follow-up pass: `test/integration` **428 pass / 1 skip / 0 fail of 429** (1782 `expect()` calls, 53.60s) and `test/contract` **142 pass / 0 fail of 142** (594 `expect()` calls, 381.64s) — verbatim tails in the Slice 4 section above. The dev override's `3140:3140` publication had to be restored between the two runs (the documented ordering hazard). The runner lane was brought back up afterwards — a quiesce or a restore leaves it down by design (D12/D13) — and `/api/health` reports its `runner` block. **All six commands green; nothing merged to `main`.** Next: Slice 5, unstarted and blocked on Open Question 2.
