@@ -11,10 +11,11 @@ import { Claim } from './pages/Claim.tsx';
 import { Access } from './pages/Access.tsx';
 import { Schedules } from './pages/Schedules.tsx';
 import { Runs } from './pages/Runs.tsx';
+import { Spend } from './pages/Spend.tsx';
 import { Upgrades } from './pages/Upgrades.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'upgrades';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades';
 
 /**
  * What `GET /api/wizard/state` answered, as the screen chooser sees it: an HTTP
@@ -59,6 +60,7 @@ function pageFromPath(): Page | null {
   const path = window.location.pathname.replace(/\/+$/, '');
   if (path === '/schedules') return 'schedules';
   if (path === '/runs') return 'runs';
+  if (path === '/spend') return 'spend';
   if (path === '/upgrades') return 'upgrades';
   return null;
 }
@@ -118,6 +120,7 @@ export function App() {
             <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
             <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
             <button className="nav-item" onClick={() => setPage('runs')}>Runs</button>
+            <button className="nav-item" onClick={() => setPage('spend')}>Spend</button>
             <button className="nav-item" onClick={() => setPage('upgrades')}>Upgrades</button>
             <button className="nav-item" onClick={() => setPage('access')}>Access</button>
           </>
@@ -130,6 +133,7 @@ export function App() {
         {page === 'connection' && <Connection />}
         {page === 'schedules' && <Schedules />}
         {page === 'runs' && <Runs />}
+        {page === 'spend' && <Spend />}
         {page === 'upgrades' && <Upgrades />}
         {page === 'access' && <Access />}
       </main>

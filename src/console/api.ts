@@ -558,3 +558,46 @@ export const runApi = {
     return toRunnerStatus(r.runner);
   },
 };
+
+/**
+ * The spend surface (`src/control/routes/spend.ts`, Tasks 11 and 12).
+ *
+ * One payload carries BOTH meters and both coverages. Three honesty rules are
+ * encoded in these types, not in the page:
+ *   - `ours.totalUsd` is `number | null`: NULL means runs existed but none could
+ *     be priced, and it must be rendered as words, never `$0.00` (honesty rule
+ *     3, `Runs.tsx:159-161`);
+ *   - `brain` is `BrainUsage | null`, and `coverage.brainReachable` says whether
+ *     the ledger was read at all — an unread ledger is UNKNOWN, never zero, and
+ *     the two totals are never added together;
+ *   - `brain.coverage.notCovered` is upstream's own list of what its ledger
+ *     misses and is carried VERBATIM, character for character (D8).
+ */
+export type SpendRow = { key: string; label: string; runs: number; costUsd: number | null; unpricedRuns: number };
+
+/** gbrain's own ledger, as `src/ops/usage.ts` maps `get_usage`'s receipt. */
+export type BrainUsage = {
+  windowDays: number;
+  totals: { calls: number; inputTokens: number; outputTokens: number;
+            cacheReadTokens: number; cacheWriteTokens: number; costUsd: number };
+  byModel: { model: string; calls: number; costUsd: number | null; unpricedCalls: number }[];
+  byPhase: { phase: string; calls: number; costUsd: number }[];
+  coverage: { source: string; loggedSince: string | null; tablePresent: boolean;
+              pricedCalls: number; unpricedCalls: number; notCovered: string[] };
+};
+
+export type SpendReport = {
+  windowDays: number;
+  ours: { totalUsd: number | null; unpricedRuns: number;
+          byMember: SpendRow[]; bySchedule: SpendRow[]; byModel: SpendRow[] };
+  brain: BrainUsage | null;
+  coverage: { ours: string[]; brainReachable: boolean };
+};
+
+/**
+ * The route clamps `days` 1–365 and defaults to 30; the page asks for one
+ * window and reads back `windowDays` from the payload rather than assuming it.
+ */
+export const spendApi = {
+  get: (days = 30) => api.get<SpendReport>(`/spend?days=${encodeURIComponent(String(days))}`),
+};
