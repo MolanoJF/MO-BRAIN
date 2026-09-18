@@ -35,13 +35,15 @@ export type BrainUsage = {
 const GRANT_TTL_SECONDS = 300;
 
 /**
- * The MCP endpoint this process dials.
+ * The MCP DATA-LANE endpoint this process dials for `get_usage`.
  *
  * Inside compose, ops is on `brain-net`, so it reaches `gbrain-serve` directly;
  * `PUBLIC_URL` is deliberately NOT set in the ops container, and a bare
  * `mcpUrl()` would resolve to 127.0.0.1 inside the wrong container. The
  * published dev override lets a host-run contract test reach the same endpoint
  * through Caddy by setting `GBRAIN_MCP_URL`.
+ *
+ * This is NOT the URL handed to `mcp.grant` — see `grantEndpoint()`.
  */
 function mcpEndpoint(): string {
   const explicit = process.env.GBRAIN_MCP_URL?.trim();
@@ -53,6 +55,27 @@ function mcpEndpoint(): string {
   }
   // In compose, ops is on brain-net and dials gbrain-serve directly.
   return 'http://gbrain-serve:3131/mcp';
+}
+
+/**
+ * The `--url` the `mcp.grant` carries. It is credential-delivery bookkeeping,
+ * NOT the lane `get_usage` dials: with `credentialsOut` set, gbrain writes the
+ * token to a file, and the MCP call is a separate fetch to `mcpEndpoint()`.
+ *
+ * gbrain validates this URL with `assertSecureEndpoint`/`normalizeMcpUrl` and
+ * REFUSES a non-loopback plain-HTTP endpoint ("Use HTTPS for credential
+ * delivery; HTTP is supported only on loopback"), so feeding it the internal
+ * `http://gbrain-serve:3131/mcp` data lane made every stock-stack read throw
+ * (F20). Every other grant in the product passes `mcpUrl()`
+ * (`src/control/connections.ts`): PUBLIC_URL when one is configured, loopback
+ * otherwise. This mirrors that convention — the ops container sets no
+ * PUBLIC_URL, so it resolves to loopback and gbrain accepts it. Kept local
+ * rather than imported because the control-plane DB module graph must not enter
+ * the ops process (S2).
+ */
+function grantEndpoint(): string {
+  const base = (process.env.PUBLIC_URL ?? 'http://127.0.0.1:3131').replace(/\/+$/, '');
+  return base.endsWith('/mcp') ? base : `${base}/mcp`;
 }
 
 /** A self-signed Caddy on the dev box needs this; production is plain http on
@@ -68,12 +91,14 @@ export async function readBrainUsage(days: number): Promise<BrainUsage> {
   const name = `bs-usage-${tag}`;
   const credentialsOut = `/srv/gbrain-home/.creds-usage-${tag}.json`;
   const endpoint = mcpEndpoint();
+  const grantUrl = grantEndpoint();
 
   const r = await callOps('mcp.grant', {
     name,
     harness: 'generic',
     profile: 'operator',
-    url: endpoint,
+    // Bookkeeping only: gbrain refuses the internal plain-HTTP data lane here.
+    url: grantUrl,
     tokenTtl: String(GRANT_TTL_SECONDS),
     credentialsOut,
   }, { json: true });

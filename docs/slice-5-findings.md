@@ -16,6 +16,7 @@ up as a measurement).
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
+| F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
 
 ---
 
@@ -273,4 +274,85 @@ run since this stack was last cycled. `tablePresent=true` is the fact the page
 needs, and the four `not_covered` exclusions rendered on the Spend page come
 from this block, not from us. `clients before=7 after=7` is the revocation
 proof: the client minted for each call left no residue.
+
+---
+
+## F20 — the spend ledger was unreachable on a stock stack: the grant `--url` was the internal plain-HTTP data lane
+
+**Task 10 defect, found by Gate-C-style scrutiny of `readBrainUsage` against the
+production shape.** `src/ops/usage.ts` used ONE endpoint for two different jobs:
+it passed `mcpEndpoint()` — in compose, `http://gbrain-serve:3131/mcp` — to
+`mcp.grant` as `--url` AND dialed it for `get_usage`. gbrain validates a grant's
+`--url` with `assertSecureEndpoint`/`normalizeMcpUrl` and refuses a non-loopback
+plain-HTTP endpoint. The grant is only credential-delivery bookkeeping (with
+`credentialsOut` the token lands in a file, and the `get_usage` MCP call is a
+separate fetch), so the URL that must be reachable is NOT the URL gbrain will
+accept. The host-run contract test set `GBRAIN_MCP_URL=https://localhost:8443/mcp`,
+so it exercised the HTTPS path and never saw the stock failure.
+
+Reproduction from production shape — inside the stock `gbrain-ops` container,
+which sets neither `PUBLIC_URL` nor `GBRAIN_MCP_URL`:
+
+```bash
+docker exec brainstand-gbrain-ops-1 bun -e \
+  "import {readBrainUsage} from '/app/src/ops/usage.ts'; readBrainUsage(1).then(u=>console.log('OK',JSON.stringify(u.coverage))).catch(e=>{console.error('ERR',e.message);process.exit(1)})"
+```
+
+```text
+ERR mcp.grant (usage) failed (exit 1)
+```
+
+The message the wrapper swallowed, from the same `--url` gbrain was handed:
+
+```bash
+docker exec brainstand-gbrain-ops-1 gbrain mcp grant bs-usage-probe \
+  --harness generic --profile operator \
+  --url http://gbrain-serve:3131/mcp --token-ttl 300 --dry-run --json
+```
+
+```json
+{"status":"error","reason":"mcp_setup_failed","message":"Use HTTPS for credential delivery; HTTP is supported only on loopback"}
+```
+
+The measured product consequence, `GET /api/spend?days=30` (admin session):
+
+```text
+"brain": null
+...
+"coverage": { ..., "brainReachable": false }
+```
+
+### Fix
+
+`src/ops/usage.ts:76` adds `grantEndpoint()`, which mirrors the product's one
+grant-URL convention, `mcpUrl()` (`src/control/connections.ts:496`): `PUBLIC_URL`
+when configured, else loopback (`http://127.0.0.1:3131/mcp`). `readBrainUsage`
+now passes THAT to `mcp.grant` (`src/ops/usage.ts:94,101`) and keeps
+`mcpEndpoint()` (`src/ops/usage.ts:48`) for the actual `get_usage` fetch, so the
+data lane still dials `http://gbrain-serve:3131/mcp` inside compose and the
+public HTTPS URL under `GBRAIN_MCP_URL`. The helper is local rather than imported
+because the control-plane DB module graph must not enter the ops process (S2);
+it is the same deliberate mirroring the file already uses for `grantedClientId`.
+No compose env was added: the ops service correctly carries no `PUBLIC_URL`, and
+the loopback default is what gbrain accepts.
+
+After the fix, the same in-container call:
+
+```text
+OK coverage={"source":"gateway.chat","loggedSince":null,"tablePresent":true,"pricedCalls":0,"unpricedCalls":0,"notCovered":["failed chat calls (budget-tracker owns pessimistic in-flight spend)","subagent raw-SDK calls","embeddings (embedding-pricing.ts unit)","calls made before migration v140 / sink registration"]}
+```
+
+And `GET /api/spend?days=30` on the rebuilt stock stack:
+
+```text
+brainReachable=True
+brainIsNull=False
+brain.windowDays=30
+brain.coverage.source=gateway.chat
+brain.coverage.tablePresent=True
+brain.totals.calls=0
+```
+
+The `brain` block is no longer null and `coverage.brainReachable` is `true`;
+`calls=0` is the empty ledger, not the F20 failure.
 
