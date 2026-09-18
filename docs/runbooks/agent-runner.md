@@ -174,9 +174,9 @@ What each half does, and what to expect:
 
 | Surface | With the token empty | With the token set |
 |---|---|---|
-| `GET /api/health` → `runner.state` | `disabled` | `never_claimed`, or `connected` while a claim is live |
+| `GET /api/health` → `runner.state` | `disabled` | `connected` while a runner is polling (`RUNNER_SEEN_WINDOW_MS`, 50 s) or holding a live lease; `never_claimed` once the last sighting ages out |
 | `POST /api/runs/claim` (runner bearer) | `503 {"error":"runner_disabled"}` — measured by Gate B's B10 | `401 {"error":"unauthorized"}` for an empty, absent or wrong bearer — measured live here |
-| `POST /api/schedules` with `jobType: agent_prompt` | `409 runner_not_enabled`, with `state` and `lastSeenAt` | same 409 unless a claim is **live** |
+| `POST /api/schedules` with `jobType: agent_prompt` | `409 runner_not_enabled`, with `state` and `lastSeenAt` | accepted (`201`) while a runner is **seen** — idle and long-polling counts, and that is the point of D2 |
 
 The disable/enable pair was **not re-run while writing this document**: Gate B is executing that exact
 sequence as its B10 leg and Gate C covers it again as C12, and two agents flipping `RUNNER_TOKEN` and
@@ -198,7 +198,29 @@ not re-run here. What this document did run independently is the mechanic behind
 `RUNNER_TOKEN` in the child environment renders both services' token empty — see *Provenance*) and the
 health read in step 3.
 
+> **D2 changed two lines of that log.** The restored lane now reads `connected`
+> (`{"state":"connected","lastSeenAt":"…","version":"2.1.274"}`) instead of `never_claimed`/`null`,
+> because a runner that is polling **has been seen** — and the B12 third state is now the IDLE read,
+> taken after a claim request that consumed nothing. The refusal text moved with it (below). The
+> `disabled` half of the log is unchanged: an empty `RUNNER_TOKEN` still short-circuits to `null`/`null`
+> without consulting the sighting record at all.
+
 ## "What did the 3am agent do?"
+
+**Getting in.** The console's door is a **sign-in page** (`src/console/pages/SignIn.tsx`, the `signin`
+phase of `src/console/App.tsx`'s `phaseFor`, F18). A returning operator is asked to sign in with their
+own account — the page posts `/api/auth/sign-in/email` — because the session probe `GET
+/api/wizard/state` is `requireAdmin` and answers **401** to a request that carries no session. A wrong
+password is answered in words (`That email and password do not match an account. Check them and try
+again.`), not with the raw 401; every other refusal keeps the server's own text, including Better Auth's
+`403 Invalid origin`, which is deliberately **not** read as a bad password. The fresh-install form is
+still there for a box that genuinely has no admin, and its own `already_bootstrapped` refusal now routes
+to sign-in instead of printing the code. **Before F18 the bundle had no sign-in page at all**: a
+returning operator landed on "Create the first admin" and every submission was refused
+`already_bootstrapped` — a 409 from a form that had nothing left to do — so a lane that was running
+perfectly was unreachable from its own console. The page's existence and the two measured screens
+(`h1 = "Create the first admin"` before, `h1 = "Sign in"` after) are **F18's** measurements, in
+[`docs/slice-4-findings.md`](../slice-4-findings.md), not re-run here.
 
 Console: **`/runs`**. The list, and then a detail that renders the prompt, the tool-call timeline, the
 token counts, the cost, the diff and the revert button. That page is the answer to the question, and
@@ -419,6 +441,30 @@ agent's prose — the per-call rows carry the upstream HTTP status, and nothing 
 `agent_failed` run is never re-run (D11). Fix the key, then `POST /api/schedules/:id/run-now` if you
 want the work redone now.
 
+**This dev stack's credential is a rotating host secret, and the refresh is what revokes it.**
+`~/.claude/.credentials.json` is rewritten whenever the machine's Claude Code refreshes its OAuth
+token, and that refresh **invalidates the previous access token** — so the row stored here starts
+answering `401 authentication_error` / `OAuth access token has been revoked.` with nothing changed in
+this repository. Measured on 2026-09-18 (both halves of the same minute, so the contradiction is not a
+stale reading): the file's token authenticated upstream directly — a `POST /v1/messages` with the
+gateway's own auth shape (`Bearer` + `anthropic-beta: oauth-2025-04-20`) answered `200` — while the
+stored row answered `401 OAuth access token has been revoked.`, and its `expiresAt` was 5.1 h out. A
+rotation is therefore a **maintenance window, not a fix**: store the key, then run the work that needs
+it immediately, and re-check the file's mtime and `expiresAt` before blaming the product for a fresh
+401.
+
+**The e2e family's own cycles can undo a rotation, so a rotation made before a suite run may not be
+there when the money legs reach the gateway.** `restore.e2e.test.ts` drops and reloads the control
+database from a backup, and the upgrade gate's rollback restores a volume snapshot; either can put back
+a `secrets` generation that predates the rotation (measured: a version stored at 11:41:55 was gone from
+the control DB after the next pass's cycle, and the money legs answered the same 401). Re-provision
+**after** a cycle, not before it — the e2e file's own precondition message says the same thing
+("nothing re-provisions that credential … after such a cycle"), and the value to store is the host's
+current Claude Code token. Record who rotated it and when: both 2026-09-18 rotations were host-side
+acts by agents working this slice, v1 → v2 at 16:41:55Z and again to a fresh version during the
+verification passes, each storing the token out of `~/.claude/.credentials.json` with the value never
+printed.
+
 **Two budgets, two different piles of money (U9).** Our cap is per run:
 `schedules.agent_budget_usd` → `agent_runs.budget_usd`, metered call by call in `agent_run_usage`,
 checked **before** the gateway forwards and again **mid-stream**, so a single expensive request is
@@ -439,28 +485,31 @@ are not the same number.
 | State | Meaning |
 |---|---|
 | `disabled` | `RUNNER_TOKEN` is unset or whitespace. The lane is off — the configuration fact and the refusal are the same fact. |
-| `never_claimed` | The lane is configured and **no claim is live**. Either no runner has ever claimed, or the last one's lease lapsed. |
-| `connected` | A claim is live: an `agent_prompt` run inside its lease. **The only green state.** |
+| `never_claimed` | The lane is configured and **no runner has been seen in `RUNNER_SEEN_WINDOW_MS` (50 s)**: either none has ever polled, or the last one has stopped polling. A live lease also keeps the lane out of this state, so "no fourth word" still holds. |
+| `connected` | A runner is there: seen within the window (a claim request that found nothing still counts — D2), or holding a live `agent_prompt` lease. **The only green state.** |
 
-**"The runner is enabled" is not "the runner is connected."** Read `lastSeenAt` with the state, because
-`never_claimed` is also where "configured, claimed once, lease since lapsed" lands, and `null` versus a
-timestamp is the honest discriminator — `null` means literally never, a timestamp means a runner was
-here and is not any more. Measured live on this stack while the runner container was stopped but the
-token was set:
+**"The runner is enabled" is not "the runner is connected."** The green word is earned by a **sighting**:
+`runner_presence` gets a row on every `POST /api/runs/claim`, written before anything is claimed, so a
+runner that is long-polling an empty queue is `connected` — and a runner that stopped polling falls back
+to `never_claimed` 50 s later. Read `lastSeenAt` with the state: `null` means literally never, a
+timestamp means a runner was here and is not any more. Measured live on this stack (runner container
+stopped and restarted by hand, `RUNNER_TOKEN` set throughout):
 
 ```
-{"state":"never_claimed","lastSeenAt":"2026-09-17T17:44:38.545Z","version":null}   # was here, is not now
-{"state":"never_claimed","lastSeenAt":null,"version":null}                          # never claimed
-{"state":"connected",    "lastSeenAt":"2026-09-17T17:58:03.004Z","version":null}   # a claim is live
+15:26:23  {"state":"connected",    "lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}   # polling
+15:26:37  {"state":"connected",    "lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}   # stopped, inside the window
+15:27:40  {"state":"never_claimed","lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}   # window lapsed
+15:27:49  {"state":"connected",    "lastSeenAt":"2026-09-18T15:27:49.629Z","version":"2.1.274"}   # restarted, first poll
 ```
 
-The third reading was caught while a runner held a claim (Gate B's, running as this was written), which
-is the whole difference the state is there to show: the same lane, the same `lastSeenAt` column, and
-only one of the three states means "something is listening right now".
+The third reading is the one to read twice: it is the same lane, the same `lastSeenAt` column, and only
+the state moved — because the window is the only thing that lapsed.
 
-`version` is always `null` today, deliberately: the ledger records *who* claimed (`claimed_by`), never
-which harness build, and a fabricated version would be worse than an absent one. The harness version
-lives on `agent_runs.harness_version`, written by the claim path.
+`version` is the harness version the last-seen runner reported **in the request that recorded it**
+(D4's `harnessVersion`), and it is `null` only when no runner has ever been seen. It is the last
+sighting's version, not a claim about the build running right now: a runner that upgrades and polls
+again replaces it. No runner id is projected — the row is keyed by one, and `/api/health` carries no
+client id of any kind.
 
 ### Alerts this lane raises
 
@@ -481,17 +530,24 @@ reachable without a session.
 Three related names, three different surfaces — do not read one as another:
 
 - The **health state** is `never_claimed`. That is what you look at.
-- The **refusal you get** when you try to create an `agent_prompt` schedule with no runner connected is
+- The **refusal you get** when you try to create an `agent_prompt` schedule with no runner seen is
   `409 runner_not_enabled`, and its body carries `state` and `lastSeenAt` plus a detail that names the
-  fix. Measured live:
+  fix. Measured live on this stack, 63 s after the runner container was stopped by hand (the window had
+  just lapsed, and the detail names the window — it never claims nothing has *ever* claimed a run,
+  which was false about a runner that is merely slow to poll):
 
   ```
-  POST /api/schedules {"name":"runbook-probe-…","connectionId":"…","preset":"nightly-agent-briefing"}
-  -> 409 {"error":"runner_not_enabled","state":"never_claimed","lastSeenAt":null,
-          "detail":"No agent runner is connected: nothing has claimed any agent run. Start the runner
-                    (docker compose --profile runner up -d agent-runner) and try again."}
+  POST /api/schedules {"name":"d2-never-claimed-probe","connectionId":"…","preset":"nightly-agent-briefing"}
+  -> 409 {"error":"runner_not_enabled","state":"never_claimed","lastSeenAt":"2026-09-18T15:26:23.599Z",
+          "detail":"No agent runner has been seen: no claim request has reached the control plane in the
+                    last 50s (lastSeenAt is when one last did). Start the runner
+                    (docker compose --profile runner up -d agent-runner) and try again — a runner that
+                    is polling is accepted here."}
   schedule row created? False
   ```
+
+  With the same container **running**, the same body is accepted (`201`): the create gate asks whether a
+  runner has been seen, and a long poll with an empty queue is a sighting.
 
 - The **claim refusal code** `runner_never_seen` means something narrower: a claim arrived **without a
   runner id**, so no run was claimed and none was consumed. That is a runner bug, not an operator
@@ -615,6 +671,14 @@ measurements (B10/B11/B12/B1, and its `run1.txt`), attributed as such. Also not 
 `/dev/urandom` generator line (`scripts/install.sh`'s own; this Windows shell has no `/dev/urandom`),
 and the runner's own startup refusal without `RUNNER_TOKEN`, which is read from `src/runner/main.ts`
 rather than exercised — starting the container to watch it refuse would toggle the lane.
+
+**Extended 2026-09-18, and by whom.** *The three health states*, the sighting-window blockquote and the
+refusal text under *`runner_never_seen`* were measured on this stack on **2026-09-18** by the agent that
+changed the gate (F19) — those readings are the ones quoted there, not re-run by the file's original
+author. *Getting in* is **F18's** measurement by the agent that built the sign-in page, quoted from the
+live bundle in a fresh browser profile. This pass (the slice-4 close-out re-verification, 2026-09-18)
+folded both into [`docs/slice-4-findings.md`](../slice-4-findings.md) as F18/F19 and did **not** re-drive
+the browser or re-toggle the lane.
 
 The run detail and the revert refusal were captured against the control DB generation that existed at
 that moment; the gates cycle the stack, so a fresh `/api/runs` is empty until something runs again.

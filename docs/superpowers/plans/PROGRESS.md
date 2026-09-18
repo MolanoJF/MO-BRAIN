@@ -3,7 +3,7 @@
 **New session? Start with [HANDOFF.md](../../../HANDOFF.md).**
 
 **Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical) · [Slice 4](./2026-09-17-slice-4-agent-runner.md)
-**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3. [docs/slice-4-findings.md](../../slice-4-findings.md) — U1–U8 and P1–P9 statuses, F1–F17, Gate C's measured numbers and real spend.
+**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3. [docs/slice-4-findings.md](../../slice-4-findings.md) — U1–U8 and P1–P9 statuses, F1–F19, Gate C's measured numbers and real spend.
 **Branch:** `slice-4-agent-runner` — **Slice 4 is complete here and is NOT yet merged to `main`** (Slices 0–3.5 are merged on `main`; Slice 3.5 at `202a658`). Slice 4's six verification commands and the two build gates are run and pasted in the Slice 4 section below, with their baselines — **all six are green** (the last two were re-measured after the fix commit `9efc992`). **Next stage is Slice 5 — its plan is not written, and it is blocked on Open Question 2.**
 
 ---
@@ -613,6 +613,92 @@ with 0 fail):
 | `test/contract` | ≥ 83 / 0 | **142 / 0 of 142** | **+59 pass on the baseline; green** |
 | `test/e2e` | ≥ 77 / 0, twice | **104 / 0** twice consecutively | **+27** |
 | `pin.test.sh` / `harness-pin.test.sh` | both arms PASS | both arms PASS | — |
+
+### The final-verification pass (2026-09-18, after the sign-in page and the runner-presence gate landed)
+
+Re-measured on the frozen tree, one command at a time, nothing else against the stack, after the two
+uncommitted product changes of that day (`src/console/pages/SignIn.tsx` + the console's `phaseFor`, and
+`src/agent/runners.ts` + `0007_runner_presence.sql` + the runs/health/schedules routes). Verbatim tails:
+
+```
+$ bun run lint:forbidden
+lint:forbidden clean                          # exit 0
+
+$ bunx tsc --noEmit
+(exit 0, no output)
+
+$ bun test test/unit
+ 628 pass
+ 0 fail
+ 2267 expect() calls
+Ran 628 tests across 46 files. [2.05s]
+
+$ CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control bun test test/integration
+ 434 pass
+ 1 skip
+ 0 fail
+ 1804 expect() calls
+Ran 435 tests across 30 files. [50.80s]
+
+$ bun test test/contract                     # after the dev stack was re-upped (docker port -> 3140/tcp -> 0.0.0.0:3140)
+ 142 pass
+ 0 fail
+ 594 expect() calls
+Ran 142 tests across 14 files. [384.82s]
+
+$ bash test/build/pin.test.sh                # via Git bash, GBRAIN_VERSION=0.50.5.0
+--- expecting SUCCESS at pin 0.50.5.0
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected
+
+$ bash test/build/harness-pin.test.sh        # via Git bash, HARNESS_VERSION=2.1.274
+--- expecting SUCCESS at pin 2.1.274
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected at the harness install
+```
+
+`test/unit` is **628 / 0** (+26 on the close-out pass's 602: the new `test/unit/console-app.test.ts` and
+the console-polish unit tests) and `test/integration` **434 pass / 1 skip / 0 fail of 435** (+6 on 428).
+`test/contract` is unchanged at **142 / 0 of 142**. Both build gates pass both arms.
+
+**`bun test --parallel=1 test/e2e` first came back red twice, and the cause was the credential, not the
+tree.** Both of those runs measured **93 pass / 11 fail** (B5–B8 and C3–C8, C11) with
+`[gate-c] Gate C total model spend = $0.0000000 over 4 run(s)`: every money leg failed because the
+gateway's upstream answered, verbatim, `{"type":"error","error":{"type":"authentication_error","message":
+"OAuth access token has been revoked."}}` — the org's stored `anthropic_api_key` is this machine's Claude
+Code OAuth access token (the runbook's own measured fact) and the CLI's morning refresh revoked it. The
+credential was re-provisioned host-side from `~/.claude/.credentials.json` (value never printed; the
+token authenticated upstream directly with the gateway's own auth shape, `200`), and the two consecutive
+directory runs then measured:
+
+```
+$ bun test --parallel=1 test/e2e           # first, after the credential was re-provisioned
+ 104 pass
+ 0 fail
+ 1011 expect() calls
+Ran 104 tests across 6 files. [1336.39s]
+[gate-c] Gate C total model spend = $0.0656777 over 5 run(s)
+
+$ bun test --parallel=1 test/e2e           # the second, from the state the first left
+ 104 pass
+ 0 fail
+ 1011 expect() calls
+Ran 104 tests across 6 files. [1327.58s]
+[gate-c] Gate C total model spend = $0.0660306 over 5 run(s)
+```
+
+Both are far above the plan's `≥ 77 pass / 0 fail` baseline, and the second started from exactly the
+state the first left (its teardown deletes every fixture and leaves the write Space clean and the lane
+enabled). **The two green runs cost `$0.0656777` + `$0.0660306` = `$0.1317083` of real model spend**;
+the two red passes cost `$0.0000000` (the refusal happens before any upstream connection). One further
+note the next session needs: the e2e family's own cycles (`restore.e2e.test.ts`'s control-DB reload, the
+upgrade gate's rollback) **undo a credential rotation** — measured: a version stored at 11:41:55 was gone
+after the next pass's cycle, four separate re-provisions were needed across these runs, and the gate's
+`beforeAll` requires **exactly one** `anthropic_api_key` row for the org, so a repair must replace that
+row rather than add a version (adding one produced `PRECONDITION FAILED: … (found 2 rows)`). Full
+account: `docs/runbooks/agent-runner.md`, "Rotating the Anthropic key"; `HANDOFF.md`'s live-state block.
 
 The integration `1 skip` is the platform opt-out, not a silent gap: `[fileplane.test.ts] Skipping
 "config.json is written 0600" on win32: NTFS has no POSIX permission bits`. The unit run also echoes two

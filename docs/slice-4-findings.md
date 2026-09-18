@@ -72,6 +72,8 @@ diff). Neither blocks the slice; both change a downstream task's shape, as recor
 | F11 | `delete_page` is **not** on the granted MCP surface (`unknown_operation`) although the grant's `allowedOperations` lists it — `allowedToolsFor` must read the surface, not the grant | `confirmed` |
 | F12 | The Space repos have **no** `user.name`/`user.email` configured, so every commit in them must carry `-c user.name -c user.email` (our `commitAs` does; gbrain's write-through would exit 128) | `confirmed` |
 | F13 | Pre-existing secret residue: 36 credential-delivery journals from earlier slices persist under `GBRAIN_HOME` | `confirmed` |
+| F18 | The shipped console bundle had **no sign-in page**: `App.tsx` read the **401** from `GET /api/wizard/state` (admin-only) as "this box is empty", so a returning operator got the bootstrap form and every submission was refused `already_bootstrapped` | **`contradicted`** (the slice-4 plan's D1) |
+| F19 | A runner that was **present and long-polling right now** read `never_claimed`, because `connected` was defined as a live lease on an `agent_prompt` run — so the first `agent_prompt` schedule could not be created (`409 runner_not_enabled`) on an idle stack, and the refusal said "nothing has claimed any agent run", which was false about that stack | **`contradicted`** (the plan's D2/D12) |
 
 ---
 
@@ -1742,3 +1744,220 @@ s, the write one ~145 ms round trip), and the leg **cannot pass silently** if it
 first call shows up as `forwarded.length !== 0` and a non-empty ledger, so the leg fails on the plan's own
 fourth fact rather than passing on a technicality. The other residual is the C1 fixture's extra slot in
 the second directory run, above — a shape variance of a fixture this finding does not own.
+
+---
+
+## F18 — the shipped bundle had no sign-in page: an auth failure was read as a fresh install
+
+**Status: `contradicted`.** The plan's console work (Task 13) shipped Runs/Schedules UI, but the console
+had no door for a returning operator: `src/console/App.tsx`'s `refresh()` let the **401** from
+`GET /api/wizard/state` fall into `catch { setPhase('bootstrap') }`, and `Bootstrap.tsx` was the only
+thing in the bundle that posted `/api/auth/sign-in/email`. A returning operator therefore landed on
+"Create the first admin", and every submission was refused `already_bootstrapped` — the console was
+unreachable through its own door, which is the first of the two blocking items of the Slice 4 plan's
+"end to end, by hand, once" condition.
+
+### Measured before (fresh browser profile, real origin `https://localhost/`)
+
+The browser was driven with certificate errors ignored at the CDP level (the dev Caddy cert is
+self-signed), so the page is the **live shipped bundle served by the rebuilt-later image**, not a
+scratch re-implementation:
+
+```
+$ (fresh profile) https://localhost/
+h1 = "Create the first admin"
+inputs = ["Organization name","Email","Password (12+ characters)"]
+buttons = ["Create admin"]
+
+$ filling it in with any credentials and submitting:
+"already_bootstrapped"                       # the raw code, printed as the form's error
+
+$ curl -sk https://localhost/api/bootstrap
+{"bootstrapped":true}   HTTP 200             # the stack is bootstrapped; the form is a dead end
+$ curl -sk -X POST https://localhost/api/bootstrap -d '{"email":"someone@example.test",...}'
+{"error":"already_bootstrapped"}   HTTP 409
+```
+
+### Cause
+
+`GET /api/bootstrap → {bootstrapped}` is the discriminator, and it was already being fetched — but its
+answer only ever chose between *bootstrap* and *not bootstrap*. The **session** question was asked with
+`GET /api/wizard/state`, which is `requireAdmin`: an unauthenticated caller gets **401**, and the 401 was
+treated as "this box is empty". The shipped bundle's only sign-in call was inside `Bootstrap.submit`.
+
+### Fix
+
+| File | Change |
+|---|---|
+| `src/console/App.tsx` | New pure `phaseFor(bootstrapped, probe)` — the screen decision, extracted so it is testable; `refresh()` keeps the probe's **status** (`ApiError.status`) instead of collapsing every failure into `bootstrap`; new `signin` phase |
+| `src/console/pages/SignIn.tsx` | **New.** Posts `/api/auth/sign-in/email` (the route the e2e files already use), routes into the app through the same `refresh()`; `signInError()` turns a 401 into a sentence and leaves every other refusal as the server's own words |
+| `src/console/pages/Bootstrap.tsx` | Stays the fresh-install form; its `already_bootstrapped` refusal now **routes to sign-in** (`onSignIn`) instead of printing the code |
+| `test/unit/console-app.test.ts` | **New.** The decision table and the refusal text |
+
+The decision table, in one place: `bootstrapped=false → bootstrap`; `bootstrapped=true` with 401 (no
+session) → **sign-in**; with 403 (a session, just not an admin) → the app, because only an authenticated
+caller can be refused by role and sending them to sign in would loop them; with 2xx → `ready`, or the
+wizard while setup is unfinished; with a 5xx/unreachable probe → sign-in, since `bootstrapped` has
+already ruled out the fresh-install form. No router was added; the console's visual language is unchanged.
+
+### Measured after (same live origin, fresh profile, updated image)
+
+```
+h1 = "Sign in"                       # before: "Create the first admin"
+body = "This brain is already set up. Sign in with your own account to reach the console."
+
+# wrong password (live Better Auth 401 {message, code}):
+"That email and password do not match an account. Check them and try again."
+
+# correct credentials (admin@example.test):
+nav = ["Health","Setup","Members","Connection","Schedules","Runs","Upgrades","Access"]
+h1  = "Health"   → "All components healthy", 4 Space repos listed
+```
+
+`Bootstrap.tsx`'s refusal path is proved at the unit level (`already_bootstrapped` → `onSignIn`); the
+integration `auth.test.ts` still owns the route's own 409.
+
+### Residual
+
+`signInError` deliberately does NOT map 403 to "wrong password". Better Auth answers `403 Invalid origin`
+for an untrusted origin; telling an operator to retype a correct password would be a lie. Only `401`
+(bad credentials) and `429` (rate limit) get sentences; everything else keeps the server's words.
+
+---
+
+## F19 — an idle, long-polling runner was `never_claimed`, so the first agent schedule could not be created
+
+**Status: `contradicted`.** D12 words the create refusal as *"with no runner **ever seen**"*. The
+implementation defined `connected` as **a live lease on an `agent_prompt` run** (`src/agent/runners.ts`,
+two queries against `schedule_runs`), so a runner that was present and polling right now landed in
+`never_claimed` and every `agent_prompt` create was a 409 — while the refusal explained that "nothing has
+claimed any agent run", which was false about that stack. This is the second of the two blocking items of
+the "end to end, by hand, once" condition.
+
+### Measured before (runner profile up, container polling, no run in flight)
+
+```
+$ curl -sk https://localhost/api/health | jq -c .runner
+{"state":"never_claimed","lastSeenAt":"2026-09-18T14:56:06.131Z","version":null}
+
+$ docker logs --tail 1 brainstand-agent-runner-1
+[runner] eca84f132117-fb709b62 up, harness 2.1.274, tools 7 on the closed list   # it IS polling
+
+$ curl -sk -X POST https://localhost/api/schedules -H "cookie: <admin>"
+  -d '{"preset":"nightly-agent-briefing","connectionId":"<writes internal>","name":"d2-repro-before"}'
+{"error":"runner_not_enabled","state":"never_claimed","lastSeenAt":"2026-09-18T14:56:06.131Z",
+ "detail":"No agent runner is connected: nothing has claimed any agent run. Start the runner
+           (docker compose --profile runner up -d agent-runner) and try again."}     HTTP 409
+```
+
+The console renders exactly that `detail` (`Schedules.tsx` joins `code — detail`), which is where the
+operator-facing false sentence came from.
+
+### Cause
+
+The claim route already receives the runner's identity on **every** long poll (`runnerId`,
+`harnessVersion`) and nothing persisted it. `runnerStatus()` therefore had no signal for "a runner is
+here right now, with nothing to do".
+
+### Fix
+
+| File | Change |
+|---|---|
+| `src/control/db/schema.ts` + `0007_runner_presence.sql` + `meta/0007_snapshot.json` | New table `runner_presence` (`runner_id` PK, `last_seen_at`, `harness_version`), **generated** with `bunx drizzle-kit generate --name runner_presence` |
+| `src/agent/runners.ts` | `recordRunnerSeen()` (upsert on the claim request) and the new `runnerStatus()`: `connected` = seen within `RUNNER_SEEN_WINDOW_MS`, **or** holding a live lease; `lastSeenAt`/`version` from the sighting row |
+| `src/control/routes/runs.ts` | `POST /api/runs/claim` records the sighting **before** anything is claimed — including on the empty 204 that is the common case |
+| `src/control/routes/schedules.ts` | The refusal text now names what the gate tests (a sighting inside the window) instead of "nothing has claimed any agent run" |
+| `src/control/routes/health.ts` | Doc only: `version` is real now, and the runner **id** is deliberately not projected |
+| `src/upgrade/digest.ts` | `runner_presence` joins `UNCOUNTED_TABLES` (L9): it is rewritten once per poll and holds no work |
+| `test/integration/{auth,schema,scheduler-routes}.test.ts` | `DECLARED_TABLES` / census / L9 rows; new legs for seen / stale / not-a-sighting, the create gate, and the PK |
+| `test/e2e/slice4.e2e.test.ts` | B10/B11/B12 move to the new contract (below) |
+
+**The contract change a reader must be able to find: `connected` no longer means "holding a live lease".**
+It now means **seen within a bounded window** (`RUNNER_SEEN_WINDOW_MS`), with a live lease kept as a
+second, sufficient condition in the same derivation. `never_claimed` therefore no longer means "no run
+has ever been claimed"; it means no sighting inside the window and no live lease. `lastSeenAt` is where a
+runner last was, and `version` is the harness version it announced in the request that recorded it.
+
+**Scope: not org-scoped, and it cannot be.** The sighting is the claim request, which names a runner and
+**no organization** — one runner container serves the deployment and consumes whichever org's run is
+next — and `/api/health` reads this row **without a session**. So the row carries the runner's identity
+and nothing else: no token, no client id, no connection detail, no org. `/api/health` projects only
+`state`/`lastSeenAt`/`version` (the B12 leg asserts the runner id is absent from it).
+
+**The window: `RUNNER_SEEN_WINDOW_MS = 2 × RUN_CLAIM_WAIT_MS` = 50 s.** `POST /api/runs/claim` holds the
+request for up to `RUN_CLAIM_WAIT_MS` (25 s, deliberately under the common 30 s proxy idle timeout) and
+answers `204`, then the runner loops immediately; presence is written when the request **arrives**. A
+healthy idle runner therefore refreshes its row once per poll (~25 s), so a window at or under one poll
+would report `never_claimed` about a runner that is holding a poll open at that instant — the window
+**cannot** be shorter than one poll. Two polls tolerate exactly one missed or failed poll, which is the
+least a blip may cost, and no more: a longer window would keep a dead runner green. The in-flight gap is
+not this window's job — a runner that is **running** work is not polling — and that is why the live-lease
+check stays in the derivation alongside it.
+
+### Measured after
+
+Raw HTTP, the same body that returned 409:
+
+```
+$ curl -sk -X POST https://localhost/api/schedules -H "cookie: <admin>"
+  -d '{"preset":"nightly-agent-briefing","connectionId":"<writes internal>","name":"d2-after-proof"}'
+HTTP 201
+{"id":"b4e912b7-…","name":"d2-after-proof","preset":"nightly-agent-briefing","jobType":"agent_prompt",
+ "operation":null,"agentPrompt":"Read the pages under this Connection's write space…",
+ "agentModel":"claude-haiku-4-5","agentMaxTokens":16384,"agentBudgetUsd":"2",
+ "agentHarnessVersion":"2.1.274","kind":"calendar","calendarHour":3,"calendarMinute":5, …}
+# the fixture row was deleted again (`DELETE /api/schedules/:id` → 200, count 0)
+```
+
+Health, with the runner idle and polling:
+
+```
+{"state":"connected","lastSeenAt":"2026-09-18T15:25:33.565Z","version":"2.1.274"}   # was never_claimed/null
+```
+
+The window, measured by stopping the container by hand and waiting (`RUNNER_TOKEN` set throughout):
+
+```
+15:26:23  {"state":"connected",    "lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}
+15:26:37  agent-runner stopped
+15:26:37  {"state":"connected",    "lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}  # inside the window
+15:27:40  {"state":"never_claimed","lastSeenAt":"2026-09-18T15:26:23.599Z","version":"2.1.274"}  # window lapsed
+15:27:49  agent-runner restarted
+15:27:49  {"state":"connected",    "lastSeenAt":"2026-09-18T15:27:49.629Z","version":"2.1.274"}  # first poll
+```
+
+And the refusal while the window has lapsed — true about the stack it refuses:
+
+```
+POST /api/schedules {preset:'nightly-agent-briefing', connectionId:<writes internal>}
+HTTP 409
+{"error":"runner_not_enabled","state":"never_claimed","lastSeenAt":"2026-09-18T15:26:23.599Z",
+ "detail":"No agent runner has been seen: no claim request has reached the control plane in the last 50s
+           (lastSeenAt is when one last did). Start the runner (docker compose --profile runner up -d
+           agent-runner) and try again — a runner that is polling is accepted here."}
+schedule row created? False
+```
+
+### Which legs moved, and why (no assertion was deleted)
+
+| Leg | Was | Now |
+|---|---|---|
+| B10 restored | `never_claimed`, `version: null` | `connected` with `lastSeenAt` set and `version == HARNESS_PIN` — the restored container is polling, and the version it announces is the one the row carries (D2/D12). The `disabled` half of B10 is unchanged. |
+| B11 control | `409 runner_not_enabled` ("no claim is live") | `201` + the created row (registered in `FIXTURE_SCHEDULES`). Precedence is still the leg: the unpriced body stops at `400 unpriced_model`, the priced one now proves it got **past** the gate. |
+| B12 | live `never_claimed` read | The third reading is now the **idle** one, taken deterministically: the leg asserts the queue is empty (B2's own SQL), makes a claim request that consumes nothing (204), and then reads `connected`/`version == HARNESS_PIN` with `lastSeenAt` at that request. Under the old live-lease reading that exact sequence left the lane `never_claimed`. The three-word vocabulary assertions and the no-token/no-client-id scan are unchanged. |
+| `scheduler-routes.test.ts` | — | New: seen → `connected` with the announced version; stale → `never_claimed` with `lastSeenAt`; no id/no version → no row; create accepted while seen, refused when the sighting ages out; the refusal detail no longer says "nothing has claimed" and does name the window. Its `beforeEach` clears `runner_presence`, because the row is deployment-wide and every other file in that directory claims through the route. |
+
+### Residual / incidental
+
+- **A pre-existing partial mock made `test/integration/scheduler-routes.test.ts` unloadable on its own**
+  (`Export named 'gitPathExists' not found in module opsClient.ts`, from `6cf53a8`'s addition of the
+  export; `revert.ts` is loaded by the app graph, and no test mock carried the export). The full
+  `bun test test/integration` run tolerated it by module-graph reuse; a single-file run did not. **Fixed
+  here** by mirroring `gitPathExists` in that file's mock — the same rule the file's own comment states.
+  Reproduced at `HEAD` before the fix with a scratch copy of the committed file, which failed identically.
+- **`lastSeenAt` never moves backwards and never becomes `null` once a runner has been here:** it is the
+  later of the sighting row and the most recent agent claim's `started_at`. Without that fallback the
+  migration window (before the runner's first poll) would report `null` — "literally never" — about a
+  deployment that ran work yesterday, which is the honesty the old comment claimed and this keeps.
+- **Nothing about the runner's own identity reaches `/api/health`.** `state`, `lastSeenAt` and `version`
+  are still the whole vocabulary (S3c, `openAlerts()`' discipline).
