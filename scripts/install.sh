@@ -19,6 +19,12 @@ if [ -e "$ENV_PATH" ]; then
   exit 1
 fi
 
+# Preflight BEFORE any secret is generated: a host that cannot run the stack
+# must not end up holding an ENCRYPTION_KEY it will never use.
+if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+  bash "$(dirname "$0")/preflight.sh" || exit $?
+fi
+
 DOMAIN="${DOMAIN:-}"
 if [ -z "$DOMAIN" ]; then
   read -r -p "Domain for this brain (e.g. brain.acme-co.com): " DOMAIN || true
@@ -89,6 +95,13 @@ fi
 
 # Project dir is compose/ (first -f), so without --env-file Compose would
 # look for compose/.env and miss the secrets we just wrote at $ENV_PATH.
+echo "Pulling pinned images (${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain})…"
+if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; then
+  echo "Could not pull the pinned Mobrain images." >&2
+  echo "On an air-gapped or registry-less host, build them locally instead:" >&2
+  echo "  docker compose --env-file \"$ENV_PATH\" -f compose/docker-compose.yml -f compose/docker-compose.build.yml build" >&2
+  exit 16
+fi
 docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml up -d --wait
 
 cat <<EOF
