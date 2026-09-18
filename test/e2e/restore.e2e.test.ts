@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runBackup } from '../../scripts/backup.ts';
 import { runRestore } from '../../scripts/restore.ts';
-import { callOps, seedSpace } from '../../src/control/opsClient.ts';
+import { callOps, opsHealthy, seedSpace } from '../../src/control/opsClient.ts';
 
 const SKIP_RESTORE_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_RESTORE_E2E';
 
@@ -65,10 +65,45 @@ async function probeDockerCompose(): Promise<boolean> {
 
 const dockerAvailable = await probeDockerCompose();
 
+/**
+ * `up -d --wait` gates on POSTGRES' healthcheck; gbrain-ops declares none (only
+ * postgres does), so compose is satisfied once that container is RUNNING —
+ * which is not the same instant as the host being able to reach the ops RPC
+ * published at 127.0.0.1:3140. This file is the one that cycles the volumes, so
+ * the brain it restores is nearly empty, `runRestore` returns in seconds, and
+ * the host-side `sources.list` below runs only a moment after the containers
+ * were created. Measured here: a 1s poller saw the published surface refuse
+ * connections for ~8s around restore's own `down -v` + `up`, and this leg
+ * failed in the directory run and passed alone minutes later on identical code
+ * — a readiness race, not a failed restore.
+ *
+ * Bounded (Ruling 30): a genuinely dead ops surface still fails the assertion
+ * this guards instead of hanging the suite, and no assertion changes — this
+ * waits for the surface the assertion reads THROUGH, exactly as slice1 waits on
+ * both HTTP surfaces before reading them. `opsHealthy()` is the shipped probe
+ * (GET /healthz, unauthenticated); the thing awaited is another container
+ * publishing a port, so it is a real poll and no fake clock can advance it.
+ */
+async function waitForOpsRpc(timeoutMs = 120_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await opsHealthy()) return;
+    await Bun.sleep(500);
+  }
+  throw new Error(
+    `the ops RPC at ${process.env.OPS_RPC_URL ?? 'http://127.0.0.1:3140'} never answered /healthz `
+      + `within ${timeoutMs}ms`,
+  );
+}
+
 beforeAll(async () => {
   if (!dockerAvailable) return;
   dir = await mkdtemp(join(tmpdir(), 'bs-restore-'));
   await compose('up', '-d', '--wait');
+  // The file's own first host-side call is callOps('init') below: same surface,
+  // same cold-stack window. A real poll, not a fake clock — the thing awaited is
+  // another container binding its port.
+  await waitForOpsRpc();
 
   // Virgin CI stacks need init before sources.add. Re-init on an existing
   // brain may exit non-zero (dim mismatch / already templated) — that is fine.
@@ -158,6 +193,11 @@ describe('restore', () => {
     expect(report.ok).toBe(true);
     expect(report.doctorExitCode).toBe(0);
 
+    // The stack is up, but THIS read is a host-side one: it goes through
+    // gbrain-ops' published port, and `up -d --wait` gates on postgres alone
+    // (gbrain-ops has no healthcheck). Wait for the surface the assertion reads
+    // before asserting on it.
+    await waitForOpsRpc();
     const search = await callOps<{ sources?: unknown[] }>('sources.list', {}, { json: true, timeoutMs: 120_000 });
     expect(search.ok).toBe(true);
 
