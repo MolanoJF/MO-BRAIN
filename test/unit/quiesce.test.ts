@@ -5,6 +5,7 @@ import { SWAP_SERVICES } from '../../scripts/upgrade.ts';
 
 function fakeOps(lines: string[], status: { running: boolean; workers: unknown[] } | null): OpsCaller {
   return {
+    kind: 'stub',
     async auditTail(): Promise<string[]> { return lines; },
     async supervisorStatus() { return status; },
   };

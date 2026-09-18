@@ -211,6 +211,7 @@ function writeAuditFixture(events: unknown[]): string {
 /** The negative fixtures parse a local file; the status read is a stub so the
  *  fixture does not depend on a live supervisor. */
 const staticOps: OpsCaller = {
+  kind: 'stub',
   auditTail: async () => [],
   supervisorStatus: async () => ({ running: false, workers: [] }),
 };
@@ -228,6 +229,7 @@ const AUDIT_TAIL_PROGRAM = [
 /** A slice0-scoped OpsCaller: the supervisor A7 starts lives in the slice0
  *  harness, so its audit must be read there, not from the main stack's ops. */
 const slice0OpsCaller: OpsCaller = {
+  kind: 'stub',
   async auditTail() {
     const r = await composeExec('gbrain-ops', ['bun', '-e', AUDIT_TAIL_PROGRAM]);
     if (r.exitCode !== 0) return [];
@@ -498,6 +500,7 @@ describe('Slice 3.5 seam gate A', () => {
     const cleanEventLiveWorker = await verifySupervisorDrained({
       auditDir: writeAuditFixture([{ event: 'shutting_down', exit_code: 0, reason: 'SIGTERM' }]),
       ops: {
+        kind: 'stub',
         auditTail: async () => [],
         supervisorStatus: async () => ({ running: false, workers: [{ pid: 4242 }] }),
       },

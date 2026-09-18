@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { UpgradeContext } from './types.ts';
-import { callOps, auditTail as httpAuditTail } from '../control/opsClient.ts';
+import { type OpsCaller, httpOpsCaller, relayOpsCaller } from '../control/opsCaller.ts';
+export { type OpsCaller, httpOpsCaller, relayOpsCaller } from '../control/opsCaller.ts';
 
 /** Stop order (D3, D13): every writer drains before the last one — gbrain-ops —
  *  goes down, leaving Postgres as the only live process. resume() runs the
@@ -168,80 +169,6 @@ async function sh(argv: string[], timeoutMs: number): Promise<{ exitCode: number
     ]);
     return { exitCode, stdout, stderr };
   } finally { clearTimeout(timer); }
-}
-
-/** Feed text to a command's stdin — argv array only; the text never reaches
- *  argv, so a credential in it is never a credential in `ps` (S3c). */
-async function feedString(argv: string[], input: string, timeoutMs = 60_000) {
-  const p = Bun.spawn(argv, { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
-  const timer = setTimeout(() => p.kill(), timeoutMs);
-  try {
-    await p.stdin.write(input);
-    await p.stdin.end();
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
-    ]);
-    return { exitCode, stdout, stderr };
-  } finally { clearTimeout(timer); }
-}
-
-export type OpsCaller = {
-  auditTail(lines: number): Promise<string[]>;
-  supervisorStatus(): Promise<{ running: boolean; workers: unknown[] } | null>;
-};
-
-/** Direct HTTP, opsClient.ts's own convention. Works wherever ops publishes
- *  a reachable port — compose/docker-compose.dev.yml does, for Gate A and
- *  test/e2e. This is the default `verifySupervisorDrained` falls back to. */
-function httpOpsCaller(): OpsCaller {
-  return {
-    auditTail: (lines) => httpAuditTail(lines),
-    async supervisorStatus() {
-      const r = await callOps<{ running?: boolean; workers?: unknown[] }>(
-        'jobs.supervisorStatus', {}, { json: true, timeoutMs: 30_000 },
-      );
-      return r.json ? { running: !!r.json.running, workers: r.json.workers ?? [] } : null;
-    },
-  };
-}
-
-/**
- * Production-safe: reach ops through `compose exec -T gbrain-ops bun -e`,
- * the same relay scripts/restore.ts:170-182 already uses. Production
- * publishes no ops host port (S2), so a bare host-side fetch to
- * OPS_RPC_URL only works in dev/test, never here.
- */
-function relayOpsCaller(compose: readonly string[]): OpsCaller {
-  const relay = async <T>(path: string, body: unknown): Promise<T> => {
-    const program = `
-      let input = '';
-      for await (const chunk of process.stdin) input += chunk;
-      const base = process.env.OPS_RPC_URL ?? 'http://127.0.0.1:3140';
-      const res = await fetch(base + ${JSON.stringify(path)}, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.OPS_RPC_TOKEN },
-        body: input,
-      });
-      process.stdout.write(await res.text());
-    `;
-    const r = await feedString(
-      [...compose, 'exec', '-T', 'gbrain-ops', 'bun', '-e', program], JSON.stringify(body),
-    );
-    if (r.exitCode !== 0) throw new Error(`ops relay ${path} failed: ${r.stderr}`);
-    return JSON.parse(r.stdout) as T;
-  };
-  return {
-    auditTail: async (lines) => {
-      const r = await relay<{ lines?: string[] }>('/fileplane/audit-tail', { lines });
-      return Array.isArray(r.lines) ? r.lines : [];
-    },
-    supervisorStatus: async () => {
-      const r = await relay<{ json: { running?: boolean; workers?: unknown[] } | null }>(
-        '/rpc', { op: 'jobs.supervisorStatus', params: {}, json: true, timeoutMs: 30_000 },
-      );
-      return r.json ? { running: !!r.json.running, workers: r.json.workers ?? [] } : null;
-    },
-  };
 }
 
 export type SupervisorAuditEvent = Record<string, unknown>;
