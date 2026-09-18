@@ -15,11 +15,13 @@ up as a measurement).
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
+| P7 | The D11 live-stack debt clears through product paths alone — eight admin checklist acks settle the `awaiting_admin_decision` ledger row to `applied`, `/schedules`' alert ack empties `/api/health`'s `scheduleAlerts`, and `DELETE /api/members/:id` offboards the residue — and the one path that does not exist is a purge for a revoked Connection (F22) | `confirmed` |
 | U1 | `compose/Caddyfile`'s public `@gbrain` route publishes an unauthenticated Prometheus `/metrics` surface naming brains, Spaces, models or spend | `contradicted` — the pinned `gbrain-serve` answers `401` with `{"error":"Admin authentication required"}`; no body, no cardinality. S1's argument does not need to be extended to `/metrics` on this pin |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 | F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
 | F21 | Mobrain's `SEARCH_MODES` offers ids `fast` and `thorough`, but the pinned gbrain `0.50.5.0` accepts only `conservative \| balanced \| tokenmax`; `search.mode` is stored verbatim and the resolver silently falls back to `balanced`, so the product's mode picker does not change the search pipeline | `confirmed` — fixed here |
+| F22 | A revoked Connection has no product path to purge it: `POST /api/connections/:id/revoke` exists, but there is no `DELETE /api/connections/:id` route and the console offers no control, so a revoked row survives until its member is offboarded (which cascades) — and it cannot be offboarded if a live schedule still holds the member's Connection. The plan's Task 14 labels this `F2` | `confirmed` — deliberately deferred (reason in F22 below) |
 
 ---
 
@@ -545,4 +547,274 @@ Gates: `bunx tsc --noEmit`, `bun run lint:forbidden`, `bun test test/unit` (649
 pass / 0 fail), `bun test test/integration/wizard.test.ts` (10 pass / 0 fail),
 and `bun test test/contract/config.contract.test.ts test/contract/init.contract.test.ts`
 (8 pass / 0 fail) all green.
+
+---
+
+## P7 — the live-stack debt clears through product paths, and the one path that does not exist
+
+**Task 14.** D11 forbids clearing the dev stack's debt with SQL and requires each item be driven
+through the product, with any path that turns out not to exist recorded as an `F`. The stack was
+signed into as `admin@example.test` over Caddy at `https://localhost:8443`, and every mutation below
+is a published route — no `psql`, no `UPDATE`, no `DELETE` outside an API handler.
+
+Two surfaces make up the claim, because `/api/health` does not carry upgrade state: `scheduleAlerts`
+comes from `GET /api/health` (unauthenticated, kinds only), and the pending decision comes from
+`GET /api/upgrades/pending-decisions` — the same predicate preflight's own `PENDING_CHECKLIST`
+refusal (`scripts/upgrade.ts:325`) reads.
+
+### Step 1 — the before state
+
+```json
+{
+  "ok": true,
+  "components": {
+    "controlDb": "ok",
+    "ops": "ok"
+  },
+  "gbrainVersion": "0.50.5.0",
+  "pin": {
+    "declared": "0.50.5.0",
+    "observed": "0.50.5.0",
+    "matches": true
+  },
+  "repos": [
+    {
+      "sourceId": "customers",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    },
+    {
+      "sourceId": "internal",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    },
+    {
+      "sourceId": "shared",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    }
+  ],
+  "scheduleAlerts": [
+    {
+      "id": "22e85d5e-371d-4d4b-b495-6e9b908c484a",
+      "kind": "agent_budget_exceeded",
+      "scheduleId": "gate-c-budget-mu7e7tlm",
+      "at": "2026-09-18T20:17:34.210Z"
+    },
+    {
+      "id": "79747aa2-1c19-4af4-9012-985f4f7aefed",
+      "kind": "lease_expired",
+      "scheduleId": "gate-c-kill-mu7e7tlm",
+      "at": "2026-09-18T20:17:12.037Z"
+    },
+    {
+      "id": "e1c25021-efbf-451e-a9e9-93d6f59574b2",
+      "kind": "overlap_killed_previous",
+      "scheduleId": "94814788-9a8c-4eed-8d4d-b21c16a3814d",
+      "at": "2026-09-17T06:14:02.601Z"
+    },
+    {
+      "id": "4ea66784-b885-400d-97ea-abd3dbb99107",
+      "kind": "connection_revoked",
+      "scheduleId": "c7b38618-a1df-4bd0-b4ec-b2819cc6eccb",
+      "at": "2026-09-17T06:13:50.408Z"
+    }
+  ],
+  "runner": {
+    "state": "connected",
+    "lastSeenAt": "2026-09-18T21:38:02.745Z",
+    "version": "2.1.274"
+  },
+  "at": "2026-09-18T21:38:26.560Z"
+}
+```
+
+The stack carried **four** open alert kinds, not the two the task text names. `agent_budget_exceeded`
+and `lease_expired` are residue from the 2026-09-18 Slice 4 Gate C run (`gate-c-budget-mu7e7tlm` /
+`gate-c-kill-mu7e7tlm`) and were added after `HANDOFF.md`'s "two alerts" line was written; the documented
+`overlap_killed_previous` and `connection_revoked` were also still open. `GET /api/upgrades/pending-decisions`
+returned **8** items, all `0.50.2.0`, all on run `run-022b8cfe-c1af-4cb2-a091-dc2f95b77de0` — which is
+also `runs[0]`, so the console's `pendingChecklist(openRun.checklist)` banner (which reads only the latest
+run's checklist) really did show them.
+
+### Step 2 — the eight checklist items, read before each was acknowledged
+
+Each item was read from `GET /api/upgrades/pending-decisions` (id, key, prompt, why) and acknowledged with
+`POST /api/upgrades/checklist/:itemId/ack`. The route is admin-gated and takes **no body**; it answers
+`{ item }` with `state: "acknowledged"` and `decidedBy` set to the admin user id.
+
+| # | key | what the item said | ack result |
+|---|---|---|---|
+| 1 | `pre-0-50-0-0-cutover-attested` | Confirm the 0.50.0.0 coordinated authorization cutover was completed against THIS database, or that the brain was provisioned at 0.50.0.0 or later | `acknowledged` |
+| 2 | `upstream-step-2-host-upgrade` | Run `gbrain upgrade`, restart its services, then `gbrain --version` / `gbrain doctor`; on a partial early migration, recover rather than bulk-authorize | `acknowledged` |
+| 3 | `upstream-step-3-pglite-holders` | Confirm no PGLite holders on the host, or that they were restarted normally; never delete a live lock | `acknowledged` |
+| 4 | `upstream-step-4-hosted-launchers` | Rerun the original installed launcher workflow for any recorded launcher still exporting a write source or `--brain host`; confirm which were repaired | `acknowledged` |
+| 5 | `upstream-step-5-code-source-walk` | Name the source whose Bash parsing / Windows subdir sync failed, back up its files, run a source-scoped full sync with `--no-embed`, review paid embedding before authorizing | `acknowledged` |
+| 6 | `upstream-step-6-unattached-facts` | Keep unresolved references with NULL entity target and provenance; report `skipped_no_page` rather than inventing entity pages; keep a restorable backup | `acknowledged` |
+| 7 | `upstream-step-7-write-results` | `storage_busy` means not applied/queued; inspect `gbrain jobs stats --json` and the job results before restoring unattended schedules | `acknowledged` |
+| 8 | `upstream-step-8-oauth-scopes` | A generic client starts `read`; saving needs an explicit authorized `write` plus operator approval; preserve authorized sessions; verify the intended harness without broadening scopes | `acknowledged` |
+
+All eight recorded `decidedBy = 0arnXQq6gMyaLf30hd2nAlyhwUZjuvRK` (the admin session). Route shape
+discovered from `src/control/routes/upgrades.ts:143` — no body and no content-type requirement. The
+underlying update is conditioned on `state = 'pending'` (`src/upgrade/ledger.ts:145`), so a re-ack
+changes nothing; the route does not read that return value and still answers `200` with the existing
+row.
+
+### Step 3 — the ledger row resolves through the product, as the last item is acked
+
+There is **no route that decides a `playbook_ledger` row directly**, and none is needed: a checklist item's
+acknowledgement is the real judgement, and `ackChecklistItem` settles the version's ledger row to
+`applied` when the last pending item for that version changes (`src/upgrade/ledger.ts:155-168`). After
+item 8:
+
+```text
+GET /api/upgrades/pending-decisions      -> {"pending":[]}
+ledger["0.50.2.0"].state                 -> "applied"
+ledger["0.50.2.0"].decidedBy             -> 0arnXQq6gMyaLf30hd2nAlyhwUZjuvRK
+ledger["0.50.2.0"].updatedAt             -> 2026-09-18T21:38:46.854Z
+last notes line                          -> "2026-09-18T21:38:46.854Z applied — every checklist item
+                                             decided; last was 'upstream-step-8-oauth-scopes',
+                                             acknowledged by 0arnXQq6gMyaLf30hd2nAlyhwUZjuvRK"
+```
+
+`GET /api/upgrades/pending-decisions` is the route that lists availability of undecided work, and it is
+empty. Preflight's refusal reads the same `state = 'pending'` predicate, so a new upgrade run is no
+longer refused with `PENDING_CHECKLIST`.
+
+### Step 4 — the four alerts, through the only acknowledgement surface
+
+`POST /api/schedule-alerts/:id/ack` is member-gated, takes no body, and answers `{ ok: true }`; it is the
+route the `/schedules` page drives. All four open rows were acknowledged by id:
+
+```text
+ack agent_budget_exceeded   (22e85d5e-371d-4d4b-b495-6e9b908c484a) -> {"ok":true}
+ack lease_expired           (79747aa2-1c19-4af4-9012-985f4f7aefed) -> {"ok":true}
+ack overlap_killed_previous (e1c25021-efbf-451e-a9e9-93d6f59574b2) -> {"ok":true}
+ack connection_revoked      (4ea66784-b885-400d-97ea-abd3dbb99107) -> {"ok":true}
+```
+
+Afterwards `/api/health`'s `scheduleAlerts` is `[]` — the open-alert kinds are gone, not merely listed
+elsewhere.
+
+### Step 5 — the residue, and F22
+
+Before: **10 memberships** (1 owner, 8 members, 1 viewer) and **7 active / 3 revoked Connections**. The
+memberships live schedules reference — `slice2-cshared` (connection `7bd6a9b3`, active) and `slice2-cdual`
+(connection `251817a9`, active) — plus `gate-b-throwaway` (connection `b5e64bb4`, revoked) and the admin
+owner are the ones a live route still needs, so they stay. The `gate-b-viewer` viewer is a Slice 3.5 /
+Slice 4 gate identity (`test/e2e/slice4.e2e.test.ts:66`), and `requireRole` 403s without its membership
+(`src/control/rbac.ts:45`), so it too stays.
+
+Removed through `DELETE /api/members/:id` (admin; cascades each member's Connections —
+`schema.ts:171`, `onDelete: 'cascade'` — and never deletes the gbrain source):
+
+| membership | email | what the cascade removed |
+|---|---|---|
+| `f32eec75-7b64-4f12-b8e5-ef8619963e5e` | `slice2-pairing-…` | `8b306f3c` (revoked) |
+| `190593a0-bac1-4c5e-b0ad-2b73dc0c3593` | `slice2-isolated-…` | `afe8db89` (active) |
+| `0f16129c-0c33-4a81-b217-f9c741b5da73` | `slice2-twowrite-…` | `2bbb3121`, `838ceb2d` (active) |
+| `b77578c7-8eee-47da-a6e1-db6152858aa8` | `slice2-ccustomers-…` | `ca6475d4` (active) |
+| `b82fe1b3-de79-4f80-b83b-5fdc31983af4` | `slice2-cinternal-…` | `e94bf2c3` (active) |
+
+The console exposes offboarding (`src/console/pages/Members.tsx:58`, `api.delete('/members/:id')`), and
+the API route exists, so membership deletion is **not** a gap. The residue that remains is the two
+revoked Connections owned by kept memberships (`b5e64bb4` on `gate-b-throwaway`, `a656d51b` on
+`slice2-cdual`): the console's Connection page offers only `POST /connections/:id/revoke`
+(`src/console/pages/Connection.tsx:151`) and there is no `DELETE /api/connections/:id` route
+(`src/control/routes/connections.ts` has none), so the only way to purge one is to offboard the member —
+which cannot be done while a live route still holds the member. That is **F22**; no SQL was used.
+
+After: **5 memberships** (1 owner, 3 members, 1 viewer) and **4 Connections** (2 active, 2 revoked). The
+viewer's path was re-proved after the restore — sign-in succeeded and `GET /api/schedule-alerts` as the
+viewer answered `200`.
+
+### Step 6 — the after state and the diff
+
+```json
+{
+  "ok": true,
+  "components": {
+    "controlDb": "ok",
+    "ops": "ok"
+  },
+  "gbrainVersion": "0.50.5.0",
+  "pin": {
+    "declared": "0.50.5.0",
+    "observed": "0.50.5.0",
+    "matches": true
+  },
+  "repos": [
+    {
+      "sourceId": "customers",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    },
+    {
+      "sourceId": "internal",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    },
+    {
+      "sourceId": "shared",
+      "staleLock": false,
+      "lockAgeSeconds": null,
+      "uncommittedFiles": 0,
+      "unpushedCommits": 0,
+      "branch": "master"
+    }
+  ],
+  "scheduleAlerts": [],
+  "runner": {
+    "state": "connected",
+    "lastSeenAt": "2026-09-18T21:39:42.804Z",
+    "version": "2.1.274"
+  },
+  "at": "2026-09-18T21:39:59.879Z"
+}
+```
+
+Semantic diff, before → after: `scheduleAlerts` goes from four entries to `[]`; `runner.state`,
+`runner.version`, `pin`, `components` and `repos` are byte-for-byte unchanged. The only other moving
+lines are the two clock fields (`runner.lastSeenAt`, `at`) — expected, since the runs are seconds apart.
+`ok` was and stays `true`, and `pin.matches` was and stays `true`.
+
+---
+
+## F22 — a revoked Connection has no purge path; only its member can be offboarded
+
+**Found by Task 14's cleanup; deliberately deferred.** `POST /api/connections/:id/revoke` exists and is
+the console's only Connection-lifecycle control (`src/console/pages/Connection.tsx:151`,
+`src/control/routes/connections.ts:115`). There is **no `DELETE /api/connections/:id`** and no console
+control that deletes a Connection row, so a revoked Connection is permanent residue: the product's only
+route to remove it is `DELETE /api/members/:id`, which cascades every Connection the member owns
+(`src/control/db/schema.ts:171`). That is not a purge of the Connection; it is an offboarding, and it is
+impossible for a member a live schedule still holds — which is exactly the state Task 14 finds the two
+surviving revoked rows in.
+
+The plan's Task 14 Step 5 labels this `F2`; this document continues Slice 4's numbering
+(`F1`–`F19` → `F20`, `F21`), so it is recorded as **F22**.
+
+**Decision: deferred, not fixed here.** Adding a purge is a new destructive admin surface with its own
+blast radius (`agent_runs.connection_id` is `on delete set null` on purpose, so the audit survives;
+`schedules.connection_id` is not null, so a purge must decide what happens to a schedule whose
+Connection is gone) and it is not what Task 14 is for — D11 says record the missing path, not build it
+mid-cleanup. The correct shape is a follow-up slice that adds `DELETE /api/connections/:id` for
+`state = 'revoked'` only, with the schedule interaction stated in the route, a console control, and a
+test; the named owner slice is the next hardening slice after Slice 5 GA. No SQL was reached for in the
+meantime, and the two revoked rows are visible, inert, and explained here.
 
