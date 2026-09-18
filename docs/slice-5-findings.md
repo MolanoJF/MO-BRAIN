@@ -14,6 +14,8 @@ up as a measurement).
 | P2 | Making the compose project name a variable with the legacy value as default leaves the live stack's volume names unchanged | `confirmed` |
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
+| U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
+| U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 
 ---
 
@@ -200,4 +202,75 @@ To unblock, on the machine that owns the release: create the `mobrain` org (or s
 IMAGE_NAMESPACE=mobrain GBRAIN_VERSION=0.50.5.0 HARNESS_VERSION=2.1.274 APP_VERSION=1.0.0 \
   bash scripts/publish-images.sh
 ```
+
+---
+
+## U2 — `operator` carries `admin`; `get_usage` needs no elevation to `full`
+
+**Task 10, Step 1/3.** Upstream's `get_usage` operation declares scope `admin`
+(`gbrain/src/core/ops/usage.ts`), and the plan asks whether the `operator`
+profile actually carries it before reaching for `full`. Measured against the
+pinned binary: **it does.** `gbrain mcp grant` with `--profile operator` returns
+a grant whose own receipt is the evidence:
+
+```json
+"scopes":["admin"],
+...
+"allowedOperations":["add_link","add_tag",...,"get_usage",...],
+"surface":"full","surfaceSetBy":"operator","tokenTtlSeconds":300,"profile":"operator"
+```
+
+`allowedOperations` is the operation snapshot the profile compiles to; `get_usage`
+is in it, and the scope list is exactly `["admin"]`. The source of truth is
+`src/core/grants/profiles.ts`, where `operator: ['admin']` and `full:
+['admin','agent']` — so `full` would add an `agent` scope this read has no
+business holding, and it was not used. The contract test's second leg passing
+against this profile is the operational confirmation.
+
+The pinned binary also publishes the operation in its public tool surface:
+
+```text
+MEASURED tool surface at 0.50.5.0: 136 tools, get_usage present=true
+```
+
+---
+
+## U3 — `get_usage` over the HTTP MCP lane answers with totals and a verbatim coverage block
+
+**Task 10, Step 5.** `src/ops/usage.ts` mints the `operator` client through the
+published ops RPC (`mcp.grant`), takes its access token from the one-time
+private handoff, calls `get_usage` with `POST {mcp}/mcp`
+(`tools/call`, accept `application/json, text/event-stream`), maps
+snake_case → camelCase without altering a value, and revokes the client in a
+`finally`. Nothing read `chat_usage_log` (G2). The window is passed straight
+through and upstream's own `coverage` block is carried verbatim, including all
+four `not_covered` exclusions.
+
+Command:
+
+```bash
+bun test test/contract/usage.contract.test.ts
+```
+
+Verbatim tail:
+
+```text
+bun test v1.3.14 (0d9b296a)
+MEASURED tool surface at 0.50.5.0: 136 tools, get_usage present=true
+MEASURED get_usage(30): calls=0 cost=$0 models=0 phases=0 coverage.loggedSince=null tablePresent=true
+MEASURED get_usage(365): calls=0 unpricedCalls=0 models=0
+MEASURED clients before=7 after=7
+
+ 4 pass
+ 0 fail
+ 7 expect() calls
+Ran 4 tests across 1 file. [8.11s]
+```
+
+`coverage.loggedSince=null` and `calls=0` are honest, not a defect: the dev
+stack's `chat_usage_log` ledger is empty because no `gateway.chat` traffic has
+run since this stack was last cycled. `tablePresent=true` is the fact the page
+needs, and the four `not_covered` exclusions rendered on the Spend page come
+from this block, not from us. `clients before=7 after=7` is the revocation
+proof: the client minted for each call left no residue.
 

@@ -15,6 +15,7 @@ import {
   deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
+import { readBrainUsage } from './usage.ts';
 import { commitAs, diffRange, inspectRepos, probeTreePaths, revertRange } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
@@ -154,6 +155,17 @@ Bun.serve({
         const requested = (body as { lines?: unknown }).lines;
         const lines = typeof requested === 'number' && Number.isFinite(requested) ? requested : 50;
         return json({ lines: await readSupervisorAuditTail(lines) });
+      }
+
+      // D8: gbrain's OWN spend, read through the published `get_usage` MCP
+      // operation. Read-only, no lock. The request carries only a window in
+      // days; the mint/revoke lifecycle lives in readBrainUsage.
+      if (url.pathname === '/usage') {
+        const requested = (body as { days?: unknown }).days;
+        const days = typeof requested === 'number' && Number.isFinite(requested)
+          ? requested
+          : 30;
+        return json(await readBrainUsage(days));
       }
 
       // A3: claim takes the ops-side --credentials-out file once, then deletes it.

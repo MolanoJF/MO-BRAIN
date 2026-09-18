@@ -1,5 +1,6 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
 import type { GitRange, RepoStatus, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
+import type { BrainUsage } from '../ops/usage.ts';
 
 export type { RepoStatus };
 
@@ -137,6 +138,14 @@ export async function deleteCredentialJournal(clientId: string): Promise<{ delet
 export async function auditTail(lines = 50): Promise<string[]> {
   const payload = await post<{ lines?: string[] }>('/fileplane/audit-tail', { lines }, 30_000);
   return Array.isArray(payload.lines) ? payload.lines : [];
+}
+
+/**
+ * D8: gbrain's own spend ledger, as the ops-side `get_usage` read maps it.
+ * Read-only; the mint/revoke lifecycle stays on the ops side of the boundary.
+ */
+export async function brainUsage(days: number): Promise<BrainUsage> {
+  return post('/usage', { days }, 60_000);
 }
 
 export async function opsHealthy(): Promise<boolean> {
