@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Written 2026-09-15; updated 2026-09-18. **Slices 0, 1, 2, 3 and 3.5 are complete on `main`; Slice 4 is complete on branch `slice-4-agent-runner` and is NOT yet merged to `main`** (Slice 3.5 merged at `202a658`). **All six verification commands are green on that branch** — the last two were re-measured on 2026-09-18 after commit `9efc992` closed the six failures the close-out pass left red, and nothing was weakened to get there (numbers below). **Next action: write the Slice 5 plan** — it is not written, and it is additionally blocked on Open Question 2 (the search-mode cost spread must be measured before pricing). No Slice 4 work is on `main`.
+Written 2026-09-15; updated 2026-09-18. **Slices 0, 1, 2, 3, 3.5 and 4 are complete and merged on `main`** — Slice 3.5 at `202a658`, Slice 4 merged at `6ba1754`, which makes `main` the only branch again (it was the only branch before Slice 4 too). **All six verification commands are green** (numbers below): unit `628/0`, integration `434 pass + 1 skip`, contract `142/0`, e2e `104/0` twice consecutively, `lint:forbidden` and `tsc --noEmit` clean, and both build gates passing both arms. **Next action: write the Slice 5 plan** — it is not written, and it is additionally blocked on Open Question 2 (the search-mode cost spread must be measured before pricing).
 
 This file is the cold-start entry point. Historical mid-task resume notes (including “resume at Task 3 re-review” and branch `slice-1-deploy-one-brain`) are obsolete and were removed.
 
@@ -25,7 +25,7 @@ The strategy rests on one bet: **gbrain is a pinned upstream dependency driven o
 | 2 — members + connections | **complete** on `main` (Gates A/B/C green) |
 | 3 — scheduler, `gbrain_command` only | **complete** on `main` (Gates A/B/C green) |
 | 3.5 — deterministic upgrades | **complete** on `main` (Gates A/B/C green; merged 2026-09-17, HEAD `202a658` at merge) |
-| 4 — agent runner | **complete** on `slice-4-agent-runner` (Gates A/B/C green; all six verification commands green) — **not yet merged to `main`** |
+| 4 — agent runner | **complete** on `main` (merged `6ba1754`; Gates A/B/C green; all six verification commands green) |
 
 Do **not** re-execute the Slice 0, 1, 2, 3, 3.5 or 4 plan/gate work. Those are historical records. Slice 4's plan is [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md); its findings and measured spend are [`docs/slice-4-findings.md`](docs/slice-4-findings.md); its runbook is [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md).
 
@@ -98,7 +98,7 @@ Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (
 
 | | |
 |---|---|
-| Branch | `slice-4-agent-runner` — **Slice 4's work, not yet merged**; Slices 0–3.5 are on `main` (Slice 3.5 at `202a658`) |
+| Branch | `main` only — Slices 0–4 all merged (Slice 3.5 at `202a658`, Slice 4 at `6ba1754`) |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
 | Slice 0 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md`](docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md) |
 | Slice 1 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md`](docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md) |

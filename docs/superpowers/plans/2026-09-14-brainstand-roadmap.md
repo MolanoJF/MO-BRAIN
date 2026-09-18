@@ -1,6 +1,6 @@
 # brainstand — Staged Delivery Roadmap
 
-> **For agentic workers:** This is the **stage map**, not an executable plan. **Slices 0–3.5 are COMPLETE on `main`; Slice 4 is COMPLETE on `slice-4-agent-runner` and is NOT yet merged — do not re-execute any of those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
+> **For agentic workers:** This is the **stage map**, not an executable plan. **Slices 0–4 are COMPLETE and merged on `main` — do not re-execute any of those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
 
 **Goal:** Turn gbrain (a 415K-LOC CLI/MCP knowledge system) into a product a team deploys with one `docker compose up` and operates from a web console — with gbrain pinned and upgraded, never forked.
 
@@ -89,7 +89,7 @@ Do not re-litigate these. Each was read out of the source, not inferred.
 
 ## Environment prerequisites
 
-**Current (2026-09-18):** Slices 0–3.5 are complete and merged on `main` (Slice 3.5 merged at `202a658`). Slice 4 is **complete on branch `slice-4-agent-runner`, not yet merged to `main`** — its exit gate is met (see [Slice 4](#slice-4--agent-runner) below). Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 5 — its plan is not yet written, and it is additionally blocked on Open Question 2.**
+**Current (2026-09-18):** Slices 0–3.5 **and Slice 4** are complete and merged on `main` (Slice 3.5 merged at `202a658`, Slice 4 at `6ba1754`), which is the only branch. Slice 4's exit gate is met (see [Slice 4](#slice-4--agent-runner) below) and all six verification commands are green. Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 5 — its plan is not yet written, and it is additionally blocked on Open Question 2.**
 
 The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
 
@@ -220,7 +220,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 4 — Agent runner
 
-**Plan:** [`2026-09-17-slice-4-agent-runner.md`](./2026-09-17-slice-4-agent-runner.md) — **COMPLETE** on `slice-4-agent-runner` (Gates A/B/C green; **not yet merged to `main`**). Findings: [`docs/slice-4-findings.md`](../../slice-4-findings.md). Runbook: [`docs/runbooks/agent-runner.md`](../../runbooks/agent-runner.md). The six verification commands and the two build gates, with their pasted output: [`PROGRESS.md`](./PROGRESS.md).
+**Plan:** [`2026-09-17-slice-4-agent-runner.md`](./2026-09-17-slice-4-agent-runner.md) — **COMPLETE** on `main` (merged `6ba1754`; Gates A/B/C green; all six verification commands green). Findings: [`docs/slice-4-findings.md`](../../slice-4-findings.md). Runbook: [`docs/runbooks/agent-runner.md`](../../runbooks/agent-runner.md). The six verification commands and the two build gates, with their pasted output: [`PROGRESS.md`](./PROGRESS.md).
 
 **Why last of the build stages:** highest risk. Depends on Slice 2 (an identity to run as) and Slice 3 (dispatch).
 
@@ -254,7 +254,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 **Plan:** to be written at this gate.
 
-**Entry gate:** Slice 3.5 exit gate green **and** Slice 4 exit gate green — **both are now met.** Slice 3.5 closed on six green commands and a 77/0 e2e family; Slice 4's three promises are measured in its own section above (branch `slice-4-agent-runner`, not yet merged), and the one defect its gate found is fixed rather than papered over. Upgrades must be deterministic before this stage exists.
+**Entry gate:** Slice 3.5 exit gate green **and** Slice 4 exit gate green — **both are now met.** Slice 3.5 closed on six green commands and a 77/0 e2e family; Slice 4's three promises are measured in its own section above, and the defects its gate and its operator walk found are fixed rather than papered over. Upgrades must be deterministic before this stage exists.
 
 **Scope:** our provisioner stands up the same stack per tenant; the user never sees compose. **N stacks, not one stack with tenants** — gbrain is single-brain-per-`GBRAIN_HOME` with no users table, and `source_id`/`federated_read` is the only isolation axis. This makes upgrade automation load-bearing for the business model, not a nicety. Billing.
 
