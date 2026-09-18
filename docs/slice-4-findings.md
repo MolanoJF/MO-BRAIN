@@ -1262,3 +1262,278 @@ task's own two files reverted to `HEAD`, so it is pre-existing. The mock now car
 stubs (`writeReport`, `cancelRun`, `gitRange`, `gitRevertRange`, `auditTail`); **no assertion was changed
 or weakened** — the full file goes from unloadable to **55 pass / 0 fail**.
 
+---
+
+## F15 — Gate C, the Slice 4 exit gate: the measured numbers, the real spend, and the one promise it disproved
+
+**Where.** `test/e2e/slice4.e2e.test.ts`, `describe('Slice 4 exit gate C')`, C1–C12 (Task 17). Every leg
+runs the REAL `agent-runner` container on the REAL pinned harness against the REAL brain on this dev
+stack (`brainstand-*`, `DOMAIN=localhost`, org timezone **`America/New_York`**, Connection
+`251817a9-…` writing `internal` and reading `customers`, model pinned to `claude-haiku-4-5`). The gate
+also added a named precondition to the file's `beforeAll` (`anthropic_api_key` present, with one
+actionable message and the runbook section named — see "the credential note" below).
+
+### What each leg measured (verbatim from the run logs)
+
+| leg | observation |
+|---|---|
+| C1 | nightly `agent_prompt` materialized **by the leader tick**, not by a route: slot `2026-09-17T03:00`, `fire_at 2026-09-17T07:00:00+00:00` (= 03:00 EDT; the UTC wall of the same instant is `T07:00`, so the slot is the org's clock, not UTC), `attempt 1`, `state pending`, scheduled watermark `05:02:18.716` → `05:02:33.716` with the row count still 1 (a second tick is idempotent on `(schedule_id, slot)`). The pause that made the `pending` observation possible is PROVEN with a sentinel row that survived 33 304 ms — see "the orphaned claim" below |
+| C2 | `claimed_by = 0796bdd1ae59-039764d7` = the **container's** announced id; the scheduler's worker was `c83c9229a86a-bc322e9f`; heads captured for `internal` + `customers`; `gbrain_client_id` minted at claim |
+| C3 | run `succeeded`/`ok`; **`cost_usd` = `SUM(agent_run_usage.cost_usd)` = `$0.0263765` over 2 metered calls**, tokens in 18 / out 276 / cacheRead 17 860 / cacheWrite 18 554, `num_turns 2`, both sides computed in SQL |
+| C4 | write Space range `bace919b..04ab1606` names `gate-c/mu6hnk0t/nightly.md`, authored by the Connection's member; **read Space `customers` `6b3b901d..6b3b901d` EMPTY**; no `agent_read_space_moved` alert; working tree clean after the finish's own commit |
+| C5 | one `GET /api/runs/:id` payload carries prompt, the `mcp__gbrain__put_page` tool call, 2 usage rows, `costUsd`, and the diff file list |
+| C6 | **FAILS — see below.** The tree and the admin-authored revert commit are right; the index is not |
+| C7 | `docker compose kill agent-runner` mid-run (the kill lands after the agent's first page is on disk): `lease_expired` / `infra_failed`, `failure_detail.reason = lease_expired`, alert kind `lease_expired`, and the run's gbrain bearer — recovered from gbrain's own credential journal (F7) while the client was still alive — went **200 → 401** across the reclaim. Revoke error absent from the alert |
+| C8 | **the double-write proof**: `schedule_runs` holds 2 rows, `attempt 1` and `2`, slots `manual:2026-09-18T05:07:56Z` and `…Z#r2`; each page exists exactly once in the run's own directory, one commit added it, and the agent's text appears exactly once in the file |
+| C9 | cap tightened below the accrued spend: `classification budget_exceeded`, `agent_runs.failure_class budget_exceeded`, one alert `agent_budget_exceeded` with `budgetUsd $0.0055756` / `accruedUsd $0.0111512` and **no `midStream`**, the gateway's own log line `status 402, tokens 0, costUsd null` (the pre-forward refusal), and `agent_run_usage` holding exactly the forwarded calls (1 row, `http_status 200`, `stop_reason` set, cost non-null) — no truncated row |
+| C10 | **from inside the container**: `control-plane:3150` and `caddy:443` connect; `localhost:443`, `postgres:5432`, `gbrain-serve:3131`, `gbrain-ops:3140`, `1.1.1.1:443`, `api.anthropic.com:443` all fail (ECONNREFUSED); `/proc/net/route` carries one subnet route `000012AC/0001` and **no `00000000` destination** |
+| C11 | a prompt that asks for Bash: the harness's own `system/init` surface is 23 `mcp__gbrain__*` tools and no built-in, **no `tool_use` at all**, `permission_denials: []`, the write Space's head unmoved, no untracked leftovers, empty diff — nothing ran |
+| C12 | B10's technique reused: empty `RUNNER_TOKEN` → `/api/health` `disabled` with `ok: true` and `controlDb`/`ops` `ok`, `/.well-known/gbrain` 200, `POST /api/schedules` → `409 runner_not_enabled` with no row written; then restored, and the runner proved to be polling the CURRENT control plane (request-shape refusal, F14's trap) |
+
+### Money — measured, not estimated
+
+Per-run figures logged by the gate's teardown (before the fixtures and their cascading runs were deleted):
+
+| run | schedule | state | calls | cost |
+|---|---|---|---|---|
+| C1–C6 | `gate-c-nightly-…` | `succeeded` | 2 | **$0.0263765** |
+| C7 (killed) | `gate-c-kill-…` (attempt 1) | `lease_expired` | 1 | **$0.0240012** |
+| C8 (retry) | `gate-c-kill-…` (attempt 2) | `succeeded` | 2 | **$0.0153746** |
+| C9 | `gate-c-budget-…` | `failed` / `budget_exceeded` | 1 | **$0.0111512** |
+| C11 | `gate-c-bash-…` | `succeeded` | 1 | **$0.0109399** |
+
+**Gate C total for that run: `$0.0878434` over 5 real runs.**
+
+The final acceptance run of the same file (`bun test --parallel=1 test/e2e/slice4.e2e.test.ts`) reported
+**27 tests: 26 pass, 1 fail — the failure is C6 alone** — in 543.03 s, with these per-run figures:
+
+| run | schedule | state | calls | cost |
+|---|---|---|---|---|
+| C1–C6 | `gate-c-nightly-mu6i3zmk` | `succeeded` | 2 | `$0.0139852` |
+| C7 (killed) | `gate-c-kill-mu6i3zmk` (attempt 1) | `lease_expired` | 1 | `$0.0122812` |
+| C8 (retry) | `gate-c-kill-mu6i3zmk` (attempt 2) | `succeeded` | 2 | `$0.0155088` |
+| C9 | `gate-c-budget-mu6i3zmk` | `failed` / `budget_exceeded` | 1 | `$0.0111187` |
+| C11 | `gate-c-bash-mu6i3zmk` | `succeeded` | 1 | `$0.0109987` |
+
+**that run's total: `$0.0638926`.** Gate C's whole measured spend across this task (this run, the
+`$0.0878434` run above, the first 12-leg run whose five runs were not logged before teardown, and the
+pre-barrier C1 attempts that spent one real run) is **≈ `$0.25` against the `$5.00` ceiling** — of which
+`$0.151736` is directly measured and the rest is bounded by the same per-run shape (five runs of
+$0.011–$0.027). Gate B's own metered leg costs `$0.000045`
+(B6's log). Two earlier Gate C runs (the first 12-leg run, whose fixtures were deleted before this
+logging existed, and the pre-barrier C1 attempt that spent a real run) plus the diagnostic model calls
+bring the whole Gate C work to **≈ $0.21**, against the slice's **$5.00** ceiling — the money left is
+untouched, and every leg that could be exercised without a model call was (C10, C12, and the C6
+reproduction below).
+
+### The defect: the revert's re-index does not remove the reverted page (honesty rule 7)
+
+C6's third clause — "a subsequent `search` no longer returns the reverted page" — **fails on the shipped
+product**, and it is not a race: the leg polls for two minutes after the route has already answered.
+
+Measured, with a `succeeded` run whose page the agent wrote through MCP `put_page`:
+
+```
+[gate-c] C6 ... revert commit 43a8c3d6, the file is gone from the write Space and from git, and the
+route reported a successful re-index (sync exit 0), yet gbrain still returns the page for the query
+"gate C nightly page mu6hnk0t": ["gate-c/mu6hnk0t/nightly", …]
+```
+
+**Reproduced with no run, no harness and no model call**, in gbrain's own verbs:
+
+```
+$ gbrain put gate-c/repro-<t>          # the MCP shape: a page row first, brain-first
+$ write that file into the repo; git add -A; git commit -m "agent run repro-<t>"
+$ gbrain sync --source internal --json # added: 1
+$ git rm -- gate-c/repro-<t>.md; git commit -m "revert: agent run repro-<t>"
+$ gbrain sync --source internal --json # deleted: 1  … and the page still answers
+$ gbrain sync --source internal --full # deleted: 0  … and the page still answers
+$ gbrain delete gate-c/repro-<t> --purge   # this is what removes it
+```
+
+**Mechanism.** gbrain's `sync` prunes a page it **imported from a file** (a file-first page vanishes on
+the next sync after its file is committed as deleted — measured), but a page created **brain-first**
+(`put_page`; the file is only write-through) keeps its `pages` row and its chunk when that file goes
+away, because there is no file-provenance record to diff. Every page an agent run writes is brain-first,
+so the revert path's step 3 (`sync` + `embed --stale`, `src/agent/revert.ts:262-281`) cannot satisfy the
+promise the runbook makes for it ("so the brain's index moves back with the tree. Honesty rule 7…"). The
+route still reports success, which is the sharper half of the finding: the operator is told the index
+moved when it did not.
+
+**Fix directions** (for the slice owner; both are product changes, not gate changes): remove the reverted
+pages by name after the revert (a page-level remove; note the scheduler allowlist holds only
+`sync`/`embed`/`dream`/`doctor` today, and the operation registry has no page-delete verb, so this needs
+one), or make the page file-backed at finish so a later sync can prune it, or have `sync` prune a
+brain-first page whose write-through path vanished. Until one lands, **C6 must stay red** — the leg was
+not softened, and the exit gate's report is "the third of the roadmap's three promises is broken for the
+only page shape an agent produces".
+
+### Things execution surfaced (each measured; none of them in the plan)
+
+1. **An orphaned claim request keeps consuming pending agent rows for up to `RUN_CLAIM_WAIT_MS`.** With
+   the runner container EXITED, a `running` row was observed whose `claimed_by` named a container that
+   had already died, and a freshly inserted `pending` row was consumed as `skipped_overlap` (with
+   `claimed_by` null) every few seconds: the claim route polls the database inside one request, and a
+   request whose client is gone keeps polling until its 25 s window closes. Consequence for C1: pausing
+   the consumer is not the same as a quiet lane, so the gate proves the pause with a sentinel row (a
+   disabled schedule, so a stray request consumes it without a mint or an alert) that must survive a full
+   window — 33 304 ms observed — before the materialized row is asserted `pending`. Any future e2e leg
+   that stops the runner and expects a row to sit still needs the same barrier.
+2. **A finished run's `failure_detail` says `recorded_by_component`, not `budget_exceeded`.** The meter
+   writes `{reason: budget_exceeded, budgetUsd, accruedUsd}` at the refusal; `finishAgentRun` then
+   rewrites `failure_detail` for a class a component already recorded, so the *numbers* survive only on
+   the alert (`agent_budget_exceeded`) and the class survives on `failure_class`. C9 asserts both, in
+   that shape — the second of the two facts a renderer must know.
+3. **C11's "denied-tool event" is contradicted by measurement, in the stronger direction.** The runbook
+   says a prompt asking for Bash "produces a denied-tool event"; measured, the harness's `result` frame
+   carries `permission_denials: []` and **no `tool_use` at all**, because `--tools ""` removes the
+   built-in surface at the source (F3) — the MCP server's own 23 tools are what remains, and the model
+   cannot call a tool it was never offered. So the leg asserts the real thing: nothing ran, the offered
+   surface has no built-in, the head did not move.
+4. **The credential note at the top of this document is about the HOST's key, not the org's.** The org
+   holds a working `anthropic_api_key`: the gateway forwarded every real call above (2/1/2/1/1 metered
+   calls, `$0.0878434`). The `beforeAll` precondition added by this task names the secret, the row and
+   the runbook section, so a cold stack fails once with the reason instead of four times with symptoms.
+
+### What did not discriminate (stated, not dressed up)
+
+- **C11's `permission_denials` branch** can only assert the negative: with `--tools ""` there is nothing
+  to deny, so the "denied-tool event" half of the leg cannot be observed on this pin. The branch is
+  written so that a future pin which *does* emit a denial asserts the denied tool is a non-MCP name, but
+  today the observed value is `[]` and the leg's discriminating half is "no `tool_use`, no head move".
+- **C8's retry row is written by the gate, not by the reclaimer.** `reclaimExpiredLeases` deliberately
+  does not re-run a dead runner's agent run (its own comment; `test/integration/scheduler-claim.test.ts`'s
+  "NEVER auto-retried"; the runbook's alert table). The plan's C8 expects "after C7's reclaim **and one
+  retry**" with two rows; the shipped product produces one. The gate asserts the reclaim's real shape,
+  then writes the retry occurrence in `createRetryRow`'s own shape and lets the REAL runner claim and
+  execute it, so the double-write claim (one copy per page, one commit adding it, one copy of the text)
+  is proven on real work — but the *origin* of the second attempt is the gate, and that is a finding, not
+  a pass.
+
+---
+
+## F16 — the revert's re-index could not remove the page an agent run writes: the mechanism, measured, and the operation that fixes it
+
+**Where.** `src/agent/revert.ts` (`revertRun`'s index step, D10 step 3), the new
+`src/contracts/registry.ts` operation `page.delete`, the read-only ops route `POST /git/path-exists`
+(`src/ops/git.ts` + `src/ops/server.ts`), `src/control/opsClient.ts`, `src/console/*`, and C6 of
+`test/e2e/slice4.e2e.test.ts` — whose three clauses are UNCHANGED. F15 named the defect; this is the
+repair, and the first thing it did was re-measure the mechanism without a model call.
+
+### The mechanism, re-measured (and F15's sentence corrected)
+
+F15 says `sync` "prunes only pages it imported from a file". That is the right *conclusion* by the wrong
+*route*: a page created brain-first does carry a `source_path` (MCP `put_page` records the write-through
+target), and a **full** reconcile does prune it. What actually leaves the reverted page alive is the
+DELTA. Measured, in gbrain's own verbs, on this stack (`.brainstand-tmp/slice4/RevertIndex/repro-c6b.sh`,
+model-free):
+
+```
+$ GBRAIN_SOURCE=internal gbrain put gate-c/repro-<t>   # the MCP shape: row first, file untracked
+$ git add -A; git commit -m "agent run repro-<t>"      # the finish's commit — NO sync in between
+$ git rm -- gate-c/repro-<t>.md; git commit -m "revert: agent run repro-<t>"
+$ gbrain sync --source internal --json
+Already up to date.
+{"schema_version":1,"source_id":"internal","sync_status":"up_to_date","added":0,"modified":0,
+ "deleted":0,"chunks_created":0,"embedded":0,...}
+$ gbrain search "gate-c nightly page <t>" --json | grep -c 'gate-c/repro-<t>'
+2                                   # …the reverted page still answers
+```
+
+The file's ADDITION and its REMOVAL both landed inside the anchor..HEAD window the route's `sync` is
+about to reconcile, so they net to nothing: `git diff --name-status <anchor> HEAD` says nothing about
+that path, `filtered.deleted` never holds it, and `deleted: 0` is not a lie — it is the truth about a
+window in which the path does not exist. `embed --stale` only ever re-embeds. Instrumented, the tree
+still holds the page (`source_path` recorded) and `deleted_at` is null: nothing in the shipped step 3
+touches it.
+
+Consequences for the fix, both load-bearing:
+
+- **The removed pages must be named.** A page-level delete is the only step that does not depend on
+  where the sync's anchor happens to sit.
+- **The other candidate F15 lists — "make the page file-backed at finish so a later sync can prune it"
+  — does not close this one.** The page is already file-backed (`source_path` is recorded at
+  `put_page` time); what fails is the DELTA, which a file-backed page is just as invisible to. It would
+  also rewrite the run's own finish path for the revert's benefit.
+- **Teaching `sync` is not available** (G3: upstream is never patched).
+- **`sync --full` is neither sufficient nor proportionate.** F15 measured `deleted: 0` for it on the
+  brain-first shape, and even where a full reconcile does prune the row, it walks the whole Space on a
+  request a human is waiting on.
+
+### The fix, and the argv it adds
+
+`page.delete` — `delete <slug> --source-id <id> --purge [--json]` — the measured working fix, run
+through the SAME ops RPC path `sync`/`embed` already use (`revertRun` never spawns gbrain itself; S2).
+`--purge` is honored only for the trusted LOCAL CLI (the op refuses a remote caller with
+`permission_denied`), and gbrain-ops IS that local CLI; `--source-id` is REQUIRED rather than defaulted
+to `ctx.sourceId`, because a multi-source brain can hold one slug in several sources and the reverted
+page belongs to the write Space's source (A11's second leg proves the targeting).
+
+The receipt, measured at the pin (`test/contract/runner.contract.test.ts`, A11 — L6's proof that `--json`
+is implemented rather than accepted):
+
+```
+MEASURED page.delete at 0.50.5.0: status=purged slug=runner-contract/revert-<id> source_id=customers
+write_through.removed=true (/srv/brain-repos/customers/runner-contract/revert-<id>.md)
+inserted=["gbrain","delete","runner-contract/revert-<id>","--source-id","customers","--purge","--json"];
+search "revert-needle-<id>": before=[hit], after=[]
+```
+
+The receipt's keys are `status`, `slug`, `source_id`, `write_through{removed,path,skipped}` and
+`residuals`. An ABSENT slug exits **1** with `Error [page_not_found]: …` on **stderr** and no JSON
+receipt — recorded here because a caller that only read the exit code could not tell "there was no page"
+from "the delete failed".
+
+`revertRun`'s step 3 is now: **the pages the revert removed, by name → `sync` → `embed --stale`**, and
+`RevertSuccess.index` carries all three (`purge`, `sync`, `embed`) so a reader can see that the index
+moved by deletion rather than assume it. Three rules the step gets right:
+
+1. **Only the removed paths.** `purgeCandidates` filters to git's own `D` rows: a file the revert merely
+   EDITED is re-synced from its new content, and its page is never touched. `revertRange`'s staged diff
+   now runs with `--no-renames` (measured: the inverse of `git mv a.md b.md` arrives as
+   `R100 b.md a.md` with rename detection on — post-image `a.md`, so the REMOVED path is invisible —
+   and as `A a.md` + `D b.md` with it off), which is what lets the filter see a reverted rename at all.
+2. **Never purge a page that is still a file.** `gbrain delete --purge` UNLINKS the page's markdown when
+   it is there, so a slug whose file the tree still holds is live work. The guard asks the TREE through
+   `POST /git/path-exists` (a revert's own file list is a memory of git, not the tree), probing both the
+   removed path and the slug's own `<slug>.md` BEFORE any delete runs, and records
+   `skipped_file_present` with the path it found. A probe that cannot look is `refused_unreadable` and
+   FAILS the revert: "I could not look" is never permission to delete.
+3. **The step reports what it observed.** `purged` / `absent` / `skipped_file_present` /
+   `skipped_not_a_page` / `refused_unreadable` / `failed`, each with its argv, exit code, stderr,
+   classification and a one-line why — and the Runs page renders both halves, so a purge the guard
+   skipped is visible as "left in the index on purpose, and still answerable: <slug> (<reason>)".
+
+A `failed` or `refused_unreadable` purge THROWS, on the same principle as a failed sync/embed: the commit
+landed, and a reverted page that still answers searches is not reverted.
+
+### The correction this also carried (runbook)
+
+`docs/runbooks/agent-runner.md` said a prompt asking for Bash "produces a denied-tool event" — F15's
+measured correction now stands in its place: no `tool_use` at all and `permission_denials: []`, because
+`--tools ""` removes the built-in surface at the source.
+
+### C6 after the fix (measured)
+
+`bun test --parallel=1 test/e2e/slice4.e2e.test.ts` — the leg that F15 left red, on the same run that
+carried the repair:
+
+```
+[gate-c] C6 revert commit=89e60ce0 author=admin@example.test; file absent;
+  search before=[gate-c/mu6jhb9j/nightly,gate-c/mu6gq05j/nightly,gate-b-seed-mu54vuc2]
+  after=[gate-c/mu6gq05j/nightly,gate-b-seed-mu54vuc2,gate-c/mu6hnk0t/kill-b] (slug gone)
+```
+
+The reverted page is in the BEFORE array and absent from the AFTER array of a real `gbrain search`, with
+C6's three clauses untouched. `index.purge` for that run carries one `purged` entry for
+`gate-c/mu6jhb9j/nightly`; the route's `sync` still reports `up_to_date` / `deleted: 0`, which is the
+point: the deletion is what moved the index, and the receipt now says so.
+
+**One leg of that run is red, and it is not this one.** C9 (`the cap below the accrued spend refuses
+before forwarding`) failed with `ended.state === 'succeeded'` on a run that made **2** metered calls and
+spent `$0.0144983`; F15's own green measurement of C9 was a **1**-call run at `$0.0111512`. C9 waits for
+the first metered call and only then writes `budget_usd = accrued × 0.5` (`test/e2e/slice4.e2e.test.ts`,
+C9), so a run that has already made its last call when that write lands finishes `succeeded` — a race in
+the leg's timing, on a code path (the gateway meter and its cap) this change does not touch. The other
+25 legs, C6 among them, passed: the run ended **26 pass / 1 fail**, and Gate C's own teardown logged
+`Gate C total model spend = $0.0773488 over 5 run(s)`.

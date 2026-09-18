@@ -413,11 +413,47 @@ describe('revert refusals are choices — D10', () => {
   test('success says the index moved back too — honesty rule 7', () => {
     const text = revertSuccessText({
       reverted: true, runId: 'run-1', sourceId: 'shared', revertCommit: 'eeeeeeee',
-      revertedAt: '2026-09-17T07:00:00.000Z', files: [], index: { sync: {}, embed: {} },
+      revertedAt: '2026-09-17T07:00:00.000Z', files: [],
+      index: {
+        purge: [{
+          slug: 'gate-c/r1/nightly', outcome: 'purged',
+          detail: "removed from shared's index by name",
+        }],
+        sync: {}, embed: {},
+      },
     });
     expect(text).toContain('eeeeeeee');
     expect(text).toMatch(/re-synced and re-embedded/i);
-    expect(text).toMatch(/stops answering searches/i);
+    // F16: the page that had to be removed BY NAME is the one the sync cannot
+    // reach, and the line says so rather than leaving the operator to assume it.
+    expect(text).toContain('gate-c/r1/nightly');
+    expect(text).toMatch(/removed from the index by name/i);
+    expect(text).toMatch(/stop answering searches/i);
+    expect(text).not.toMatch(/left in the index/i);
+  });
+
+  // The other half of the same honesty rule: a purge the guard SKIPPED (the file
+  // is still in the write Space, so the page is someone's live work) must be
+  // visible, with its reason — a git-only revert must not read as a full one.
+  test('a skipped purge is named, and the line does not claim the page is gone', () => {
+    const text = revertSuccessText({
+      reverted: true, runId: 'run-1', sourceId: 'shared', revertCommit: 'eeeeeeee',
+      revertedAt: '2026-09-17T07:00:00.000Z', files: [],
+      index: {
+        purge: [{
+          slug: 'gate-c/r1/nightly',
+          outcome: 'skipped_file_present',
+          detail: "gate-c/r1/nightly.md is still in the write Space's working tree, so "
+            + 'gate-c/r1/nightly is live work rather than a reverted page: nothing was removed',
+        }],
+        sync: {}, embed: {},
+      },
+    });
+    expect(text).toContain('gate-c/r1/nightly');
+    expect(text).toMatch(/left in the index on purpose/i);
+    expect(text).toMatch(/still answerable/i);
+    expect(text).toMatch(/live work rather than a reverted page/i);
+    expect(text).not.toMatch(/stop answering searches/i);
   });
 });
 

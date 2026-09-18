@@ -412,7 +412,18 @@ export type RevertSuccess = {
   revertCommit: string;
   revertedAt: string;
   files: Array<{ status: string; path: string }>;
-  index: { sync: unknown; embed: unknown };
+  /**
+   * F16: `purge` is the remove-by-name step (`PagePurge` in
+   * `src/agent/revert.ts`) — the one a re-sync cannot stand in for, because the
+   * page an agent run writes is created brain-first — and it records a SKIP as
+   * loudly as a removal. The console renders both, so a git-only revert cannot
+   * be mistaken for one that moved the index.
+   */
+  index: {
+    purge: Array<{ slug: string; outcome: string; detail: string }>;
+    sync: unknown;
+    embed: unknown;
+  };
 };
 
 /** The route's own shapes, so the jsonb columns can be narrowed exactly once. */

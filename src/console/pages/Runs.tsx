@@ -480,11 +480,32 @@ export function revertChoice(body: Record<string, unknown>): RevertChoice {
   };
 }
 
-/** D10's success, saying what the re-index did — honesty rule 7: a revert that
- *  did not re-index is not a revert. */
+/**
+ * D10's success, saying what the re-index did — honesty rule 7: a revert that
+ * did not re-index is not a revert.
+ *
+ * F16 makes this line carry a second distinction. The step that actually undoes
+ * a reverted PAGE is the delete by name: the page an agent run writes is created
+ * brain-first (MCP `put_page`), and `sync` reconciles `anchor..HEAD`, so a file
+ * added and removed inside one unsynced delta nets to nothing — `sync` answers
+ * `deleted: 0` and the page keeps answering. So the page removals are named, and
+ * a purge the guard SKIPPED — its file is still in the write Space, which makes
+ * it someone's live work — is said out loud with its reason rather than folded
+ * into a claim that the brain forgot something it still holds.
+ */
 export function revertSuccessText(result: RevertSuccess): string {
+  const purged = result.index.purge.filter((p) => p.outcome === 'purged');
+  const kept = result.index.purge.filter((p) => p.outcome !== 'purged');
+  const removed = purged.length === 0
+    ? 'no page had to be removed from the index by name (the revert removed no page-shaped file)'
+    : `${purged.length} reverted page(s) were removed from the index by name — `
+      + `${purged.map((p) => p.slug).join(', ')} — so they stop answering searches`;
+  const left = kept.length === 0
+    ? ''
+    : ' Left in the index on purpose, and still answerable: '
+      + `${kept.map((p) => `${p.slug} (${p.detail})`).join('; ')}.`;
   return `Reverted by commit ${result.revertCommit} at ${new Date(result.revertedAt).toLocaleString()} — a new commit, `
-    + `never a rewrite — and ${result.sourceId} was re-synced and re-embedded, so a reverted page stops answering searches.`;
+    + `never a rewrite — and ${result.sourceId} was re-synced and re-embedded: ${removed}.${left}`;
 }
 
 export function Runs() {

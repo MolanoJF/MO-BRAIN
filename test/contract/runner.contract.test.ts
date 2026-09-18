@@ -1428,3 +1428,166 @@ describe('A10 verifyHarnessPin', () => {
       `(observed ${out.bad.observed})`);
   }, 300_000);
 });
+
+// ===========================================================================
+// A11 — F16's page removal: the revert's remove-by-name step, against gbrain at the pin.
+//
+// The revert's `sync` cannot undo the page an agent run writes, and that is F15: MCP `put_page`
+// creates the row brain-first with its chunks embedded inline, so the page survives a file whose
+// addition and removal both landed inside one unsynced delta. The repair is a delete BY NAME, and
+// this describe is where the operation that carries it is pinned — the G4 coverage this registry
+// entry cannot ship without, and L6's proof that `--json` is IMPLEMENTED rather than accepted.
+//
+// Every clause is measured against the real binary. What each leg proves:
+//   1. the argv the registry builds is the argv the pin takes, and both flags it depends on are
+//      REQUIRED, not optional — a missing `--source-id` is refused before the binary runs;
+//   2. a real `put_page`-shaped page (row plus write-through file, never synced) is removed, and
+//      the receipt is PARSED: status, slug, source_id, write_through and residuals;
+//   3. the receipt is the evidence, not the exit code: the page stops answering a real `search`;
+//   4. `--source-id` targets the named source's row and leaves the same slug in another source
+//      alone — the `#4329` failure mode, which on a multi-source brain would purge the wrong row.
+// ===========================================================================
+describe('A11 the revert\'s page removal (real binary at the pin)', () => {
+  const RUN_ID = randomUUID().slice(0, 8);
+  const SLUG = `runner-contract/revert-${RUN_ID}`;
+  /** A phrase that appears only in this leg's page, so a keyword search either
+   *  finds that page or finds nothing of ours. */
+  const NEEDLE = `revert-needle-${RUN_ID}`;
+  const CONTENT = `# Revert contract ${RUN_ID}\n\n${NEEDLE}\n`;
+
+  beforeAll(async () => {
+    await composeUp();
+    await resetBrain();
+    assertOk(OPERATIONS.init!, await execOperation(OPERATIONS.init!, {
+      nonInteractive: true, force: true, url: BRAIN_DB_URL,
+      embeddingModel: 'openai:text-embedding-3-small',
+    }, { timeoutMs: 600_000 }));
+    for (const id of ['customers', 'shared']) {
+      await seedGitSource(id);
+      // `--federated` is not decoration: the default is `federated: false`
+      // ("only searched when explicitly named via --source"), and the registry's
+      // `search` carries no source param — an unfederated source would be
+      // invisible to the unqualified searches below, and the two legs would fail
+      // on their CONTROL step rather than on anything the purge did.
+      assertOk(OPERATIONS['sources.add']!, await execOperation(OPERATIONS['sources.add']!, {
+        id, path: `/srv/brain-repos/${id}`, federated: true,
+      }));
+    }
+  }, 900_000);
+
+  afterAll(async () => {
+    await composeDown();
+  }, 120_000);
+
+  /** A brain-first write exactly as MCP `put_page` performs it: the row first,
+   *  and the markdown lands in the Space's working tree as an UNTRACKED file the
+   *  agent's finish path would commit. `put` has no `--source` flag, so the
+   *  source is selected the way the local CLI does it (GBRAIN_SOURCE). */
+  const putPage = async (sourceId: string, slug: string, content: string, timeoutMs = 120_000) => {
+    const r = await composeExec('gbrain-ops', ['gbrain', 'put', slug, '--content', content], {
+      env: { GBRAIN_SOURCE: sourceId }, timeoutMs,
+    });
+    if (r.exitCode !== 0) {
+      throw new Error(`gbrain put ${slug} exited ${r.exitCode}: ${(r.stderr || r.stdout).slice(0, 300)}`);
+    }
+    return r;
+  };
+
+  /** The hits a real `search` answers with, as `{slug, source_id}` pairs.
+   *  Asserted to PARSE: a search whose receipt came back null would otherwise
+   *  read as "the page is gone". The SOURCE is what the two-source leg needs —
+   *  one slug can be answered by a row in each source, and only the pair says
+   *  which row the purge reached. */
+  const searchHits = async (query: string): Promise<Array<{ slug: string; sourceId: string }>> => {
+    const r = await execOperation(OPERATIONS.search!, { query, limit: '10' }, { json: true });
+    assertOk(OPERATIONS.search!, r);
+    if (r.json === null) throw new Error(`gbrain search emitted no JSON to parse: ${r.stdout.slice(0, 300)}`);
+    const hits = r.json as Array<{ slug?: string; source_id?: string }>;
+    return hits.map((h) => ({ slug: h.slug ?? '', sourceId: h.source_id ?? '' }));
+  };
+  const searchSlugs = async (query: string): Promise<string[]> =>
+    (await searchHits(query)).map((h) => h.slug);
+
+  test('the operation is the pin\'s argv, and --source-id is required rather than defaulted', () => {
+    const spec = OPERATIONS['page.delete']!;
+    expect(spec.argv).toEqual(['delete']);
+    expect(buildArgv(spec, { slug: SLUG, sourceId: 'customers', purge: true }, { json: true }))
+      .toEqual(['delete', SLUG, '--source-id', 'customers', '--purge', '--json']);
+    // Multi-source is the reason this cannot be optional: the local default is
+    // `ctx.sourceId`, which for the platform would be `default` — a different row.
+    expect(() => buildArgv(spec, { slug: SLUG, purge: true })).toThrow(/missing required param sourceId/);
+    // The claim the legs below test against real output (L6).
+    expect(spec.supportsJson).toBe(true);
+    expect(spec.privilege).toBe('brain-db');
+  });
+
+  test.skipIf(!dockerAvailable)('a brain-first page is purged, and the page really stops answering', async () => {
+    await putPage('customers', SLUG, CONTENT);
+
+    // The control: the page IS answerable before the purge. Without it, "the
+    // search no longer returns it" would pass on a page that was never indexed.
+    expect(await searchSlugs(NEEDLE)).toContain(SLUG);
+
+    const spec = OPERATIONS['page.delete']!;
+    const r = await execOperation(spec, { slug: SLUG, sourceId: 'customers', purge: true }, { json: true });
+    assertOk(spec, r);
+    // L6, the whole point: this parses the receipt off stdout. A flag that were
+    // merely accepted would leave `json` null here.
+    expect(r.json).not.toBeNull();
+    const receipt = r.json as {
+      status?: string; slug?: string; source_id?: string;
+      write_through?: { removed?: boolean; path?: string; skipped?: string };
+      residuals?: string;
+    };
+    expect(receipt.status).toBe('purged');
+    expect(receipt.slug).toBe(SLUG);
+    expect(receipt.source_id).toBe('customers');
+    // The write-through half, which is why the revert path needs a TREE guard:
+    // this verb UNLINKS the page's markdown when it is on disk. Here it is (the
+    // `put` above never committed), so the purge removes it.
+    expect(receipt.write_through?.path).toBe(`/srv/brain-repos/customers/${SLUG}.md`);
+    expect(receipt.write_through?.removed).toBe(true);
+    expect(typeof receipt.residuals).toBe('string');
+
+    // The evidence the revert's promise needs: the same query no longer finds it.
+    expect(await searchSlugs(NEEDLE)).not.toContain(SLUG);
+
+    console.log(`MEASURED page.delete at ${GBRAIN_PIN}: status=${receipt.status} slug=${receipt.slug} `
+      + `source_id=${receipt.source_id} write_through.removed=${receipt.write_through?.removed} `
+      + `(${receipt.write_through?.skipped ?? receipt.write_through?.path}) inserted=${JSON.stringify(r.argv)}; `
+      + `search "${NEEDLE}": before=[hit], after=[]`);
+  }, 300_000);
+
+  test.skipIf(!dockerAvailable)('--source-id targets the named source, and leaves the same slug elsewhere', async () => {
+    const other = `${SLUG}-twin`;
+    // The same base name in the source `shared` and in `customers`: a multi-source
+    // brain can hold one slug in several sources, and the reverted page belongs to
+    // the write Space's own.
+    await putPage('shared', other, `# shared twin ${RUN_ID}\n\n${NEEDLE}-shared\n`);
+    await putPage('customers', other, `# customers twin ${RUN_ID}\n\n${NEEDLE}-customers\n`);
+    const before = await searchHits(`${NEEDLE}-shared`);
+    // Both rows answer the same query: the SAME slug, one per source. (The two
+    // needles share their tokens, so a keyword search reaches both pages.)
+    expect(before).toContainEqual({ slug: other, sourceId: 'customers' });
+    expect(before).toContainEqual({ slug: other, sourceId: 'shared' });
+
+    const spec = OPERATIONS['page.delete']!;
+    const r = await execOperation(spec, { slug: other, sourceId: 'customers', purge: true }, { json: true });
+    assertOk(spec, r);
+    // One named boundary read of the receipt, the shape the pin prints (above).
+    const receipt = r.json as { status?: string; slug?: string; source_id?: string } | null;
+    expect(receipt?.status).toBe('purged');
+    expect(receipt?.source_id).toBe('customers');
+
+    // The named source's row is gone; the OTHER source's row is untouched and
+    // still answers. A dropped `--source-id` (the pre-#4329 behaviour) would have
+    // purged `shared`'s row and left this one live.
+    const after = await searchHits(`${NEEDLE}-shared`);
+    expect(after.filter((h) => h.sourceId === 'customers')).toEqual([]);
+    expect(after).toContainEqual({ slug: other, sourceId: 'shared' });
+
+    await execOperation(spec, { slug: other, sourceId: 'shared', purge: true }, { json: true });
+    console.log(`MEASURED page.delete --source-id on a two-source brain: customers' "${other}" purged, `
+      + `shared's copy still answered "${NEEDLE}-shared", then purged too`);
+  }, 300_000);
+});

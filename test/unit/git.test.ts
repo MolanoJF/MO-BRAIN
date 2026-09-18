@@ -1,8 +1,8 @@
 import { test, expect, describe } from 'bun:test';
 import { classifyLock, commitArgs, diffRange, revertRange } from '../../src/ops/git.ts';
-import type { GitRange, RangeCommit, RevertRequest } from '../../src/ops/git.ts';
+import type { GitRange, RangeCommit, RevertRequest, TreeProbe } from '../../src/ops/git.ts';
 import { attributeCommits, captureHeads, diffForRun } from '../../src/agent/diff.ts';
-import { revertRun } from '../../src/agent/revert.ts';
+import { purgeCandidates, revertRun } from '../../src/agent/revert.ts';
 import type {
   RevertDeps, RevertRefusal, RevertResult, RevertSuccess, RevertTarget,
 } from '../../src/agent/revert.ts';
@@ -253,11 +253,51 @@ const revertTarget = (over: Partial<RevertTarget> = {}): RevertTarget => ({
 /** One recorded op call: op, the FENCED params, and the --json the scheduler path asks for. */
 type OpsCall = { op: string; params: Record<string, unknown>; json: boolean | undefined };
 
+/** What the injected tree probe was asked, and what it answers. The default is
+ *  "every probed path is gone", which is the reverted shape; `onDisk` names the
+ *  paths the tree still holds. */
+function treeProbe(probes: string[], onDisk: string[] = []) {
+  return async (sourceId: string, paths: readonly string[]): Promise<TreeProbe> => {
+    probes.push(`${sourceId}:${paths.join(',')}`);
+    return {
+      sourceId,
+      root: `/srv/brain-repos/${sourceId}`,
+      paths: paths.map((p) => ({ path: p, onDisk: onDisk.includes(p), inGit: onDisk.includes(p) })),
+    };
+  };
+}
+
+/** One fake ops reply, in the pin's own vocabulary: an exit code, stderr, and the
+ *  receipt the real op printed (absent, or the parsed payload). */
+type OpsReply = { exitCode?: number; stderr?: string; json?: unknown };
+
+/**
+ * A `callOps` fake. Its signature is GENERIC because the real one is
+ * (`callOps<T>` returns `json: T | null`): a mock declaring a concrete receipt
+ * type cannot satisfy it, so the payload is asserted once here — at the seam —
+ * and every assertion below reads the value the fake actually returned.
+ */
+function opsFake(log: OpsCall[], handler: (op: string, params: Record<string, unknown>) => OpsReply) {
+  return async <T,>(op: string, params?: Record<string, unknown>, opts?: { json?: boolean }) => {
+    log.push({ op, params: params ?? {}, json: opts?.json });
+    const reply = handler(op, params ?? {});
+    return {
+      ok: (reply.exitCode ?? 0) === 0,
+      exitCode: reply.exitCode ?? 0,
+      argv: ['gbrain', op],
+      stdout: '',
+      stderr: reply.stderr ?? '',
+      json: (reply.json ?? null) as T | null,
+    };
+  };
+}
+
 function revertHarness(over: Partial<RevertDeps> = {}, target: RevertTarget | null = revertTarget()) {
   const ops: OpsCall[] = [];
   const ranges: string[] = [];
   const reverts: RevertRequest[] = [];
   const marked: Array<{ runId: string; at: Date; sha: string }> = [];
+  const probes: string[] = [];
 
   const deps: RevertDeps = {
     loadTarget: async () => target,
@@ -270,6 +310,7 @@ function revertHarness(over: Partial<RevertDeps> = {}, target: RevertTarget | nu
       reverts.push(req);
       return { reverted: true, sha: SHA_B, files: [{ status: 'M', path: 'page.md' }] };
     },
+    probeTree: treeProbe(probes),
     callOps: async (op, params, opts) => {
       ops.push({ op, params: params ?? {}, json: opts?.json });
       // `json: null` for the same reason a real zero-exit op needs no receipt
@@ -280,7 +321,7 @@ function revertHarness(over: Partial<RevertDeps> = {}, target: RevertTarget | nu
     ...over,
   };
 
-  return { deps, ops, ranges, reverts, marked };
+  return { deps, ops, ranges, reverts, marked, probes };
 }
 
 /** Narrow a revert result to its refusal arm, or fail the test by name. */
@@ -401,6 +442,7 @@ describe('revertRun', () => {
       revertCommit: SHA_B,
       files: [{ status: 'M', path: 'page.md' }],
       index: {
+        purge: [],
         sync: { argv: ['gbrain', 'sync', '--source', 'customers', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
         embed: { argv: ['gbrain', 'embed', '--stale', '--source', 'customers', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
       },
@@ -432,5 +474,161 @@ describe('revertRun', () => {
     // half-imported Space.
     expect(h.marked).toHaveLength(1);
     expect(h.ops.map((o) => o.op)).toEqual(['sync']);
+  });
+
+  // F15: `sync` reconciles anchor..HEAD, so a file ADDED and REMOVED inside one
+  // unsynced delta nets to nothing; the page an agent run writes was created
+  // brain-first by MCP put_page. The reverted page therefore has to go by name,
+  // and BEFORE the sync — the sync cannot stand in for it.
+  test('a page the revert REMOVED is deleted by name, before the sync', async () => {
+    const ops: OpsCall[] = [];
+    const h = revertHarness({
+      revertRange: async () => ({
+        reverted: true,
+        sha: SHA_B,
+        files: [
+          { status: 'M', path: 'gate-c/r1/edited.md' },
+          { status: 'D', path: 'gate-c/r1/Nightly Page.md' },
+        ],
+      }),
+      callOps: opsFake(ops, (op) =>
+        op === 'page.delete'
+          ? { json: { status: 'purged', slug: 'gate-c/r1/nightly-page', source_id: 'customers' } }
+          : {}),
+    });
+
+    const r = success(await revertRun({ runId: RUN_ID, actor: ADMIN }, h.deps));
+    // Only the DELETED path: the modified file's page is re-synced from its new
+    // content and is another run's page as often as this one's.
+    expect(r.index.purge).toEqual([{
+      slug: 'gate-c/r1/nightly-page',
+      removedPath: 'gate-c/r1/Nightly Page.md',
+      outcome: 'purged',
+      detail: "removed from customers's index by name",
+      argv: ['gbrain', 'delete', 'gate-c/r1/nightly-page', '--source-id', 'customers', '--purge', '--json'],
+      exitCode: 0,
+      stderr: '',
+      classification: 'ok',
+    }]);
+    // The tree was asked BEFORE any delete, for the removed path and for the
+    // slug's own file — the two files a purge would unlink.
+    expect(h.probes).toEqual(['customers:gate-c/r1/Nightly Page.md,gate-c/r1/nightly-page.md']);
+    // The order IS the requirement: purge, sync, embed.
+    expect(ops).toEqual([
+      { op: 'page.delete', params: { slug: 'gate-c/r1/nightly-page', sourceId: 'customers', purge: true }, json: true },
+      { op: 'sync', params: { source: 'customers' }, json: true },
+      { op: 'embed', params: { source: 'customers', stale: true }, json: true },
+    ]);
+  });
+
+  // The guard's whole point: `gbrain delete --purge` UNLINKS the page's markdown
+  // when it is there, so a slug whose file is in the tree is LIVE work — another
+  // writer re-created it, or the revert restored it. Nothing is touched, and the
+  // skip is in the receipt so a git-only revert is visible as one.
+  test('a slug whose file is still in the tree is skipped, with the reason recorded', async () => {
+    const probes: string[] = [];
+    const h = revertHarness({
+      revertRange: async () => ({
+        reverted: true, sha: SHA_B, files: [{ status: 'D', path: 'gate-c/r1/nightly.md' }],
+      }),
+      probeTree: treeProbe(probes, ['gate-c/r1/nightly.md']),
+    });
+
+    const r = success(await revertRun({ runId: RUN_ID, actor: ADMIN }, h.deps));
+    expect(probes).toEqual(['customers:gate-c/r1/nightly.md']);
+    expect(r.index.purge).toHaveLength(1);
+    expect(r.index.purge[0]).toMatchObject({
+      slug: 'gate-c/r1/nightly',
+      removedPath: 'gate-c/r1/nightly.md',
+      outcome: 'skipped_file_present',
+      exitCode: null,
+      stderr: '',
+      classification: 'refused',
+    });
+    expect(r.index.purge[0]!.detail).toMatch(/gate-c\/r1\/nightly\.md is still in the write Space/);
+    // No delete was attempted, and the sync/embed still ran: the revert is real,
+    // this one page just belongs to someone else.
+    expect(h.ops.map((o) => o.op)).toEqual(['sync', 'embed']);
+  });
+
+  test('a probe that cannot read the tree fails the revert rather than purging blind', async () => {
+    const h = revertHarness({
+      revertRange: async () => ({
+        reverted: true, sha: SHA_B, files: [{ status: 'D', path: 'gate-c/r1/nightly.md' }],
+      }),
+      probeTree: async () => { throw new Error('ops rpc 400: git rev-parse internal failed'); },
+    });
+
+    await expect(revertRun({ runId: RUN_ID, actor: ADMIN }, h.deps))
+      .rejects.toThrow(/nightly was not removed from the brain index \(refused_unreadable\)/);
+    // Fail closed: no delete was attempted. The sync/embed still ran — the revert
+    // commit is on the history and the rest of the Space has to move with it —
+    // but the route cannot report a revert, which is what the throw is for.
+    expect(h.ops.map((o) => o.op)).toEqual(['sync', 'embed']);
+  });
+
+  test('an absent page is a result, a failed delete is not: both are recorded', async () => {
+    const absentOps: OpsCall[] = [];
+    const absent = revertHarness({
+      revertRange: async () => ({
+        reverted: true, sha: SHA_B, files: [{ status: 'D', path: 'gate-c/r1/gone.md' }],
+      }),
+      // Measured at the pin: an unknown slug exits 1 and the code appears in the
+      // STDERR prose, with no JSON receipt.
+      callOps: opsFake(absentOps, (op) => (op === 'page.delete'
+        ? { exitCode: 1, stderr: 'Error [page_not_found]: Page not found: gate-c/r1/gone' }
+        : {})),
+    });
+    const r = success(await revertRun({ runId: RUN_ID, actor: ADMIN }, absent.deps));
+    expect(r.index.purge[0]).toMatchObject({
+      slug: 'gate-c/r1/gone', outcome: 'absent', exitCode: 1, classification: 'failed',
+    });
+    expect(r.index.purge[0]!.detail).toMatch(/no page at gate-c\/r1\/gone in customers/);
+    // The absent page is not retried, and the scheduler steps still run.
+    expect(absentOps.map((o) => o.op)).toEqual(['page.delete', 'sync', 'embed']);
+
+    const failingOps: OpsCall[] = [];
+    const failing = revertHarness({
+      revertRange: async () => ({
+        reverted: true, sha: SHA_B, files: [{ status: 'D', path: 'gate-c/r1/stuck.md' }],
+      }),
+      callOps: opsFake(failingOps, (op) => (op === 'page.delete'
+        ? { exitCode: 1, stderr: 'Error [storage_error]: the page content could not be written to disk' }
+        : {})),
+    });
+    await expect(revertRun({ runId: RUN_ID, actor: ADMIN }, failing.deps))
+      .rejects.toThrow(/stuck was not removed from the brain index \(failed\):.*storage_error/s);
+  });
+});
+
+/**
+ * The pure half of the purge: WHICH paths become slugs, and which must not. The
+ * status filter is git's own token — a revert's `D` is the only row that names a
+ * file the tree no longer has.
+ */
+describe('purgeCandidates', () => {
+  test('only the removed paths, deduped in diff order', () => {
+    expect(purgeCandidates([
+      { status: 'M', path: 'gate-c/r1/edited.md' },
+      { status: 'D', path: 'gate-c/r1/nightly.md' },
+      { status: 'D', path: 'gate-c/r1/nightly.md' },
+      { status: 'A', path: 'gate-c/r1/restored.md' },
+    ])).toEqual([{ path: 'gate-c/r1/nightly.md', slug: 'gate-c/r1/nightly' }]);
+  });
+
+  // The derivation mirrors gbrain's slugifyPath (src/core/sync.ts): `.md`/`.mdx`
+  // stripped, then per segment lower-cased with runs of whitespace collapsed to a
+  // hyphen. A guessed slug could name a DIFFERENT page, so anything else is null.
+  test('the slug mirrors gbrain\'s own derivation, and only where it is certain', () => {
+    expect(purgeCandidates([{ status: 'D', path: 'Notes/My  Page.mdx' }]))
+      .toEqual([{ path: 'Notes/My  Page.mdx', slug: 'notes/my-page' }]);
+    expect(purgeCandidates([{ status: 'D', path: 'notes/v1.0.0.md' }]))
+      .toEqual([{ path: 'notes/v1.0.0.md', slug: 'notes/v1.0.0' }]);
+    // A code file derives slugifyCodePath's flattened slug, and an emoji/ CJK
+    // name can be imported under a frontmatter slug: neither is ours to guess.
+    expect(purgeCandidates([{ status: 'D', path: 'src/core/chunkers/code.ts' }]))
+      .toEqual([{ path: 'src/core/chunkers/code.ts', slug: null }]);
+    expect(purgeCandidates([{ status: 'D', path: 'notes/🗂️ emoji.md' }]))
+      .toEqual([{ path: 'notes/🗂️ emoji.md', slug: null }]);
   });
 });

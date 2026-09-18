@@ -9,13 +9,19 @@
  *      because the audit story is a named human, not "the system";
  *   2. `agent_runs.reverted_at` + `revert_commit`, written the moment the commit
  *      exists;
- *   3. `sync` + `embed --stale` through the normal scheduler command path, so the
- *      brain's index moves back with the tree.
+ *   3. the index moves back with the tree: the pages the revert REMOVED are
+ *      deleted by name (F15 — the scheduler's `sync` cannot do it, because a
+ *      file whose addition and removal landed inside one unsynced delta nets to
+ *      nothing), then `sync` + `embed --stale` through the normal scheduler
+ *      command path.
  *
  * Nothing here auto-reverts, ever. Honesty rule 7 is why a failed step 3 THROWS
  * instead of returning the success shape: the git commit is real and the row
  * records it, but a reverted file that still answers searches is not reverted,
- * and the caller must not be able to render it as one.
+ * and the caller must not be able to render it as one. A purge the guard SKIPPED
+ * is not a failure — a slug whose file is still in the tree is live work and
+ * removing it would delete someone else's page — but it is recorded in the
+ * result, so a git-only revert is visible as one.
  *
  * The three refusals are RETURNED, never thrown, so a route maps each one
  * straight to a status and a body without re-deriving anything. Every one carries
@@ -32,8 +38,8 @@ import { eq } from 'drizzle-orm';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { OPERATIONS } from '../contracts/registry.ts';
 import { getDb, schema } from '../control/db/client.ts';
-import { callOps, gitRange, gitRevertRange } from '../control/opsClient.ts';
-import type { RangeFile, RevertOutcome, RevertRequest } from '../ops/git.ts';
+import { callOps, gitPathExists, gitRange, gitRevertRange } from '../control/opsClient.ts';
+import type { RangeFile, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
 import { SCHEDULER_COMMANDS, fenceParams, validateParams, type SchedulerCommand } from '../scheduler/commands.ts';
 import { classifyExit, type Classification } from '../scheduler/execute.ts';
 import { attributeCommits, type RangeFetcher } from './diff.ts';
@@ -66,6 +72,43 @@ export type IndexStep = {
   classification: Classification;
 };
 
+/**
+ * One page-level removal, run after the revert commit and BEFORE the sync: the
+ * slug the reverted file derived, what happened to it, and why in one line.
+ *
+ * F15 is the reason this step exists at all. `sync` reconciles the
+ * anchor..HEAD delta, so a file whose addition and removal both landed inside
+ * that delta nets to nothing; the page an agent run writes is brain-first (MCP
+ * `put_page` embeds it inline), and `embed --stale` only ever re-embeds. Without
+ * a delete by name, the reverted page keeps answering searches.
+ */
+export type PagePurge = {
+  slug: string;
+  /** The tree path the revert removed, which derived this slug. */
+  removedPath: string;
+  /**
+   * `purged` — the op's own receipt said the row and its chunks are gone;
+   * `absent` — no page at that slug in the write Space (nothing to remove);
+   * `skipped_file_present` — the slug is STILL a file in the write Space, so it
+   *   is live work rather than a reverted page: nothing was touched;
+   * `skipped_not_a_page` — the path derives no slug this module can trust;
+   * `refused_unreadable` — the tree could not be read, so the guard could not
+   *   tell live work from a reverted page: nothing was touched and the revert
+   *   FAILS (a refusal is never permission);
+   * `failed` — the op ran and did not remove the page.
+   */
+  outcome: 'purged' | 'absent' | 'skipped_file_present' | 'skipped_not_a_page'
+    | 'refused_unreadable' | 'failed';
+  /** One line the console and the Runs page can render verbatim. */
+  detail: string;
+  /** The argv the op path built — worth recording even when the op never ran. */
+  argv: string[];
+  /** null when the guard skipped the call: no op produced an exit code. */
+  exitCode: number | null;
+  stderr: string;
+  classification: Classification;
+};
+
 export type RevertSuccess = {
   reverted: true;
   runId: string;
@@ -75,8 +118,13 @@ export type RevertSuccess = {
   revertedAt: string;
   /** The inverse diff, as `git diff --cached --name-status` saw it. */
   files: RangeFile[];
-  /** Both steps, always: a re-index that did not complete throws instead. */
-  index: { sync: IndexStep; embed: IndexStep };
+  /**
+   * The remove-by-name step, then both scheduler steps — always all three: a
+   * re-index that did not complete throws instead. `purge` is EMPTY when the
+   * revert removed no page-shaped file, which is the honest shape for a revert
+   * of edits only.
+   */
+  index: { purge: PagePurge[]; sync: IndexStep; embed: IndexStep };
 };
 
 /** D10's refusals, each an explicit `{ error, …context }` the console renders as
@@ -128,6 +176,11 @@ export type RevertDeps = {
   markReverted: (runId: string, at: Date, sha: string) => Promise<void>;
   fetchRange: RangeFetcher;
   revertRange: (req: RevertRequest) => Promise<RevertOutcome>;
+  /** F16 — what the write Space's WORKING TREE holds at each path, tracked or
+   *  not. Injectable for the same reason the rest is: the guard's three
+   *  outcomes (skip a live file, purge a reverted page, refuse an unreadable
+   *  tree) are worth proving without a repo behind them. */
+  probeTree: (sourceId: string, paths: readonly string[]) => Promise<TreeProbe>;
   callOps: typeof callOps;
   now: () => number;
 };
@@ -228,7 +281,7 @@ export async function revertRun(
   const at = new Date(deps.now());
   await deps.markReverted(runId, at, outcome.sha);
 
-  const index = await reindex(sourceId, deps);
+  const index = await reindex(sourceId, outcome.files, deps);
   const embed = index.embed;
   if (embed === null || index.sync.classification !== 'ok' || embed.classification !== 'ok') {
     const failing = embed ?? index.sync;
@@ -239,6 +292,25 @@ export async function revertRun(
     );
   }
 
+  // The remove-by-name step is the one the scheduler steps cannot stand in for
+  // (F15): a purge that failed or that the guard could not even attempt leaves
+  // the reverted page in the index, which is exactly the state this route must
+  // never report as a revert. A skip with a reason is NOT that state — see
+  // `purgeRemovedPages`.
+  const unpurged = index.purge.filter(
+    (p) => p.outcome === 'failed' || p.outcome === 'refused_unreadable',
+  );
+  if (unpurged.length > 0) {
+    const failed = unpurged[0]!;
+    throw new Error(
+      `revert commit ${outcome.sha} landed for run ${runId} and ${sourceId} was re-synced, but the `
+      + `reverted page ${failed.slug} was not removed from the brain index (${failed.outcome}): `
+      + `${failed.argv.join(' ')} exited ${failed.exitCode ?? 'no call'} `
+      + `(${failed.classification}) ${failed.stderr.trim() || failed.detail}. `
+      + 'Honesty rule 7: a reverted file that still answers searches is not reverted.',
+    );
+  }
+
   return {
     reverted: true,
     runId,
@@ -246,7 +318,7 @@ export async function revertRun(
     revertCommit: outcome.sha,
     revertedAt: at.toISOString(),
     files: outcome.files,
-    index: { sync: index.sync, embed },
+    index: { purge: index.purge, sync: index.sync, embed },
   };
 }
 
@@ -256,13 +328,22 @@ export async function revertRun(
  * `--source` from the write Space, so a caller cannot supply it), the same ops
  * RPC argv build. No shell, and never gbrain straight from the control plane (S2).
  *
+ * The page-level removals come FIRST, and they are not optional decoration on
+ * the sync: `sync` reconciles `anchor..HEAD`, so a file whose addition and
+ * removal both landed inside that delta nets to NO change (F15, measured), and
+ * the page an agent run writes was created brain-first by MCP `put_page` with
+ * its chunks embedded inline. Only a delete by name moves it.
+ *
  * The embed runs only when sync succeeded — the rule `live-sync`'s step 2 carries:
  * embedding a half-imported Space commits chunks of a state sync never reached.
  */
 async function reindex(
   writeSourceId: string,
+  revertFiles: readonly RangeFile[],
   deps: RevertDeps,
-): Promise<{ sync: IndexStep; embed: IndexStep | null }> {
+): Promise<{ purge: PagePurge[]; sync: IndexStep; embed: IndexStep | null }> {
+  const purge = await purgeRemovedPages(writeSourceId, revertFiles, deps);
+
   const sync = SCHEDULER_COMMANDS['sync'];
   const embed = SCHEDULER_COMMANDS['embed'];
   if (!sync || !embed) throw new Error('the scheduler allowlist is missing sync or embed');
@@ -270,14 +351,196 @@ async function reindex(
   const syncStep = await runIndexStep(
     sync, fenceParams(sync, validateParams(sync, {}), writeSourceId), deps,
   );
-  if (syncStep.classification !== 'ok') return { sync: syncStep, embed: null };
+  if (syncStep.classification !== 'ok') return { purge, sync: syncStep, embed: null };
 
   return {
+    purge,
     sync: syncStep,
     embed: await runIndexStep(
       embed, fenceParams(embed, validateParams(embed, { stale: true }), writeSourceId), deps,
     ),
   };
+}
+
+/**
+ * The page-shaped paths a revert REMOVED, as slugs. `status` is git's own token,
+ * and only a `D` names a path that is now gone — a file the revert merely
+ * MODIFIED (`M`) is re-synced from its new content and must not be touched: the
+ * page it derives may be another run's, and the revert did not remove it.
+ *
+ * The slug derivation mirrors gbrain's own (`src/core/sync.ts`, `slugifyPath`):
+ * strip `.md`/`.mdx`, then per segment lower-case and collapse runs of
+ * whitespace to a hyphen. A path whose segment carries anything outside
+ * letters/digits/dots/underscores/hyphens/spaces derives no slug here — that is
+ * the emoji/CJK case gbrain imports under a FRONTMATTER slug, and a guarded
+ * `null` is the only honest answer; a guessed slug could name another page.
+ */
+export function purgeCandidates(files: readonly RangeFile[]): Array<{ path: string; slug: string | null }> {
+  const out: Array<{ path: string; slug: string | null }> = [];
+  const seen = new Set<string>();
+  for (const f of files) {
+    if (!f.status.startsWith('D')) continue;
+    if (seen.has(f.path)) continue;
+    seen.add(f.path);
+    out.push({ path: f.path, slug: slugForRemovedPath(f.path) });
+  }
+  return out;
+}
+
+const PAGE_SEGMENT_RE = /^[\p{L}\p{N}._\- ]+$/u;
+
+/** null when this path derives no slug this module can stand behind. */
+function slugForRemovedPath(relPath: string): string | null {
+  const stripped = relPath.replace(/\.mdx?$/i, '');
+  if (stripped === relPath) return null; // not markdown: a code file's slug is flattened (slugifyCodePath)
+  const segments = stripped.split('/');
+  const slugs: string[] = [];
+  for (const raw of segments) {
+    const segment = raw.normalize('NFC');
+    if (!PAGE_SEGMENT_RE.test(segment)) return null;
+    const slug = segment.toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (slug === '') return null;
+    slugs.push(slug);
+  }
+  return slugs.length > 0 ? slugs.join('/') : null;
+}
+
+/**
+ * Remove the pages the revert removed, BY NAME, one delete per slug.
+ *
+ * Two rules this function exists to get right, both learned from F15:
+ *
+ *   1. **Only the removed paths.** `purgeCandidates` filters to `D`; a file the
+ *      revert edited is re-synced from its content and its page is never touched.
+ *   2. **Never purge a page that is still a file.** `gbrain delete --purge`
+ *      UNLINKS the page's markdown if it is there, so a slug whose file the tree
+ *      still holds is live work — another writer re-created it, or the revert
+ *      restored it under a name that derives the same slug. Nothing is touched
+ *      and the skip is recorded with the path that was found. That check asks
+ *      the TREE (`deps.probeTree`), never the revert's own file list, because
+ *      the file list is a memory of git. Both the removed path and the slug's
+ *      own `<slug>.md` are probed: a page re-created at its canonical path is
+ *      live whether or not the removed path is the one that came back.
+ *
+ * The probe's own failure is NOT a skip: a guard that could not look has no
+ * evidence the file is gone, and "absence of evidence is a pass" is the failure
+ * `src/upgrade/digest.ts` names. Those candidates come back
+ * `refused_unreadable`, and `revertRun` throws on them.
+ */
+async function purgeRemovedPages(
+  writeSourceId: string,
+  revertFiles: readonly RangeFile[],
+  deps: RevertDeps,
+): Promise<PagePurge[]> {
+  const spec = OPERATIONS['page.delete'];
+  if (!spec) throw new Error('the registry is missing page.delete');
+
+  const candidates = purgeCandidates(revertFiles);
+  if (candidates.length === 0) return [];
+
+  const argvFor = (slug: string) => redactArgv(spec, ['gbrain', ...buildArgv(
+    spec, { slug, sourceId: writeSourceId, purge: true }, { json: true },
+  )]);
+  const skipped = (
+    c: { path: string; slug: string | null }, outcome: PagePurge['outcome'], detail: string,
+  ): PagePurge => ({
+    slug: c.slug ?? c.path,
+    removedPath: c.path,
+    outcome,
+    detail,
+    argv: c.slug === null ? [] : argvFor(c.slug),
+    exitCode: null,
+    stderr: '',
+    classification: 'refused',
+  });
+
+  // One probe for every path that could veto a purge, before any delete runs:
+  // a guard that asks per-slug after the first removal would already have
+  // unlinked files by the time it refused.
+  const probePaths = [...new Set(candidates.flatMap((c) => (
+    c.slug === null ? [c.path] : [c.path, `${c.slug}.md`]
+  )))];
+  let probe: TreeProbe | null = null;
+  let probeFailure = '';
+  try {
+    probe = await deps.probeTree(writeSourceId, probePaths);
+  } catch (e) {
+    probeFailure = e instanceof Error ? e.message : String(e);
+  }
+
+  const present = new Set((probe?.paths ?? []).filter((p) => p.onDisk).map((p) => p.path));
+  const out: PagePurge[] = [];
+
+  for (const c of candidates) {
+    if (c.slug === null) {
+      out.push(skipped(
+        c, 'skipped_not_a_page',
+        `${c.path} derives no slug this path can stand behind (a non-markdown file, or a name gbrain `
+        + 'imports under a frontmatter slug), so no page was removed for it',
+      ));
+      continue;
+    }
+    if (probe === null) {
+      out.push(skipped(
+        c, 'refused_unreadable',
+        `the write Space's working tree could not be read (${probeFailure}), so the purge guard has no `
+        + 'evidence that the removed file is gone and nothing was removed',
+      ));
+      continue;
+    }
+    const twin = `${c.slug}.md`;
+    const stillThere = [c.path, twin].find((p) => present.has(p));
+    if (stillThere !== undefined) {
+      out.push(skipped(
+        c, 'skipped_file_present',
+        `${stillThere} is still in the write Space's working tree, so ${c.slug} is live work rather than a `
+        + 'reverted page: nothing was removed',
+      ));
+      continue;
+    }
+
+    const params = { slug: c.slug, sourceId: writeSourceId, purge: true };
+    const argv = argvFor(c.slug);
+    try {
+      const r = await deps.callOps('page.delete', params, { json: true, timeoutMs: INDEX_TIMEOUT_MS });
+      const receipt = r.json as { status?: unknown } | null;
+      const classification = classifyExit('page.delete', r.exitCode, r.json);
+      const purged = r.exitCode === 0 && receipt?.status === 'purged';
+      // An absent slug is a RESULT, not a failure: the op exits 1 with
+      // `Error [page_not_found]: …` on stderr and no JSON receipt (measured at
+      // the pin), which for a reverted path means sync never imported it and
+      // there is no page to remove.
+      const absent = r.exitCode !== 0 && r.stderr.includes('page_not_found');
+      out.push({
+        slug: c.slug,
+        removedPath: c.path,
+        outcome: purged ? 'purged' : absent ? 'absent' : 'failed',
+        detail: purged
+          ? `removed from ${writeSourceId}'s index by name`
+          : absent
+            ? `no page at ${c.slug} in ${writeSourceId}: there was nothing to remove`
+            : `the delete did not report a purge (exit ${r.exitCode})`,
+        argv,
+        exitCode: r.exitCode,
+        stderr: r.stderr,
+        classification,
+      });
+    } catch (e) {
+      // The op never produced an exit code: -1 classifies as a plain failure,
+      // the same line `runIndexStep` holds.
+      out.push({
+        slug: c.slug,
+        removedPath: c.path,
+        outcome: 'failed',
+        detail: 'the ops RPC failed before the delete produced an exit code',
+        argv,
+        exitCode: -1,
+        stderr: e instanceof Error ? e.message : String(e),
+        classification: classifyExit('page.delete', -1, null),
+      });
+    }
+  }
+  return out;
 }
 
 async function runIndexStep(
@@ -374,6 +637,7 @@ const defaultDeps: RevertDeps = {
   markReverted,
   fetchRange: gitRange,
   revertRange: gitRevertRange,
+  probeTree: gitPathExists,
   callOps,
   now: () => Date.now(),
 };

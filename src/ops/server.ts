@@ -15,7 +15,7 @@ import {
   deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
-import { commitAs, diffRange, inspectRepos, revertRange } from './git.ts';
+import { commitAs, diffRange, inspectRepos, probeTreePaths, revertRange } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -201,6 +201,25 @@ Bun.serve({
         if (typeof before !== 'string' || !before) return json({ error: 'before required' }, 400);
         if (typeof after !== 'string' || !after) return json({ error: 'after required' }, 400);
         return json(await diffRange(sourceId, before, after, { sql }));
+      }
+
+      // F16: the revert's purge guard. `gbrain delete <slug> --purge` unlinks a
+      // page's markdown file when it is there, so a reverted path some writer
+      // has since re-created is LIVE work. Read-only, and it answers from the
+      // WORKING TREE — the revert's own file list is a memory of git. An
+      // invalid sourceId, an unreadable repo or an unstat-able path throws (400)
+      // rather than answering `onDisk: false`, which a caller would read as
+      // permission to delete.
+      if (url.pathname === '/git/path-exists') {
+        const { sourceId, paths } = body as { sourceId?: unknown; paths?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (!Array.isArray(paths) || paths.length === 0) {
+          return json({ error: 'paths must be a non-empty array' }, 400);
+        }
+        if (!paths.every((p) => typeof p === 'string')) {
+          return json({ error: 'every path must be a string' }, 400);
+        }
+        return json(await probeTreePaths(sourceId, paths as string[], { sql }));
       }
 
       // D10 steps 1+2: the revert and the commit that signs it are ONE locked

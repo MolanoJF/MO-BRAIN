@@ -318,11 +318,16 @@ What it does, in order:
 1. `git revert --no-commit <before>..<after>` in the run's write Space, under the repo lock.
 2. `commitAs(sourceId, actor = the acting admin, "revert: agent run <runId>")` — the audit story is
    that a **named human** reverted it, never that "the system" did.
-3. `sync` + `embed --stale` through the **normal scheduler command path**, so the brain's index moves
-   back with the tree. Honesty rule 7: **a reverted file that still answers searches is not reverted.**
-   A failed re-index is an error, not a success: the message names the revert commit that already
-   landed, so you know the tree moved and the index did not — the two are never presented as both
-   done when only one is.
+3. **the pages the revert removed, deleted by name** (`gbrain delete <slug> --source-id <write Space>
+   --purge`, F16): the page an agent run writes is created brain-first by MCP `put_page`, and `sync`
+   reconciles `anchor..HEAD` — a file added and removed inside that one window nets to nothing, so a
+   re-sync alone leaves the reverted page answering. A slug whose file is still in the write Space is
+   **skipped** and named in the response, because that file is someone's live work; then
+4. `sync` + `embed --stale` through the **normal scheduler command path**, so the rest of the brain's
+   index moves back with the tree. Honesty rule 7: **a reverted file that still answers searches is not
+   reverted.** A failed re-index is an error, not a success: the message names the revert commit that
+   already landed, so you know the tree moved and the index did not — the two are never presented as
+   both done when only one is.
 
 It is a **new commit**, never a history rewrite, and **nothing ever auto-reverts.**
 
@@ -543,7 +548,11 @@ disabling it does not change how quiesce runs.
 - **Never enable Bash.** Bash is a distinct, higher-trust job class that this slice deliberately does
   not implement, and `schedules` refuses to store it: there is no column, no field and no pass-through
   for a tool allowlist, a permission mode or a shell, so a payload carrying one dies as an **unknown
-  field** before it can become a row. A prompt that asks for Bash produces a denied-tool event.
+  field** before it can become a row. Measured (C11, and F3's probe before it): a prompt that asks for
+  Bash produces **no `tool_use` at all** and `permission_denials: []`, because `--tools ""` removes the
+  built-in surface at the source — the model cannot call a tool it was never offered. There is no
+  denied-tool event to look for; the evidence that the request died is the empty tool surface, the
+  empty diff and an unmoved head.
 - **Never treat the tool flags as the fence.** `--allowedTools` / `--disallowedTools` are defence in
   depth; the fence is `runner-net` being `internal: true`. Never attach the runner to a second network,
   and never add a Caddy route for `/api/runs/*` or `/api/gateway/*` — those two surfaces are

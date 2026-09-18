@@ -1,5 +1,5 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
-import type { GitRange, RepoStatus, RevertOutcome, RevertRequest } from '../ops/git.ts';
+import type { GitRange, RepoStatus, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
 
 export type { RepoStatus };
 
@@ -72,6 +72,17 @@ export async function inspectRepos(): Promise<RepoStatus[]> {
  */
 export async function gitRange(sourceId: string, before: string, after: string): Promise<GitRange> {
   return post('/git/range', { sourceId, before, after }, 60_000);
+}
+
+/**
+ * F16 — the revert's purge guard. Read-only: what the write Space's WORKING
+ * TREE holds at each path, tracked or not. Ops REFUSES (throws) rather than
+ * answering `onDisk: false` when the Space, the repo or a path cannot be read,
+ * so a caller must never treat a thrown call as "the file is gone" — but it can
+ * treat a returned `onDisk: false` as the filesystem's own word.
+ */
+export async function gitPathExists(sourceId: string, paths: readonly string[]): Promise<TreeProbe> {
+  return post('/git/path-exists', { sourceId, paths }, 60_000);
 }
 
 /**

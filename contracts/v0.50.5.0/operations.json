@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.5.0",
-  "generatedAt": "2026-09-17T06:26:12.833Z",
+  "generatedAt": "2026-09-18T05:37:41.152Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -693,6 +693,37 @@
           "name": "timeoutMs",
           "flag": "--timeout-ms",
           "kind": "value"
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "page.delete",
+      "argv": [
+        "delete"
+      ],
+      "params": [
+        {
+          "name": "slug",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "sourceId",
+          "flag": "--source-id",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "purge",
+          "flag": "--purge",
+          "kind": "flag"
         }
       ],
       "supportsJson": true,

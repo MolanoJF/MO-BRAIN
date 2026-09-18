@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SQL } from 'bun';
@@ -242,6 +243,101 @@ export async function diffRange(
   });
 }
 
+/** One path's state in a Space's working tree. TWO observations, never one
+ *  derived from the other: what the filesystem holds, and what git knows. */
+export type TreePathState = {
+  /** The repo-relative path, as validated — never the caller's raw string. */
+  path: string;
+  /** `stat` found something at `<repo>/<path>`. This is the fact a caller that
+   *  is about to UNLINK that file needs. */
+  onDisk: boolean;
+  /** `git ls-files` knows the path (in the index, or untracked and not
+   *  ignored). A file a second writer re-created after a commit is usually
+   *  untracked, which is why this is reported beside `onDisk` rather than
+   *  instead of it. */
+  inGit: boolean;
+};
+
+export type TreeProbe = { sourceId: string; root: string; paths: TreePathState[] };
+
+/**
+ * Refuse anything that could name a file outside the Space, or that git could
+ * read as an option: an absolute path, a `..` segment, a leading `-`, a
+ * backslash separator (git pathspecs use `/`), an empty segment, or NUL. The
+ * pathspec passed to git still carries `--`, because a name that merely LOOKS
+ * like an option must never become one.
+ */
+function assertRepoRelative(rel: string): string {
+  if (typeof rel !== 'string' || rel === '') throw new Error('path must be a non-empty string');
+  if (rel.includes('\0')) throw new Error('path must not contain NUL');
+  if (rel.startsWith('/') || rel.startsWith('-')) {
+    throw new Error(`path must be repo-relative and must not start with '/' or '-': ${rel}`);
+  }
+  if (rel.includes('\\')) throw new Error(`path must use '/' as its separator: ${rel}`);
+  const segments = rel.split('/');
+  if (segments.some((s) => s === '' || s === '.' || s === '..')) {
+    throw new Error(`path must not contain empty, '.' or '..' segments: ${rel}`);
+  }
+  return rel;
+}
+
+/**
+ * READ-ONLY. What a Space's WORKING TREE holds at each path, tracked or not.
+ *
+ * `revertRun`'s purge guard is the reason this exists: `gbrain delete <slug>
+ * --purge` unlinks the page's markdown file if it is there, and a reverted file
+ * whose path some other writer has since re-created is LIVE work, not a
+ * reverted page. The revert's own file list is a memory of git, so the guard
+ * has to ask the tree — and the tree lives here, behind ops (S2).
+ *
+ * An unreadable repo, an invalid `sourceId`, a path that fails validation, or a
+ * stat error that is neither ENOENT nor ENOTDIR THROWS: "I could not look" must
+ * never come back as `onDisk: false`, because a caller that reads it as absence
+ * would delete live work.
+ */
+export async function probeTreePaths(
+  sourceId: string,
+  paths: readonly string[],
+  opts: { sql: SQL; root?: string },
+): Promise<TreeProbe> {
+  if (!SOURCE_ID_RE.test(sourceId)) throw new Error(`invalid sourceId: ${sourceId}`);
+  const wanted = paths.map(assertRepoRelative);
+  const cwd = join(opts.root ?? REPOS_ROOT, sourceId);
+
+  return withRepoLock(opts.sql, sourceId, async () => {
+    // Resolve the root first: if the Space has no repo, this fails by name
+    // rather than reporting every path absent.
+    const top = await git(cwd, ['rev-parse', '--show-toplevel']);
+    if (top.exitCode !== 0) throw new Error(`git rev-parse ${sourceId} failed: ${gitFailure(top)}`);
+    const root = top.stdout.trim();
+
+    const listed = await git(cwd, [
+      'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...wanted,
+    ]);
+    if (listed.exitCode !== 0) throw new Error(`git ls-files ${sourceId} failed: ${gitFailure(listed)}`);
+    const known = new Set(listed.stdout.split('\0').filter(Boolean));
+
+    return {
+      sourceId,
+      root,
+      paths: wanted.map((rel) => ({ path: rel, onDisk: statOrThrow(join(cwd, rel)), inGit: known.has(rel) })),
+    };
+  });
+}
+
+/** `stat` as evidence, not as a default: ENOENT/ENOTDIR are the only answers
+ *  that mean "absent"; anything else (EACCES, ELOOP, an I/O error) refuses. */
+function statOrThrow(absPath: string): boolean {
+  try {
+    statSync(absPath);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw new Error(`could not stat ${absPath}: ${code ?? String(e)}`);
+  }
+}
+
 /**
  * Put a failed revert back, then PROVE it. The pre-flight proved the tracked
  * worktree clean, so HEAD plus an empty tracked status IS byte-identity. A
@@ -321,7 +417,15 @@ export async function revertRange(
     // `--no-commit` stages its own work, so an empty index is an empty inverse
     // diff: the range is already back and there is nothing to commit. This is the
     // shape `commitAs` reports as `committed: false`.
-    const staged = await git(cwd, ['diff', '--cached', '--name-status']);
+    // `--no-renames` is F16's, and it is not cosmetic: with rename detection on,
+    // the inverse of a rename is reported as ONE `R100 <pre> <post>` row, and
+    // `parseNameStatus` keeps the POST-image path — so the path the revert
+    // REMOVED (`b.md` in `git mv a.md b.md`, reverted) would appear only as a
+    // pre-image, and a caller that removes pages by name could not see it.
+    // Measured: `git diff --cached --name-status` answers `R100 b.md a.md` for
+    // that revert, and `--no-renames` answers `A a.md` + `D b.md` — what the
+    // revert actually did to the tree.
+    const staged = await git(cwd, ['diff', '--cached', '--name-status', '--no-renames']);
     if (staged.exitCode !== 0) throw new Error(`git diff --cached ${sourceId} failed: ${gitFailure(staged)}`);
     if (!staged.stdout.trim()) return { reverted: false, reason: 'nothing_to_revert' };
 
