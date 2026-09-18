@@ -1,6 +1,6 @@
 # brainstand — Staged Delivery Roadmap
 
-> **For agentic workers:** This is the **stage map**, not an executable plan. **Slice 0 and Slice 1 are COMPLETE on `main` — do not re-execute those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
+> **For agentic workers:** This is the **stage map**, not an executable plan. **Slices 0–3.5 are COMPLETE on `main`; Slice 4 is COMPLETE on `slice-4-agent-runner` and is NOT yet merged — do not re-execute any of those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
 
 **Goal:** Turn gbrain (a 415K-LOC CLI/MCP knowledge system) into a product a team deploys with one `docker compose up` and operates from a web console — with gbrain pinned and upgraded, never forked.
 
@@ -89,7 +89,7 @@ Do not re-litigate these. Each was read out of the source, not inferred.
 
 ## Environment prerequisites
 
-**Current (2026-09-17):** Slices 0–3.5 are complete and merged on `main`, which is the **only** branch (Slice 3.5 merged at `202a658`). Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 4 — its plan is not yet written.**
+**Current (2026-09-18):** Slices 0–3.5 are complete and merged on `main` (Slice 3.5 merged at `202a658`). Slice 4 is **complete on branch `slice-4-agent-runner`, not yet merged to `main`** — its exit gate is met (see [Slice 4](#slice-4--agent-runner) below). Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 5 — its plan is not yet written, and it is additionally blocked on Open Question 2.**
 
 The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
 
@@ -220,7 +220,7 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ### Slice 4 — Agent runner
 
-**Plan:** to be written at this gate, from the spec's *Agent runner* section.
+**Plan:** [`2026-09-17-slice-4-agent-runner.md`](./2026-09-17-slice-4-agent-runner.md) — **COMPLETE** on `slice-4-agent-runner` (Gates A/B/C green; **not yet merged to `main`**). Findings: [`docs/slice-4-findings.md`](../../slice-4-findings.md). Runbook: [`docs/runbooks/agent-runner.md`](../../runbooks/agent-runner.md). The six verification commands and the two build gates, with their pasted output: [`PROGRESS.md`](./PROGRESS.md).
 
 **Why last of the build stages:** highest risk. Depends on Slice 2 (an identity to run as) and Slice 3 (dispatch).
 
@@ -239,13 +239,22 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 **Exit gate:** a nightly `agent_prompt` produces a run record with cost, token counts and a brain diff; **killing the runner mid-run reclaims the lease without double-writing**; exceeding the budget cap stops the run and alerts rather than silently truncating.
 
+**Exit gate status — MET**, measured on the live stack by Gate C (`test/e2e/slice4.e2e.test.ts`, C1–C12). The numbers, the money and the one defect the gate itself found are in [`docs/slice-4-findings.md`](../../slice-4-findings.md) F15–F17; the commands are pasted in [`PROGRESS.md`](./PROGRESS.md).
+
+| Roadmap promise | Measured outcome |
+|---|---|
+| A nightly `agent_prompt` produces a run record with cost, token counts and a brain diff | **Met** — C1–C5: the row materializes at its org-local slot through Slice 3's own materializer, the runner claims it, `costUsd` equals `SUM(agent_run_usage.cost_usd)`, and one `GET /api/runs/:id` carries the prompt, the tool calls, the tokens, the cost and the diff. |
+| Killing the runner mid-run reclaims the lease without double-writing | **Met** — C7 kills the container mid-run (`lease_expired` / `infra_failed`, an alert, and the run's bearer going 200 → 401 across the reclaim); C8 is the double-write proof. One honest qualification, recorded rather than smoothed: the retry row is written by the **gate**, because `reclaimExpiredLeases` deliberately never re-runs a dead runner's agent run. |
+| Exceeding the budget cap stops the run and alerts rather than silently truncating | **Met** — C9: `402` with `tokens: 0` / `costUsd: null` and **zero completed calls**, `budget_exceeded` on both rows, one `agent_budget_exceeded` alert with no `midStream`. F17 removed the leg's own race — it could never have been deterministic, because `agent_run_usage` only holds a call once it has ended. |
+| *(the promise inside the first one: a brain diff **with a revert**)* | **Needed a real product fix, found by this gate.** C6 failed on the shipped product: the file's addition and its removal both land inside the anchor..HEAD window a delta `sync` reconciles, so `deleted: 0` was the truth about a window in which the path does not exist, and the reverted page kept answering searches. **F15** named it, **F16** fixed it — a new `page.delete` operation, with the revert naming the pages it removed and refusing to delete a slug whose file the tree still holds — and C6's three clauses are unchanged. |
+
 ---
 
 ### Slice 5 — Managed cloud
 
 **Plan:** to be written at this gate.
 
-**Entry gate:** Slice 3.5 exit gate green **and** Slice 4 exit gate green. Upgrades must be deterministic before this stage exists.
+**Entry gate:** Slice 3.5 exit gate green **and** Slice 4 exit gate green — **both are now met.** Slice 3.5 closed on six green commands and a 77/0 e2e family; Slice 4's three promises are measured in its own section above (branch `slice-4-agent-runner`, not yet merged), and the one defect its gate found is fixed rather than papered over. Upgrades must be deterministic before this stage exists.
 
 **Scope:** our provisioner stands up the same stack per tenant; the user never sees compose. **N stacks, not one stack with tenants** — gbrain is single-brain-per-`GBRAIN_HOME` with no users table, and `source_id`/`federated_read` is the only isolation axis. This makes upgrade automation load-bearing for the business model, not a nicety. Billing.
 
@@ -300,9 +309,9 @@ Get a lawyer's eye on naming and positioning before launch: *"built on gbrain"* 
 | 3 | Control-plane compromise = brain compromise | Split ops sidecar (S2); control plane holds no brain DB creds | Slice 1 |
 | 4 | File-plane write races eat an API key | Single serialized writer + Postgres advisory lock + atomic write (S3) | Slice 1 |
 | 5 | Permission UI promises what enforcement can't do | Connections as the unit of access; Space = source hard rule (S4) | Slice 2 |
-| 6 | Agent runner is arbitrary code execution with org keys | Network isolation, MCP-only tools, egress allowlist, gateway-proxied model calls, ephemeral workspace, optional deployment | Slice 4 |
+| 6 | Agent runner is arbitrary code execution with org keys | Network isolation, MCP-only tools, egress allowlist, gateway-proxied model calls, ephemeral workspace, optional deployment. **Slice 4 (2026-09-18): shipped and measured, not declared.** C10 probes from *inside* the container — only `caddy:443` and `control-plane:3150` connect and `/proc/net/route` carries no default route; C11 measures an MCP-only surface (`--tools ""` leaves 23 `mcp__gbrain__*` tools and **no** `tool_use` for a prompt that asks for Bash); the gateway refuses with `402` **before forwarding** (C9); the workspace is a per-run directory under `/tmp` tmpfs, destroyed on every exit path; the lane is off by default behind the `runner` profile (C12). **Bash stays a distinct higher-trust job class this slice deliberately does not implement** — `schedules` has no field to store it. | Slice 4 |
 | 7 | Inconsistent snapshots make rollback a lie | Quiesce (V5) or volume-level snapshot; CI-tested restore | Slice 1 + 3.5 |
-| 8 | Agent retries double-write | Failure classification; upsert-by-slug; idempotency keys | Slice 4 |
+| 8 | Agent retries double-write | Failure classification; upsert-by-slug; idempotency keys. **Slice 4 (2026-09-18):** D11's table plus `schedule_runs.attempt`; C8 is the double-write proof — one copy of the page in the run's own directory, one commit adding it, the agent's text exactly once. Open and stated rather than hidden: `reclaimExpiredLeases` never re-runs a dead runner's agent run, so C8's retried occurrence is written by the **gate** in `createRetryRow`'s shape; no product path retries a `lease_expired` agent run (F15). | Slice 4 |
 | 9 | Secrets sprawl across four planes, a vault and connector JSON | One `secrets` table as source of truth; everything else materialized and re-materialized on rotation | Slice 1 |
 | 10 | Many sources may degrade search fan-out / `federated_read[]` | **Open question — measure before committing to Space-per-boundary at scale** | Open Q1 |
 
