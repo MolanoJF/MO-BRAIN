@@ -101,7 +101,8 @@ bun run scripts/restore.ts /srv/backups/2026-09-18
 `runRestore` stops the writers, drops and recreates `gbrain` and `control`, loads the dumps, restores
 the repos, re-materializes the file plane, restarts the services, runs
 `gbrain apply-migrations --yes --non-interactive`, then `gbrain doctor --json`. Its report carries
-`ok` (doctor's exit code alone), the component list, and `connectionsNeedingReissue`.
+`ok` (doctor's exit code alone), the component list, `connectionsNeedingReissue`, and — on the
+new-domain branch only — `connectionsInvalidated` and `alertsRaised`.
 
 Measured this drill, same archive, new-domain branch (the stop-to-report path; the same-domain path
 is the existing `test/e2e/restore.e2e.test.ts` assertion):
@@ -164,31 +165,39 @@ It also reports `connectionsNeedingReissue`, the gbrain client ids the restored 
 names. Measured this drill: **2** clients needed re-issue, out of **4** Connection rows (2 `active`,
 2 already `revoked`). The restore itself finished in **21.2 s** with `doctorExitCode: 0`.
 
-**Measured product behaviour at this point — a known gap (F23).** The product does **not** mark the
-restored Connections invalid. After the restore, `GET /api/connections` (what the console's
-Connection page reads) returned the **same** states as before it: the 2 `active` Connections were
-still `active`, the 2 `revoked` ones still `revoked`. `GET /api/health`'s `scheduleAlerts` was
-`[]`, and no route or page told a member that their Connection no longer works. **The console will
-show a working Connection that is not one.** Until F23 is fixed, the operator must invalidate them
-by hand as part of the flow below; do not trust the `active` badge after a domain move.
+**The new-domain restore invalidates every grant for you (F23, fixed).** After the restored services
+are up and `apply-migrations` has run, `runRestore` marks every `connections` row still `active` as
+`revoked` (stamping `revoked_at`), retires the live client name so the member can be re-provisioned,
+disables each enabled schedule on those Connections with `disabled_reason = "connection_revoked"`,
+and raises one **`connection_revoked`** alert per disabled schedule — the member-facing message,
+visible on `/schedules` and, as unacknowledged kinds, on `/api/health`. The report's
+`connectionsInvalidated` and `alertsRaised` say what actually changed.
+
+Measured on the live stack (the F23 fix): before the restore **2** Connections read `active` and
+`/api/health`'s `scheduleAlerts` was `[]`; after it **0** read `active` and **4** `connection_revoked`
+alerts were open. `GET /api/connections` — what the console's Connection page reads — now shows
+`revoked`, never a working Connection that is not one. A **same-domain** restore is untouched: it
+changes no Connection and raises no alert.
 
 ---
 
 ## The bulk re-provisioning flow
 
 Because a new domain invalidates every grant, the operator's job after the restore is to replace
-every Connection, member by member. Each replacement is a **revoke then re-provision**, never a
-rotate — the client secrets are hashed server-side and cannot be recovered from the archive.
+every Connection, member by member. The restore has already moved every Connection to `revoked` and
+raised the alerts, so the job is **re-provision, never revoke again**.
 
-1. **Read the affected set.** `runRestore`'s report lists `connectionsNeedingReissue` (the gbrain
-   client ids). Cross-check the console: **Connection** page, every row whose state reads `active`
-   after a domain move is stale. Measured: 2 such rows in this drill.
-2. **Revoke each stale Connection** through the console's **Connection → Revoke** (or
-   `POST /api/connections/:id/revoke`). This is irreversible at gbrain (`auth revokeClient` deletes
-   the client and its tokens) and is the honest signal the old grant is dead. It also disables the
-   member's schedules with `disabled_reason = "connection_revoked"` and raises a
-   **`connection_revoked`** alert — the member-facing message, visible on `/schedules`. The
-   schedules themselves are disabled, not deleted, so a re-grant can re-enable them.
+1. **Read the affected set.** `runRestore`'s report names `connectionsNeedingReissue` (the gbrain
+   client ids the restored control DB still names) and `connectionsInvalidated` (how many rows it
+   actually revoked). Cross-check the console: **Connection** page, every row reads `revoked` after a
+   domain move. Measured: 2 rows invalidated in this drill.
+2. **Skip the revoke — the restore did it.** It already wrote the control-DB half of the product's
+   own revoke: `state = "revoked"`, the retired client name, disabled schedules
+   (`disabled_reason = "connection_revoked"`) and a **`connection_revoked`** alert each — the
+   member-facing message, visible on `/schedules`. The old gbrain clients are left in place on
+   purpose: their issuer/redirect origin is gone, so they cannot mint a working token, and their ids
+   stay in the report for this step. The schedules are disabled, not deleted, so a re-grant can
+   re-enable them.
 3. **Re-provision each member.** Create the Connection again on the console's **Connection** page
    (member, write Space, read Spaces, harness, optional fence), then have the member
    **re-run the harness wiring** against the new domain. A scope change that adds access requires a

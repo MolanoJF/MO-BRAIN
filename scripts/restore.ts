@@ -54,6 +54,10 @@ export type RestoreReport = {
   components: string[];
   doctorExitCode: number;
   connectionsNeedingReissue: string[];
+  /** Written only by the new-domain branch (F23). Zero on a same-domain restore. */
+  connectionsInvalidated: number;
+  /** `connection_revoked` alerts raised for the disabled schedules, if any. */
+  alertsRaised: number;
   domainChanged: boolean;
 };
 
@@ -246,6 +250,72 @@ async function reMaterializeFilePlane(): Promise<void> {
 }
 
 /**
+ * F23: a restore into a different `DOMAIN` invalidates every grant, because
+ * OAuth redirect URIs and issuer URLs are domain-bound. The archive has no
+ * way to know the new origin, so the restored `connections` rows still read
+ * `active` while every token they name is dead. The honest, schema-understood
+ * state is `revoked` — no new state and no migration: `connections.state`'s
+ * CHECK already allows it, `GET /api/connections` and the console's Connection
+ * page render it verbatim, and the retirement of the client name (mirroring
+ * `retiredClientName` in src/control/connections.ts) frees the deterministic
+ * `bs-<member8>-<space>` name so the member can be re-provisioned.
+ *
+ * This mirrors `revokeConnection`'s control-DB half — not its `auth.revokeClient`
+ * ops call: the restored gbrain already lost the credential and the origin that
+ * made it valid, so there is no live grant to delete, and the restored clients
+ * must stay listed for the operator to replace. Enabled schedules on an
+ * invalidated Connection are disabled (`connection_revoked`) and one alert is
+ * raised per disabled schedule, the product's existing member-facing surface.
+ *
+ * Runs through the same `compose exec postgres` psql lane the rest of restore
+ * uses, and only from the new-domain branch — a same-domain restore is a no-op.
+ */
+const INVALIDATE_DOMAIN_BOUND_GRANTS_SQL = `
+with target as (
+  select id, organization_id, client_name from connections where state = 'active'
+),
+revoked as (
+  update connections c
+  set state = 'revoked',
+      revoked_at = now(),
+      client_name = 'revoked:' || c.id
+  from target t
+  where c.id = t.id
+  returning c.id, c.organization_id, t.client_name as original_name
+),
+disabled as (
+  update schedules s
+  set enabled = false, disabled_reason = 'connection_revoked'
+  where s.enabled and s.connection_id in (select id from revoked)
+  returning s.id, s.organization_id, s.connection_id
+),
+raised as (
+  insert into schedule_alerts (id, organization_id, schedule_id, run_id, kind, detail)
+  select gen_random_uuid()::text, d.organization_id, d.id, null, 'connection_revoked',
+         jsonb_build_object('connectionId', r.id, 'clientName', r.original_name)
+  from disabled d
+  join revoked r on r.id = d.connection_id
+  returning id
+)
+select
+  (select count(*) from revoked)::int as connections_invalidated,
+  (select count(*) from raised)::int as alerts_raised;
+`;
+
+async function invalidateDomainBoundGrants(): Promise<{ connectionsInvalidated: number; alertsRaised: number }> {
+  const r = await shCapture(
+    [...COMPOSE, 'exec', '-T', 'postgres', 'psql', '-U', 'gbrain', '-d', 'control',
+      '-v', 'ON_ERROR_STOP=1', '-tAc', INVALIDATE_DOMAIN_BOUND_GRANTS_SQL],
+    120_000,
+  );
+  if (r.exitCode !== 0) {
+    throw new Error(`new-domain grant invalidation failed: ${excerpt(r.stdout, r.stderr)}`);
+  }
+  const [connectionsInvalidated = '0', alertsRaised = '0'] = r.stdout.trim().split('|');
+  return { connectionsInvalidated: Number(connectionsInvalidated), alertsRaised: Number(alertsRaised) };
+}
+
+/**
  * Restore is a console flow, not a README script: restore both databases,
  * re-materialize secrets, then re-issue credentials for every Connection —
  * gbrain hashes client secrets server-side, so restoring cannot recover them.
@@ -305,6 +375,21 @@ export async function runRestore(dir: string, opts: { newDomain?: string } = {})
     600_000,
   );
 
+  // F23: a new-domain restore rebinds every OAuth grant, so the restored
+  // `active` Connections are dead. Invalidate them now, after the restored
+  // services own the DB and migrations have run, so the console and
+  // `/api/health` report a state that is true. Same-domain restores skip this
+  // entirely: their grants are still valid.
+  const invalidation = opts.newDomain
+    ? await invalidateDomainBoundGrants()
+    : { connectionsInvalidated: 0, alertsRaised: 0 };
+  if (opts.newDomain) {
+    console.log(
+      `[restore] new domain ${opts.newDomain}: revoked ${invalidation.connectionsInvalidated} ` +
+      `Connection(s); raised ${invalidation.alertsRaised} connection_revoked alert(s)`,
+    );
+  }
+
   // Production gbrain-ops publishes no host port (S2). Doctor / auth.clients
   // must run via compose exec argv — never host callOps / OPS_RPC_URL.
   const doctor = await shCapture(
@@ -349,6 +434,8 @@ export async function runRestore(dir: string, opts: { newDomain?: string } = {})
     components: Object.keys(manifest.components),
     doctorExitCode: doctor.exitCode,
     connectionsNeedingReissue,
+    connectionsInvalidated: invalidation.connectionsInvalidated,
+    alertsRaised: invalidation.alertsRaised,
     domainChanged: Boolean(opts.newDomain),
   };
 }

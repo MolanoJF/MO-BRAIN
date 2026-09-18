@@ -16,8 +16,8 @@ up as a measurement).
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
 | P7 | The D11 live-stack debt clears through product paths alone — eight admin checklist acks settle the `awaiting_admin_decision` ledger row to `applied`, `/schedules`' alert ack empties `/api/health`'s `scheduleAlerts`, and `DELETE /api/members/:id` offboards the residue — and the one path that does not exist is a purge for a revoked Connection (F22) | `confirmed` |
-| P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `partial` — the product's new-domain restore branch ran (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) and named **2** Connections needing re-issue, but **0** were invalidated: the console still showed the same **2** `active`, and no member-facing message existed. The physical `DOMAIN` was not changed (no alternate hostname resolves on this host), so the OAuth issuer/redirect-URI mismatch itself was not reproduced on the wire. See P8 and F23 below |
-| F23 | A new-domain restore leaves every `active` Connection `active`: the console shows a working Connection that is not one, and nothing tells the member | `confirmed` — deferred (reason in F23 below) |
+| P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `partial` at Task 16 — the product's new-domain restore branch ran (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) and named **2** Connections needing re-issue, but **0** were invalidated: the console still showed the same **2** `active`, and no member-facing message existed. The physical `DOMAIN` was not changed (no alternate hostname resolves on this host), so the OAuth issuer/redirect-URI mismatch itself was not reproduced on the wire. **F23 (below) is now fixed: the same drill measures `active` 2 → 0 and 4 `connection_revoked` alerts.** |
+| F23 | A new-domain restore leaves every `active` Connection `active`: the console shows a working Connection that is not one, and nothing tells the member | `confirmed` — **FIXED HERE** (measured `active` 2 → 0 and `scheduleAlerts` [] → 4 `connection_revoked`; see F23 below) |
 | U1 | `compose/Caddyfile`'s public `@gbrain` route publishes an unauthenticated Prometheus `/metrics` surface naming brains, Spaces, models or spend | `contradicted` — the pinned `gbrain-serve` answers `401` with `{"error":"Admin authentication required"}`; no body, no cardinality. S1's argument does not need to be extended to `/metrics` on this pin |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
@@ -879,9 +879,9 @@ host-side, operator-facing, never surfaced to the member or the console.
 **How long the whole path takes: 21.2 s** (`elapsedMs: 21203`) from the first `compose stop` to the
 returned report, including `gbrain apply-migrations` and `gbrain doctor` (exit `0`).
 
-### The automated C8 leg fails, for the same reason
+### The automated C8 leg fails, for the same reason (pre-fix measurement)
 
-`test/e2e/slice5.e2e.test.ts`, run on the live stack:
+`test/e2e/slice5.e2e.test.ts`, run on the live stack at Task 16 time:
 
 ```text
 MEASURED C7 quiesced=verified quiesceLane=http id=61228c87-777f-4694-b067-7fca71247c14
@@ -895,7 +895,8 @@ MEASURED C8 domainChanged=true needingReissue=2 activeAfter=2 total=4
 `C7` passes (on the dev stack the published ops port makes the lane `http`; the production-shaped
 lane is `relay`, measured above). `C8`'s assertion is the plan's own and was **not** weakened: the
 console must not show a working Connection after a new-domain restore, and it does. The failure is
-the defect, F23, not a test bug.
+the defect, F23, not a test bug. **F23 is fixed below; the same leg now measures `activeAfter=0` and
+passes.**
 
 ### Why this is partial, not complete
 
@@ -922,37 +923,74 @@ as the documented consequence rather than a measured one. **No number above was 
 
 ## F23 — a new-domain restore invalidates nothing, so the console shows a working Connection that is not one
 
-**Found by Task 16's P8 drill; deferred, with the reason below.** `runRestore` parses `newDomain`,
-returns `domainChanged: true`, prints the consequence to stderr, and lists the gbrain clients that
-need re-issue (`connectionsNeedingReissue`). It performs **no** state change on the control DB's
-`connections` rows and raises **no** alert. Two measured product consequences:
+**Found by Task 16's P8 drill. FIXED HERE.** `runRestore` parsed `newDomain`, returned
+`domainChanged: true`, printed the consequence to stderr, and listed the gbrain clients that need
+re-issue (`connectionsNeedingReissue`) — and performed **no** state change on the control DB's
+`connections` rows and raised **no** alert. Two measured product consequences:
 
-1. `GET /api/connections` returns every `active` Connection unchanged after a new-domain restore —
+1. `GET /api/connections` returned every `active` Connection unchanged after a new-domain restore —
    measured **2 of 2 active** in P8 — and the console's Connection page renders that `active` badge
-   verbatim, so it shows a working Connection that is not one.
-2. No member-facing message exists. `/api/health`'s `scheduleAlerts` stays `[]`; the only signal is
-   the host-side script output and report.
+   verbatim, so it showed a working Connection that was not one.
+2. No member-facing message existed. `/api/health`'s `scheduleAlerts` stayed `[]`; the only signal
+   was the host-side script output and report.
 
-A contributing gap: `scripts/backup.ts`'s `BackupManifest` carries **no `DOMAIN` (or public URL)
-field**, so a restore cannot compare the archive's origin to the running deployment's and must rely
-on the operator passing `NEW_DOMAIN` to learn a move happened. Even then, it only reports.
+A contributing gap (not fixed here, and not on the honesty path): `scripts/backup.ts`'s
+`BackupManifest` carries **no `DOMAIN` (or public URL) field**, so a restore cannot compare the
+archive's origin to the running deployment's and must rely on the operator passing `NEW_DOMAIN` to
+learn a move happened. The invalidation below is gated on that same signal.
 
-### Decision: deferred, not fixed here
+### Fix
 
-Task 16's own deliverable is the runbook and the drill; it is **not** the task for a new destructive
-product surface. Closing F23 correctly needs (a) a decision on what "invalidated" means for the
-`connections` row — a new state requires a migration (the table's check constraint allows only
-`pending | active | revoked`), or the flow reuses `revoked` and its alert path; (b) a way for the
-host-side restore to reach the control plane's mutation code, which today has no admin route for a
-bulk revoke and no session the script could hold; and (c) a member-facing message and a console
-state that distinguish "never worked" from "worked, domain moved". That is a feature with a blast
-radius on the restore lane, the schema and the Connection page — the named owner slice is **the
-Gate C fix (Task 17)** if it takes it, otherwise the post-GA hardening slice.
+`scripts/restore.ts` now invalidates every grant, on the new-domain branch only. After the restored
+services are up and `gbrain apply-migrations` has run, `runRestore` calls a new
+`invalidateDomainBoundGrants()` (`scripts/restore.ts:305`), which runs one transactional CTE through
+the same `compose exec postgres psql` lane the rest of restore uses (`scripts/restore.ts:273`). The
+statement:
 
-Until then the authoritative procedure is the bulk re-provisioning flow in
-[`docs/runbooks/backup-restore.md`](runbooks/backup-restore.md), which states the invalidation
-consequence first and tells the operator not to trust the `active` badge after a domain move. The
-C8 assertion stays as written — it is the tripwire that will go green when F23 is closed — and
-nothing was weakened to hide it.
+- marks every `connections` row still `state = 'active'` as `revoked` with `revoked_at = now()`;
+- retires the live client name to `revoked:<id>` — exactly `retiredClientName()` in
+  `src/control/connections.ts`, so the deterministic `bs-<member8>-<space>` name is free for the
+  member to be re-provisioned;
+- disables every enabled `schedule` on those Connections with `disabled_reason = 'connection_revoked'`;
+- raises one `connection_revoked` alert per disabled schedule, with
+  `detail = { connectionId, clientName }` — the product's existing member-facing surface
+  (`/schedules`, and `/api/health`'s unacknowledged kinds).
+
+The branch is gated on `opts.newDomain` (`scripts/restore.ts:383`); **a same-domain restore is
+untouched** (measured `connectionsInvalidated: 0`). **No new state and no migration: `revoked` is
+the correct minimal state.** `connections.state`'s CHECK already allows it, `GET /api/connections`
+and the console's Connection page already render it, and it is precisely the state the product's own
+`revokeConnection` writes. A distinct `needs_reissue` state would add a migration, a meta snapshot
+and a console branch to say what `revoked` plus a `connection_revoked` alert already says. The fix
+deliberately does **not** call `auth.revokeClient`: the restored gbrain lost the origin that made the
+grant valid, there is no live secret to delete, and the restored clients must stay listed
+(`connectionsNeedingReissue`) for the operator to replace. `RestoreReport` now carries the actual
+counts, `connectionsInvalidated` and `alertsRaised` (`scripts/restore.ts:58`).
+
+### Measured
+
+The live stack before the drill: `connections` = 2 `active` / 2 `revoked`; **4** enabled `gate-c-*`
+schedules on the second active Connection; `scheduleAlerts` empty. `bun test --parallel=1
+test/e2e/slice5.e2e.test.ts`:
+
+```text
+MEASURED public /metrics: 401
+MEASURED C7 quiesced=verified quiesceLane=http id=7b15d3eb-9433-4b89-b9e8-dc2b738571c8
+[restore] new domain drill-new-domain.example.test: revoked 2 Connection(s); raised 4 connection_revoked alert(s)
+MEASURED C8 domainChanged=true needingReissue=2 activeAfter=0 total=4
+ 4 pass / 0 fail
+ 6 expect() calls
+```
+
+Before → after: Connections `active` **2 → 0** (the 2 already-`revoked` rows stay `revoked`; total 4);
+their 4 enabled schedules disabled; `GET /api/health` `scheduleAlerts` **[] → 4
+`connection_revoked`** (kinds only, as designed — the authenticated `/schedules` carries the detail).
+The same-domain path measured `invalidated 0 / alerts 0`, and `restore.e2e.test.ts` (4 pass / 0 fail,
+including its own `newDomain` leg against an archive with no active Connection) logged `revoked 0
+Connection(s); raised 0 connection_revoked alert(s)` — the SQL is a clean no-op with nothing to
+invalidate. `test/unit` 649 / 0 and `test/integration/backup.test.ts` 11 / 0 were also green.
+
+The C8 assertion was **not** weakened: `expect(stillActive.map((c) => c.clientName)).toEqual([])` now
+passes because the state is genuinely `revoked`, not because the expectation moved.
 
 
