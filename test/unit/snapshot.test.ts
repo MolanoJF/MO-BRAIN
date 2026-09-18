@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   dockerVolumeDriver, dumpDatabase, tarVolumeToFile,
-  SNAPSHOT_DATABASES, SNAPSHOT_VOLUMES,
+  SNAPSHOT_DATABASES,
+  projectName, snapshotVolumes, volumeLabel,
 } from '../../src/upgrade/snapshot.ts';
 import type { Runner, RunResult } from '../../src/upgrade/snapshot.ts';
 
@@ -43,10 +44,10 @@ let dir: string;
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'bs-snap-')); });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-describe('SNAPSHOT_DATABASES / SNAPSHOT_VOLUMES', () => {
+describe('SNAPSHOT_DATABASES / snapshotVolumes', () => {
   test('name exactly what D3 promises', () => {
     expect(SNAPSHOT_DATABASES).toEqual(['gbrain', 'control']);
-    expect(SNAPSHOT_VOLUMES).toEqual(['brainstand_brain-repos', 'brainstand_gbrain-home']);
+    expect(snapshotVolumes()).toEqual(['brainstand_brain-repos', 'brainstand_gbrain-home']);
   });
 });
 
@@ -73,7 +74,7 @@ describe('the exact argv for each artifact', () => {
   test('take() produces all four named artifacts through those two primitives only', async () => {
     const runner = new FakeRunner();
     const manifest = await dockerVolumeDriver.take(
-      { runId: 'run-1', volumes: SNAPSHOT_VOLUMES, databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE },
+      { runId: 'run-1', volumes: snapshotVolumes(), databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE },
       runner,
     );
     expect(manifest.artifacts.map((a) => a.name).sort()).toEqual(
@@ -94,7 +95,7 @@ describe('verify and restore', () => {
   test('verify fails on a sha mismatch', async () => {
     const runner = new FakeRunner();
     const manifest = await dockerVolumeDriver.take(
-      { runId: 'run-2', volumes: SNAPSHOT_VOLUMES, databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE },
+      { runId: 'run-2', volumes: snapshotVolumes(), databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE },
       runner,
     );
     const corrupted = {
@@ -107,7 +108,7 @@ describe('verify and restore', () => {
 
   test('restore refuses a manifest that does not verify, before it runs a single command', async () => {
     const runner = new FakeRunner();
-    const ctx = { runId: 'run-3', volumes: SNAPSHOT_VOLUMES, databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE };
+    const ctx = { runId: 'run-3', volumes: snapshotVolumes(), databases: SNAPSHOT_DATABASES, outDir: dir, compose: COMPOSE };
     const manifest = await dockerVolumeDriver.take(ctx, runner);
     const corrupted = {
       ...manifest,
@@ -124,5 +125,25 @@ describe('verify and restore', () => {
     expect(dockerVolumeDriver.describe().map((a) => a.name).sort()).toEqual(
       ['brain-db', 'brain-repos', 'control-db', 'gbrain-home'],
     );
+  });
+});
+
+describe('projectName / snapshotVolumes (D4)', () => {
+  test('defaults to the legacy project name so existing deployments keep their volumes', () => {
+    delete process.env.COMPOSE_PROJECT_NAME;
+    expect(projectName()).toBe('brainstand');
+    expect(snapshotVolumes()).toEqual(['brainstand_brain-repos', 'brainstand_gbrain-home']);
+  });
+
+  test('follows COMPOSE_PROJECT_NAME when the operator sets one', () => {
+    process.env.COMPOSE_PROJECT_NAME = 'acme-brain';
+    expect(snapshotVolumes()).toEqual(['acme-brain_brain-repos', 'acme-brain_gbrain-home']);
+    delete process.env.COMPOSE_PROJECT_NAME;
+  });
+
+  test('the label a snapshot is filed under is project-independent', () => {
+    process.env.COMPOSE_PROJECT_NAME = 'acme-brain';
+    expect(volumeLabel('acme-brain_brain-repos')).toBe('brain-repos');
+    delete process.env.COMPOSE_PROJECT_NAME;
   });
 });

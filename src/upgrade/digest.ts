@@ -5,7 +5,7 @@ import { OPERATIONS } from '../contracts/registry.ts';
 import { writePin } from '../contracts/pin.ts';
 import { verifyManifest } from './manifest.ts';
 import {
-  SNAPSHOT_DATABASES, SNAPSHOT_VOLUMES, dockerVolumeDriver, type SnapshotContext,
+  SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
 } from './snapshot.ts';
 import { quiesce as realQuiesce, resume as realResume } from './quiesce.ts';
 import type {
@@ -409,7 +409,7 @@ export async function rollback(
   // artifact set and output dir are the driver's inputs, so project them here.
   const snapCtx: SnapshotContext = {
     runId: ctx.runId,
-    volumes: SNAPSHOT_VOLUMES,
+    volumes: snapshotVolumes(),
     databases: SNAPSHOT_DATABASES,
     outDir: ctx.upgradeDir,
     compose: ctx.compose,

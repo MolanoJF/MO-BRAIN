@@ -12,7 +12,33 @@ import { buildManifest, verifyManifest } from './manifest.ts';
  * against a scratch volume, never a product service.
  */
 export const SNAPSHOT_DATABASES = ['gbrain', 'control'] as const;
-export const SNAPSHOT_VOLUMES = ['brainstand_brain-repos', 'brainstand_gbrain-home'] as const;
+
+/**
+ * D4 — the compose project name is DATA, not branding.
+ *
+ * Docker derives volume names from it (`<project>_<volume>`), so changing it
+ * orphans an existing deployment's data. The default is therefore FROZEN at
+ * the legacy value forever, whatever the product ends up being called, and the
+ * variable exists so that (a) the rename in Task 4 cannot silently strand
+ * anyone's brain, and (b) two stacks can be co-resident on one host.
+ */
+export const LEGACY_PROJECT_NAME = 'brainstand';
+
+export function projectName(): string {
+  const raw = process.env.COMPOSE_PROJECT_NAME?.trim();
+  return raw && raw.length > 0 ? raw : LEGACY_PROJECT_NAME;
+}
+
+const VOLUME_SUFFIXES = ['brain-repos', 'gbrain-home'] as const;
+
+export function snapshotVolumes(): readonly string[] {
+  return VOLUME_SUFFIXES.map((s) => `${projectName()}_${s}`);
+}
+
+export function volumeLabel(volume: string): string {
+  const prefix = `${projectName()}_`;
+  return volume.startsWith(prefix) ? volume.slice(prefix.length) : volume;
+}
 
 const DB_ARTIFACT_NAME: Record<string, string> = { gbrain: 'brain-db', control: 'control-db' };
 const VOLUME_ARTIFACT_NAME: Record<string, string> = {
@@ -168,7 +194,7 @@ export const dockerVolumeDriver: SnapshotDriver = {
   describe(): { name: string }[] {
     return [
       ...SNAPSHOT_DATABASES.map((db) => ({ name: artifactNameForDb(db) })),
-      ...SNAPSHOT_VOLUMES.map((v) => ({ name: artifactNameForVolume(v) })),
+      ...snapshotVolumes().map((v) => ({ name: artifactNameForVolume(v) })),
     ];
   },
 

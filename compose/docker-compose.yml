@@ -1,6 +1,6 @@
 # brainstand production stack. Caddy is the sole ingress; nothing else
 # publishes a host port.
-name: brainstand
+name: ${COMPOSE_PROJECT_NAME:-brainstand}
 
 x-gbrain-env: &gbrain-env
   GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain

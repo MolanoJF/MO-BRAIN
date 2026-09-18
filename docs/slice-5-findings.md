@@ -11,6 +11,7 @@ up as a measurement).
 | # | Claim | Status |
 |---|---|---|
 | P1 | On a production-shaped stack (base compose file only, no published ops port) the backup verifies its quiesce through the `compose exec` relay | `confirmed` |
+| P2 | Making the compose project name a variable with the legacy value as default leaves the live stack's volume names unchanged | `confirmed` |
 
 ---
 
@@ -64,3 +65,30 @@ Verbatim output:
 lane has ever recorded on a production-shaped stack, proved through the one lane that works without a
 published port. The manifest at `/tmp/bs-backup-probe/manifest.json` (`C:\tmp\bs-backup-probe\manifest.json`
 on this host) was re-read directly and carried the same two fields.
+
+---
+
+## P2 — the frozen project-name default is inert on the live stack
+
+**Task 3.** `compose/docker-compose.yml` now reads `name: ${COMPOSE_PROJECT_NAME:-brainstand}` (and
+`compose/docker-compose.slice0.yml` reads `name: ${COMPOSE_PROJECT_NAME:-brainstand-slice0}`), and
+`src/upgrade/snapshot.ts` derives its volume list from `projectName()` instead of the removed
+`SNAPSHOT_VOLUMES` constant. The default is the legacy value, so a deployment that sets no
+`COMPOSE_PROJECT_NAME` must keep the exact volume names Docker already created.
+
+Command:
+
+```bash
+docker volume ls | grep -E 'brain-repos|gbrain-home'
+```
+
+Verbatim output:
+
+```text
+local     brainstand_brain-repos
+local     brainstand_gbrain-home
+```
+
+Both volumes are unchanged: with no `COMPOSE_PROJECT_NAME` in the environment, `projectName()` returns
+`brainstand` and `snapshotVolumes()` returns `['brainstand_brain-repos', 'brainstand_gbrain-home']`, the
+same pair the old hardcoded constant named.

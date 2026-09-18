@@ -11,7 +11,7 @@ import type { RepoStatus } from '../src/ops/git.ts';
 import { appendEvent, openJournal, readJournal, type Journal } from '../src/upgrade/journal.ts';
 import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
-  SNAPSHOT_DATABASES, SNAPSHOT_VOLUMES, dockerVolumeDriver, type SnapshotContext,
+  SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
 } from '../src/upgrade/snapshot.ts';
 import { QUIESCE_ORDER, composeModel, quiesce, restoreLane } from '../src/upgrade/quiesce.ts';
 import { hasPlaybook, playbooksFor, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
@@ -756,7 +756,7 @@ async function measureSnapshotBytes(ctx: UpgradeContext): Promise<number> {
   );
   if (db.exitCode !== 0) throw new Error(`snapshot size probe (databases) failed: ${db.stderr}`);
   let total = Number(db.stdout.trim() || '0');
-  for (const volume of SNAPSHOT_VOLUMES) {
+  for (const volume of snapshotVolumes()) {
     // argv array, no shell: a throwaway busybox reports the volume's raw bytes.
     const r = await shCapture(
       ['docker', 'run', '--rm', '-v', `${volume}:/src:ro`, 'busybox', 'du', '-sb', '/src'],
@@ -893,7 +893,7 @@ async function resumeAtCurrentPin(
 
 async function snapshotWithDrain(ctx: UpgradeContext, drain: unknown): Promise<SnapshotManifest> {
   const snapCtx: SnapshotContext = {
-    runId: ctx.runId, volumes: SNAPSHOT_VOLUMES, databases: SNAPSHOT_DATABASES,
+    runId: ctx.runId, volumes: snapshotVolumes(), databases: SNAPSHOT_DATABASES,
     outDir: ctx.upgradeDir, compose: ctx.compose,
   };
   const manifest = await dockerVolumeDriver.take(snapCtx);

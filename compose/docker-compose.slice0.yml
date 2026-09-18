@@ -1,6 +1,6 @@
 # Slice 0: prove the CLI lane. Postgres + one ops container, nothing else.
 # No Caddy, no serve, no worker — those arrive in Slice 1.
-name: brainstand-slice0
+name: ${COMPOSE_PROJECT_NAME:-brainstand-slice0}
 
 services:
   postgres:
