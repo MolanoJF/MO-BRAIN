@@ -16,6 +16,8 @@ up as a measurement).
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
 | P7 | The D11 live-stack debt clears through product paths alone — eight admin checklist acks settle the `awaiting_admin_decision` ledger row to `applied`, `/schedules`' alert ack empties `/api/health`'s `scheduleAlerts`, and `DELETE /api/members/:id` offboards the residue — and the one path that does not exist is a purge for a revoked Connection (F22) | `confirmed` |
+| P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `partial` — the product's new-domain restore branch ran (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) and named **2** Connections needing re-issue, but **0** were invalidated: the console still showed the same **2** `active`, and no member-facing message existed. The physical `DOMAIN` was not changed (no alternate hostname resolves on this host), so the OAuth issuer/redirect-URI mismatch itself was not reproduced on the wire. See P8 and F23 below |
+| F23 | A new-domain restore leaves every `active` Connection `active`: the console shows a working Connection that is not one, and nothing tells the member | `confirmed` — deferred (reason in F23 below) |
 | U1 | `compose/Caddyfile`'s public `@gbrain` route publishes an unauthenticated Prometheus `/metrics` surface naming brains, Spaces, models or spend | `contradicted` — the pinned `gbrain-serve` answers `401` with `{"error":"Admin authentication required"}`; no body, no cardinality. S1's argument does not need to be extended to `/metrics` on this pin |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
@@ -817,4 +819,140 @@ mid-cleanup. The correct shape is a follow-up slice that adds `DELETE /api/conne
 `state = 'revoked'` only, with the schedule interaction stated in the route, a console control, and a
 test; the named owner slice is the next hardening slice after Slice 5 GA. No SQL was reached for in the
 meantime, and the two revoked rows are visible, inert, and explained here.
+
+---
+
+## P8 — the new-domain restore: measured, and what it did not do
+
+**Task 16 — `partial`, stated as partial.** Two things are measured and one is not. What was
+measured: the product's own new-domain restore branch, its timing, and exactly what the console
+shows afterwards. What was **not** measured, and is not claimed: the OAuth issuer/redirect-URI
+mismatch on the wire, because the deployment's real `DOMAIN` was not changed (see "Why this is
+partial").
+
+### The archive
+
+A backup was taken on a **production-shaped stack** (base compose file only, so `docker port
+brainstand-gbrain-ops-1` printed nothing), through the `compose exec` relay
+(`OPS_RPC_URL=http://gbrain-ops:3140`, so the host-side port probe could not succeed). Manifest:
+
+```text
+MEASURED backup: quiesced=verified quiesceLane=relay elapsed=10.8s
+```
+
+That is Task 2 Step 7's procedure reproduced (already recorded as P1) and the archive this drill
+restores.
+
+### The drill
+
+`runRestore(archive, { newDomain: 'brain-drill.example.test' })` was run against the live stack:
+
+```text
+DRILL_REPORT {
+  "ok": true,
+  "components": ["brainDb","controlDb","brainRepos","secrets"],
+  "doctorExitCode": 0,
+  "connectionsNeedingReissue": [
+    "gbrain_cl_ef0098e245bf220ac4c92a277ea718f8c6088519c5339dea9da8655797114675",
+    "gbrain_cl_5eef1324e5ce01f97458172ef163e4f8588f05888a2c64b4b24795ff97c4a413"
+  ],
+  "domainChanged": true,
+  "elapsedMs": 21203
+}
+```
+
+**How many Connections are invalidated: 0.** Before the restore `GET /api/connections` (the exact
+surface the console's Connection page reads) returned **4** rows — **2 `active`**
+(`bs-0aae83e1-shared`, `bs-a919cb38-internal`) and 2 already `revoked`. After the restore the same
+call returned the **identical** states: the same 2 `active`, the same 2 `revoked`. The restore's
+report did name **2** Connections needing re-issue, but it changed none of them.
+
+**What the console shows for each: `active`.** The Connection page renders `row.state` verbatim
+(`src/console/pages/Connection.tsx`), so an operator opening it after a domain move sees a working
+Connection that is not one.
+
+**Whether the member-facing message explains what happened: no.** `/api/health`'s `scheduleAlerts`
+was `[]` before and after; the restore raises no `connection_revoked` alert and disables no
+schedule. The only place the consequence appears is the restore script's stderr and its report —
+host-side, operator-facing, never surfaced to the member or the console.
+
+**How long the whole path takes: 21.2 s** (`elapsedMs: 21203`) from the first `compose stop` to the
+returned report, including `gbrain apply-migrations` and `gbrain doctor` (exit `0`).
+
+### The automated C8 leg fails, for the same reason
+
+`test/e2e/slice5.e2e.test.ts`, run on the live stack:
+
+```text
+MEASURED C7 quiesced=verified quiesceLane=http id=61228c87-777f-4694-b067-7fca71247c14
+MEASURED C8 domainChanged=true needingReissue=2 activeAfter=2 total=4
+(fail) C8: restore to a new domain invalidates every Connection, and the console says so
+  error: expect(received).toEqual(expected)
+  - []
+  + [ "bs-0aae83e1-shared", "bs-a919cb38-internal" ]
+```
+
+`C7` passes (on the dev stack the published ops port makes the lane `http`; the production-shaped
+lane is `relay`, measured above). `C8`'s assertion is the plan's own and was **not** weakened: the
+console must not show a working Connection after a new-domain restore, and it does. The failure is
+the defect, F23, not a test bug.
+
+### Why this is partial, not complete
+
+A true drill needs the stack's `DOMAIN` to differ from the archive's. It could not be done safely
+in this environment:
+
+- No alternate hostname resolves. `dns.lookup('drill.localhost')` and
+  `dns.lookup('newhost.localhost')` both answer `ENOTFOUND` on this Windows host; only bare
+  `localhost` resolves (`::1`). Caddy's site address is `{$DOMAIN}`, so a request with the old Host
+  would not reach the new site, and adding a hosts-file entry needs an elevated shell.
+- Changing `DOMAIN` on the live stack would break the dev override's published
+  `https://localhost:8443` surface — the base URL every host-run e2e leg and Task 17's Gate C stand
+  on — for the duration of the drill and risk stranding the stack afterwards.
+- The runner, the scheduler's `PUBLIC_URL`, and `gbrain-serve --public-url` all interpolate
+  `DOMAIN`; a half-reverted change is exactly the state Task 17 must not inherit.
+
+So the drill drove the product's actual new-domain branch — the code path `bun run scripts/restore.ts`
+takes when `NEW_DOMAIN` is set — and measured its full response and timing. It did **not** reproduce
+the wire-level 401/OAuth rejection that a real issuer change causes; that consequence is stated in
+the runbook from the spec and the mechanism (domain-bound issuer and redirect URIs), and is labelled
+as the documented consequence rather than a measured one. **No number above was fabricated.**
+
+---
+
+## F23 — a new-domain restore invalidates nothing, so the console shows a working Connection that is not one
+
+**Found by Task 16's P8 drill; deferred, with the reason below.** `runRestore` parses `newDomain`,
+returns `domainChanged: true`, prints the consequence to stderr, and lists the gbrain clients that
+need re-issue (`connectionsNeedingReissue`). It performs **no** state change on the control DB's
+`connections` rows and raises **no** alert. Two measured product consequences:
+
+1. `GET /api/connections` returns every `active` Connection unchanged after a new-domain restore —
+   measured **2 of 2 active** in P8 — and the console's Connection page renders that `active` badge
+   verbatim, so it shows a working Connection that is not one.
+2. No member-facing message exists. `/api/health`'s `scheduleAlerts` stays `[]`; the only signal is
+   the host-side script output and report.
+
+A contributing gap: `scripts/backup.ts`'s `BackupManifest` carries **no `DOMAIN` (or public URL)
+field**, so a restore cannot compare the archive's origin to the running deployment's and must rely
+on the operator passing `NEW_DOMAIN` to learn a move happened. Even then, it only reports.
+
+### Decision: deferred, not fixed here
+
+Task 16's own deliverable is the runbook and the drill; it is **not** the task for a new destructive
+product surface. Closing F23 correctly needs (a) a decision on what "invalidated" means for the
+`connections` row — a new state requires a migration (the table's check constraint allows only
+`pending | active | revoked`), or the flow reuses `revoked` and its alert path; (b) a way for the
+host-side restore to reach the control plane's mutation code, which today has no admin route for a
+bulk revoke and no session the script could hold; and (c) a member-facing message and a console
+state that distinguish "never worked" from "worked, domain moved". That is a feature with a blast
+radius on the restore lane, the schema and the Connection page — the named owner slice is **the
+Gate C fix (Task 17)** if it takes it, otherwise the post-GA hardening slice.
+
+Until then the authoritative procedure is the bulk re-provisioning flow in
+[`docs/runbooks/backup-restore.md`](runbooks/backup-restore.md), which states the invalidation
+consequence first and tells the operator not to trust the `active` badge after a domain move. The
+C8 assertion stays as written — it is the tripwire that will go green when F23 is closed — and
+nothing was weakened to hide it.
+
 
