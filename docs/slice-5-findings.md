@@ -15,6 +15,7 @@ up as a measurement).
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
+| U1 | `compose/Caddyfile`'s public `@gbrain` route publishes an unauthenticated Prometheus `/metrics` surface naming brains, Spaces, models or spend | `contradicted` — the pinned `gbrain-serve` answers `401` with `{"error":"Admin authentication required"}`; no body, no cardinality. S1's argument does not need to be extended to `/metrics` on this pin |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 | F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
@@ -337,6 +338,43 @@ run since this stack was last cycled. `tablePresent=true` is the fact the page
 needs, and the four `not_covered` exclusions rendered on the Spend page come
 from this block, not from us. `clients before=7 after=7` is the revocation
 proof: the client minted for each call left no residue.
+
+---
+
+## U1 — `/metrics` is auth-gated upstream: the public route answers 401, not a Prometheus body
+
+**Task 8, Step 1/2.** The audit's premise was that `compose/Caddyfile:34` routes `/metrics`
+to `gbrain-serve:3131` on the **public** site alongside `/health`, and that if the pinned
+binary answered an unauthenticated Prometheus body it would publish brain, Space and model
+cardinality to anyone. That premise is a claim about upstream's intent, so it was measured
+against the pinned binary behind our Caddy rather than assumed.
+
+Command, verbatim, exactly as the plan specifies:
+
+```bash
+curl -sk -o /dev/null -w '%{http_code}\n' https://localhost:8443/metrics
+curl -sk https://localhost:8443/metrics | head -20
+```
+
+Verbatim output:
+
+```text
+401
+{"error":"Admin authentication required"}
+```
+
+**Status code: `401`.** A body did come back, but it is a fixed JSON error envelope and
+nothing else — 42 bytes. It names **no brains, no Spaces, no models and no spend**; it
+carries no metric name, no label and no cardinality of any kind. The pinned `gbrain-serve`
+gates `/metrics` behind admin authentication exactly as upstream describes ("Prometheus,
+admin-gated"), so **S1's argument does not need to be extended to `/metrics` on this pin**.
+
+**Step 3 therefore did not fire:** the route answered `401`, not `200` with a body. The
+`@gbrain` matcher is left untouched and `/metrics` stays where it is, alongside `/health`.
+No Caddyfile change and no reload were required. The C1 leg (Gate C) still pins the
+negative — it asserts the public status is one of `401 | 403 | 404`, so if a future pin
+relaxes the gate and starts answering `200`, Task 17's run goes red and this decision is
+revisited rather than silently shipped.
 
 ---
 
