@@ -1,0 +1,9 @@
+# D2: build stanzas live here, never in the production file. CI and the two
+# build gates use `-f compose/docker-compose.yml -f compose/docker-compose.build.yml`.
+services:
+  control-plane:
+    build: { context: .., dockerfile: docker/control-plane.Dockerfile }
+  scheduler:
+    build: { context: .., dockerfile: docker/control-plane.Dockerfile }
+  agent-runner:
+    build: { context: .., dockerfile: docker/agent-runner.Dockerfile }

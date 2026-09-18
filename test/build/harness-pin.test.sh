@@ -12,12 +12,13 @@ cd "$(dirname "$0")/../.."
 
 PIN="${HARNESS_VERSION:-2.1.274}"
 BOGUS="0.0.0-not-a-real-version"
+IMAGE="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/agent-runner"
 fail=0
 
 echo "--- expecting SUCCESS at pin ${PIN}"
 if docker build -f docker/agent-runner.Dockerfile \
      --build-arg "HARNESS_VERSION=${PIN}" \
-     -t "mobrain/agent-runner:${PIN}" . ; then
+     -t "${IMAGE}:${PIN}" . ; then
   echo "PASS: pinned build succeeded"
 else
   echo "FAIL: pinned build should have succeeded"; fail=1
@@ -27,7 +28,7 @@ echo "--- expecting FAILURE at a deliberately wrong pin"
 BOGUS_LOG="$(mktemp)"
 if docker build -f docker/agent-runner.Dockerfile \
      --build-arg "HARNESS_VERSION=${BOGUS}" \
-     -t mobrain/agent-runner:bogus . >"$BOGUS_LOG" 2>&1 ; then
+     -t "${IMAGE}:bogus" . >"$BOGUS_LOG" 2>&1 ; then
   echo "FAIL: bogus pin built successfully — the smoke gate is not a gate"; fail=1
   cat "$BOGUS_LOG"
 elif grep -q "$BOGUS" "$BOGUS_LOG"; then

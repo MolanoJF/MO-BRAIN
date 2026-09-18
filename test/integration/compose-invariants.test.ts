@@ -11,6 +11,7 @@ const compose = parse(readFileSync('compose/docker-compose.yml', 'utf8'), { merg
 const svc = (n: string) => compose.services[n];
 
 const devOverride = parse(readFileSync('compose/docker-compose.dev.yml', 'utf8')) as any;
+const buildOverlay = parse(readFileSync('compose/docker-compose.build.yml', 'utf8')) as any;
 const dockerAvailable = Bun.which('docker') !== null;
 
 // If Docker is unavailable, the Docker-dependent test below vanishes
@@ -272,10 +273,19 @@ describe('agent runner service invariants', () => {
     expect(svc('agent-runner').tmpfs).toEqual(['/tmp']);
   });
 
-  test('the image is pinned to HARNESS_VERSION and the build uses the same pin (G1)', () => {
+  test('the image is pinned to HARNESS_VERSION (G1)', () => {
     expect(svc('agent-runner').image).toContain('${HARNESS_VERSION');
-    expect(svc('agent-runner').build.dockerfile).toBe('docker/agent-runner.Dockerfile');
-    expect(svc('agent-runner').build.args.HARNESS_VERSION).toBe('${HARNESS_VERSION:?required}');
+  });
+
+  // D2: the production file pulls; it never builds. Every build stanza lives in
+  // compose/docker-compose.build.yml, which CI and the build gates merge in.
+  test('production compose carries NO build stanza — the build overlay does (D2)', () => {
+    for (const [name, service] of Object.entries(compose.services) as [string, any][]) {
+      expect(service.build, `${name} must not build in the production file (D2)`).toBeUndefined();
+    }
+    expect(buildOverlay.services['control-plane'].build.dockerfile).toBe('docker/control-plane.Dockerfile');
+    expect(buildOverlay.services['scheduler'].build.dockerfile).toBe('docker/control-plane.Dockerfile');
+    expect(buildOverlay.services['agent-runner'].build.dockerfile).toBe('docker/agent-runner.Dockerfile');
   });
 
   test('neither compose file defaults HARNESS_VERSION — a version move must be explicit or compose refuses to start', () => {

@@ -13,6 +13,7 @@ up as a measurement).
 | P1 | On a production-shaped stack (base compose file only, no published ops port) the backup verifies its quiesce through the `compose exec` relay | `confirmed` |
 | P2 | Making the compose project name a variable with the legacy value as default leaves the live stack's volume names unchanged | `confirmed` |
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
+| P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 
 ---
 
@@ -134,3 +135,69 @@ openai_api_key|24|80|256
 
 `controlDb":"ok"` + `ops":"ok"` and both rows opening under the frozen domain separator are the whole
 claim: the rename moved a name, never a key.
+
+---
+
+## P4 — the publish is blocked at the push: the token has no `write:packages`
+
+**Task 5, Step 7.** The plan's publish gate needs a GHCR credential with `write:packages`. The
+authenticated `gh` account is `MolanoJF`, and `gh auth status` reports its token scopes verbatim:
+
+```text
+✓ Logged in to github.com account MolanoJF (keyring)
+- Token scopes: 'gist', 'read:org', 'repo'
+```
+
+There is also **no `mobrain` GitHub org** — the namespace the compose file and the publisher default
+to. `docker login ghcr.io` still succeeds, because it only proves the token authenticates:
+
+```bash
+TOKEN="$(gh auth token)"
+echo "$TOKEN" | docker login ghcr.io -u MolanoJF --password-stdin
+```
+
+```text
+Login Succeeded
+```
+
+The first real publish, at the intended namespace:
+
+```bash
+IMAGE_NAMESPACE=mobrain GBRAIN_VERSION=0.50.5.0 HARNESS_VERSION=2.1.274 APP_VERSION=1.0.0 \
+  bash scripts/publish-images.sh
+```
+
+```text
+--- ghcr.io/mobrain/gbrain-base:0.50.5.0
+... (the pinned build succeeds: `#14 naming to ghcr.io/mobrain/gbrain-base:0.50.5.0 done`) ...
+The push refers to repository [ghcr.io/mobrain/gbrain-base]
+...
+error from registry: permission_denied: The token provided does not match expected scopes.
+```
+
+(`PUBLISH_EXIT=1`.) The plan's fallback namespace, `MolanoJF`, fails earlier, at the tag itself —
+Docker repository names must be lowercase, and the authenticated account name is not:
+
+```text
+--- ghcr.io/MolanoJF/gbrain-base:0.50.5.0
+ERROR: failed to build: invalid tag "ghcr.io/MolanoJF/gbrain-base:0.50.5.0": repository name must be lowercase
+```
+
+(`PUBLISH_EXIT=1`.)
+
+**The blocker, named exactly:** the only available credential is an OAuth token scoped
+`gist, read:org, repo`; GHCR pushes require `write:packages`, which it does not carry, and the
+`mobrain` org it would push under does not exist. No digest can be produced honestly here. The dry
+run and both build gates prove the artifacts build at their exact pins; only the registry push is
+blocked, and it is blocked by credentials and org ownership, not by the repository. Recorded rather
+than skipped: **no image was published, so there are no digests to paste.**
+
+To unblock, on the machine that owns the release: create the `mobrain` org (or set
+`IMAGE_NAMESPACE=<lowercase-owner>`), grant a token `write:packages` (a classic PAT with
+`write:packages, read:packages`, or a fine-grained token with `packages: write`), then re-run:
+
+```bash
+IMAGE_NAMESPACE=mobrain GBRAIN_VERSION=0.50.5.0 HARNESS_VERSION=2.1.274 APP_VERSION=1.0.0 \
+  bash scripts/publish-images.sh
+```
+
