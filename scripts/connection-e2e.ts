@@ -275,7 +275,7 @@ export async function runConnectionE2E(): Promise<ConnectionE2EReport> {
     const dir = `/srv/brain-repos/${s.id}`;
     const extra = await composeExec('gbrain-ops', ['sh', '-c',
       `set -e; cd ${dir}; ` +
-      `git config user.email brainstand@example.invalid; git config user.name brainstand; ` +
+      `git config user.email mobrain@example.invalid; git config user.name mobrain; ` +
       `printf '${s.printfBody}' > ${s.file}; git add -A; ` +
       `git diff --cached --quiet || git commit -qm 'probe ${s.id}'`]);
     steps.push({ id: `seed:${s.id}`, ok: extra.exitCode === 0, exitCode: extra.exitCode, ms: 0 });

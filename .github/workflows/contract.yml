@@ -40,7 +40,7 @@ jobs:
         run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "brainstand/gbrain-base:${GBRAIN_VERSION}" .
+            -t "mobrain/gbrain-base:${GBRAIN_VERSION}" .
       - run: bun run test:contract
       - name: Capture the capability snapshot and report drift
         if: always()
@@ -71,7 +71,7 @@ jobs:
       - run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "brainstand/gbrain-base:${GBRAIN_VERSION}" .
+            -t "mobrain/gbrain-base:${GBRAIN_VERSION}" .
       # Untested restore is not backup.
       - run: bun test test/e2e/restore.e2e.test.ts
         timeout-minutes: 90
@@ -96,7 +96,7 @@ jobs:
       - run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "brainstand/gbrain-base:${GBRAIN_VERSION}" .
+            -t "mobrain/gbrain-base:${GBRAIN_VERSION}" .
       # Keyword search does not need OPENAI_API_KEY (sync --no-embed).
       - run: bun test test/e2e/slice2.e2e.test.ts
         timeout-minutes: 90

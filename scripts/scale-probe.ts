@@ -239,8 +239,8 @@ async function seedRepo(dir: string, files: Array<{ name: string; body: string }
     `const dir=${JSON.stringify(dir)}; const files=${JSON.stringify(files)};` +
     `fs.mkdirSync(dir,{recursive:true}); process.chdir(dir);` +
     `spawnSync('git',['init','-q'],{stdio:'ignore'});` +
-    `spawnSync('git',['config','user.email','brainstand@example.invalid']);` +
-    `spawnSync('git',['config','user.name','brainstand']);` +
+    `spawnSync('git',['config','user.email','mobrain@example.invalid']);` +
+    `spawnSync('git',['config','user.name','mobrain']);` +
     `for (const f of files) fs.writeFileSync(f.name, f.body);` +
     `spawnSync('git',['add','-A']);` +
     `const staged=spawnSync('git',['diff','--cached','--quiet']);` +

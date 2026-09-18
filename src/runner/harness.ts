@@ -6,7 +6,7 @@
  * container (`src/contracts/argv.ts` is the precedent, and Task 15's Gate A
  * asserts this function's exact output).
  *
- * Every flag below is a measurement of `brainstand/agent-runner:2.1.274`
+ * Every flag below is a measurement of `mobrain/agent-runner:2.1.274`
  * (`docs/slice-4-findings.md`), never an assumption:
  *
  *   F2  `-p` with `--output-format stream-json` **exits 1 without `--verbose`**.

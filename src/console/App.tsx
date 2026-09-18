@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from './api.ts';
+import { PRODUCT_NAME } from '../control/lifecycle.ts';
 import { Bootstrap } from './pages/Bootstrap.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { Wizard } from './pages/Wizard.tsx';
@@ -108,7 +109,7 @@ export function App() {
   return (
     <div className="flex min-h-screen">
       <nav className="w-[200px] shrink-0 border-r border-subtle p-4">
-        <div className="mb-6 font-semibold">brainstand</div>
+        <div className="mb-6 font-semibold">{PRODUCT_NAME}</div>
         <button className="nav-item" onClick={() => setPage('health')}>Health</button>
         <button className="nav-item" onClick={() => setPage('setup')}>Setup</button>
         {phase === 'ready' && (

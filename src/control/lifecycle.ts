@@ -1,3 +1,10 @@
+/**
+ * The product's name, in one place. Human-facing surfaces render this; the
+ * cryptographic domain separators and the compose project name are frozen and
+ * deliberately do NOT derive from it (D3/D4).
+ */
+export const PRODUCT_NAME = 'Mobrain';
+
 export const LIFECYCLE_ORDER = [
   'uninitialized',
   'provider-configured',

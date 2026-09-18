@@ -168,7 +168,7 @@ export async function runTutorial(): Promise<TutorialReport> {
     const dir = `/srv/brain-repos/${s.id}`;
     const seed = await composeExec('gbrain-ops', ['sh', '-c',
       `set -e; mkdir -p ${dir}; cd ${dir}; git init -q; ` +
-      `git config user.email brainstand@example.invalid; git config user.name brainstand; ` +
+      `git config user.email mobrain@example.invalid; git config user.name mobrain; ` +
       `printf '${s.printfBody}' > ${s.file}; git add -A; ` +
       `git diff --cached --quiet || git commit -qm 'seed ${s.id}'`]);
     steps.push({ id: `seed:${s.id}`, ok: seed.exitCode === 0, exitCode: seed.exitCode, ms: 0 });

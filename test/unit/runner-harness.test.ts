@@ -4,7 +4,7 @@
  *
  * Every flag asserted here is a MEASUREMENT from `docs/slice-4-findings.md` (P2,
  * P3, P4, P5) or from `claude --help` read out of the pinned binary itself —
- * `brainstand/agent-runner:2.1.274`, harness `2.1.274`:
+ * `mobrain/agent-runner:2.1.274`, harness `2.1.274`:
  *
  *   F2   `-p` + `--output-format stream-json` exits 1 without `--verbose`.
  *   F3   `--tools ""` yields an MCP-only surface and removes the ToolSearch turn.

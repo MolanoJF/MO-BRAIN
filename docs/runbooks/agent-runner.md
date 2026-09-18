@@ -23,7 +23,7 @@ a locally-issued certificate, and nothing else the runner lane needs.
 
 ## The service
 
-`agent-runner` runs `bun run /app/src/runner/main.ts` from `brainstand/agent-runner:${HARNESS_VERSION}`
+`agent-runner` runs `bun run /app/src/runner/main.ts` from `mobrain/agent-runner:${HARNESS_VERSION}`
 — the harness is `@anthropic-ai/claude-code` at an **exact** pinned version (`2.1.274` at this pin; the
 image build fails on a mismatch, and `lint:forbidden`'s `moving-harness-pin` fails the build on a
 moving reference). It is **strictly the least privileged process in the stack**:
@@ -386,7 +386,7 @@ finish. Three limits are stated rather than hidden:
   it reads the after-head. That is what makes the range real, and it is why the author of a commit in
   these Spaces is one of **our** writers and never gbrain.
 - **A commit written by another of our writers is reported, not assumed away.** `live-sync`, a
-  member's own agent, or another brainstand job can commit in the same Space during the window.
+  member's own agent, or another Mobrain job can commit in the same Space during the window.
   `attributeCommits` sets `concurrentWriters: true`, lists `foreignAuthors`, and the console says
   *"2 of 5 commits in this range were not written by this run"* — never presenting them as the agent's
   work. Revert then needs `?confirm=concurrent`. (We cannot stamp our own run id on commits made by

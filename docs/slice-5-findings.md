@@ -12,6 +12,7 @@ up as a measurement).
 |---|---|---|
 | P1 | On a production-shaped stack (base compose file only, no published ops port) the backup verifies its quiesce through the `compose exec` relay | `confirmed` |
 | P2 | Making the compose project name a variable with the legacy value as default leaves the live stack's volume names unchanged | `confirmed` |
+| P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 
 ---
 
@@ -92,3 +93,44 @@ local     brainstand_gbrain-home
 Both volumes are unchanged: with no `COMPOSE_PROJECT_NAME` in the environment, `projectName()` returns
 `brainstand` and `snapshotVolumes()` returns `['brainstand_brain-repos', 'brainstand_gbrain-home']`, the
 same pair the old hardcoded constant named.
+
+---
+
+## P3 — the rename did not break decryption: the live stack still opens its secrets
+
+**Task 4.** `brainstand-kek-v1` is the HKDF **info** that derives the `secrets` KEK, so it is a
+cryptographic domain separator and not a product name (D3). The rename moved every human-facing surface
+and left all three frozen strings byte-for-byte unchanged; the point of this probe is that the proof is
+operational, not textual — the live control DB's rows still open.
+
+First, the stack was healthy after the rename:
+
+```bash
+curl -sk https://localhost:8443/api/health | grep -o '"components":[^}]*}'
+```
+
+```text
+"components":{"controlDb":"ok","ops":"ok"}
+```
+
+Then both secret rows were read **by name and length only, never by value**. The plan names a helper in
+`test/integration/secrets.test.ts`; **that file does not exist**, so the equivalent check was run
+read-only against the running control plane: fetch `{name, salt, wrapped_dek, payload}`, call `open()`
+(the production decrypt path in `src/control/secrets.ts`), and print only the name and the plaintext
+length. No value is printed, and none was.
+
+```text
+anthropic_api_key decrypts, plaintext_len=108
+openai_api_key decrypts, plaintext_len=164
+```
+
+Envelope lengths in the DB, from
+`select name, octet_length(salt), octet_length(wrapped_dek), octet_length(payload) from secrets order by name`:
+
+```text
+anthropic_api_key|24|80|184
+openai_api_key|24|80|256
+```
+
+`controlDb":"ok"` + `ops":"ok"` and both rows opening under the frozen domain separator are the whole
+claim: the rename moved a name, never a key.

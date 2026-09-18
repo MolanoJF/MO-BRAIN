@@ -21,7 +21,7 @@ services:
     networks: [brain-net]
 
   gbrain-ops:
-    image: brainstand/gbrain-base:${GBRAIN_VERSION:?required}
+    image: mobrain/gbrain-base:${GBRAIN_VERSION:?required}
     build:
       context: ..
       dockerfile: docker/gbrain-base.Dockerfile

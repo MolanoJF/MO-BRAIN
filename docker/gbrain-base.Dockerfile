@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# brainstand gbrain base image.
+# Mobrain gbrain base image.
 #
 # G1: the version is an exact semver ARG. A moving ref in an image build is
 # non-reproducible by construction — never default this to latest-stable.

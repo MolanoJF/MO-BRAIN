@@ -211,8 +211,8 @@ export async function seedSpaceRepo(sourceId: string, opts: { sql: SQL }): Promi
     // Identity via -c flags in argv — never `git config` global, never a shell.
     try {
       await runGit(dir, [
-        '-c', 'user.email=brainstand@localhost',
-        '-c', 'user.name=brainstand',
+        '-c', 'user.email=mobrain@localhost',
+        '-c', 'user.name=mobrain',
         'commit', '-m', 'seed',
       ]);
     } catch (e) {

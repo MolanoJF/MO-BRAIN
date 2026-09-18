@@ -80,7 +80,7 @@ describe('postUpgrade', () => {
 // Every RPC-boundary test here targets the MAIN product stack's gbrain-ops at
 // the dev override's published port (compose/docker-compose.dev.yml maps
 // 3140:3140). execOperation targets the slice0 harness — the pinned
-// brainstand/gbrain-base image, never rebuilt from the working tree — so a
+// mobrain/gbrain-base image, never rebuilt from the working tree — so a
 // regenerated contracts/v<pin>/operations.json does not exist there and the
 // RPC seam is untestable through it. Tests that only need the pinned binary
 // (A5, A7) use execOperation; A3/A8/A9 shell docker directly.
@@ -182,7 +182,7 @@ async function opsRpc(
 async function dockerRunOffline(argv: string[]): Promise<RawResult> {
   return run([
     'docker', 'run', '--rm', '--network', 'none', '--tmpfs', '/gb',
-    '-e', 'GBRAIN_HOME=/gb', `brainstand/gbrain-base:${GBRAIN_PIN}`, ...argv,
+    '-e', 'GBRAIN_HOME=/gb', `mobrain/gbrain-base:${GBRAIN_PIN}`, ...argv,
   ], 180_000);
 }
 
@@ -258,7 +258,7 @@ async function seedThrowawayVolume(volume: string, fileName: string, content: st
   if (r.exitCode !== 0) throw new Error(`docker volume create failed: ${r.stderr}`);
   r = await run([
     'docker', 'run', '--rm', '--entrypoint', 'sh', '-v', `${volume}:/v`,
-    `brainstand/gbrain-base:${GBRAIN_PIN}`,
+    `mobrain/gbrain-base:${GBRAIN_PIN}`,
     '-c', `printf '%s' '${content.replace(/'/g, "'\\''")}' > /v/${fileName}`,
   ], 60_000);
   if (r.exitCode !== 0) throw new Error(`seeding volume ${volume} failed: ${r.stderr}`);

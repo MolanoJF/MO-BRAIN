@@ -4,7 +4,7 @@
 # guarantees the sidecar binary IS the server binary — version skew between
 # wrapper and gbrain is exactly the bug class the exact pin exists to prevent.
 ARG GBRAIN_VERSION=0.50.0.0
-FROM brainstand/gbrain-base:${GBRAIN_VERSION}
+FROM mobrain/gbrain-base:${GBRAIN_VERSION}
 ARG GBRAIN_VERSION
 
 WORKDIR /app

@@ -103,7 +103,7 @@ describe('scheduler operations against the pinned container', () => {
 // `composeExec`, Gate A drives the MAIN product stack's `gbrain-ops` over the
 // host port its dev override publishes (compose/docker-compose.dev.yml maps
 // 3140:3140; the base file publishes nothing, by invariant). The slice0
-// `gbrain-ops` is the pinned `brainstand/gbrain-base` image and is never
+// `gbrain-ops` is the pinned `mobrain/gbrain-base` image and is never
 // rebuilt from this working tree, so `/fileplane/report` and `/rpc/cancel` do
 // not exist there at all — and a stale main-stack container is exactly what
 // A2/A4 catch, because the allowlist they load comes out of the image.

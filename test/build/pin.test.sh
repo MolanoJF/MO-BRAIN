@@ -9,7 +9,7 @@ fail=0
 echo "--- expecting SUCCESS at pin ${PIN}"
 if docker build -f docker/gbrain-base.Dockerfile \
      --build-arg "GBRAIN_VERSION=${PIN}" \
-     -t "brainstand/gbrain-base:${PIN}" . ; then
+     -t "mobrain/gbrain-base:${PIN}" . ; then
   echo "PASS: pinned build succeeded"
 else
   echo "FAIL: pinned build should have succeeded"; fail=1
@@ -18,7 +18,7 @@ fi
 echo "--- expecting FAILURE at a deliberately wrong pin"
 if docker build -f docker/gbrain-base.Dockerfile \
      --build-arg "GBRAIN_VERSION=0.0.0-not-a-real-version" \
-     -t brainstand/gbrain-base:bogus . >/dev/null 2>&1 ; then
+     -t mobrain/gbrain-base:bogus . >/dev/null 2>&1 ; then
   echo "FAIL: bogus pin built successfully — the smoke gate is not a gate"; fail=1
 else
   echo "PASS: bogus pin was rejected"

@@ -1099,7 +1099,7 @@ describe('Slice 4 control-DB boundary (A5, A9)', () => {
 // and then exercised for real.
 // ===========================================================================
 describe('A8 the token lane\'s registry operations (real binary at the pin)', () => {
-  /** `execOperation` targets the slice0 harness: the pinned brainstand/gbrain-base image, never
+  /** `execOperation` targets the slice0 harness: the pinned mobrain/gbrain-base image, never
    *  rebuilt from the working tree — the same target `mcp-grant.contract.test.ts` uses. */
   const RUN_ID = randomUUID().slice(0, 8);
   const GRANT_NAME = `runner-contract-${RUN_ID}`;
@@ -1397,7 +1397,7 @@ describe('A10 verifyHarnessPin', () => {
       ]);
       return { exitCode, stdout, stderr };
     };
-    const image = `brainstand/agent-runner:${HARNESS_PIN}`;
+    const image = `mobrain/agent-runner:${HARNESS_PIN}`;
     const reported = await run(['docker', 'run', '--rm', '--entrypoint', 'claude', image, '--version']);
     expect({ code: reported.exitCode, stderr: reported.stderr }).toMatchObject({ code: 0 });
     const installed = reported.stdout.trim().split(/\s+/)[0]!; // "2.1.274 (Claude Code)" -> the token

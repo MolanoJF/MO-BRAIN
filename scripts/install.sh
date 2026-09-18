@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# brainstand self-host installer. The compose IS the deployment; this script
+# Mobrain self-host installer. The compose IS the deployment; this script
 # only prompts for a domain, generates secrets, writes .env and brings the
 # stack up. The console owns everything after `up`.
 set -euo pipefail
 
-ENV_PATH="${BRAINSTAND_ENV_PATH:-.env}"
+# `MOBRAIN_*` are the current names; the legacy `BRAINSTAND_*` spelling keeps
+# working for one release, because .env files in the wild already use it.
+ENV_PATH="${MOBRAIN_ENV_PATH:-${BRAINSTAND_ENV_PATH:-.env}}"
 GBRAIN_VERSION="${GBRAIN_VERSION:-0.50.5.0}"
 # G1: the second pinned dependency (D4). Required with no compose default, so
 # a deployment that never enables the runner still names a harness version.
@@ -46,6 +48,9 @@ cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
 GBRAIN_VERSION=${GBRAIN_VERSION}
 HARNESS_VERSION=${HARNESS_VERSION}
+# Both names for one release: MOBRAIN_VERSION is current, BRAINSTAND_VERSION
+# is the legacy alias older .env files already carry (D3 rename).
+MOBRAIN_VERSION=dev
 BRAINSTAND_VERSION=dev
 WORKER_CONCURRENCY=2
 
@@ -77,8 +82,8 @@ if [ -n "$RUNNER_TOKEN" ]; then
   echo "Agent runner enabled: generated RUNNER_TOKEN and added COMPOSE_PROFILES=runner to $ENV_PATH."
 fi
 
-if [ "${BRAINSTAND_SKIP_UP:-0}" = "1" ]; then
-  echo "Skipping docker compose up (BRAINSTAND_SKIP_UP=1)."
+if [ "${MOBRAIN_SKIP_UP:-${BRAINSTAND_SKIP_UP:-0}}" = "1" ]; then
+  echo "Skipping docker compose up (MOBRAIN_SKIP_UP=1)."
   exit 0
 fi
 
