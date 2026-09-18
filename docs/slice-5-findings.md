@@ -993,4 +993,162 @@ invalidate. `test/unit` 649 / 0 and `test/integration/backup.test.ts` 11 / 0 wer
 The C8 assertion was **not** weakened: `expect(stillActive.map((c) => c.clientName)).toEqual([])` now
 passes because the state is genuinely `revoked`, not because the expectation moved.
 
+---
+
+## F24 — a brain that chose a search mode under the old vocabulary kept it after F21
+
+**Found by Task 17's C2 leg. FIXED HERE.** F21 moved `SEARCH_MODES` to the pinned binary's real
+vocabulary (`conservative | balanced | tokenmax`) and left the live stack's gbrain `config.set
+search.mode` on `balanced`. It did **not** touch the control DB's stored `brains.search_mode`
+column, so `/api/wizard/state` — which renders the wizard's mode screen from that column — still
+reported the invalid id. Measured the first time C2 ran against the freshly rebuilt control plane:
+
+```text
+MEASURED C2 wizard lifecycle=ready searchMode=fast modes=fast,balanced,thorough
+```
+
+Two consequences: the mode screen showed a selection the pinned binary refuses, and an operator
+who re-ran `/finish` on that brain would hand `config set search.mode fast` to gbrain again. The
+`expect(ids).toEqual(['balanced','conservative','tokenmax'])` assertion was **not** moved; the
+defect was.
+
+### Fix
+
+A data-only control-DB migration, `src/control/db/migrations/0008_search_mode_vocabulary.sql`
+(with its `meta/0008_snapshot.json` and `_journal.json` entry): `fast -> conservative` and
+`thorough -> tokenmax`, `balanced` unchanged, an unknown value left alone. It is idempotent and
+schema-neutral, so it does not move the upgrade digest's schema census. After rebuild + recreate:
+
+```text
+MEASURED C2 wizard lifecycle=ready searchMode=conservative modes=conservative,balanced,tokenmax
+```
+
+### Two environmental events C2 also surfaced (not product defects)
+
+- **The running `control-plane` image was stale.** The first C2 run read the **old** vocabulary
+  (`fast,balanced,thorough`) because the dev stack's `ghcr.io/mobrain/control-plane:dev` had not
+  been rebuilt since F21 landed. Rebuilt from the current source with
+  `docker build -f docker/control-plane.Dockerfile --build-arg GBRAIN_VERSION=0.50.5.0 -t
+  mobrain/control-plane:dev .` and re-tagged `ghcr.io/mobrain/control-plane:dev`. The source was
+  already correct; the stack was not.
+- **The `ANTHROPIC_API_KEY` in the host environment is invalid**, and the working credential is the
+  host's Claude Code OAuth token. Measured directly, values never printed:
+
+  ```text
+  env-api-key  status 401 {"type":"error","type":"authentication_error","message":"API key is invalid."}
+  creds-oauth  status 200 {"model":"claude-haiku-4-5-20251001", ...}
+  ```
+
+  The e2e preconditions require the org's `anthropic_api_key`; it was re-provisioned host-side from
+  `~/.claude/.credentials.json` through `storeSecret` (host-side act, value never printed,
+  round-trip verified). This is the rotating-host-secret maintenance window the runbook documents —
+  **once per destructive cycle**, and C9 is such a cycle.
+
+---
+
+## F25 — a rollback to a pre-rename pin cannot recreate its images; `buildImages` is a no-op on the shipped compose
+
+**Found by Task 17's C9 leg, which the plan wrote to re-prove Slice 3.5's exit gate "on the renamed,
+re-published stack — the rename touched volume names and image references, which is precisely what a
+rollback depends on." DEFERRED (release/hardening), and C9 was made to pass only after the missing
+image was tagged locally.**
+
+The first C9 run normalized to `0.50.0.0` by rolling back a completed Slice 3.5 run
+(`run-022b8cfe-…`, from the pre-rename era). The rollback moved `.env` back to `0.50.0.0`, and the
+stack then never came up:
+
+```text
+error: the stack never became ready within 900000ms (last: console=502 serve=502)
+MEASURED teardown: runner=null pin=null
+```
+
+The cause was in the rollback's own `up`: the compose image reference is now
+`ghcr.io/mobrain/gbrain-base:${GBRAIN_VERSION}`, and **no `mobrain/…:0.50.0.0` image exists** — the
+rename (Task 4) moved the namespace, and the publish (Task 5; blocked at the push by P4) ships only
+the current pin. Only the pre-rename `brainstand/gbrain-base:0.50.0.0` was on the host, so
+`docker compose up` tried to pull `ghcr.io/mobrain/gbrain-base:0.50.0.0` and 404'd, leaving every
+service stopped.
+
+Underneath that is a second, independent gap: `scripts/upgrade.ts`'s `buildImages` runs
+
+```text
+docker compose <ctx.compose> build --build-arg GBRAIN_VERSION=<version> gbrain-ops gbrain-serve gbrain-worker control-plane
+```
+
+against `ctx.compose = ['docker','compose','-f','compose/docker-compose.yml']`. Since Task 5 moved
+every `build:` stanza into `compose/docker-compose.build.yml`, that command prints **"No services to
+build"** and does nothing. `gbrain-serve`/`gbrain-worker` follow the pin by pulling
+`gbrain-base:<pin>`, but `gbrain-ops` runs the `control-plane:<APP_VERSION>` image, which bundles
+gbrain at **build** time and is not versioned by the gbrain pin — so a pin move leaves the ops
+RPC's `check-update` reporting the old binary. Measured after the local normalization:
+`"pin":{"declared":"0.50.0.0","observed":"0.50.5.0","matches":false}` against a running
+`gbrain 0.50.0.0` `gbrain-serve`.
+
+### What was needed to make C9 pass (the workaround this finding records)
+
+- Tag the pre-rename image into the new namespace, host-side:
+  `docker tag brainstand/gbrain-base:0.50.0.0 ghcr.io/mobrain/gbrain-base:0.50.0.0`.
+- Re-provision the OAuth credential (F24's environmental event) because the precondition rollback
+  restores a `secrets` generation that predates the last rotation.
+
+With those two host-side acts, C9 ran and measured clean (see below). **Neither is a product fix.**
+
+### Fix (deferred; named owner: the release/hardening work in Task 18 and after)
+
+1. `scripts/upgrade.ts` must include `-f compose/docker-compose.build.yml` in the compose it builds
+   with, so `buildImages` actually rebuilds `control-plane` at the target pin (the shape Slice 3.5
+   relied on before Task 5 moved the stanzas) — or the control-plane image must otherwise be made
+   pin-addressable.
+2. The registry must carry the images a rollback can land on. Publishing only the current pin makes
+   "roll back one version" a pull-404 on any host that did not build the old tag locally. The
+   release step must publish (or the rollback must build) the target pin's `gbrain-base` under the
+   current namespace.
+3. A pin move must keep `pin.observed` honest: either the ops RPC reads a pin-versioned gbrain, or
+   `verifyRuntimePin` reads the running `gbrain-serve` binary rather than the ops container's bundle.
+
+C9's assertions were **not** weakened; the two host-side acts above are the environment catching up
+to the release step the plan defers to Task 18.
+
+### Measured (the accepted run)
+
+```text
+MEASURED C9 precondition: rolled back completed run run-ae7fa87b-… to 0.50.0.0 (exit 4)
+MEASURED C9 pending cleared(before fixture): 8
+MEASURED C9 repo drift cleared: ["internal"]
+MEASURED C9 fixture: FIXTURE: config.version 149 -> 143; open_loops replaced (id TEXT PRIMARY KEY); pre-digest taken
+MEASURED C9 failed run run-1bf3aa84-… exit=4 states=[planned,capability,preflight_ok,quiesced,snapshot_taken,snapshot,swapped,schema,rolling_back,rollback_failed]
+MEASURED C9 rollback of run-1bf3aa84-… restored the pre-upgrade state exactly
+MEASURED C9 un-fixture: UN-FIXTURE: open_loops restored to the real schema; config.version -> 149
+MEASURED C9 real run run-9a7b34b8-… ledger[0.50.5.0]=applied parity.regressed=[] schemaVersionOk=true observed=0.50.5.0
+```
+
+---
+
+## P9 — the GA operator walk, C1–C10, measured on one stack
+
+`bun test --parallel=1 test/e2e/slice5.e2e.test.ts`, one continuous walk, `10 pass / 0 fail`:
+
+```text
+MEASURED public /metrics: 401
+MEASURED C2 bootstrap: bootstrapped=true
+MEASURED C2 wizard lifecycle=ready searchMode=conservative modes=conservative,balanced,tokenmax
+MEASURED C3 whoami transport=oauth source=internal federated=["internal"]
+MEASURED C3 fence search sources=[internal] over 1 hit(s)
+MEASURED C4 command run c3169385-… state=succeeded report=reports/walk-cmd-…/2026-09-18-1927.md summary.status=first_sync
+MEASURED C5 run=5be53a8b-… state=succeeded cost=$0.0263051 toolUses=[mcp__gbrain__put_page] usageRows=2 diff=[walk/…/agent.md]
+MEASURED C6 coverage notCovered=[failed chat calls (budget-tracker owns pessimistic in-flight spend) | subagent raw-SDK calls | embeddings (embedding-pricing.ts unit) | calls made before migration v140 / sink registration]
+MEASURED C6 ours=$0.0263051 unpriced=0 brainReachable=true member=walk-…@example.test memberCost=$0.0263051
+MEASURED C7 quiesced=verified quiesceLane=http id=f5c06355-…
+MEASURED C8 before active=8 total=11
+MEASURED C8 domainChanged=true needingReissue=9 activeAfter=0 total=11
+MEASURED C9 real run run-9a7b34b8-… ledger[0.50.5.0]=applied parity.regressed=[] schemaVersionOk=true observed=0.50.5.0
+MEASURED C10 the GA walk total model spend = $0.0263051 over 1 run(s)
+MEASURED teardown: runner={"state":"connected","lastSeenAt":"2026-09-18T23:31:33.390Z","version":"2.1.274"} pin={"declared":"0.50.5.0","observed":"0.50.5.0","matches":true}
+```
+
+C10's number is captured at C6, not at teardown: C9's rollback restores a control-DB snapshot that
+predates the walk, so a teardown-only query would honestly report `$0.0000000` about a walk that
+spent real money. C10 prints the captured figure instead, and falls back to the live query when C6
+did not run (a focused run). C1, C7 and C8 were written by Tasks 8 and 16 and kept as they were.
+
 
