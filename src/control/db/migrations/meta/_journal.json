@@ -57,6 +57,13 @@
       "when": 1789744317469,
       "tag": "0007_runner_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789745000000,
+      "tag": "0008_search_mode_vocabulary",
+      "breakpoints": true
     }
   ]
 }
