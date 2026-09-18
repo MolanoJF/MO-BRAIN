@@ -1,9 +1,9 @@
 import { test, expect, describe } from 'bun:test';
 import {
   runnerStateLabel, runnerStateTone, runnerBanner, runStatusLine, failureText, revertedLine,
-  costText, budgetText, costNote, tokensText, eventLabel, toolCalls, errorFrameCount,
-  agentSelfSummary, diffText, isForeignCommit, fileStatusLabel, readSpaceMoveAlert,
-  revertChoice, revertSuccessText, REVERT_DISCLOSURE,
+  costText, budgetText, costNote, tokensText, eventLabel, eventRuns, toolCalls, errorFrameCount,
+  agentSelfSummary, diffText, isForeignCommit, commitAuthorNote, fileStatusLabel, readSpaceMoveAlert,
+  revertChoice, revertSuccessText, toolResultGloss, REVERT_DISCLOSURE, NO_METERED_CALL,
 } from '../../src/console/pages/Runs.tsx';
 import { AGENT_RUNNER_WARNING } from '../../src/console/pages/Access.tsx';
 import type { AgentRunEventRow, AgentRunRow, AgentRunUsageRow } from '../../src/console/api.ts';
@@ -177,30 +177,56 @@ describe('the run status — honesty rule 1', () => {
     expect(errorFrameCount(toolError)).toBe(0);
   });
 
-  test('a reverted run names the commit that reverted it', () => {
+  test('a reverted run names the commit that reverted it, and the human who signed it', () => {
     expect(revertedLine(run())).toBeNull();
     const line = revertedLine(run({ revertedAt: '2026-09-17T07:00:00.000Z', revertCommit: 'dddddddd' }));
     expect(line).toContain('dddddddd');
     expect(line).toMatch(/never a history rewrite/i);
+    // D7: the audit story is a NAMED human. The page names them when it knows
+    // them, and otherwise says exactly where the name is signed — never
+    // "the system", never a name it did not read.
+    expect(line).toMatch(/acting admin/i);
+    expect(line).toMatch(/never "the system"/i);
+    expect(line).toContain("git log -1 --format='%an <%ae>' ddddddd");
+    expect(line).not.toContain('@example.test');
+
+    const named = revertedLine(
+      run({ revertedAt: '2026-09-17T07:00:00.000Z', revertCommit: 'dddddddd' }),
+      { email: 'admin@example.test', name: 'Ada' },
+    );
+    expect(named).toContain('admin@example.test');
+    expect(named).toMatch(/acting admin who clicked/i);
   });
 });
 
 describe('cost and budget — honesty rule 3, U9', () => {
   test('a NULL cost renders as words, never as $0.00', () => {
-    const text = costText(run({ costUsd: null, numTurns: 3 }));
+    const text = costText(run({ costUsd: null, numTurns: 3 }), [usage({ costUsd: null })]);
     expect(text).not.toContain('$0.00');
     expect(text).toMatch(/not priced/i);
     expect(text).toMatch(/unknown, not zero/i);
   });
 
-  test('a run with no priced call says that, rather than blaming the price table', () => {
-    const text = costText(run({ costUsd: null, numTurns: 0 }));
+  test('a run with no metered call says that, rather than blaming the price table', () => {
+    // D4: `num_turns` is the RUNNER's count, not a count of metered calls. A run
+    // whose every call was refused at the gateway has turns and zero usage rows,
+    // and its model is priced — "no rate in the price table" asserts a cause that
+    // did not happen.
+    const text = costText(run({ costUsd: null, numTurns: 3, model: 'claude-haiku-4-5' }), []);
     expect(text).not.toContain('$0.00');
-    expect(text).toMatch(/no priced model call was recorded/i);
+    expect(text).toBe(NO_METERED_CALL);
+    expect(text).toMatch(/no model call was metered/i);
+    expect(text).not.toMatch(/price table/i);
+  });
+
+  test('a priced run with no rollup names the rollup, not the price table', () => {
+    const text = costText(run({ costUsd: null, numTurns: 2 }), [usage(), usage({ seq: 2 })]);
+    expect(text).toMatch(/rollup row was never written/i);
+    expect(text).not.toMatch(/price table/i);
   });
 
   test('a real zero is still $0.00 — the NULL case does not swallow it', () => {
-    expect(costText(run({ costUsd: '0', numTurns: 1 }))).toContain('$0.00');
+    expect(costText(run({ costUsd: '0', numTurns: 1 }), [usage({ costUsd: '0' })])).toContain('$0.00');
   });
 
   test('the run cap is labelled as ours, so it cannot be confused with gbrain\'s daily budget', () => {
@@ -275,6 +301,91 @@ describe('the tool-call timeline', () => {
     }
     expect(eventLabel('tool_use')).toContain('tool_use');
   });
+
+  // D8: the frames a two-turn run actually produces are ~40 identical
+  // `system/thinking_tokens` rows, which buried the tool result and the model
+  // turn. Nothing is dropped; the repetition is.
+  test('repeated frames collapse to one row with the count and both ends', () => {
+    const events = [
+      event(0, 'system/init', { type: 'system', subtype: 'init' }),
+      ...Array.from({ length: 40 }, (_, i) => event(i + 1, 'system/thinking_tokens', { type: 'system' })),
+      event(41, 'assistant', call('t1', 'mcp__gbrain__put_page', {})),
+      event(42, 'user', result('t1', '{"slug":"reports/x"}')),
+    ];
+    const rows = eventRuns(events);
+    expect(rows.map((r) => r.kind)).toEqual(['system/init', 'system/thinking_tokens', 'assistant', 'user']);
+    const folded = rows.find((r) => r.kind === 'system/thinking_tokens')!;
+    expect(folded.count).toBe(40);
+    expect(folded.firstSeq).toBe(1);
+    expect(folded.lastSeq).toBe(40);
+    // ...and a run of one still reports the frame it was.
+    expect(rows[0]).toEqual({ kind: 'system/init', count: 1, firstSeq: 0, lastSeq: 0 });
+  });
+
+  test('error frames are never folded — an error is the thing not to summarize', () => {
+    const events = [
+      event(1, 'error', { type: 'error', is_error: true, message: 'stream failed' }),
+      event(2, 'error', { type: 'error', is_error: true, message: 'stream failed' }),
+      event(3, 'error', { type: 'error', is_error: true, message: 'stream failed' }),
+    ];
+    const rows = eventRuns(events);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.count === 1)).toBe(true);
+    expect(errorFrameCount(events)).toBe(3);
+  });
+
+  test('frames arriving out of order are folded by their sequence, not their row order', () => {
+    const rows = eventRuns([
+      event(3, 'system/thinking_tokens', {}),
+      event(1, 'system/thinking_tokens', {}),
+      event(2, 'system/thinking_tokens', {}),
+    ]);
+    expect(rows).toEqual([{ kind: 'system/thinking_tokens', count: 3, firstSeq: 1, lastSeq: 3 }]);
+  });
+});
+
+describe('the raw tool result, glossed — D10', () => {
+  // The real receipt from the walked run: `status: "created_or_updated"`,
+  // `chunks: 1`, three `skipped: "remote"` backstops and a write-through path.
+  const receipt = JSON.stringify({
+    slug: 'reports/byhand-nightly/bhwalk1',
+    status: 'created_or_updated',
+    chunks: 1,
+    auto_links: { skipped: 'remote', hint: 'auto_link runs for trusted local writers only' },
+    auto_timeline: { skipped: 'remote', hint: 'auto_link runs for trusted local writers only' },
+    facts_backstop: { skipped: 'kind:concept' },
+    chronicle_backstop: { skipped: 'remote' },
+    write_through: { written: true, path: '/srv/brain-repos/internal/reports/byhand-nightly/bhwalk1.md' },
+    embedding: { status: 'embedded' },
+  });
+
+  test('a skipped backstop is explained as a skip, never as a fault', () => {
+    const gloss = toolResultGloss(receipt)!;
+    expect(gloss).toContain('created_or_updated');
+    expect(gloss).toContain('/srv/brain-repos/internal/reports/byhand-nightly/bhwalk1.md');
+    expect(gloss).toMatch(/skipped: "remote".*NOT a failure/i);
+    expect(gloss).toMatch(/trusted local writers only/i);
+    // F10: a successful write can carry `status: "skipped"` — the gloss says so
+    // rather than letting a reader read the word as a fault.
+    expect(gloss).toMatch(/successful write carrying `status: "skipped"`/i);
+    expect(gloss).toMatch(/chunking is asynchronous/i);
+    expect(gloss).toMatch(/embedding "embedded" is the search index/i);
+  });
+
+  test('a write that did NOT land is said to have not landed', () => {
+    const gloss = toolResultGloss(JSON.stringify({
+      status: 'failed', chunks: 0, write_through: { written: false },
+    }))!;
+    expect(gloss).toMatch(/did not land/i);
+    expect(gloss).not.toMatch(/is the page write/i);
+  });
+
+  test('anything that is not this receipt gets no gloss at all', () => {
+    expect(toolResultGloss('not json')).toBeNull();
+    expect(toolResultGloss('[]')).toBeNull();
+    expect(toolResultGloss('{"status":"ok"}')).toBeNull();
+    expect(toolResultGloss('{"search":{"results":[]}}')).toBeNull();
+  });
 });
 
 describe('the diff hedge — honesty rule 6, D9', () => {
@@ -318,6 +429,23 @@ describe('the diff hedge — honesty rule 6, D9', () => {
     const commit = { sha: 'a', author: 'Grace', email: 'grace@example.test', subject: 's', at: 'now' };
     expect(isForeignCommit(commit, ['Grace <grace@example.test>'])).toBe(true);
     expect(isForeignCommit(commit, [])).toBe(false);
+  });
+
+  // D6: `slice2-cdual-…@example.test` is not a stranger — it is the Connection
+  // member's own identity, which `commitAsMember` passes to git. Every author row
+  // says whose identity it is, and the foreign marker stays a statement about
+  // the RUN rather than about the human.
+  test('the author of every commit is attributed to the Connection member identity', () => {
+    const mine = { sha: 'a', author: 'slice2-cdual-mu54u9vf', email: 'slice2-cdual-mu54u9vf@example.test', subject: 's', at: 'now' };
+    expect(commitAuthorNote(mine, [])).toMatch(/connection member's identity/i);
+    expect(commitAuthorNote(mine, [])).not.toMatch(/not written by this run/i);
+
+    const theirs = { ...mine, email: 'grace@example.test' };
+    const authors = ['slice2-cdual-mu54u9vf <grace@example.test>'];
+    expect(commitAuthorNote(theirs, authors)).toMatch(/not written by this run/i);
+    // Even then it is still one of ours — the marker never turns the member into
+    // an unknown commit author.
+    expect(commitAuthorNote(theirs, authors)).toMatch(/connection member's identity/i);
   });
 
   test('git\'s own status token is spelled out, and kept', () => {
@@ -430,6 +558,16 @@ describe('revert refusals are choices — D10', () => {
     expect(text).toMatch(/removed from the index by name/i);
     expect(text).toMatch(/stop answering searches/i);
     expect(text).not.toMatch(/left in the index/i);
+    // D7: a revert is signed by a named human, and the page names the one who
+    // just clicked when it knows them.
+    expect(text).toMatch(/acting admin's own git identity/i);
+    const named = revertSuccessText({
+      reverted: true, runId: 'run-1', sourceId: 'shared', revertCommit: 'eeeeeeee',
+      revertedAt: '2026-09-17T07:00:00.000Z', files: [],
+      index: { purge: [], sync: {}, embed: {} },
+    }, { email: 'admin@example.test', name: 'Ada' });
+    expect(named).toContain('admin@example.test');
+    expect(named).toMatch(/acting admin who clicked/i);
   });
 
   // The other half of the same honesty rule: a purge the guard SKIPPED (the file

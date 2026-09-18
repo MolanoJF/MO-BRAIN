@@ -4,7 +4,11 @@ import {
   subHourlyMessage, laneHolderId, commandScope, runStateLabel, runStateTone,
   runReason, alertLabel, alertTone, pinnedAlerts, isPinnedAlert, quietHoursBadge,
   holdBadge, hhmm, presetScope, agentPayloadOf, AGENT_LANE_DISCLOSURE,
+  PRICED_MODELS, AGENT_MAX_TOKENS_MIN, AGENT_MAX_TOKENS_MAX,
+  AGENT_BUDGET_MAX_USD, AGENT_PROMPT_MAX_CHARS, agentDraftOf, agentFormRefusals,
+  agentCreateFields, memberRoleLine, slotClocks,
 } from '../../src/console/pages/Schedules.tsx';
+import { PRICED_AT } from '../../src/gateway/pricing.ts';
 import { api, ApiError, scheduleApi } from '../../src/console/api.ts';
 import { AGENT_ALERT_KINDS } from '../../src/agent/alerts.ts';
 import { PRESETS } from '../../src/scheduler/presets.ts';
@@ -68,6 +72,110 @@ describe('the Connection mental model', () => {
     const line = connectionLine(null);
     expect(line).toContain('no Connection');
     expect(line).not.toContain('runs as');
+  });
+
+  // D9: the line read "… · writes to internal — member member", because the
+  // label was the same word as the role's own value.
+  test('the member role is labelled once, so a member Connection does not read "member member"', () => {
+    expect(memberRoleLine('member')).toBe('member role: member');
+    expect(memberRoleLine(null)).toBe('member role: unknown');
+    const line = `${connectionLine({ clientName: 'bs-x', writeSpace: 'internal' })} — ${memberRoleLine('member')}`;
+    expect(line).toBe('runs as bs-x · writes to internal — member role: member');
+    expect(line).not.toMatch(/member member/);
+  });
+});
+
+/**
+ * D5: two clocks for one occurrence, both labelled. The ledger shows the
+ * org-local slot and the same instant in the viewer's zone; unlabelled side by
+ * side, two correct numbers read as a disagreement.
+ */
+describe('one occurrence, two labelled clocks — D5', () => {
+  test('the org clock is named, and so is the viewer clock and its zone', () => {
+    const clocks = slotClocks('2026-09-18T04:05', '2026-09-18T08:05:00.000Z', 'Europe/Madrid');
+    expect(clocks.org).toBe('org clock 2026-09-18T04:05');
+    expect(clocks.viewer).toContain('your clock');
+    expect(clocks.viewer).toContain(new Date('2026-09-18T08:05:00.000Z').toLocaleString());
+    expect(clocks.viewer).toContain('(Europe/Madrid)');
+    expect(clocks.org).not.toBe(clocks.viewer);
+  });
+
+  test('a browser that will not name its zone still gets a labelled clock', () => {
+    const clocks = slotClocks('2026-09-18T04:05', '2026-09-18T08:05:00.000Z', null);
+    expect(clocks.viewer).toMatch(/^your clock /);
+    expect(clocks.viewer).not.toContain('(');
+  });
+});
+
+describe('the agent payload is the operator\'s — D3', () => {
+  const agentPreset = PRESETS['nightly-agent-briefing']!;
+  const defaults = agentDraftOf(agentPayloadOf(agentPreset)!);
+
+  test('the preset pre-fills the form, and its own values are accepted as they are', () => {
+    expect(defaults).toEqual({
+      prompt: agentPreset.agent!.prompt,
+      model: 'claude-haiku-4-5',
+      maxTokens: '16384',
+      budgetUsd: '2',
+    });
+    // A one-click create must still work: the preset's own payload is refused by
+    // nothing the form checks.
+    expect(agentFormRefusals(defaults)).toEqual([]);
+  });
+
+  test('the model picker is the shipped price table, read rather than mirrored', () => {
+    expect(PRICED_MODELS).toContain(defaults.model);
+    expect(PRICED_MODELS).toContain('claude-opus-5');
+    expect(PRICED_AT).toBe('2026-09-17');
+    // A model this build cannot price is refused in the API's own sentence.
+    const refusal = agentFormRefusals({ ...defaults, model: 'gpt-9' });
+    expect(refusal).toHaveLength(1);
+    expect(refusal[0]!.field).toBe('agentModel');
+    expect(refusal[0]!.detail).toBe(
+      `Not in the price table pinned on ${PRICED_AT}, so a run on it `
+      + 'would have an unknowable cost. Pick a priced model.',
+    );
+  });
+
+  test('the prompt, the cap and the budget are refused in the API\'s own words', () => {
+    const empty = agentFormRefusals({ ...defaults, prompt: '   ' });
+    expect(empty.find((r) => r.field === 'agentPrompt')!.detail).toBe(
+      `a non-empty prompt of at most ${AGENT_PROMPT_MAX_CHARS} characters — a pointer `
+      + 'at what to do, not an inlined essay',
+    );
+    const long = agentFormRefusals({ ...defaults, prompt: 'x'.repeat(AGENT_PROMPT_MAX_CHARS + 1) });
+    expect(long.map((r) => r.field)).toEqual(['agentPrompt']);
+
+    expect(agentFormRefusals({ ...defaults, maxTokens: '12.5' }).find((r) => r.field === 'agentMaxTokens')!.detail)
+      .toBe(`an integer in [${AGENT_MAX_TOKENS_MIN}, ${AGENT_MAX_TOKENS_MAX}]`);
+    expect(agentFormRefusals({ ...defaults, maxTokens: String(AGENT_MAX_TOKENS_MAX + 1) })
+      .map((r) => r.field)).toEqual(['agentMaxTokens']);
+    expect(agentFormRefusals({ ...defaults, maxTokens: '' }).map((r) => r.field))
+      .toEqual(['agentMaxTokens']);
+
+    expect(agentFormRefusals({ ...defaults, budgetUsd: '0' }).find((r) => r.field === 'agentBudgetUsd')!.detail)
+      .toBe(`a decimal greater than 0 and at most ${AGENT_BUDGET_MAX_USD} USD, `
+        + 'with at most six decimal places');
+    expect(agentFormRefusals({ ...defaults, budgetUsd: '2.0000001' }).map((r) => r.field))
+      .toEqual(['agentBudgetUsd']);
+    expect(agentFormRefusals({ ...defaults, budgetUsd: 'abc' }).map((r) => r.field))
+      .toEqual(['agentBudgetUsd']);
+    // The bound is the API's own, and it is NOT exclusive at the top.
+    expect(agentFormRefusals({ ...defaults, budgetUsd: String(AGENT_BUDGET_MAX_USD) })).toEqual([]);
+  });
+
+  test('the create body carries the four keys, money still text and the cap a number', () => {
+    expect(agentCreateFields(defaults)).toEqual({
+      agentPrompt: agentPreset.agent!.prompt,
+      agentModel: 'claude-haiku-4-5',
+      agentMaxTokens: 16384,
+      agentBudgetUsd: '2',
+    });
+    // A retyped cap is a number by the route's own `intOf`, and the budget it
+    // sends is exactly the text the operator typed — never a float.
+    const edited = agentCreateFields({ ...defaults, maxTokens: ' 4096 ', budgetUsd: '0.5' });
+    expect(edited.agentMaxTokens).toBe(4096);
+    expect(edited.agentBudgetUsd).toBe('0.5');
   });
 });
 

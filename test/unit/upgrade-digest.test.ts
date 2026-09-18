@@ -124,8 +124,12 @@ describe('compareDoctor', () => {
 describe('the digest does not count the runner ledger (L9)', () => {
   const uncounted = UNCOUNTED_TABLES as readonly string[];
 
-  test('the three tables the agent runner writes are uncounted', () => {
-    for (const table of ['agent_runs', 'agent_run_events', 'agent_run_usage']) {
+  test('the tables the agent runner writes are uncounted', () => {
+    for (const table of [
+      'agent_runs', 'agent_run_events', 'agent_run_usage',
+      // D2: rewritten on every claim request, so it moves with no brain change.
+      'runner_presence',
+    ]) {
       expect(uncounted).toContain(table);
     }
   });

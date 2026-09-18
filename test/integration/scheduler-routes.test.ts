@@ -60,6 +60,15 @@ mock.module('../../src/control/opsClient.ts', () => ({
     sourceId, before: '', after: '', commits: [], files: [],
   }),
   gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
+  // Task 10's revert probes the tree before it removes a page, and `revert.ts` is
+  // loaded by the app graph (`routes/runs.ts`), so this export must exist even
+  // though no probe here exercises a revert: answering "neither on disk nor in
+  // git" is the state a route test that never reverts wants anyway.
+  gitPathExists: async (sourceId: string, paths: readonly string[]) => ({
+    sourceId,
+    root: `/repos/${sourceId}`,
+    paths: paths.map((path) => ({ path, onDisk: false, inGit: false })),
+  }),
   auditTail: async () => [],
 }));
 
@@ -71,7 +80,8 @@ const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src
 const { revokeConnection } = await import('../../src/control/connections.ts');
 const { materializeDue } = await import('../../src/scheduler/materialize.ts');
 // Same ordering rule as the block above: these read env at module scope too.
-const { runnerStatus } = await import('../../src/agent/runners.ts');
+const { runnerStatus, recordRunnerSeen, RUNNER_SEEN_WINDOW_MS } =
+  await import('../../src/agent/runners.ts');
 const { HARNESS_PIN } = await import('../../src/runner/pin.ts');
 const { MODEL_PRICING } = await import('../../src/gateway/pricing.ts');
 const { eq, and, inArray } = await import('drizzle-orm');
@@ -202,6 +212,11 @@ beforeEach(async () => {
   await getDb().delete(schema.schedules).where(eq(schema.schedules.organizationId, ORG));
   await getDb().delete(schema.scheduleAlerts).where(eq(schema.scheduleAlerts.organizationId, ORG));
   await getDb().delete(schema.auditLog).where(eq(schema.auditLog.organizationId, ORG));
+  // D2's sighting record is deployment-wide, not org-scoped: it is written by
+  // `POST /api/runs/claim`, which names a runner and no organization. Every
+  // other file in this directory claims runs through that route, so "no runner
+  // has ever been seen" has to be CONSTRUCTED here rather than assumed.
+  await getDb().delete(schema.runnerPresence);
 });
 
 afterAll(async () => {
@@ -690,6 +705,43 @@ describe('the runner lane: three states, and only one of them is green', () => {
     expect(status.lastSeenAt).toBeInstanceOf(Date);
     expect(status.version).toBeNull();
   });
+
+  // D2. The sighting is the claim REQUEST, which arrives before any run exists:
+  // that is what makes an idle-but-present runner visible, and it is what the
+  // old live-lease definition of `connected` got wrong.
+  test('a runner that has been seen is `connected`, with the version it announced', async () => {
+    const announcedAt = Date.now();
+    await recordRunnerSeen('runner-seen-0123abcd', HARNESS_PIN, announcedAt);
+
+    const status = await runnerStatus();
+    expect(status.state).toBe('connected');
+    expect(status.version).toBe(HARNESS_PIN);
+    // The sighting's own moment, and no claim anywhere: `lastSeenAt` is the row's
+    // timestamp, not a run it never had.
+    expect(status.lastSeenAt!.getTime()).toBe(announcedAt);
+    expect((await getDb().select().from(schema.scheduleRuns)
+      .where(eq(schema.scheduleRuns.organizationId, ORG))).length).toBe(0);
+  });
+
+  test('a sighting older than the window is not `connected` — and lastSeenAt still says it was here', async () => {
+    await recordRunnerSeen(
+      'runner-gone-0123abcd', HARNESS_PIN, Date.now() - RUNNER_SEEN_WINDOW_MS - 1_000,
+    );
+    const status = await runnerStatus();
+    expect(status.state).toBe('never_claimed');
+    expect(Date.now() - status.lastSeenAt!.getTime()).toBeGreaterThan(RUNNER_SEEN_WINDOW_MS);
+    expect(status.version).toBe(HARNESS_PIN);
+  });
+
+  test('a request with no runner id, or no version, is not a sighting at all', async () => {
+    // Both are refused as request shape by the claim route (`runner_never_seen`,
+    // `harness_version_required`), so neither may leave a row: a sighting with no
+    // identity would put an empty string in /api/health's `version`.
+    await recordRunnerSeen('', HARNESS_PIN);
+    await recordRunnerSeen('runner-partial-0123abcd', '   ');
+    expect(await runnerStatus()).toEqual({ state: 'never_claimed', lastSeenAt: null, version: null });
+    expect((await getDb().select().from(schema.runnerPresence)).length).toBe(0);
+  });
 });
 
 describe('agent_prompt schedules', () => {
@@ -821,9 +873,15 @@ describe('agent_prompt schedules', () => {
   test('no consumer, no schedule: `never_claimed` and `disabled` both refuse a create', async () => {
     const never = await hit('POST', '/api/schedules', adminCookie, agentBody());
     expect(never.status).toBe(409);
-    expect(await never.json()).toMatchObject({
+    const neverBody = await never.json() as { error: string; detail: string };
+    expect(neverBody).toMatchObject({
       error: 'runner_not_enabled', state: 'never_claimed', lastSeenAt: null,
     });
+    // D2: the refusal names the fact the gate TESTS — a sighting inside the
+    // window. It must not say "nothing has claimed any agent run", which was
+    // false about the running, long-polling runner this defect was found with.
+    expect(neverBody.detail).not.toContain('nothing has claimed');
+    expect(neverBody.detail).toContain(`${Math.round(RUNNER_SEEN_WINDOW_MS / 1000)}s`);
 
     await withRunnerToken('', async () => {
       const off = await hit('POST', '/api/schedules', adminCookie,
@@ -841,6 +899,32 @@ describe('agent_prompt schedules', () => {
     const rows = await getDb().select().from(schema.schedules)
       .where(eq(schema.schedules.organizationId, ORG));
     expect(rows.map((r) => r.jobType)).toEqual(['gbrain_command']);
+  });
+
+  // D2, the reversal this fix is FOR: a runner that is long-polling the claim
+  // route has been SEEN, and the first agent schedule becomes creatable — with no
+  // run in flight, and nothing but the sighting making the lane green.
+  test('a runner that is seen but idle makes an agent schedule creatable', async () => {
+    await recordRunnerSeen('runner-idle-0123abcd', HARNESS_PIN);
+
+    const res = await hit('POST', '/api/schedules', adminCookie, agentBody());
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ jobType: 'agent_prompt', operation: null });
+    // The row exists because the sighting does — no claim was needed, and no
+    // claim happened.
+    expect((await getDb().select().from(schema.scheduleRuns)
+      .where(eq(schema.scheduleRuns.organizationId, ORG))).length).toBe(0);
+
+    // And the same stack refuses the moment the sighting ages out of the window:
+    // the gate is the WINDOW, not "ever".
+    await getDb().delete(schema.runnerPresence);
+    await recordRunnerSeen(
+      'runner-idle-0123abcd', HARNESS_PIN, Date.now() - RUNNER_SEEN_WINDOW_MS - 1_000,
+    );
+    const stale = await hit('POST', '/api/schedules', adminCookie,
+      agentBody({ name: uniqueName('stale-lane') }));
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: 'runner_not_enabled', state: 'never_claimed' });
   });
 
   test('a runner whose lease lapsed is refused too, and the refusal says when it was last seen', async () => {

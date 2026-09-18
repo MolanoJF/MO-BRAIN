@@ -57,6 +57,12 @@ async function openAlerts(): Promise<
  * appear here. `state`, `lastSeenAt` and `version` are the whole vocabulary
  * D12 defines, and there is nothing else to leak.
  *
+ * `version` is real since D2: it is the harness version the last-seen runner
+ * reported in the very claim request that recorded it, and it is the same
+ * string that container announces on the wire — not a runner id, not a token.
+ * The runner's own identity (`runner_presence.runner_id`) is deliberately NOT
+ * projected here.
+ *
  * A ledger this probe cannot read is not a connected runner: the fallback is the
  * env-only reading, which is never green, and `components.controlDb` already
  * reports the failure that caused it.

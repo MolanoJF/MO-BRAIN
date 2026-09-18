@@ -559,3 +559,23 @@ export const agentRunUsage = pgTable('agent_run_usage', {
   stopReason: text('stop_reason'),
   httpStatus: integer('http_status'),
 }, (t) => [uniqueIndex('agent_run_usage_run_seq_uq').on(t.runId, t.seq)]);
+
+/**
+ * D2's seen-record: one row per runner that has announced itself on the claim
+ * route. `runner_id` is the runner's own `${HOSTNAME}-${uuid8}` (`RUNNER_ID`),
+ * the same id that lands in `schedule_runs.claimed_by`; `harness_version` is
+ * what that SAME request reported, so `/api/health` stops answering `null` about
+ * a version it is being told on every poll.
+ *
+ * It is **not** org-scoped, and cannot be: the sighting is the claim request,
+ * which names a runner but no organization — one runner container serves the
+ * whole deployment and consumes whichever org's run is next — and `/api/health`
+ * reads this table WITHOUT a session. So the row carries the runner's identity
+ * and nothing else: no token, no client id, no connection detail, no org.
+ * Writer: `recordRunnerSeen` in `src/agent/runners.ts`.
+ */
+export const runnerPresence = pgTable('runner_presence', {
+  runnerId: text('runner_id').primaryKey(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  harnessVersion: text('harness_version').notNull(),
+});

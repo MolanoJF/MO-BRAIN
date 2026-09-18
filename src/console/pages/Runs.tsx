@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
-  ApiError, runApi, type AgentRunDetail, type AgentRunEventRow, type AgentRunRow,
-  type AgentRunUsageRow, type RevertSuccess, type RunnerStatusRow,
+  ApiError, runApi, sessionApi, type AgentRunDetail, type AgentRunEventRow, type AgentRunRow,
+  type AgentRunUsageRow, type RevertSuccess, type RunnerStatusRow, type SessionUser,
 } from '../api.ts';
-import { runStateLabel, runStateTone, type Tone } from './Schedules.tsx';
+import { runStateLabel, runStateTone, slotClocks, type Tone } from './Schedules.tsx';
 import type { DiffSummary, RangeCommit } from '../../agent/types.ts';
 
 /**
@@ -125,24 +125,60 @@ export function runStatusLine(run: AgentRunRow): string {
   return why === null ? base : `${base} — ${why}`;
 }
 
-/** D10: a reverted run says which commit did it. Nothing auto-reverts, ever. */
-export function revertedLine(run: AgentRunRow): string | null {
+/** D10: a reverted run says which commit did it, and whose identity signed it.
+ *  Nothing auto-reverts, ever.
+ *
+ *  D7: D10's audit story is that a NAMED HUMAN reverted the run, and that name is
+ *  the git AUTHOR of the revert commit — `commitAs(sourceId, actor, …)` signs it
+ *  with `actorIdentity(ctx.userId)`, the acting admin's own name and email. The
+ *  projection carries the commit, not its author, so the line NAMES the human
+ *  when the page knows them (`actor`, read from the session that performed the
+ *  revert) and otherwise says exactly where the name is signed, with the command
+ *  that prints it. It never invents an actor and never calls it "the system". */
+export function revertedLine(run: AgentRunRow, actor: SessionUser | null = null): string | null {
   if (run.revertedAt === null) return null;
-  return `Reverted ${new Date(run.revertedAt).toLocaleString()} by commit `
-    + `${run.revertCommit ?? 'an unrecorded commit'} — a new commit plus a re-index, never a history rewrite.`;
+  const commit = run.revertCommit ?? 'an unrecorded commit';
+  const who = actor === null
+    ? 'That commit is authored by the acting admin — the human who clicked it, signed with their own '
+      + 'identity and never "the system" (D10) — so '
+      + `\`git log -1 --format='%an <%ae>' ${short(commit)}\` in the write Space prints their name.`
+    : `That commit is authored by ${actor.email}, the acting admin who clicked it — signed with that human's `
+      + 'own identity, never "the system" (D10).';
+  return `Reverted ${new Date(run.revertedAt).toLocaleString()} by commit ${commit} — a new commit plus a `
+    + `re-index, never a history rewrite. ${who}`;
 }
 
 /**
- * Honesty rule 3: a cost we could not price is not a cost of zero. `cost_usd` is
- * NULL when the model is absent from the price table, and NULL renders as words,
- * never as $0.00. A run with no priced call at all says that instead, because
- * "the model could not be priced" would be the wrong reason for it.
+ * The one honest sentence for "nothing was metered" — shared by the token line
+ * and the cost line so the two cannot drift, and so no reader has to wonder
+ * whether they disagree.
  */
-export function costText(run: AgentRunRow): string {
+export const NO_METERED_CALL = 'No model call was metered for this run.';
+
+/**
+ * Honesty rule 3: a cost we could not price is not a cost of zero. `cost_usd` is
+ * NULL when a metered call could not be priced, and NULL renders as words, never
+ * as $0.00.
+ *
+ * D4 — and NULL has MORE than one cause, so the words have to name the right
+ * one. `num_turns` is the runner's own count of turns, not a count of metered
+ * calls: a run whose every call was refused at the gateway (a 401) leaves zero
+ * `agent_run_usage` rows and still reports turns. Blaming the price table for
+ * that run asserts a cause that did not happen — the model IS priced and nothing
+ * was metered. So the clause is driven by the usage ROWS: no metered call means
+ * the sentence the token line already prints, a NULL-priced call means the price
+ * table, and a fully priced set with no rollup means the rollup. Only the first
+ * of those three is a fact about this deployment's models.
+ */
+export function costText(run: AgentRunRow, usage: AgentRunUsageRow[]): string {
   if (run.costUsd === null) {
-    return run.numTurns === 0
-      ? 'No priced model call was recorded for this run, so there is no cost to show.'
-      : 'Not priced — at least one call used a model with no rate in the price table, so the cost is unknown, not zero.';
+    if (usage.length === 0) return NO_METERED_CALL;
+    if (usage.some((u) => u.costUsd === null)) {
+      return 'Not priced — at least one metered call used a model with no rate in the price table, so the cost is '
+        + 'unknown, not zero.';
+    }
+    return `No total was recorded for this run, but its ${num(usage.length)} metered call(s) were priced — the `
+      + 'rollup row was never written. Read the per-call rows below.';
   }
   return `${money(run.costUsd)} over ${num(run.numTurns)} model turn(s).`;
 }
@@ -191,7 +227,7 @@ export function costNote(run: AgentRunRow, usage: AgentRunUsageRow[]): string | 
  * from, so the page never shows a token total it cannot attribute to a call.
  */
 export function tokensText(usage: AgentRunUsageRow[]): string {
-  if (usage.length === 0) return 'No model call was metered for this run.';
+  if (usage.length === 0) return NO_METERED_CALL;
   const t = usage.reduce(
     (a, u) => ({
       input: a.input + u.inputTokens,
@@ -219,6 +255,35 @@ export function eventLabel(kind: string): string {
     case 'error': return 'Error frame';
     default: return `Unrecognised frame (${kind})`;
   }
+}
+
+/** One run of consecutive same-kind frames, collapsed for display. */
+export type EventRunRow = { kind: string; count: number; firstSeq: number; lastSeq: number };
+
+/**
+ * D8 — the transcript, folded the way a reader needs it. The harness reports
+ * `system/thinking_tokens` over and over (65 frames for one two-turn run), and
+ * rendering one row each buried the tool result and the model turn under
+ * identical lines. Consecutive frames of the same kind become ONE row carrying
+ * the count and both ends, so nothing is dropped and nothing repeats for pages.
+ *
+ * `error` is the exception and is never collapsed: an error frame is the one
+ * thing this page exists to keep in front of a reader (honesty rule 1), and a
+ * folded count would hide where in the stream it happened.
+ */
+export function eventRuns(events: AgentRunEventRow[]): EventRunRow[] {
+  const runs: EventRunRow[] = [];
+  const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  for (const event of ordered) {
+    const last = runs[runs.length - 1];
+    if (last && last.kind === event.kind && event.kind !== 'error') {
+      last.count += 1;
+      last.lastSeq = event.seq;
+      continue;
+    }
+    runs.push({ kind: event.kind, count: 1, firstSeq: event.seq, lastSeq: event.seq });
+  }
+  return runs;
 }
 
 /** The redacted frames' `message.content[]`, which is where the harness puts its
@@ -297,6 +362,48 @@ export function toolCalls(events: AgentRunEventRow[]): ToolCall[] {
 }
 
 /**
+ * D10 — a gloss for the gbrain JSON an operator sees raw, and true about it.
+ *
+ * F10 (`docs/slice-4-findings.md`) measured the shapes the runs actually
+ * produce, and the load-bearing fact is that `status: "skipped"` and the
+ * `skipped: "remote"` backstops accompany a SUCCESSFUL write: the write landed
+ * (`write_through.written: true`, `embedding.status: "embedded"`), and the
+ * auto-link/auto-timeline backstops simply do not run for a remote writer — a
+ * stdio serve sweeps the body's wikilinks later. A reader who takes `skipped`
+ * for a fault is reading the opposite of what happened, so the gloss says which
+ * is which. Returns null for anything that is not this receipt.
+ */
+export function toolResultGloss(result: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const receipt = parsed as Record<string, unknown>;
+  if (typeof receipt.status !== 'string' || !('write_through' in receipt)) return null;
+
+  const written = receipt.write_through as { written?: unknown; path?: unknown } | null;
+  const path = typeof written?.path === 'string' ? written.path : null;
+  const embedding = (receipt.embedding as { status?: unknown } | null)?.status;
+  const chunks = typeof receipt.chunks === 'number' ? receipt.chunks : null;
+  const parts = [
+    `gbrain's write receipt: status "${receipt.status}" is what gbrain reported for the write, and `
+    + `${written?.written === true ? `write_through.written: true means it landed${path === null ? '' : ` at ${path}`}` : 'write_through.written is not true, so the file did not land'}.`,
+    chunks === null
+      ? 'Chunk and embedding steps are reported separately below.'
+      : `${chunks} chunk(s) existed at response time — chunking is asynchronous, so 0 here is not a lost write.`,
+    typeof embedding === 'string' ? `embedding "${embedding}" is the search index.` : '',
+    '`skipped: "remote"` on auto_links/auto_timeline/chronicle_backstop is NOT a failure: those backstops run for '
+    + 'trusted local writers only, so a remote write saves the body\'s wikilinks as text and a stdio serve sweeps '
+    + 'them later; `facts_backstop` skips by page kind the same way. F10 measured a successful write carrying '
+    + '`status: "skipped"`.',
+  ];
+  return parts.filter((p) => p !== '').join(' ');
+}
+
+/**
  * Honesty rule 1's receipt: error frames are counted from the stream itself, so
  * the page can say the run failed even when the agent's closing message claims
  * success. A `system/api_retry` frame is a retry, and an `isError` inside a tool
@@ -359,6 +466,20 @@ export function diffText(diff: DiffSummary | null): string {
  *  honestly make is which commits `attributeCommits` counted as foreign. */
 export function isForeignCommit(commit: RangeCommit, foreignAuthors: string[]): boolean {
   return foreignAuthors.includes(`${commit.author} <${commit.email}>`);
+}
+
+/**
+ * D6 — whose identity is on the commit, said on the row itself. The author
+ * column showed `slice2-cdual-…@example.test` with no explanation, which a reader
+ * can only read as a stranger. It is not: `commitAsMember` signs every commit
+ * with the CONNECTION'S MEMBER identity (`-c user.name -c user.email`, F12), so
+ * the author is the member this Connection runs as — and the foreign marker,
+ * when the attribution raised one, is about the run, not about the human.
+ */
+export function commitAuthorNote(commit: RangeCommit, foreignAuthors: string[]): string {
+  return isForeignCommit(commit, foreignAuthors)
+    ? 'the Connection member\'s identity · not written by this run'
+    : 'the Connection member\'s identity';
 }
 
 /** `git diff --name-status`'s own token, spelled out — never normalized away. */
@@ -492,8 +613,13 @@ export function revertChoice(body: Record<string, unknown>): RevertChoice {
  * a purge the guard SKIPPED — its file is still in the write Space, which makes
  * it someone's live work — is said out loud with its reason rather than folded
  * into a claim that the brain forgot something it still holds.
+ *
+ * D7 rides here as well: the revert was signed with the ACTING ADMIN's git
+ * identity, so when the page knows who that was — the session that just clicked
+ * the button, which by construction is the `actorIdentity(ctx.userId)` the route
+ * signs with — the line names them instead of leaving the operator to open git.
  */
-export function revertSuccessText(result: RevertSuccess): string {
+export function revertSuccessText(result: RevertSuccess, actor: SessionUser | null = null): string {
   const purged = result.index.purge.filter((p) => p.outcome === 'purged');
   const kept = result.index.purge.filter((p) => p.outcome !== 'purged');
   const removed = purged.length === 0
@@ -504,8 +630,11 @@ export function revertSuccessText(result: RevertSuccess): string {
     ? ''
     : ' Left in the index on purpose, and still answerable: '
       + `${kept.map((p) => `${p.slug} (${p.detail})`).join('; ')}.`;
+  const signed = actor === null
+    ? ' It is signed with the acting admin\'s own git identity (D10).'
+    : ` It is signed with ${actor.email}'s own git identity — the acting admin who clicked, not "the system" (D10).`;
   return `Reverted by commit ${result.revertCommit} at ${new Date(result.revertedAt).toLocaleString()} — a new commit, `
-    + `never a rewrite — and ${result.sourceId} was re-synced and re-embedded: ${removed}.${left}`;
+    + `never a rewrite — and ${result.sourceId} was re-synced and re-embedded: ${removed}.${left}${signed}`;
 }
 
 export function Runs() {
@@ -516,6 +645,14 @@ export function Runs() {
   const [reverted, setReverted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * D7: the identity the revert route will sign with — this session's own user.
+   * Read once, and only used to name the actor of a revert THIS page performed
+   * or of a run whose revert commit the page cannot resolve to a name.
+   */
+  const [me, setMe] = useState<SessionUser | null>(null);
+  /** D7: the run THIS session reverted, whose actor is therefore this session. */
+  const [revertedHere, setRevertedHere] = useState<string | null>(null);
 
   const load = async (openRunId?: string) => {
     const [status, list] = await Promise.all([runApi.runner(), runApi.list()]);
@@ -525,6 +662,10 @@ export function Runs() {
     setDetail(target === undefined ? null : await runApi.detail(target).catch(() => null));
     setError(null);
   };
+
+  useEffect(() => {
+    void sessionApi.me().then(setMe).catch(() => { /* no identity known */ });
+  }, []);
 
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
@@ -553,8 +694,12 @@ export function Runs() {
     setRefusal(null);
     setReverted(null);
     try {
-      setReverted(revertSuccessText(await runApi.revert(detail.runId, confirm)));
-      await load(detail.runId);
+      const runId = detail.runId;
+      setReverted(revertSuccessText(await runApi.revert(runId, confirm), me));
+      // D7: this page knows the actor of THIS run's revert — it just was the
+      // actor — and of no other run's, so the flag is per run, not global.
+      setRevertedHere((current) => (current === runId ? current : runId));
+      await load(runId);
     } catch (e) {
       // A refusal is a 409 whose BODY is the choice (D10). Anything else is an
       // error the operator reads as an error.
@@ -571,6 +716,11 @@ export function Runs() {
   const selfSummary = detail === null ? null : agentSelfSummary(detail.events);
   const errors = detail === null ? 0 : errorFrameCount(detail.events);
   const calls = detail === null ? [] : toolCalls(detail.events);
+  const frames = detail === null ? [] : eventRuns(detail.events);
+  const actor = detail !== null && revertedHere === detail.runId ? me : null;
+  const detailClocks = detail === null ? null : slotClocks(detail.slot, detail.fireAt);
+  const tokens = detail === null ? '' : tokensText(detail.usage);
+  const cost = detail === null ? '' : costText(detail, detail.usage);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -612,7 +762,9 @@ export function Runs() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((run) => (
+              {runs.map((run) => {
+                const clocks = slotClocks(run.slot, run.fireAt);
+                return (
                 <tr
                   key={run.runId}
                   className={`border-b border-subtle cursor-pointer ${
@@ -628,8 +780,8 @@ export function Runs() {
                     </div>
                   </td>
                   <td className="py-2 pr-3 font-mono text-xs">
-                    {run.slot}
-                    <div className="text-muted">{new Date(run.fireAt).toLocaleString()}</div>
+                    {clocks.org}
+                    <div className="text-muted">{clocks.viewer}</div>
                   </td>
                   <td className={`py-2 pr-3 ${TONE_CLASS[runStateTone(run.state)]}`}>{runStateLabel(run.state)}</td>
                   <td className="py-2 pr-3">{num(run.numTurns)}</td>
@@ -638,7 +790,8 @@ export function Runs() {
                     {run.costUsd === null ? 'not priced' : money(run.costUsd)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -659,7 +812,8 @@ export function Runs() {
             <h2 className="text-lg font-semibold">{detail.scheduleName ?? detail.scheduleId}</h2>
             <div className={`text-sm ${TONE_CLASS[runStateTone(detail.state)]}`}>{runStatusLine(detail)}</div>
             <div className="text-xs text-muted font-mono">
-              {detail.runId} · {detail.slot} · fired {new Date(detail.fireAt).toLocaleString()}
+              {detail.runId} · {detailClocks!.org}
+              {' · '}{detailClocks!.viewer}
               {detail.startedAt === null ? '' : ` · started ${new Date(detail.startedAt).toLocaleString()}`}
               {detail.finishedAt === null ? '' : ` · finished ${new Date(detail.finishedAt).toLocaleString()}`}
             </div>
@@ -675,7 +829,9 @@ export function Runs() {
                 {JSON.stringify(detail.failureDetail, null, 2)}
               </pre>
             )}
-            {revertedLine(detail) && <div className="text-sm text-warning">{revertedLine(detail)}</div>}
+            {revertedLine(detail, actor) && (
+              <div className="text-sm text-warning">{revertedLine(detail, actor)}</div>
+            )}
           </div>
 
           {/* D10: nothing auto-reverts, and a refusal is a choice with its context. */}
@@ -716,7 +872,9 @@ export function Runs() {
               <p className="text-sm text-muted">No tool call was recorded in this run's event stream.</p>
             ) : (
               <div className="space-y-2">
-                {calls.map((call) => (
+                {calls.map((call) => {
+                  const gloss = call.result === null || call.isError ? null : toolResultGloss(call.result);
+                  return (
                   <div key={`${call.seq}-${call.id ?? call.name}`} className="border-b border-subtle pb-2 space-y-1">
                     <div className="text-sm">
                       <span className="font-mono">{call.name}</span>
@@ -730,12 +888,18 @@ export function Runs() {
                         No result frame was recorded — the run ended between this call and its answer.
                       </div>
                     ) : (
-                      <pre className={`text-xs whitespace-pre-wrap font-mono max-h-32 overflow-y-auto ${call.isError ? 'text-danger' : 'text-muted'}`}>
-                        {call.isError ? `tool error: ${call.result}` : call.result}
-                      </pre>
+                      <>
+                        <pre className={`text-xs whitespace-pre-wrap font-mono max-h-32 overflow-y-auto ${call.isError ? 'text-danger' : 'text-muted'}`}>
+                          {call.isError ? `tool error: ${call.result}` : call.result}
+                        </pre>
+                        {/* D10: the raw gbrain JSON stays, with the one line a
+                            first-time reader needs to not misread `skipped`. */}
+                        {gloss !== null && <div className="text-xs text-muted">{gloss}</div>}
+                      </>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             <div className="text-xs text-muted">
@@ -745,12 +909,22 @@ export function Runs() {
               the run's status comes from its row, not from this transcript (honesty rule 1).
             </div>
             {detail.events.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {detail.events.map((event) => (
-                  <span key={event.seq} className="text-xs text-muted">
-                    {eventLabel(event.kind)}
-                  </span>
-                ))}
+              <div className="space-y-1">
+                <div className="text-xs text-muted">
+                  The stream, folded: repeating frames are one row with their count, and error frames are
+                  never folded.
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {frames.map((frame) => (
+                    <span key={`${frame.kind}-${frame.firstSeq}`}
+                          className={`text-xs ${frame.kind === 'error' ? 'text-danger' : 'text-muted'}`}>
+                      {eventLabel(frame.kind)}
+                      {frame.count === 1
+                        ? ` · frame ${frame.firstSeq}`
+                        : ` ×${frame.count} · frames ${frame.firstSeq}–${frame.lastSeq}`}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
             {selfSummary !== null && (
@@ -765,8 +939,10 @@ export function Runs() {
 
           <div className="card space-y-1">
             <h2 className="text-lg font-semibold">Tokens, cost and budget</h2>
-            <div className="text-sm">{tokensText(detail.usage)}</div>
-            <div className="text-sm">{costText(detail)}</div>
+            <div className="text-sm">{tokens}</div>
+            {/* D4: with nothing metered the cost line is the token line word for
+                word, so it is said once rather than twice. */}
+            {cost !== tokens && <div className="text-sm">{cost}</div>}
             {note !== null && <div className="text-sm text-warning">{note}</div>}
             <div className="text-xs text-muted">{budgetText(detail)}</div>
             {detail.usage.length > 0 && (
@@ -808,30 +984,39 @@ export function Runs() {
               </div>
             )}
             {detail.diff !== null && detail.diff.write.commits.length > 0 && (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-subtle text-left">
-                    <th className="py-1 pr-3">commit</th>
-                    <th className="py-1 pr-3">author</th>
-                    <th className="py-1">subject</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.diff.write.commits.map((commit) => {
-                    const foreign = isForeignCommit(commit, detail.diff!.write.foreignAuthors);
-                    return (
-                      <tr key={commit.sha} className="border-b border-subtle">
-                        <td className="py-1 pr-3 font-mono">{short(commit.sha)}</td>
-                        <td className="py-1 pr-3 font-mono">
-                          {commit.author} &lt;{commit.email}&gt;
-                          {foreign && <span className="text-warning"> · not written by this run</span>}
-                        </td>
-                        <td className="py-1">{commit.subject}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <>
+                <p className="text-xs text-muted">
+                  Every author below is a NAME WE SET, not a stranger: this run committed as the
+                  Connection's member — `commitAsMember` passes that member's own name and email to git
+                  (one commit per invocation, no global config), so the author is the member this
+                  Connection runs as.
+                </p>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-subtle text-left">
+                      <th className="py-1 pr-3">commit</th>
+                      <th className="py-1 pr-3">author</th>
+                      <th className="py-1">subject</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.diff.write.commits.map((commit) => {
+                      const foreign = isForeignCommit(commit, detail.diff!.write.foreignAuthors);
+                      const note = commitAuthorNote(commit, detail.diff!.write.foreignAuthors);
+                      return (
+                        <tr key={commit.sha} className="border-b border-subtle">
+                          <td className="py-1 pr-3 font-mono">{short(commit.sha)}</td>
+                          <td className="py-1 pr-3 font-mono">
+                            {commit.author} &lt;{commit.email}&gt;
+                            <span className={foreign ? 'text-warning' : 'text-muted'}> · {note}</span>
+                          </td>
+                          <td className="py-1">{commit.subject}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
             )}
           </div>
         </section>

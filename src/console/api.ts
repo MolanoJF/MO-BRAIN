@@ -39,6 +39,31 @@ export const api = {
 };
 
 /**
+ * The signed-in identity, from Better Auth's own session endpoint.
+ *
+ * D7 needs it and cannot get it anywhere else: the revert is signed with the
+ * acting admin's git identity (`actorIdentity(ctx.userId)` in
+ * `src/control/routes/runs.ts`), and for a revert THIS page just performed, that
+ * actor is by construction the session's own user — the one identity the console
+ * reads from the server rather than inventing. A signed-out visitor gets `null`,
+ * never a placeholder name.
+ */
+export type SessionUser = { email: string; name: string | null };
+
+export const sessionApi = {
+  me: async (): Promise<SessionUser | null> => {
+    // Better Auth answers `{session, user}` or `null`; anything else (a 401 from
+    // a deployment that mounts no session route) reads as "no identity known".
+    const body = await api
+      .get<{ user?: { email?: unknown; name?: unknown } } | null>('/auth/get-session')
+      .catch(() => null);
+    const user = body?.user;
+    if (typeof user?.email !== 'string' || user.email === '') return null;
+    return { email: user.email, name: typeof user.name === 'string' ? user.name : null };
+  },
+};
+
+/**
  * The schedules surface (`src/control/routes/schedules.ts`). Types mirror the
  * routes' projections: the schedule list carries its Connection denormalization
  * because `/api/connections` is admin-only, and run history carries `summary`
@@ -146,6 +171,19 @@ export type CreateScheduleBody = {
   catchupPolicy?: string;
   overlapPolicy?: string;
   reportPolicy?: string;
+  /**
+   * D3 — the agent payload, which `AGENT_CREATE_KEYS` in
+   * `src/control/routes/schedules.ts` accepts and which nothing here declared
+   * until an operator asked for it. The set is CLOSED on purpose: the route
+   * refuses an unknown key rather than ignoring it, so a field this type does
+   * not name is a field no schedule can carry (a tool allowlist, a shell
+   * option). `agentBudgetUsd` stays text, like the column, so a cap never
+   * round-trips through a float.
+   */
+  agentPrompt?: string;
+  agentModel?: string;
+  agentMaxTokens?: number;
+  agentBudgetUsd?: string;
 };
 
 /** Only the columns an operator may change: a fenced param is never sent. */

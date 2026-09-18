@@ -159,6 +159,8 @@ describe('control schema', () => {
     'upgrade_runs', 'upgrade_events', 'upgrade_checklist_items',
     // Slice 4 agent runner.
     'agent_runs', 'agent_run_events', 'agent_run_usage',
+    // Slice 4 D2: the runner's own sighting record.
+    'runner_presence',
   ])('%s exists', async (t) => {
     const [row] = await sql`select to_regclass(${'public.' + t}) as r`;
     expect(row.r).not.toBeNull();
@@ -382,5 +384,26 @@ describe('control schema', () => {
     expect(after.runs).toBe(0);
     expect(after.events).toBe(0);
     expect(after.usage).toBe(0);
+  });
+
+  // D2: the sighting record is one row per RUNNER, so the runner id is the key —
+  // that is what makes the claim route's write an upsert rather than a growing
+  // log of "a runner was here" rows (which would also be uncountable evidence in
+  // the rollback digest).
+  test.skipIf(!postgresAvailable)('runner_presence is keyed by the runner id, and a re-sighting is not a second row', async () => {
+    const runnerId = 'schema-probe-0001';
+    await sql`delete from runner_presence where runner_id = ${runnerId}`;
+    await sql`insert into runner_presence (runner_id, harness_version)
+      values (${runnerId}, '2.1.274')`;
+    await expectRefused(
+      () => sql`insert into runner_presence (runner_id, harness_version)
+        values (${runnerId}, '2.1.275')`,
+      '23505', 'runner_presence_pkey',
+    );
+    const [row] = await sql`select count(*)::int as n,
+      max(harness_version) as version from runner_presence where runner_id = ${runnerId}`;
+    expect(row.n).toBe(1);
+    expect(row.version).toBe('2.1.274');
+    await sql`delete from runner_presence where runner_id = ${runnerId}`;
   });
 });

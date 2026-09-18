@@ -22,7 +22,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { timingSafeEqual } from 'node:crypto';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
-import { runnerTokenConfigured } from '../../agent/runners.ts';
+import { recordRunnerSeen, runnerTokenConfigured } from '../../agent/runners.ts';
 import {
   RUN_CLAIM_WAIT_MS, claimAgentRun, finishAgentRun, heartbeatAgentRun, recordEvents,
 } from '../../agent/claim.ts';
@@ -128,6 +128,14 @@ function refusalStatus(error: string): 400 | 409 {
  * timeout) and answers `204 No Content` on timeout, at which point the runner
  * loops immediately.
  *
+ * D2: the request is also the SEEING. `recordRunnerSeen` runs first — before any
+ * work is claimed, before the long poll is even entered — so a runner that polls
+ * and finds nothing has still announced itself to `runner_presence`, which is what
+ * lets `/api/health` and the schedule create gate tell "no runner has ever been
+ * seen" apart from "one is knocking right now". Recording it once per REQUEST
+ * (not once per claim) is the point: the empty 204 is the common case, and it is
+ * exactly the case the old live-lease reading got wrong.
+ *
  * A refusal is returned at once rather than polled through: every refusal except
  * the two request-shape ones CONSUMED the occurrence (D11), so staying in the
  * loop would only re-refuse a run that no longer exists.
@@ -136,6 +144,7 @@ runRoutes.post('/claim', runner(async (c) => {
   const body = await jsonBody(c);
   const runnerId = typeof body.runnerId === 'string' ? body.runnerId : '';
   const harnessVersion = typeof body.harnessVersion === 'string' ? body.harnessVersion : '';
+  await recordRunnerSeen(runnerId, harnessVersion);
   const deadline = Date.now() + claimWaitMs();
 
   for (;;) {

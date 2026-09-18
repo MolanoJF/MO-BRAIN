@@ -23,7 +23,8 @@
  *      unknown field and dies here. That IS the enforcement.
  *   5. Honesty rule 8 — no consumer, no schedule. An `agent_prompt` create is
  *      refused with `409 runner_not_enabled` unless `runnerStatus()` reports a
- *      claim inside its lease.
+ *      runner that is THERE: seen on the claim route within its poll window
+ *      (D2), or holding a live lease on an agent run.
  *
  * A schedule's name becomes the `reports/<job-name>/` directory, so it is
  * validated against the slug shape and REFUSED, never sanitized.
@@ -39,7 +40,7 @@ import {
   assignSlot, isSubHourly, SUB_HOURLY_SECONDS, type CalendarFootprint,
 } from '../../scheduler/stagger.ts';
 import { isValidTimeZone } from '../../scheduler/time.ts';
-import { runnerStatus } from '../../agent/runners.ts';
+import { RUNNER_SEEN_WINDOW_MS, runnerStatus } from '../../agent/runners.ts';
 import { HARNESS_PIN } from '../../runner/pin.ts';
 import { MODEL_PRICING, rateFor } from '../../gateway/pricing.ts';
 
@@ -534,15 +535,20 @@ function validateAgentPayload(
 
 /**
  * What the 409 tells the operator to do about it. Never "the runner is enabled"
- * (honesty rule 8): each state names the fact, and the fix.
+ * (honesty rule 8): each state names the fact, and the fix — and each names the
+ * fact this gate actually TESTS. `never_claimed` is the seen-window
+ * `runnerStatus()` applies, not "nothing has claimed any agent run": a runner
+ * that is polling right now IS seen, and this refusal is not what it gets (D12).
  */
 const RUNNER_NOT_ENABLED_DETAIL: Record<string, string> = {
   disabled:
     'This deployment has no agent runner — RUNNER_TOKEN is empty, so no process exists to '
     + 'claim a run. Enable the runner profile, or drop the agent schedule.',
   never_claimed:
-    'No agent runner is connected: nothing has claimed any agent run. Start the runner '
-    + '(docker compose --profile runner up -d agent-runner) and try again.',
+    'No agent runner has been seen: no claim request has reached the control plane in the last '
+    + `${Math.round(RUNNER_SEEN_WINDOW_MS / 1000)}s (lastSeenAt is when one last did). Start the `
+    + 'runner (docker compose --profile runner up -d agent-runner) and try again — a runner that '
+    + 'is polling is accepted here.',
 };
 
 scheduleRoutes.get('/schedules', guard('viewer', async (c, { orgId }) => {
@@ -689,8 +695,8 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
 
     // Honesty rule 8 and D12: an operator cannot schedule work no consumer
     // exists to run. This 409 is the same shape as `slot_taken` — the refusal
-    // carries the context the console needs, here the state and the last claim
-    // rather than a next free slot.
+    // carries the context the console needs, here the state and the last
+    // SIGHTING rather than a next free slot.
     const status = await runnerStatus();
     if (status.state !== 'connected') {
       return c.json({

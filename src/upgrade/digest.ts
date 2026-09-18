@@ -57,12 +57,19 @@ export type StateDigest = {
  * history, not content, and the snapshot restores all three the same way. A
  * digest that counted them would compare two observations of a moving ledger
  * and break the parity gate exactly as F3's row growth did.
+ *
+ * `runner_presence` (Slice 4 D2): the runner rewrites its own sighting row on
+ * every claim request — once per 25s long poll — so it moves while the brain
+ * does not. Nothing is lost by not counting it: it holds no work, and a
+ * rollback that restored an older sighting would be corrected by the very next
+ * poll.
  */
 export const UNCOUNTED_TABLES = [
   'audit_log', 'capability_snapshots', 'playbook_ledger',
   'upgrade_checklist_items', 'upgrade_events', 'upgrade_runs',
   'schedule_runs', 'schedule_alerts',
   'agent_runs', 'agent_run_events', 'agent_run_usage',
+  'runner_presence',
 ] as const;
 
 /** Exact counts per public table. n_live_tup is an estimate and will not do. */

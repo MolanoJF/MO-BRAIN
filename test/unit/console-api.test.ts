@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from 'bun:test';
-import { api, ApiError, runApi, toDiffSummary, toRunnerStatus, toSpaceHeads } from '../../src/console/api.ts';
+import { api, ApiError, runApi, scheduleApi, sessionApi, toDiffSummary, toRunnerStatus, toSpaceHeads } from '../../src/console/api.ts';
 
 const orig = globalThis.fetch;
 afterEach(() => { globalThis.fetch = orig; });
@@ -182,5 +182,54 @@ describe('the runs api client', () => {
     expect((await runApi.runner()).state).toBe('unreported');
     // A version is never invented: the ledger does not record one.
     expect(toRunnerStatus({ state: 'connected' }).version).toBeNull();
+  });
+});
+
+/**
+ * D3's wire half and D7's identity read. Both are about what actually leaves the
+ * browser: the four `agent*` keys must survive to the route (a body the server
+ * would refuse as "unknown field" if the names drifted), and the acting admin's
+ * identity must be readable from the session rather than guessed.
+ */
+describe('the agent payload and the signed-in identity', () => {
+  test('an agent create sends the four payload keys to /api/schedules', async () => {
+    let sent: unknown;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    await scheduleApi.create({
+      name: 'briefing', connectionId: 'c1', preset: 'nightly-agent-briefing',
+      agentPrompt: 'Read the pages that changed today.',
+      agentModel: 'claude-haiku-4-5',
+      agentMaxTokens: 16384,
+      agentBudgetUsd: '2',
+    });
+    expect(sent).toEqual({
+      name: 'briefing', connectionId: 'c1', preset: 'nightly-agent-briefing',
+      agentPrompt: 'Read the pages that changed today.',
+      agentModel: 'claude-haiku-4-5',
+      agentMaxTokens: 16384,
+      agentBudgetUsd: '2',
+    });
+  });
+
+  test('the session identity is read from Better Auth, and read as null when there is none', async () => {
+    const seen = capture(200, { session: { id: 's' }, user: { email: 'admin@example.test', name: 'Ada' } });
+    expect(await sessionApi.me()).toEqual({ email: 'admin@example.test', name: 'Ada' });
+    expect(seen.url).toBe('/api/auth/get-session');
+    expect(seen.method).toBe('GET');
+
+    // Signed out: Better Auth answers `null`, and no placeholder name is invented.
+    capture(200, null);
+    expect(await sessionApi.me()).toBeNull();
+
+    // A deployment that refuses the route (or a body with no user) is the same
+    // answer as signed out — an identity the page cannot read is not an identity.
+    stub(401, { error: 'unauthorized' });
+    expect(await sessionApi.me()).toBeNull();
+    capture(200, { user: {} });
+    expect(await sessionApi.me()).toBeNull();
   });
 });

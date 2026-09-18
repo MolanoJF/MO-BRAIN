@@ -707,12 +707,16 @@ describe('Slice 4 agent runner gate B', () => {
     expect((await compose('up', '-d', '--no-deps', 'agent-runner')).exitCode).toBe(0);
 
     obs.healthRestored = await waitForHealth(
-      (h) => h.runner.state !== 'disabled', 180_000, 'the lane to come back',
+      (h) => h.runner.state === 'connected', 180_000,
+      'the restored runner to be seen on the claim route',
     );
-    // No agent run has been claimed in this gate's own run yet, and the previous
-    // run deleted its fixtures, so the honest reading is `never_claimed`.
-    expect(obs.healthRestored.runner.state).toBe('never_claimed');
-    expect(obs.healthRestored.runner.version).toBeNull();
+    // D2/D12: the restored container long-polls `/api/runs/claim` and finds
+    // nothing to claim — no agent run is in flight in this window — and that is
+    // now a SIGHTING, not an absence. `never_claimed` here (the old reading) was
+    // a false refusal about a runner that is knocking right now, and `version`
+    // is no longer `null` about a build the runner announces on every poll.
+    expect(obs.healthRestored.runner.lastSeenAt).not.toBeNull();
+    expect(obs.healthRestored.runner.version).toBe(HARNESS_PIN);
 
     // "The lane answers" without spending a 25s poll: a claim with no runner id
     // is refused by the request-shape gate (`runner_never_seen`, 400), which is
@@ -737,11 +741,12 @@ describe('Slice 4 agent runner gate B', () => {
    * B11 — an unpriced model is refused at schedule creation, and the refusal
    * comes BEFORE the runner check.
    *
-   * The control pair is the leg: the same body with a priced model reaches the
-   * runner gate (409 `runner_not_enabled` — no claim is live in this window),
-   * and with an unpriced one it stops at the price table (400 `unpriced_model`).
-   * That is what makes the precedence an observation instead of a reading of the
-   * source.
+   * The control pair is the leg: the same body with a priced model gets THROUGH
+   * the runner gate (201 — the runner is up and polling, which D2 counts as
+   * seen), and with an unpriced one it stops at the price table (400
+   * `unpriced_model`). That is what makes the precedence an observation instead
+   * of a reading of the source: the priced body could not have been created
+   * unless the price check had already passed it.
    */
   test('B11 an unpriced model is refused at creation, before the runner gate', async () => {
     const unpriced = 'claude-nonesuch-9';
@@ -762,15 +767,19 @@ describe('Slice 4 agent runner gate B', () => {
     const control = await scheduledPost('/api/schedules', {
       ...AGENT_PAYLOAD, connectionId: fixtureConnectionId, name: controlName,
     });
-    expect(control.status).toBe(409);
-    expect((await readJson<{ error: string }>(control, 'priced control')).error).toBe('runner_not_enabled');
+    expect(control.status).toBe(201);
+    const created = await readJson<{ id: string; jobType: string }>(control, 'priced control');
+    expect(created.jobType).toBe('agent_prompt');
+    // The row it wrote is a fixture like every other: it is cleaned up by the
+    // gate's own teardown below.
+    FIXTURE_SCHEDULES.push(created.id);
 
     expect(one(await psql(
-      `select count(*) from schedules where name in ('${name}', '${controlName}')`,
+      `select count(*) from schedules where name = '${name}'`,
     ))).toBe('0');
     console.log(
       `[gate-b] B11 unpriced model -> ${res.status} ${body.error} (pricedAt ${body.pricedAt}); `
-      + `priced model -> ${control.status} runner_not_enabled`,
+      + `priced model -> ${control.status} (id ${created.id.slice(0, 8)})`,
     );
   }, 120_000);
 
@@ -1350,22 +1359,24 @@ describe('Slice 4 agent runner gate B', () => {
   }, 180_000);
 
   /**
-   * B12 — `/api/health` reports all three runner states correctly, and only one
-   * of them is green.
+   * B12 — `/api/health` reports the runner states honestly, and only one of them
+   * is green.
    *
-   * `disabled` was produced for real in B10 (the lane's own environment), the
-   * `connected` reading was taken while this gate's claim held a live lease, and
-   * `never_claimed` is read here, live, after the finish released it. "Green" is
-   * the SHIPPED mapping the console renders with (`runnerStateTone`), not a
-   * second opinion invented by this gate.
+   * `disabled` was produced for real in B10 (the lane's own environment), and the
+   * `connected` reading was taken while this gate's claim held a live lease. The
+   * IDLE reading is the one D2 moved: a runner that is merely long-polling the
+   * claim route has been seen, so a stack with nothing in flight is `connected` —
+   * the old `never_claimed` there was a false refusal about a runner that is
+   * knocking right now. "Green" is the SHIPPED mapping the console renders with
+   * (`runnerStateTone`), not a second opinion invented by this gate.
    */
-  test('B12 health reports disabled, never_claimed and connected, and only connected is green', async () => {
+  test('B12 health reports the runner states, and only `connected` is green', async () => {
     const disabled = obs.healthDisabled;
     const connected = obs.healthConnected;
     expect(disabled).not.toBeNull();
     expect(connected).not.toBeNull();
 
-    // The vocabulary, from the console's own pure functions.
+    // The three-word vocabulary, from the console's own pure functions.
     expect(runnerStateTone('connected')).toBe('ok');
     expect(runnerStateTone('disabled')).not.toBe('ok');
     expect(runnerStateTone('never_claimed')).not.toBe('ok');
@@ -1377,22 +1388,49 @@ describe('Slice 4 agent runner gate B', () => {
     expect(connected!.runner.state).toBe('connected');
     expect(connected!.runner.lastSeenAt).not.toBeNull();
 
-    // The third state, live: this gate's run is finished, its lease released,
-    // and `lastSeenAt` is now the honest discriminator — a runner WAS here.
-    const never = await healthNow();
-    expect(never.runner.state).toBe('never_claimed');
-    expect(runnerStateTone(never.runner.state)).not.toBe('ok');
-    expect(never.runner.lastSeenAt).not.toBeNull();
+    // D2/D12, live and idle: nothing is in flight (this gate's run finished and
+    // its lease was released) and the runner container is down (B9 paused it) —
+    // so the lane's colour is decided by the ONE thing left, a claim request:
+    //
+    //   * a request that finds no work is still a sighting (D2), and it is the
+    //     request — not a claimed run — that turns the lane green. Under the old
+    //     live-lease reading this exact sequence left the lane `never_claimed`.
+    //
+    // The queue is asserted empty first, so the 204 below cannot be a consumed
+    // run dressed up as an empty poll (B2's own precondition, same SQL).
+    expect(one(await psql(
+      "select count(*) from schedule_runs r join schedules s on s.id = r.schedule_id "
+      + "where s.job_type = 'agent_prompt' and r.state = 'pending'",
+    ))).toBe('0');
+    const sightedAt = Date.now();
+    const empty = await claimAsRunner(MY_RUNNER_ID);
+    expect(empty.status).toBe(204);
 
-    // Three keys, no token, no client id — /api/health is served without a
-    // session, so its runner vocabulary is closed by construction.
-    for (const h of [disabled!, connected!, never]) {
+    const idle = await healthNow();
+    expect(idle.runner.state).toBe('connected');
+    expect(runnerStateTone(idle.runner.state)).toBe('ok');
+    expect(idle.runner.lastSeenAt).not.toBeNull();
+    expect(idle.runner.version).toBe(HARNESS_PIN);
+    // The sighting is THAT request: no run was claimed, and `lastSeenAt` still
+    // moved — the row's own moment, read back through the health surface.
+    expect(Date.parse(idle.runner.lastSeenAt!)).toBeGreaterThanOrEqual(sightedAt - 1_000);
+
+    // Three keys, no token, no client id, and no runner id — /api/health is
+    // served without a session, so its runner vocabulary is closed by
+    // construction, even though the row behind it is keyed by a runner.
+    const idleRunner = JSON.stringify(idle.runner);
+    expect(idleRunner).not.toContain(MY_RUNNER_ID);
+    expect(idleRunner).not.toContain(runnerToken());
+    for (const h of [disabled!, connected!, idle]) {
       expect(Object.keys(h.runner).sort()).toEqual(['lastSeenAt', 'state', 'version']);
-      expect(h.runner.version).toBeNull();
     }
+    // `disabled` is the env-only reading: it has no sighting to report, so it
+    // still answers `null` for both fields rather than borrowing one.
+    expect(disabled!.runner.version).toBeNull();
+    expect(disabled!.runner.lastSeenAt).toBeNull();
     console.log(
       `[gate-b] B12 states: disabled=${JSON.stringify(disabled!.runner)} `
-      + `connected=${JSON.stringify(connected!.runner)} never_claimed=${JSON.stringify(never.runner)}`,
+      + `connected=${JSON.stringify(connected!.runner)} idle=${JSON.stringify(idle.runner)}`,
     );
   }, 120_000);
 
