@@ -851,16 +851,107 @@ async function emitOperations(version: string): Promise<void> {
   if (code !== 0) throw new Error(`operations:emit exited ${code}`);
 }
 
+/** The build overlay (D2). The production file has no `build:` stanzas. */
+const BUILD_OVERLAY = 'compose/docker-compose.build.yml';
+
+/** Production compose's image reference, resolved the way compose resolves it. */
+function registryRef(name: string, tag: string): string {
+  const registry = process.env.IMAGE_REGISTRY ?? 'ghcr.io';
+  const namespace = process.env.IMAGE_NAMESPACE ?? 'mobrain';
+  return `${registry}/${namespace}/${name}:${tag}`;
+}
+
+/** `compose/docker-compose.yml:108`'s APP_VERSION fallback chain, verbatim. */
+function controlPlaneTag(): string {
+  return process.env.APP_VERSION
+    ?? process.env.MOBRAIN_VERSION
+    ?? process.env.BRAINSTAND_VERSION
+    ?? 'dev';
+}
+
+async function imagePresent(ref: string): Promise<boolean> {
+  return (await shCapture(['docker', 'image', 'inspect', ref], 60_000)).exitCode === 0;
+}
+
+/**
+ * F25: `buildImages` used to run `docker compose -f compose/docker-compose.yml
+ * build …` against a file Task 5 stripped of every `build:` stanza, so it
+ * printed "No services to build" and exited 0. A pin move then could not
+ * produce the target `gbrain-base`, and a rollback landed on an image that did
+ * not exist. This restores the ability to build, honestly:
+ *
+ *   1. The published image is the production path: pull the target pin.
+ *   2. A pin the registry does not carry (every rollback, and any pin a
+ *      deployment publishes without) is built with the SAME recipe
+ *      `scripts/publish-images.sh:25` uses, tagged at the exact reference
+ *      production compose will run.
+ *   3. The un-pin-versioned `control-plane` image is rebuilt at `version`
+ *      through the build overlay (`docker/control-plane.Dockerfile:7` resolves
+ *      its base from the local daemon under the bare `mobrain/gbrain-base`
+ *      name, so that mirror is created first).
+ *   4. It VERIFIES the target images exist and throws otherwise — a silent
+ *      no-op is the bug, not a pass.
+ */
 async function buildImages(ctx: UpgradeContext, version: string): Promise<void> {
   // The version is passed EXPLICITLY as a build arg. Relying on the ambient
   // GBRAIN_VERSION (process env vs .env precedence) is how a rollback rebuilt
   // the image at the pin the swap had just left behind, leaving the running
   // binary at the new version while `.env` claimed the old one.
+  const baseRef = registryRef('gbrain-base', version);
+  const controlPlaneRef = registryRef('control-plane', controlPlaneTag());
+
+  if (!(await imagePresent(baseRef))) {
+    // Production path first. The Task 5 publish ships only the current pin, so
+    // a rollback's pin is normally a registry 404 by design — the build below
+    // is the product's registry-less fallback (D2), not an error path.
+    const pulled = await sh(['docker', 'pull', baseRef], 1_800_000);
+    if (pulled.exitCode !== 0) {
+      const built = await sh([
+        'docker', 'build', '-f', 'docker/gbrain-base.Dockerfile',
+        '--build-arg', `GBRAIN_VERSION=${version}`, '-t', baseRef, '.',
+      ], 3_600_000);
+      if (built.exitCode !== 0) {
+        throw new Error(`gbrain-base build at ${version} failed (${built.exitCode}): ${built.stderr}`);
+      }
+    }
+  }
+
+  if (!(await imagePresent(baseRef))) {
+    throw new Error(
+      `buildImages produced no ${baseRef}: refusing to report a silent no-op success (F25)`,
+    );
+  }
+
+  // `docker/control-plane.Dockerfile:7` is `FROM mobrain/gbrain-base:<pin>` —
+  // the bare name, not the registry-qualified production reference — so the
+  // overlay build resolves it from the local daemon. Mirror the freshly ensured
+  // base under exactly that name; it is the same layer set, not a second image.
+  const bareBase = `mobrain/gbrain-base:${version}`;
+  if (!(await imagePresent(bareBase))) {
+    const tag = await sh(['docker', 'tag', baseRef, bareBase], 120_000);
+    if (tag.exitCode !== 0) {
+      throw new Error(`could not mirror ${baseRef} as ${bareBase}: ${tag.stderr}`);
+    }
+  }
+
   const r = await sh(
-    [...ctx.compose, 'build', '--build-arg', `GBRAIN_VERSION=${version}`, ...SWAP_SERVICES],
+    [
+      ...ctx.compose, '-f', BUILD_OVERLAY, 'build',
+      '--build-arg', `GBRAIN_VERSION=${version}`, 'control-plane', 'scheduler',
+    ],
     3_600_000,
   );
   if (r.exitCode !== 0) throw new Error(`image build failed (${r.exitCode}): ${r.stderr}`);
+
+  // Verifying the references production compose will actually run is the whole
+  // point (F25): a command that exits 0 without those images is the defect.
+  const missing: string[] = [];
+  for (const ref of [baseRef, controlPlaneRef]) {
+    if (!(await imagePresent(ref))) missing.push(ref);
+  }
+  if (missing.length > 0) {
+    throw new Error(`buildImages produced no image for: ${missing.join(', ')} (F25)`);
+  }
 }
 
 async function defaultRecreate(ctx: UpgradeContext, services: readonly string[]): Promise<void> {

@@ -1050,8 +1050,7 @@ MEASURED C2 wizard lifecycle=ready searchMode=conservative modes=conservative,ba
 
 **Found by Task 17's C9 leg, which the plan wrote to re-prove Slice 3.5's exit gate "on the renamed,
 re-published stack — the rename touched volume names and image references, which is precisely what a
-rollback depends on." DEFERRED (release/hardening), and C9 was made to pass only after the missing
-image was tagged locally.**
+rollback depends on." FIXED HERE.**
 
 The first C9 run normalized to `0.50.0.0` by rolling back a completed Slice 3.5 run
 (`run-022b8cfe-…`, from the pre-rename era). The rollback moved `.env` back to `0.50.0.0`, and the
@@ -1069,57 +1068,101 @@ the current pin. Only the pre-rename `brainstand/gbrain-base:0.50.0.0` was on th
 `docker compose up` tried to pull `ghcr.io/mobrain/gbrain-base:0.50.0.0` and 404'd, leaving every
 service stopped.
 
-Underneath that is a second, independent gap: `scripts/upgrade.ts`'s `buildImages` runs
+Underneath that is a second, independent gap: `scripts/upgrade.ts`'s `buildImages` ran
 
 ```text
 docker compose <ctx.compose> build --build-arg GBRAIN_VERSION=<version> gbrain-ops gbrain-serve gbrain-worker control-plane
 ```
 
 against `ctx.compose = ['docker','compose','-f','compose/docker-compose.yml']`. Since Task 5 moved
-every `build:` stanza into `compose/docker-compose.build.yml`, that command prints **"No services to
-build"** and does nothing. `gbrain-serve`/`gbrain-worker` follow the pin by pulling
+every `build:` stanza into `compose/docker-compose.build.yml`, that command printed **"No services to
+build"** and did nothing. `gbrain-serve`/`gbrain-worker` follow the pin by pulling
 `gbrain-base:<pin>`, but `gbrain-ops` runs the `control-plane:<APP_VERSION>` image, which bundles
-gbrain at **build** time and is not versioned by the gbrain pin — so a pin move leaves the ops
+gbrain at **build** time and is not versioned by the gbrain pin — so a pin move left the ops
 RPC's `check-update` reporting the old binary. Measured after the local normalization:
 `"pin":{"declared":"0.50.0.0","observed":"0.50.5.0","matches":false}` against a running
 `gbrain 0.50.0.0` `gbrain-serve`.
 
-### What was needed to make C9 pass (the workaround this finding records)
+### The F25 workaround, for the record
 
 - Tag the pre-rename image into the new namespace, host-side:
   `docker tag brainstand/gbrain-base:0.50.0.0 ghcr.io/mobrain/gbrain-base:0.50.0.0`.
 - Re-provision the OAuth credential (F24's environmental event) because the precondition rollback
   restores a `secrets` generation that predates the last rotation.
 
-With those two host-side acts, C9 ran and measured clean (see below). **Neither is a product fix.**
+With those two host-side acts, C9 passed. Neither was a product fix, so C9 proved only that the
+environment had been patched by hand.
 
-### Fix (deferred; named owner: the release/hardening work in Task 18 and after)
+### Fix (FIXED HERE)
 
-1. `scripts/upgrade.ts` must include `-f compose/docker-compose.build.yml` in the compose it builds
-   with, so `buildImages` actually rebuilds `control-plane` at the target pin (the shape Slice 3.5
-   relied on before Task 5 moved the stanzas) — or the control-plane image must otherwise be made
-   pin-addressable.
-2. The registry must carry the images a rollback can land on. Publishing only the current pin makes
-   "roll back one version" a pull-404 on any host that did not build the old tag locally. The
-   release step must publish (or the rollback must build) the target pin's `gbrain-base` under the
-   current namespace.
-3. A pin move must keep `pin.observed` honest: either the ops RPC reads a pin-versioned gbrain, or
-   `verifyRuntimePin` reads the running `gbrain-serve` binary rather than the ops container's bundle.
+`scripts/upgrade.ts`'s `buildImages` (`scripts/upgrade.ts:895`; helpers `BUILD_OVERLAY` /
+`registryRef` / `controlPlaneTag` / `imagePresent` at `scripts/upgrade.ts:854-874`) no longer runs
+the silent no-op. It:
 
-C9's assertions were **not** weakened; the two host-side acts above are the environment catching up
-to the release step the plan defers to Task 18.
+1. Resolves the exact production reference
+   `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/gbrain-base:<pin>` — the same reference
+   `compose/docker-compose.yml:57,75` runs.
+2. Tries the production path first: `docker pull` the target pin.
+3. If the registry does not carry it (every rollback pin, and this deployment, since the Task 5
+   publish is blocked at the push by P4), builds it with the same recipe
+   `scripts/publish-images.sh:25` uses:
+   `docker build -f docker/gbrain-base.Dockerfile --build-arg GBRAIN_VERSION=<pin> -t <ref> .`
+4. Mirrors that image under `mobrain/gbrain-base:<pin>` — the bare name
+   `docker/control-plane.Dockerfile:7` resolves its `FROM` from (the registry-qualified production
+   reference is not visible to that `FROM`).
+5. Rebuilds `control-plane` and `scheduler` at the pin through the build overlay:
+   `docker compose … -f compose/docker-compose.yml -f compose/docker-compose.build.yml build --build-arg GBRAIN_VERSION=<pin> control-plane scheduler`.
+6. Verifies with `docker image inspect` that BOTH the target `gbrain-base:<pin>` and the production
+   `control-plane:<APP_VERSION>` exist, and throws naming the missing reference otherwise. An exit 0
+   without those images is the defect; it can no longer pass as one.
 
-### Measured (the accepted run)
+The upgrade lane's semantics are unchanged (D13): the same call sites, the same swap/rollback
+ordering, and the same explicit `GBRAIN_VERSION` build arg. Only the command that used to print
+"No services to build" now does the work.
+
+### Proof the manual tag was removed
+
+The manual `ghcr.io/mobrain/gbrain-base:0.50.0.0` tag and the bare `mobrain/gbrain-base:0.50.0.0`
+mirror were removed before re-running, leaving only the pre-rename `brainstand/gbrain-base:0.50.0.0`
+(`9410d75c4b55`):
 
 ```text
-MEASURED C9 precondition: rolled back completed run run-ae7fa87b-… to 0.50.0.0 (exit 4)
+Untagged: ghcr.io/mobrain/gbrain-base:0.50.0.0
+Untagged: mobrain/gbrain-base:0.50.0.0
+brainstand/gbrain-base:0.50.0.0 9410d75c4b55
+```
+
+C9's precondition rollback then rebuilt the pin through the product. After the run,
+`ghcr.io/mobrain/gbrain-base:0.50.0.0` and `mobrain/gbrain-base:0.50.0.0` both point at
+`a059d716bdd2` — a different image than the removed manual tag, produced by the build in step 3,
+not by `docker tag` of the pre-rename image.
+
+### Measured (clean state, no manual tag, the whole file green)
+
+Before the fix, the failed migration left the run in `rollback_failed` (the auto-rollback could not
+obtain `gbrain-base:0.50.0.0`). After the fix, the auto-rollback completes at the pin it targets:
+
+```text
+MEASURED C9 precondition: rolled back completed run run-9a7b34b8-… to 0.50.0.0 (exit 4)
 MEASURED C9 pending cleared(before fixture): 8
 MEASURED C9 repo drift cleared: ["internal"]
 MEASURED C9 fixture: FIXTURE: config.version 149 -> 143; open_loops replaced (id TEXT PRIMARY KEY); pre-digest taken
-MEASURED C9 failed run run-1bf3aa84-… exit=4 states=[planned,capability,preflight_ok,quiesced,snapshot_taken,snapshot,swapped,schema,rolling_back,rollback_failed]
-MEASURED C9 rollback of run-1bf3aa84-… restored the pre-upgrade state exactly
+MEASURED C9 failed run run-39af4ea4-… exit=1 states=[planned,capability,preflight_ok,quiesced,snapshot_taken,snapshot,swapped,schema,rolling_back,rolled_back]
+MEASURED C9 rollback of run-39af4ea4-… restored the pre-upgrade state exactly
 MEASURED C9 un-fixture: UN-FIXTURE: open_loops restored to the real schema; config.version -> 149
-MEASURED C9 real run run-9a7b34b8-… ledger[0.50.5.0]=applied parity.regressed=[] schemaVersionOk=true observed=0.50.5.0
+MEASURED C9 pending cleared(before real run): 0
+MEASURED C9 repo drift cleared(before real run): []
+MEASURED C9 real run run-5219d9eb-… ledger[0.50.5.0]=applied parity.regressed=[] schemaVersionOk=true observed=0.50.5.0
+MEASURED teardown: runner={"state":"connected",…} pin={"declared":"0.50.5.0","observed":"0.50.5.0","matches":true}
+```
+
+Full file, `bun test --parallel=1 test/e2e/slice5.e2e.test.ts`, one continuous walk:
+
+```text
+ 10 pass
+ 0 fail
+ 100 expect() calls
+Ran 10 tests across 1 file. [706.18s]
 ```
 
 ---
