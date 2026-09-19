@@ -204,6 +204,13 @@ jobs:
       # from the runner env without putting it on the command line.
       - name: Initialize the main stack's brain (the seam legs assume a dev brain)
         run: |
+          # gbrain-serve/worker cold-start the schema with a default embedding
+          # model; the wizard resets it through this same ops route before init
+          # so init can choose the OpenAI dims. Then init and store the key in
+          # the file plane — the wizard's provider -> finish order.
+          curl -fsS -X POST http://127.0.0.1:3140/fileplane/reset-brain-schema \
+            -H "authorization: Bearer ${OPS_RPC_TOKEN}" \
+            -H 'content-type: application/json' -d '{}'
           C="docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml"
           $C exec -T -e OPENAI_API_KEY gbrain-ops \
             gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small
