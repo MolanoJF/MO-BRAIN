@@ -197,25 +197,6 @@ jobs:
       # covers only the pinned binary), so the stack must be up first.
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
-      # The slice3/slice3.5 seam legs run against the MAIN stack and assume an
-      # initialized brain with a provider key (the dev box's wizard did that).
-      # A fresh compose stack has neither. Do it through gbrain's own CLI, never
-      # by writing tables. `-e OPENAI_API_KEY` (no value) forwards the secret
-      # from the runner env without putting it on the command line.
-      - name: Initialize the main stack's brain (the seam legs assume a dev brain)
-        run: |
-          # gbrain-serve/worker cold-start the schema with a default embedding
-          # model; the wizard resets it through this same ops route before init
-          # so init can choose the OpenAI dims. Then init and store the key in
-          # the file plane — the wizard's provider -> finish order.
-          curl -fsS -X POST http://127.0.0.1:3140/fileplane/reset-brain-schema \
-            -H "authorization: Bearer ${OPS_RPC_TOKEN}" \
-            -H 'content-type: application/json' -d '{}'
-          C="docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml"
-          $C exec -T -e OPENAI_API_KEY gbrain-ops \
-            gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small \
-            --embedding-dimensions 1536
-          $C exec -T -e OPENAI_API_KEY gbrain-ops sh -c 'gbrain config set openai_api_key "$OPENAI_API_KEY"'
       # One process per file: see test:integration:isolated above.
       - run: bun run test:contract:isolated
       - name: Capture the capability snapshot and report drift
