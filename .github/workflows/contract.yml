@@ -213,7 +213,8 @@ jobs:
             -H 'content-type: application/json' -d '{}'
           C="docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml"
           $C exec -T -e OPENAI_API_KEY gbrain-ops \
-            gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small
+            gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small \
+            --embedding-dimensions 1536
           $C exec -T -e OPENAI_API_KEY gbrain-ops sh -c 'gbrain config set openai_api_key "$OPENAI_API_KEY"'
       # One process per file: see test:integration:isolated above.
       - run: bun run test:contract:isolated
