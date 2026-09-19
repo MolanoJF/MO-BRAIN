@@ -969,34 +969,47 @@ Recorded 2026-09-19 by the agent executing Task 18 Step 1.
 
 ### Task 18 Step 4 — the release pulled by digest from a machine that did not build it
 
-The `publish` job of the `contract` workflow produced the three `RepoDigest`s below (run
-[35443874477](https://github.com/MolanoJF/mobrain/actions/runs/35443874477) at `a74e324`); they are the
-entries in `CHANGELOG.md`. `release-verify.yml` was then dispatched on a **fresh GitHub runner** — one that
-has never held this repository's images — and pulled each artifact **by digest** and started it. Run
-[35445223097](https://github.com/MolanoJF/mobrain/actions/runs/35445223097): **`verify` success in 44s**,
+**Why the digests below are not the first publish's digests, stated plainly.** The `publish` job runs on
+every push to `main`, and `docker build` is **not** bit-reproducible (`RUN apt-get update` / `bun install`
+fetch live artifacts), so a later publish moves each tag to a new digest. The first publish (run
+[35443874477](https://github.com/MolanoJF/mobrain/actions/runs/35443874477) at `a74e324`) printed
+`9cd9ba37…` / `67dbd8f4…` / `d02d1e84…`, and those were verified from outside (run
+[35445223097](https://github.com/MolanoJF/mobrain/actions/runs/35445223097)). Committing the release
+(`05ea083`) then triggered a fresh publish whose job finished last (13:20:41Z), so **those** are the digests
+the `v1.0.0` tags resolve to; the first set is kept here only as superseded history. This is exactly the
+"a tag is a label someone can move" hazard, measured rather than assumed.
+
+`release-verify.yml` was dispatched on a **fresh GitHub runner** — one that has never held this repository's
+images — and pulled each artifact **by digest** and started it. Run
+[35446122215](https://github.com/MolanoJF/mobrain/actions/runs/35446122215): **`verify` success in 56s**,
 every step green. Verbatim output:
 
 ```
 verify  Pull and start gbrain-base by digest
-  Digest: sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
-  Status: Downloaded newer image for ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
-  pulled ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
+  Digest: sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e
+  Status: Downloaded newer image for ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e
+  pulled ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e
   gbrain 0.50.5.0
 verify  Pull and start control-plane by digest
-  Digest: sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
-  Status: Downloaded newer image for ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
-  pulled ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
+  Digest: sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba
+  Status: Downloaded newer image for ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba
+  pulled ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba
   1.3.13
 verify  Pull and start agent-runner by digest
-  Digest: sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
-  Status: Downloaded newer image for ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
-  pulled ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
+  Digest: sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950
+  Status: Downloaded newer image for ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950
+  pulled ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950
   2.1.274 (Claude Code)
 ```
 
 All three pulled by digest and started: `gbrain 0.50.5.0` (the pinned base), the control-plane image's
 `bun 1.3.13`, and the agent-runner harness `2.1.274 (Claude Code)`. Gate A's assertion — *a host that did not
 build it can run it* — holds against the actual release, not the CI build of it.
+
+**Caveat a future reader must carry:** any later push to `main` re-runs `publish` and **moves these tags to
+new digests**. The record above is correct as of the `v1.0.0` push; after a new push, read the fresh digests
+from that run's `Print the published RepoDigests` step and update `CHANGELOG.md`. The digests in
+`CHANGELOG.md`, `HANDOFF.md` and `release-verify.yml`'s defaults are the `v1.0.0` set.
 
 ---
 

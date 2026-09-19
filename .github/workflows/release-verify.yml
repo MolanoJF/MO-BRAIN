@@ -10,15 +10,15 @@ on:
       gbrain_base:
         description: 'gbrain-base image reference (by digest)'
         required: true
-        default: 'ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4'
+        default: 'ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e'
       control_plane:
         description: 'control-plane image reference (by digest)'
         required: true
-        default: 'ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c'
+        default: 'ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba'
       agent_runner:
         description: 'agent-runner image reference (by digest)'
         required: true
-        default: 'ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f'
+        default: 'ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950'
 
 permissions:
   contents: read

@@ -27,9 +27,9 @@ recorded, and managed-cloud pricing (Open Question 2) remains open.
 
 | Image | Tag | RepoDigest |
 |---|---|---|
-| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4` |
-| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c` |
-| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f` |
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e` |
+| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950` |
 
 Licence: MIT (this repository and its images; gbrain is MIT, © 2026 Garry Tan, and the gbrain base image
 ships his `LICENSE` at `/opt/gbrain-LICENSE`). See [`LICENSE`](LICENSE) and
