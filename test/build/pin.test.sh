@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 PIN="${GBRAIN_VERSION:-0.50.0.0}"
-IMAGE="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/gbrain-base"
+IMAGE="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base"
 fail=0
 
 echo "--- expecting SUCCESS at pin ${PIN}"

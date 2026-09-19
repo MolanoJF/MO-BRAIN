@@ -26,12 +26,12 @@ The installer, in order:
 3. reads `DOMAIN` from the environment, or prompts for it if unset;
 4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — and treats anything but an explicit yes (including EOF on a non-interactive install) as **off**;
 5. generates four independent secrets and writes `.env` at mode `600`;
-6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}` and runs `docker compose up -d --wait`.
+6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}` and runs `docker compose up -d --wait`.
 
-To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `mobrain`:
+To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release):
 
 ```bash
-DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=mobrain bash scripts/install.sh
+DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash scripts/install.sh
 ```
 
 Every variable in the generated file is documented in [`.env.example`](../../.env.example).
@@ -80,7 +80,7 @@ Point the domain's DNS at this host first; Caddy needs it for the ACME challenge
 
 **Exit 16 — the pinned images cannot be pulled.**
 ```text
-PREFLIGHT: the pinned Mobrain images cannot be pulled; check ghcr.io/mobrain credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
+PREFLIGHT: the pinned Mobrain images cannot be pulled; check ghcr.io/molanojf credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
 ```
 The installer reports the same failure after its own pull attempt (`Could not pull the pinned Mobrain images.`). The registry is unreachable, or your credentials lack access. See the next section.
 
@@ -88,7 +88,7 @@ The installer reports the same failure after its own pull attempt (`Could not pu
 
 ## Air-gapped or registry-less hosts
 
-The production Compose file pulls published images and has no `build:` stanza. If you cannot pull from `ghcr.io/mobrain`, build the same three images locally from the source checkout with the build overlay, then bring the stack up:
+The production Compose file pulls published images and has no `build:` stanza. If you cannot pull from `ghcr.io/molanojf`, build the same three images locally from the source checkout with the build overlay, then bring the stack up:
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.build.yml build

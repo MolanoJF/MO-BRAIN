@@ -857,7 +857,7 @@ const BUILD_OVERLAY = 'compose/docker-compose.build.yml';
 /** Production compose's image reference, resolved the way compose resolves it. */
 function registryRef(name: string, tag: string): string {
   const registry = process.env.IMAGE_REGISTRY ?? 'ghcr.io';
-  const namespace = process.env.IMAGE_NAMESPACE ?? 'mobrain';
+  const namespace = process.env.IMAGE_NAMESPACE ?? 'molanojf';
   return `${registry}/${namespace}/${name}:${tag}`;
 }
 

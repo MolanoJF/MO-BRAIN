@@ -190,7 +190,7 @@ journal-first path as the ledger. The console's drift panel reads
 
 The `control-plane` service in `compose/docker-compose.yml` has **no `build:` section** — only an
 `image:`. `gbrain-ops` and `control-plane` share one image
-(`mobrain/control-plane:${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}`), and `gbrain-ops` is the service that carries
+(`molanojf/control-plane:${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}`), and `gbrain-ops` is the service that carries
 the build context. So:
 
 ```bash

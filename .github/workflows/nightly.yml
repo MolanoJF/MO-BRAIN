@@ -1,0 +1,71 @@
+name: nightly
+
+# Task 13 — the drift tripwire with teeth (D10). The pinned-current arm stays
+# blocking; the pinned-next arm is a tripwire: on failure it opens (or updates,
+# never duplicates) one GitHub issue naming the failing tests and the run URL.
+on:
+  schedule:
+    # Nightly drift detection against pinned-current AND pinned-next (G1/G4).
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # pinned-current is the supported version; pinned-next is the tripwire.
+        gbrain: ['0.50.5.0', '0.51.0.0']
+    continue-on-error: ${{ matrix.gbrain != '0.50.5.0' }}
+    env:
+      PINNED_CURRENT: '0.50.5.0'
+      GBRAIN_VERSION: ${{ matrix.gbrain }}
+      POSTGRES_PASSWORD: ci-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.3.14 }
+      - run: bun install --frozen-lockfile
+      - name: Build the pinned base image
+        run: |
+          docker build -f docker/gbrain-base.Dockerfile \
+            --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
+            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+      # tee so the failing test names survive into the issue body below.
+      - name: Run the contract suite
+        run: bun run test:contract 2>&1 | tee contract-output.txt
+      - name: Open or update a drift issue
+        if: failure() && matrix.gbrain != '0.50.5.0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: "drift: gbrain ${{ matrix.gbrain }} breaks the contract suite"
+        run: |
+          set -euo pipefail
+          # A tripwire nobody has ever seen fire is a tripwire nobody knows is
+          # connected — and the label must exist before `gh issue create` uses it.
+          gh label create drift --color B60205 \
+            --description "pinned-next contract drift" --force >/dev/null 2>&1 || true
+          # Never duplicate: one open issue per drifting version, updated nightly.
+          existing=$(gh issue list --state open --search "\"$TITLE\" in:title" \
+                     --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n' \
+            "Nightly pinned-next run failed against gbrain \`${{ matrix.gbrain }}\`." \
+            "" \
+            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "Pinned-current (\`$PINNED_CURRENT\`) is unaffected; this is a tripwire, not an outage." \
+            "" \
+            "Failing tests:" \
+            "\`\`\`" \
+            "$(grep -E '^\(fail\)' contract-output.txt | head -50 || echo 'see the run log')" \
+            "\`\`\`" \
+            "" \
+            "G1 holds: do not move the pin to make this pass. Fix the seam or widen the contract test.")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body" --label drift
+          fi

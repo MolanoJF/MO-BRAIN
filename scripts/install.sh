@@ -95,7 +95,7 @@ fi
 
 # Project dir is compose/ (first -f), so without --env-file Compose would
 # look for compose/.env and miss the secrets we just wrote at $ENV_PATH.
-echo "Pulling pinned images (${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain})…"
+echo "Pulling pinned images (${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf})…"
 if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; then
   echo "Could not pull the pinned Mobrain images." >&2
   echo "On an air-gapped or registry-less host, build them locally instead:" >&2

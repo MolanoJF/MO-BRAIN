@@ -19,15 +19,15 @@ That one command runs the preflight below, asks whether to enable the optional a
 The images are registry-qualified and exactly pinned:
 
 ```text
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/gbrain-base:0.50.5.0
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/agent-runner:2.1.274   # only with the runner
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:0.50.5.0
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:2.1.274   # only with the runner
 ```
 
-`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `mobrain`. Both are plain environment variables, so an operator running their own registry sets them explicitly:
+`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release). Both are plain environment variables, so an operator running their own registry sets them explicitly:
 
 ```bash
-DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=mobrain bash scripts/install.sh
+DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash scripts/install.sh
 ```
 
 Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
@@ -44,7 +44,7 @@ Never use a moving tag. The gbrain and harness versions are exact, and the produ
 | Free space on the Docker data root | **20 GB** |
 | TCP ports 80 and 443 | free (a port held by this stack is not a conflict) |
 | `DOMAIN` | resolves to one of this host's addresses |
-| The pinned images | pullable (`ghcr.io/mobrain/...`) |
+| The pinned images | pullable (`ghcr.io/molanojf/...`) |
 
 Each refusal prints exactly one line saying what to do; the codes are listed in the [install runbook](docs/runbooks/install.md).
 

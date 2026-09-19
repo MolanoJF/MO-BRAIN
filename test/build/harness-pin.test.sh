@@ -12,7 +12,7 @@ cd "$(dirname "$0")/../.."
 
 PIN="${HARNESS_VERSION:-2.1.274}"
 BOGUS="0.0.0-not-a-real-version"
-IMAGE="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-mobrain}/agent-runner"
+IMAGE="${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner"
 fail=0
 
 echo "--- expecting SUCCESS at pin ${PIN}"

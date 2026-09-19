@@ -17,7 +17,7 @@ deliberately has no `scheduler` entry — the scheduler has no HTTP surface.
 ## The service
 
 `scheduler` runs `bun run /app/src/scheduler/main.ts` from the same image as
-the control plane (`mobrain/control-plane:<BRAINSTAND_VERSION>`). It is
+the control plane (`molanojf/control-plane:<BRAINSTAND_VERSION>`). It is
 **strictly less privileged than the control plane**:
 
 - `CONTROL_DATABASE_URL` (control DB), `OPS_RPC_URL=http://gbrain-ops:3140`,

@@ -211,6 +211,28 @@ IMAGE_NAMESPACE=mobrain GBRAIN_VERSION=0.50.5.0 HARNESS_VERSION=2.1.274 APP_VERS
   bash scripts/publish-images.sh
 ```
 
+### P4 resolution — the namespace is the account, and CI owns the push
+
+**Resolved after P4.** The product name is **Mobrain**, but the only available GHCR owner is the
+user's GitHub account, so the images publish under **`ghcr.io/molanojf`** — the lowercase account
+name, never `MolanoJF` (Docker repository names must be lowercase) and never the product name.
+`IMAGE_NAMESPACE`'s default therefore moves from `mobrain` to `molanojf` in
+`compose/docker-compose.yml`, `scripts/{install,preflight,publish-images,upgrade}.sh`/`.ts`,
+`.env.example`, `test/build/*.test.sh` and the runbooks, while the pattern assertions in
+`test/unit/publish-images.test.sh` stay exactly as they were.
+
+The local `gh` OAuth token still lacks `write:packages` (P4), so no host-side `docker push` can
+succeed and none was attempted. Publishing moves to GitHub Actions: the `publish` job in
+`.github/workflows/contract.yml` logs in to GHCR with the workflow `GITHUB_TOKEN` under
+`permissions: packages: write`, runs `scripts/publish-images.sh` at the G1 pins, and prints the
+three `RepoDigests`. The publisher's `FROM`-resolve snag is closed without touching the
+Dockerfile: `docker/control-plane.Dockerfile:7` keeps its bare
+`FROM mobrain/gbrain-base:${GBRAIN_VERSION}`, and the publisher mirrors the registry-qualified
+base it just built to that bare name (`docker tag ghcr.io/molanojf/gbrain-base:<pin>
+mobrain/gbrain-base:<pin>`) before building the control plane — the same mirror
+`scripts/upgrade.ts` performs on the rollback path. No digest is claimed here — CI produces them,
+and `CHANGELOG.md` records them at release (Task 18).
+
 ---
 
 ## P5 — the search-mode cost spread is not measurable on this deployment: empty ledger, thin corpus, and two mode names the binary refuses

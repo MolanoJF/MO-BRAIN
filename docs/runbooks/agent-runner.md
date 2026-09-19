@@ -23,7 +23,7 @@ a locally-issued certificate, and nothing else the runner lane needs.
 
 ## The service
 
-`agent-runner` runs `bun run /app/src/runner/main.ts` from `mobrain/agent-runner:${HARNESS_VERSION}`
+`agent-runner` runs `bun run /app/src/runner/main.ts` from `molanojf/agent-runner:${HARNESS_VERSION}`
 — the harness is `@anthropic-ai/claude-code` at an **exact** pinned version (`2.1.274` at this pin; the
 image build fails on a mismatch, and `lint:forbidden`'s `moving-harness-pin` fails the build on a
 moving reference). It is **strictly the least privileged process in the stack**:

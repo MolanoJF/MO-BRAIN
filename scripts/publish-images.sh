@@ -2,7 +2,7 @@
 # G1: three images, three exact pins, no moving tags, ever.
 set -euo pipefail
 REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-NS="${IMAGE_NAMESPACE:-mobrain}"
+NS="${IMAGE_NAMESPACE:-molanojf}"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 
 exact() {  # refuse anything that is not x.y.z[.w]
@@ -23,5 +23,13 @@ build_and_push() {  # $1 image  $2 tag  $3 dockerfile  $4.. build args
 }
 
 build_and_push gbrain-base   "$GBRAIN_VERSION"  docker/gbrain-base.Dockerfile   --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}"
+# `docker/control-plane.Dockerfile:7` resolves its base FROM the daemon under the
+# bare `mobrain/gbrain-base:<pin>` name, not the registry-qualified reference the
+# line above just built and pushed (G1/D2). Mirror it there so the control-plane
+# build is a local resolve, not a second registry round-trip. `scripts/upgrade.ts`
+# does the same on the rollback path.
+if [ "$DRY" = 0 ]; then
+  docker tag "${REGISTRY}/${NS}/gbrain-base:${GBRAIN_VERSION}" "mobrain/gbrain-base:${GBRAIN_VERSION}"
+fi
 build_and_push control-plane "$APP_VERSION"     docker/control-plane.Dockerfile --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}"
 build_and_push agent-runner  "$HARNESS_VERSION" docker/agent-runner.Dockerfile  --build-arg "HARNESS_VERSION=${HARNESS_VERSION}"
