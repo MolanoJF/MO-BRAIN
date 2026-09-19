@@ -98,6 +98,12 @@ jobs:
             "mobrain/agent-runner:${HARNESS_VERSION}"
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
+      - name: Initialize the main stack's brain (the seam legs assume a dev brain)
+        run: |
+          C="docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml"
+          $C exec -T -e OPENAI_API_KEY gbrain-ops \
+            gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small
+          $C exec -T -e OPENAI_API_KEY gbrain-ops sh -c 'gbrain config set openai_api_key "$OPENAI_API_KEY"'
       # tee so the failing test names survive into the issue body below. One
       # process per file: mock.module() is process-global (see test-isolated.sh).
       # `pipefail` is required or `tee`'s exit 0 masks every failure.
