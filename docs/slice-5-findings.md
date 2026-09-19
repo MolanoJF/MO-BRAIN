@@ -1346,11 +1346,11 @@ correction, not a weakened assertion.
 
 ---
 
-## F31 — the slice3/3.5 seam legs assume a wizard-initialized main brain, which CI does not have
+## F31 — the slice3/3.5 seam legs assume a wizard-initialized main brain, which CI did not have
 
-**Found by Task 13's contract job. RECORDED, not forced.** After F28's fixes, 13 of the 15 contract
-files pass. Two fail, both against the MAIN stack, both because a fresh compose stack's brain is not
-the dev box's wizard-initialized brain:
+**Found by Task 13's contract job. FIXED HERE.** After F28's fixes, 13 of the 15 contract files passed.
+Two failed, both against the MAIN stack, both because a fresh compose stack's brain was not the dev
+box's wizard-initialized brain:
 
 ```text
 (fail) Slice 3 seam gate A > A7. the committed report is importable — sync sees it as a page
@@ -1359,22 +1359,84 @@ the dev box's wizard-initialized brain:
   reading gbrain config failed: cat: /srv/gbrain-home/.gbrain/config.json: No such file or directory
 ```
 
-The dev box's wizard runs `POST /api/wizard/provider` (writes the provider key to the file plane),
-then `/finish` (`gbrain init`) on a brain whose cold-start 1280d schema the wizard first clears
-through the ops route `/fileplane/reset-brain-schema`. CI never runs that sequence. A direct CI
-reproduction was attempted and refused:
+### Root cause, measured
 
-- `gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small` exits 1
-  with "Switching dims is destructive …" (the 1280d cold-start template).
-- Adding `--embedding-dimensions 1536` did **not** pass the guard; the same destructive prompt
-  stands (this is the pinned 0.50.5.0 behaviour).
-- Calling `/fileplane/reset-brain-schema` first did not help: `gbrain-serve`/`gbrain-worker` re-create
-  the cold-start template before `init` runs.
+A virgin `compose up` leaves gbrain-worker/serve to cold-start the schema before any wizard runs. Read
+directly inside the container, one fresh isolated compose project (`COMPOSE_PROJECT_NAME=bsci`, the dev
+override plus a temp port override so it could not touch the dev stack):
 
-The honest fix is a main-stack brain bootstrap that runs the wizard's own sequence (or quiesces the
-workers around the reset), not a loosened assertion and not an `init` flag invented to get past the
-guard. It is recorded here as the remaining contract-suite CI gap; the step was reverted so the job
-runs all 15 files and reports these two rather than failing before them.
+```text
+cat /srv/gbrain-home/.gbrain/config.json   -> No such file or directory
+content_chunks.embedding typmod            -> 1280
+gbrain doctor: embedding_model="zeroentropyai:zembed-1", "Schema width (1280d) matches gateway embedding_dimensions"
+```
+
+The prior attempts failed because they issued the reset and the init as **two separate commands**. CI run
+[35416187167](https://github.com/MolanoJF/mobrain/actions/runs/35416187167) logged the `curl
+/fileplane/reset-brain-schema` and then:
+
+```text
+gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small
+Refusing to silently re-template existing brain.
+Switching dims is destructive: it drops every embedding in your brain …
+```
+
+`--embedding-dimensions 1536` did not pass the guard either (run
+[35416733961](https://github.com/MolanoJF/mobrain/actions/runs/35416733961)); the pinned `0.50.5.0`
+refuses a headless 1280 → 1536 re-template. Between the reset command and the next `docker exec`, the
+worker recreated the 1280 template, so the guard fired again. The product's own `/finish` does not have
+that window: it calls `resetBrainSchema()` and the ops-RPC `init` back to back inside one control-plane
+request (`src/control/routes/wizard.ts:226-231`), and that is exactly why the dev box's wizard-initialized
+brain works and the hand-rolled CI sequence did not.
+
+### The fix — drive the product's bootstrap path
+
+`scripts/ci-bootstrap-brain.ts` (new) drives the wizard over the control-plane HTTP API, the path an
+operator uses: `POST /api/bootstrap` → sign-in → `GET /api/wizard/state` → `provider` → `search-mode` →
+`schema` → `space` → `finish`. It is idempotent (a `409 already_bootstrapped` signs in; a brain already
+`ready` exits `0`) and waits up to 180 s for Caddy to answer `GET /api/bootstrap` before its first POST
+(the first push run got a `502` because `up --wait` returns before Caddy routes to control-plane; run
+[35442050380](https://github.com/MolanoJF/mobrain/actions/runs/35442050380)). It is wired in after the
+stack is up in `.github/workflows/contract.yml` and `.github/workflows/nightly.yml`. No raw SQL, no
+gbrain edit, no assertion weakened.
+
+Same isolated cold brain, wizard driven through the API:
+
+```text
+bootstrap: created first admin admin@example.test (Acme)
+wizard: lifecycle=uninitialized
+wizard: provider configured (openai:text-embedding-3-small)
+wizard: search mode conservative
+wizard: schema pack gbrain-base-v2
+wizard: Space shared
+wizard: /finish ok=true lifecycle=ready
+```
+
+Afterwards `config.json` carries `embedding_model: openai:text-embedding-3-small` and
+`embedding_dimensions: 1536`, and `content_chunks.embedding` typmod is **1536**. The
+1280 → 1536 switch is real; only the wizard's back-to-back reset+init can make it.
+
+Going green also exposed a latent gap that had never been reached: the `restore` and `slice2` jobs build
+the overlay with no `HARNESS_VERSION`, and Compose refuses to interpolate `agent-runner`'s required
+variable even though that profile-gated service is never built. `HARNESS_VERSION: '2.1.274'` was added to
+both job envs. That is a CI-prerequisite fix, not a weakened gate.
+
+### Measured CI result
+
+Run [35442883710](https://github.com/MolanoJF/mobrain/actions/runs/35442883710) at `c5e5604`, all jobs
+green: `unit`, `build-gates`, `integration`, `contract`, `publish`, `clean-install`, **`restore`**,
+**`slice2`** — every job `success`. The previously-red legs now report verbatim:
+
+```text
+(pass) Slice 3 seam gate A > A7. the committed report is importable — sync sees it as a page [1654.16ms]
+(pass) Slice 3.5 seam gate A > A4. post-upgrade is idempotent and what it wrote to config.json is observable [13039.75ms]
+contract: 57 pass / 0 fail  (per-file; scheduler.contract and upgrade.contract both OK)
+restore:  4 pass / 0 fail
+slice2:   17 pass / 0 fail
+```
+
+No assertion was moved and no test was skipped. The fix is a committed bootstrap that runs the product's
+own wizard, not an `init` flag invented to get past the guard.
 
 ---
 
