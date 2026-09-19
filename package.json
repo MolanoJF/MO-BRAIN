@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test:unit": "bun test test/unit",
+    "test:integration": "bun test test/integration",
     "test:contract": "bun test test/contract",
     "test:e2e": "bun test --parallel=1 test/e2e",
     "test:build": "bash test/build/pin.test.sh",
