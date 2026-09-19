@@ -248,6 +248,9 @@ jobs:
       IMAGE_NAMESPACE: molanojf
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
+      # The published control-plane tag. Without it Compose falls back to `dev`,
+      # which no registry carries.
+      APP_VERSION: '1.0.0'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
