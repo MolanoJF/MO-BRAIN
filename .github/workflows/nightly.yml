@@ -24,7 +24,14 @@ jobs:
     env:
       PINNED_CURRENT: '0.50.5.0'
       GBRAIN_VERSION: ${{ matrix.gbrain }}
+      HARNESS_VERSION: '2.1.274'
+      DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
+      OPS_RPC_TOKEN: ci-not-a-real-token
+      # Host-side contract tests target the live main stack.
+      OPS_RPC_URL: http://127.0.0.1:3140
+      ENCRYPTION_KEY: ci-encryption-key-at-least-32-characters-long
+      BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-chars
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -35,6 +42,15 @@ jobs:
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+      - name: "Mirror the base and build the stack through the overlay (D2)"
+        run: |
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+            "mobrain/gbrain-base:${GBRAIN_VERSION}"
+          docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
+            --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
+            control-plane scheduler
+      - name: Bring the dev stack up on the pinned images
+        run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
       # tee so the failing test names survive into the issue body below.
       - name: Run the contract suite
         run: bun run test:contract 2>&1 | tee contract-output.txt

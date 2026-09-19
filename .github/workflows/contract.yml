@@ -119,7 +119,14 @@ jobs:
     env:
       # G4/G1: pinned-current only on PR/push. pinned-next is nightly.yml's job.
       GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
+      DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
+      OPS_RPC_TOKEN: ci-not-a-real-token
+      # Host-side contract tests reach the main stack (ops at :3140, serve at :3131).
+      OPS_RPC_URL: http://127.0.0.1:3140
+      ENCRYPTION_KEY: ci-encryption-key-at-least-32-characters-long
+      BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-chars
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -130,6 +137,17 @@ jobs:
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+      - name: "Mirror the base and build the stack through the overlay (D2)"
+        run: |
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+            "mobrain/gbrain-base:${GBRAIN_VERSION}"
+          docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
+            --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
+            control-plane scheduler
+      # Most of test/contract targets the LIVE main stack (the slice0 harness
+      # covers only the pinned binary), so the stack must be up first.
+      - name: Bring the dev stack up on the pinned images
+        run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
       - run: bun run test:contract
       - name: Capture the capability snapshot and report drift
         if: always()
