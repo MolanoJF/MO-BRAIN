@@ -229,6 +229,10 @@ jobs:
     needs: contract
     env:
       GBRAIN_VERSION: '0.50.5.0'
+      # Compose interpolates agent-runner's required HARNESS_VERSION even when
+      # that profile-gated service is not built or started; without it the
+      # overlay build fails before a single test runs.
+      HARNESS_VERSION: '2.1.274'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -261,6 +265,7 @@ jobs:
     needs: restore
     env:
       GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
