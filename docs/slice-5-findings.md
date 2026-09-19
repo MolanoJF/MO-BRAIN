@@ -1344,4 +1344,36 @@ as root (so restrictively-moded volume files stay readable) and a second one-sho
 is skipped. `test/unit/snapshot.test.ts` was updated to expect the extra call — a fixture
 correction, not a weakened assertion.
 
+---
+
+## F31 — the slice3/3.5 seam legs assume a wizard-initialized main brain, which CI does not have
+
+**Found by Task 13's contract job. RECORDED, not forced.** After F28's fixes, 13 of the 15 contract
+files pass. Two fail, both against the MAIN stack, both because a fresh compose stack's brain is not
+the dev box's wizard-initialized brain:
+
+```text
+(fail) Slice 3 seam gate A > A7. the committed report is importable — sync sees it as a page
+  sync --source slice3-probe --json exits 1
+(fail) Slice 3.5 seam gate A > A4. post-upgrade is idempotent and what it wrote to config.json is observable
+  reading gbrain config failed: cat: /srv/gbrain-home/.gbrain/config.json: No such file or directory
+```
+
+The dev box's wizard runs `POST /api/wizard/provider` (writes the provider key to the file plane),
+then `/finish` (`gbrain init`) on a brain whose cold-start 1280d schema the wizard first clears
+through the ops route `/fileplane/reset-brain-schema`. CI never runs that sequence. A direct CI
+reproduction was attempted and refused:
+
+- `gbrain init --non-interactive --force --embedding-model openai:text-embedding-3-small` exits 1
+  with "Switching dims is destructive …" (the 1280d cold-start template).
+- Adding `--embedding-dimensions 1536` did **not** pass the guard; the same destructive prompt
+  stands (this is the pinned 0.50.5.0 behaviour).
+- Calling `/fileplane/reset-brain-schema` first did not help: `gbrain-serve`/`gbrain-worker` re-create
+  the cold-start template before `init` runs.
+
+The honest fix is a main-stack brain bootstrap that runs the wizard's own sequence (or quiesces the
+workers around the reset), not a loosened assertion and not an `init` flag invented to get past the
+guard. It is recorded here as the remaining contract-suite CI gap; the step was reverted so the job
+runs all 15 files and reports these two rather than failing before them.
+
 
