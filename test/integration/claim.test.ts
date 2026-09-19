@@ -53,6 +53,9 @@ let callOpsHandler: (op: string, params?: Record<string, unknown>, opts?: CallOp
   (op, _params, opts) => defaultOk(op, opts);
 
 mock.module('../../src/control/opsClient.ts', () => ({
+  // `src/control/spend.ts` imports this alongside the others; a mock that
+  // omits a real export makes the whole graph unloadable (Slice 4 hazard (a)).
+  brainUsage: async () => { throw new Error('ops unreachable'); },
   callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) => {
     calls.push({ op, params, opts });
     return callOpsHandler(op, params, opts);

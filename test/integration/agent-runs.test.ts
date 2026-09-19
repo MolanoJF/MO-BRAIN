@@ -80,6 +80,9 @@ function ok(json: unknown): OpsResult {
 /** The fake ops, in full: `mock.module` must see every real export or the graph
  *  will not load (the scheduler-routes header records the same trap). */
 mock.module('../../src/control/opsClient.ts', () => ({
+  // `src/control/spend.ts` imports this alongside the others; a mock that
+  // omits a real export makes the whole graph unloadable (Slice 4 hazard (a)).
+  brainUsage: async () => { throw new Error('ops unreachable'); },
   callOps: async (op: string, params?: Record<string, unknown>, _opts?: CallOpts) => {
     if (op === 'mcp.grant') {
       ops.grants += 1;
