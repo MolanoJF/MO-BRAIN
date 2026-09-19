@@ -1376,4 +1376,61 @@ workers around the reset), not a loosened assertion and not an `init` flag inven
 guard. It is recorded here as the remaining contract-suite CI gap; the step was reverted so the job
 runs all 15 files and reports these two rather than failing before them.
 
+---
+
+## F32 — a sibling contract file's process-wide `OPS_RPC_URL=:1` answered the new spend test
+
+**Found by Task 18 Step 1**, the first full `bun test test/contract` directory run that includes
+`test/contract/usage.contract.test.ts` (Task 10). The directory run was **143 pass / 3 fail**; every
+failure was the new file's three ops-backed legs, and every one answered `ConnectionRefused` to a URL
+no test in that file ever set. Run alone, the file is 4/0.
+
+Verbatim (`bun test test/contract`, 2026-09-19T03:24Z):
+
+```text
+test\contract\usage.contract.test.ts:
+error: Unable to connect. Is the computer able to access the url?
+  path: "http://127.0.0.1:1/rpc",
+ errno: 0,
+  code: "ConnectionRefused"
+      at async post (C:\Users\juanp\Desktop\Company Brain\src\control\opsClient.ts:11:21)
+      at async readBrainUsage (C:\Users\juanp\Desktop\Company Brain\src\ops\usage.ts:96:19)
+      at async <anonymous> (C:\Users\juanp\Desktop\Company Brain\test\contract\usage.contract.test.ts:52:25)
+...
+ 143 pass
+ 3 fail
+ 595 expect() calls
+Ran 146 tests across 15 files. [384.97s]
+```
+
+**Cause.** `test/contract/connection.contract.test.ts` runs `runConnectionE2E()`, whose
+`auditThenOpsRevoke()` (`scripts/connection-e2e.ts:180-181`) sets
+`process.env.OPS_RPC_URL = 'http://127.0.0.1:1'` — deliberately, to prove the revoke path's
+audit-before-delete survives an unreachable ops — and never restored it. `src/control/opsClient.ts`
+captured that variable into a module-level `const OPS_URL` at import time. Bun runs a whole test
+directory in one process, `connection.contract` sorts first, and its dynamic
+`import('../src/control/connections.ts')` linked `opsClient.ts` while the `:1` was set — so every later
+file that lazily imported the module inherited it. `usage.contract.test.ts` is the first contract file
+to reach ops through the host `opsClient`, so it was the first victim. This is the same class as Slice
+4's F27 (`mock.module` is process-global): module-level state in one contract file leaking into a
+sibling through the shared test process.
+
+**Fix (no test or gate weakened).**
+
+- `src/control/opsClient.ts` resolves the endpoint and bearer at **call** time (`opsUrl()` /
+  `opsToken()`) instead of binding them at module load. Inside compose the variable is constant, so the
+  container's behaviour is identical; the load-time binding was the process-wide hazard.
+- `scripts/connection-e2e.ts` snapshots `process.env.OPS_RPC_URL` and restores it in a `finally`, so
+  the unreachable `:1` cannot outlive the function that needs it.
+- `test/contract/usage.contract.test.ts`'s header comment now says call-time, not module-load.
+
+**Re-measured on the same tree:** `bun test test/contract` **146 pass / 0 fail** (601 `expect()` calls,
+15 files, 389.33s); `bun test test/unit` **649/0**; `bunx tsc --noEmit` clean; `bun run lint:forbidden`
+clean. Full verification tails are in `PROGRESS.md`'s "Slice 5 — Task 18 verification" section.
+
+**What remains:** the call-time read is containment, not D5's cure. The host-side spend read still
+reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; a future file
+that mutates other module-level state could still race a sibling. Recorded so the next slice does not
+rediscover it.
+
 

@@ -7,12 +7,15 @@
  * published `get_usage` operation over the HTTP MCP lane; `listClients` counts
  * the same brain's OAuth clients through `auth clients --json`.
  *
- * Ordering matters: `src/control/opsClient.ts` binds `OPS_RPC_URL` at MODULE
- * LOAD, and `readBrainUsage` resolves its MCP endpoint from `GBRAIN_MCP_URL` on
- * first call. The prelude below runs before the dynamic imports, so both see
- * the host-facing dev values (the dev override publishes ops on :3140 and
- * Caddy on :8443; Caddy's local CA is self-signed, hence the scoped TLS opt-out
- * that production's plain-http internal hop never needs).
+ * `src/control/opsClient.ts` now resolves `OPS_RPC_URL` at CALL time, and
+ * `readBrainUsage` resolves its MCP endpoint from `GBRAIN_MCP_URL` on first
+ * call. The prelude below runs before the dynamic imports and supplies both
+ * host-facing dev values (the dev override publishes ops on :3140 and Caddy on
+ * :8443; Caddy's local CA is self-signed, hence the scoped TLS opt-out that
+ * production's plain-http internal hop never needs). Call-time resolution is
+ * what makes this file safe in the shared `bun test test/contract` process:
+ * `scripts/connection-e2e.ts` briefly points `OPS_RPC_URL` at an unreachable
+ * `:1` and restores it, rather than deciding this file's endpoint for it.
  */
 import { expect, test, describe } from 'bun:test';
 

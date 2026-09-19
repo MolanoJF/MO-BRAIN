@@ -4,13 +4,28 @@ import type { BrainUsage } from '../ops/usage.ts';
 
 export type { RepoStatus };
 
-const OPS_URL = process.env.OPS_RPC_URL ?? 'http://gbrain-ops:3140';
-const TOKEN = process.env.OPS_RPC_TOKEN ?? '';
+/**
+ * Resolve the ops endpoint at CALL time, not at module load.
+ *
+ * Binding it at load was a process-wide hazard: `bun test` runs several files
+ * in one process, and a sibling file that mutates `process.env.OPS_RPC_URL`
+ * (scripts/connection-e2e.ts points it at an unreachable `:1` to prove the
+ * audit-before-delete path survives an ops failure) permanently decided the URL
+ * for every later file that lazily imported this module. Inside compose the
+ * variable is constant, so call-time resolution changes nothing there.
+ */
+function opsUrl(): string {
+  return process.env.OPS_RPC_URL ?? 'http://gbrain-ops:3140';
+}
+
+function opsToken(): string {
+  return process.env.OPS_RPC_TOKEN ?? '';
+}
 
 async function post<T>(path: string, body: unknown, timeoutMs = 600_000): Promise<T> {
-  const res = await fetch(`${OPS_URL}${path}`, {
+  const res = await fetch(`${opsUrl()}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${opsToken()}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -149,6 +164,6 @@ export async function brainUsage(days: number): Promise<BrainUsage> {
 }
 
 export async function opsHealthy(): Promise<boolean> {
-  try { return (await fetch(`${OPS_URL}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
+  try { return (await fetch(`${opsUrl()}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok; }
   catch { return false; }
 }

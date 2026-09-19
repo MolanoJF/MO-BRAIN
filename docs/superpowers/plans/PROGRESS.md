@@ -837,6 +837,136 @@ this reason.
 
 ---
 
+## Slice 5 — Task 18 verification
+
+**Step 1 only.** The eight commands on the frozen tree at `703fea2`, in the plan's order, one at a time.
+The task's Steps 2–7 (findings finalisation, tag/publish, HANDOFF/roadmap rewrite) are not done here.
+
+**Environment.** On entry the dev stack held only `caddy` and `postgres`: compose now defaults its image
+namespace to `${IMAGE_NAMESPACE:-molanojf}` (Task 5 / P4), the host's local tags were the pre-rename
+`ghcr.io/mobrain/*`, and a GHCR pull is denied on this host (P4 — the token lacks `write:packages`), so
+the three images were rebuilt from HEAD under the production namespace with the build overlay and the
+stack was brought up with the base + dev files. `docker port brainstand-gbrain-ops-1` read
+`3140/tcp -> 0.0.0.0:3140` before each host-run suite. Commands 1–3 ran from the same shell; nothing else
+touched the stack.
+
+Verbatim tails (host local time, `-05:00`):
+
+```
+$ bun run lint:forbidden
+lint:forbidden clean                                      # exit 0
+
+$ bunx tsc --noEmit
+(exit 0, no output)
+
+$ bun test test/unit
+ 649 pass
+ 0 fail
+ 2308 expect() calls
+Ran 649 tests across 49 files. [2.24s]
+
+$ CONTROL_DATABASE_URL=postgres://gbrain:ci-not-a-real-secret@localhost:5432/control bun test test/integration
+ 441 pass
+ 1 skip
+ 0 fail
+ 1840 expect() calls
+Ran 442 tests across 31 files. [96.48s]
+# START=2026-09-18T22:12:59-05:00  END=2026-09-18T22:14:36-05:00
+
+$ bun test test/contract
+ 146 pass
+ 0 fail
+ 601 expect() calls
+Ran 146 tests across 15 files. [389.33s]
+# after the dev stack was re-upped (quiesce.test.ts dropped the :3140 publication)
+# START=2026-09-18T22:24:35-05:00  END=2026-09-18T22:31:05-05:00
+
+$ bun test --parallel=1 test/e2e           # first of the two consecutive runs
+ 114 pass
+ 8 skip
+ 0 fail
+ 1112 expect() calls
+Ran 122 tests across 8 files. [1933.66s]
+[gate-c] Gate C total model spend = $0.0649797 over 5 run(s)
+# START=2026-09-19T00:06:30-05:00  END=2026-09-19T00:38:43-05:00
+
+$ bun test --parallel=1 test/e2e           # the second, from the state the first left
+ 114 pass
+ 8 skip
+ 0 fail
+ 1113 expect() calls
+Ran 122 tests across 8 files. [1830.75s]
+[gate-c] Gate C total model spend = $0.0655791 over 5 run(s)
+# START=2026-09-19T00:54:00-05:00  END=2026-09-19T01:24:31-05:00
+
+$ bash test/build/pin.test.sh              # via Git bash, GBRAIN_VERSION=0.50.5.0
+--- expecting SUCCESS at pin 0.50.5.0
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected
+
+$ bash test/build/harness-pin.test.sh      # via Git bash, HARNESS_VERSION=2.1.274
+--- expecting SUCCESS at pin 2.1.274
+PASS: pinned build succeeded
+--- expecting FAILURE at a deliberately wrong pin
+PASS: bogus pin was rejected at the harness install
+```
+
+**Against the baseline** (unit 628 · integration 434 + 1 skip · contract 142/0 · e2e 104/0 twice; every
+count with 0 fail):
+
+| Command | Baseline | Measured | Verdict |
+|---|---|---|---|
+| `lint:forbidden` | clean | clean | — |
+| `tsc --noEmit` | clean | clean | — |
+| `test/unit` | 628 / 0 | **649 / 0** | **+21** |
+| `test/integration` | 434+1 skip / 0 | **441 / 1 skip / 0** of 442 | **+7 pass** |
+| `test/contract` | 142 / 0 | **146 / 0** of 146 | **+4 pass** (after F32) |
+| `test/e2e` | 104 / 0, twice | **114 / 8 skip / 0** twice of 122 | **+10 pass**; the 8 skips are `install.e2e`'s CI-only Gate A |
+| `pin.test.sh` / `harness-pin.test.sh` | both arms PASS | both arms PASS | — |
+
+The integration `1 skip` is the platform opt-out
+(`[fileplane.test.ts] … on win32: NTFS has no POSIX permission bits`), not a silent gap. The unit run's
+two Postgres `NOTICE`s are from its own probe, not failures.
+
+**The one defect this run found — F32.** The first `test/contract` run came back **143 pass / 3 fail**:
+every failure the new `test/contract/usage.contract.test.ts` answering `ConnectionRefused` to
+`http://127.0.0.1:1/rpc`. `test/contract/connection.contract.test.ts` runs `scripts/connection-e2e.ts`,
+which sets `process.env.OPS_RPC_URL='http://127.0.0.1:1'` and did not restore it, while
+`src/control/opsClient.ts` bound that variable at module load; Bun runs the directory in one process, so
+the sibling file inherited the dead URL. Fixed by resolving the ops endpoint/bearer at call time and
+restoring the env in a `finally` — no test or gate weakened. Full account in
+[`docs/slice-5-findings.md`](../../slice-5-findings.md), F32. After the fix, contract re-measured
+**146/0** and `test/unit` re-measured **649/0**, both above baseline.
+
+**The e2e runs and the rotating Anthropic credential.** e2e was **red twice before it was green**, and
+both reds were environmental, not a tree defect:
+
+1. **Attempt A** (`2026-09-18T22:36:02` → `23:17:22`): **101 pass / 8 skip / 13 fail**, Gate C spend
+   `$0.0000000 over 4 run(s)`. Every money leg (slice4 B5–B8 and C3–C8/C11; slice5 C5/C6) answered
+   `401 authentication_error` / `OAuth access token has been revoked.` `slice35.e2e`'s `normalizeToFromPin`
+   rolls back the latest completed upgrade run to reach `0.50.0.0`, and the latest on entry was the
+   previous session's `run-5219d9eb`, whose snapshot's control DB carried a `secrets` generation from
+   `17:27:25Z` — revoked when the machine's Claude Code refreshed the token at `21:52:25Z`. The rollback
+   put that dead credential back and the real leg then snapshotted it.
+2. **Attempt B** (`2026-09-18T23:25:50` → `2026-09-19T00:06:04`): the same 13, still `$0.0000000`. A new
+   completed-run snapshot was built with a fresh `pg_dump` of the control DB, but the manifest rewrite
+   carried a UTF-8 BOM, so `latestCompletedRunFromPin`'s `JSON.parse` skipped it and the precondition
+   rolled back the stale run again.
+
+**Attempt C** (`00:06:30` → `00:38:43`) and **Attempt D** (`00:54:00` → `01:24:31`) are the two consecutive
+green runs above. Between them the host's Claude Code auto-refreshed the OAuth token at expiry
+(`~/.claude/.credentials.json` mtime moved to `05:52:49Z`, new `expiresAt` `13:52:49Z`); the live `secrets`
+row and the newest completed-run snapshot's `control-db.sql` were re-provisioned with the refreshed host
+token (value never printed), per `docs/runbooks/agent-runner.md`, "Rotating the Anthropic key". The two
+green runs cost **`$0.0649797` + `$0.0655791` = `$0.1305588`** of real model spend; the two red attempts
+cost `$0.0000000` (every refusal happens before any upstream connection). No test or gate was weakened to
+reach any of these numbers.
+
+Recorded 2026-09-19 by the agent executing Task 18 Step 1.
+
+---
+
 - 2026-09-14 — Plans written (roadmap + Slice 0 + Slice 1). Self-review found 3 gaps before execution.
 - 2026-09-14 — Docker absent; executed the Docker-independent subset (Tasks 1 partial, 3, 11 pure, 14). 3 plan defects found.
 - 2026-09-14 — Docker installed. Pin gate repaired and green. Tasks 2, 4, 5 done — **V3 confirmed**.

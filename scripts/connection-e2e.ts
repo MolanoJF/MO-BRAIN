@@ -177,64 +177,72 @@ async function auditThenOpsRevoke(clientId: string, compiled: CompiledConnection
   auditBeforeDelete: boolean;
   connectionId: string;
 }> {
+  const priorOpsUrl = process.env.OPS_RPC_URL;
   process.env.CONTROL_DATABASE_URL = CONTROL_DATABASE_URL;
   process.env.OPS_RPC_URL = 'http://127.0.0.1:1';
-
-  const { runMigrations, getDb, schema, closeDb } = await import('../src/control/db/client.ts');
-  const { revokeConnection } = await import('../src/control/connections.ts');
-  const { eq } = await import('drizzle-orm');
-
-  await runMigrations();
-  const db = getDb();
-  const orgId = randomUUID();
-  const userId = actor;
-  const membershipId = randomUUID();
-  const writeId = randomUUID();
-  const sharedId = randomUUID();
-  const internalId = randomUUID();
-  const connectionId = randomUUID();
-
-  await db.insert(schema.users).values({
-    id: userId, email: `gate-a-${connectionId}@example.test`, emailVerified: false,
-  });
-  await db.insert(schema.organizations).values({
-    id: orgId, name: `GateA ${connectionId.slice(0, 8)}`, slug: `gate-a-${connectionId.slice(0, 8)}`,
-  });
-  await db.insert(schema.memberships).values({
-    id: membershipId, userId, organizationId: orgId, role: 'member',
-  });
-  await db.insert(schema.spaces).values([
-    { id: writeId, organizationId: orgId, sourceId: 'customers', name: 'Customers', kind: 'local-git' },
-    { id: sharedId, organizationId: orgId, sourceId: 'shared', name: 'Shared', kind: 'local-git' },
-    { id: internalId, organizationId: orgId, sourceId: 'internal', name: 'Internal', kind: 'local-git' },
-  ]);
-  await db.insert(schema.connections).values({
-    id: connectionId,
-    organizationId: orgId,
-    membershipId,
-    writeSpaceId: writeId,
-    readSpaceIds: [writeId, sharedId, internalId],
-    harness: 'generic',
-    clientName: clientName(membershipId, compiled.sourceId),
-    gbrainClientId: clientId,
-    profile: compiled.profile,
-    tokenTtl: compiled.tokenTtl,
-    state: 'active',
-    provisionedAt: new Date(),
-  });
-
   try {
-    await revokeConnection(connectionId, userId);
-  } catch {
-    // Expected: callOps cannot reach slice0 (no ops RPC). Audit must already exist.
+    const { runMigrations, getDb, schema, closeDb } = await import('../src/control/db/client.ts');
+    const { revokeConnection } = await import('../src/control/connections.ts');
+    const { eq } = await import('drizzle-orm');
+
+    await runMigrations();
+    const db = getDb();
+    const orgId = randomUUID();
+    const userId = actor;
+    const membershipId = randomUUID();
+    const writeId = randomUUID();
+    const sharedId = randomUUID();
+    const internalId = randomUUID();
+    const connectionId = randomUUID();
+
+    await db.insert(schema.users).values({
+      id: userId, email: `gate-a-${connectionId}@example.test`, emailVerified: false,
+    });
+    await db.insert(schema.organizations).values({
+      id: orgId, name: `GateA ${connectionId.slice(0, 8)}`, slug: `gate-a-${connectionId.slice(0, 8)}`,
+    });
+    await db.insert(schema.memberships).values({
+      id: membershipId, userId, organizationId: orgId, role: 'member',
+    });
+    await db.insert(schema.spaces).values([
+      { id: writeId, organizationId: orgId, sourceId: 'customers', name: 'Customers', kind: 'local-git' },
+      { id: sharedId, organizationId: orgId, sourceId: 'shared', name: 'Shared', kind: 'local-git' },
+      { id: internalId, organizationId: orgId, sourceId: 'internal', name: 'Internal', kind: 'local-git' },
+    ]);
+    await db.insert(schema.connections).values({
+      id: connectionId,
+      organizationId: orgId,
+      membershipId,
+      writeSpaceId: writeId,
+      readSpaceIds: [writeId, sharedId, internalId],
+      harness: 'generic',
+      clientName: clientName(membershipId, compiled.sourceId),
+      gbrainClientId: clientId,
+      profile: compiled.profile,
+      tokenTtl: compiled.tokenTtl,
+      state: 'active',
+      provisionedAt: new Date(),
+    });
+
+    try {
+      await revokeConnection(connectionId, userId);
+    } catch {
+      // Expected: callOps cannot reach slice0 (no ops RPC). Audit must already exist.
+    }
+
+    const audits = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'connection.revoke'));
+    const audit = audits.find((row) => row.target === connectionId);
+    const auditBeforeDelete = Boolean(audit) && !JSON.stringify(audit).includes('client_secret');
+
+    await closeDb();
+    return { auditBeforeDelete, connectionId };
+  } finally {
+    // A sibling contract file shares this `bun test` process. Leaving the
+    // unreachable :1 behind would answer every later file's ops call with
+    // ConnectionRefused (measured: test/contract/usage.contract.test.ts).
+    if (priorOpsUrl === undefined) delete process.env.OPS_RPC_URL;
+    else process.env.OPS_RPC_URL = priorOpsUrl;
   }
-
-  const audits = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'connection.revoke'));
-  const audit = audits.find((row) => row.target === connectionId);
-  const auditBeforeDelete = Boolean(audit) && !JSON.stringify(audit).includes('client_secret');
-
-  await closeDb();
-  return { auditBeforeDelete, connectionId };
 }
 
 export async function runConnectionE2E(): Promise<ConnectionE2EReport> {
