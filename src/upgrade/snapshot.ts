@@ -158,6 +158,20 @@ export async function tarVolumeToFile(
     'busybox', 'tar', 'cf', `/out/${fileName}`, '-C', '/src', '.',
   ], 900_000);
   if (r.exitCode !== 0) throw new Error(`tar of ${volume} failed (${r.exitCode}): ${r.stderr}`);
+  // Docker writes a bind-mounted file as root. Hand the artifact back to the
+  // invoking user so an operator (and the A9 tamper test) can move, verify or
+  // delete it without sudo. The tar still runs as root so volume files with
+  // restrictive modes stay readable; only the output is chowned. On hosts with
+  // no POSIX uid (Windows) there is nothing to chown.
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid !== undefined && gid !== undefined) {
+    const c = await runner.run([
+      'docker', 'run', '--rm', '-v', `${outDir}:/out`,
+      'busybox', 'chown', `${uid}:${gid}`, `/out/${fileName}`,
+    ], 60_000);
+    if (c.exitCode !== 0) throw new Error(`chown of ${fileName} failed (${c.exitCode}): ${c.stderr}`);
+  }
 }
 
 export async function untarFileIntoVolume(

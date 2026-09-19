@@ -63,11 +63,21 @@ describe('the exact argv for each artifact', () => {
   test('tarVolumeToFile uses a throwaway busybox container, never `compose exec` into a service', async () => {
     const runner = new FakeRunner();
     await tarVolumeToFile(runner, 'brainstand_gbrain-home', dir, 'gbrain-home.tar');
-    expect(runner.calls).toEqual([[
+    const tarArgv = [
       'docker', 'run', '--rm',
       '-v', 'brainstand_gbrain-home:/src:ro', '-v', `${dir}:/out`,
       'busybox', 'tar', 'cf', '/out/gbrain-home.tar', '-C', '/src', '.',
-    ]]);
+    ];
+    // POSIX hosts hand the root-owned artifact back to the invoking user; a
+    // host with no getuid (Windows) has nothing to chown.
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+    expect(runner.calls).toEqual(uid !== undefined && gid !== undefined
+      ? [tarArgv, [
+        'docker', 'run', '--rm', '-v', `${dir}:/out`,
+        'busybox', 'chown', `${uid}:${gid}`, '/out/gbrain-home.tar',
+      ]]
+      : [tarArgv]);
     expect(runner.calls[0]!.join(' ')).not.toMatch(/gbrain-serve|gbrain-worker|gbrain-ops/);
   });
 

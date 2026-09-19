@@ -155,6 +155,26 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
+      # The seam-gate contract legs (scheduler, upgrade) shell
+      # `docker compose --env-file .env …` and read `.env` for OPS_RPC_TOKEN.
+      # A CI runner has no .env; materialize one from the job environment so
+      # those legs address the stack this job just brought up. Never committed.
+      - name: Materialize .env for the live-stack contract legs
+        run: |
+          {
+            echo "DOMAIN=${DOMAIN}"
+            echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+            echo "OPS_RPC_TOKEN=${OPS_RPC_TOKEN}"
+            echo "ENCRYPTION_KEY=${ENCRYPTION_KEY}"
+            echo "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}"
+            echo "GBRAIN_VERSION=${GBRAIN_VERSION}"
+            echo "HARNESS_VERSION=${HARNESS_VERSION}"
+            echo "APP_VERSION=${APP_VERSION}"
+            echo "IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io}"
+            echo "IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-molanojf}"
+            echo "OPENAI_API_KEY=${OPENAI_API_KEY}"
+            echo "COMPOSE_PROJECT_NAME=brainstand"
+          } > .env
       - name: Build the pinned base image
         run: |
           docker build -f docker/gbrain-base.Dockerfile \

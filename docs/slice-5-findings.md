@@ -15,6 +15,7 @@ up as a measurement).
 | P3 | After the Task 4 rename the live stack's `secrets` rows still decrypt under the frozen `brainstand-kek-v1` HKDF info | `confirmed` |
 | P4 | The three images can be pushed to GHCR at their exact tags with the authenticated `gh` token | `contradicted` — login succeeds, every push is denied by token scope |
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
+| P6 | The nightly pinned-next arm opens exactly one issue per drifting version and comments on it on re-run, instead of duplicating | `confirmed` — a `workflow_dispatch` of `nightly.yml` with `gbrain_version=0.99.0.0` opened issue **#1**; a second dispatch commented on #1 and opened no second issue. Closed by hand |
 | P7 | The D11 live-stack debt clears through product paths alone — eight admin checklist acks settle the `awaiting_admin_decision` ledger row to `applied`, `/schedules`' alert ack empties `/api/health`'s `scheduleAlerts`, and `DELETE /api/members/:id` offboards the residue — and the one path that does not exist is a purge for a revoked Connection (F22) | `confirmed` |
 | P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `partial` at Task 16 — the product's new-domain restore branch ran (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) and named **2** Connections needing re-issue, but **0** were invalidated: the console still showed the same **2** `active`, and no member-facing message existed. The physical `DOMAIN` was not changed (no alternate hostname resolves on this host), so the OAuth issuer/redirect-URI mismatch itself was not reproduced on the wire. **F23 (below) is now fixed: the same drill measures `active` 2 → 0 and 4 `connection_revoked` alerts.** |
 | F23 | A new-domain restore leaves every `active` Connection `active`: the console shows a working Connection that is not one, and nothing tells the member | `confirmed` — **FIXED HERE** (measured `active` 2 → 0 and `scheduleAlerts` [] → 4 `connection_revoked`; see F23 below) |
@@ -1215,5 +1216,128 @@ C10's number is captured at C6, not at teardown: C9's rollback restores a contro
 predates the walk, so a teardown-only query would honestly report `$0.0000000` about a walk that
 spent real money. C10 prints the captured figure instead, and falls back to the live query when C6
 did not run (a focused run). C1, C7 and C8 were written by Tasks 8 and 16 and kept as they were.
+
+---
+
+## P6 — the drift tripwire fires once, then comments on itself
+
+**Task 13 Step 3.** `nightly.yml` gained a `workflow_dispatch` input, `gbrain_version`, that replaces
+the pinned-next matrix arm; the same dispatch with no input keeps `0.51.0.0`. To prove the tripwire
+is connected, it was dispatched against a version that cannot exist.
+
+First dispatch, `gbrain_version=0.99.0.0` (run
+[35413613589](https://github.com/MolanoJF/mobrain/actions/runs/35413613589)):
+
+```text
+contract (0.99.0.0)  X  Build the pinned base image   (46s)
+issue opened: #1  drift: gbrain 0.99.0.0 breaks the contract suite   label=drift
+```
+
+Second dispatch, same version (run
+[35413701789](https://github.com/MolanoJF/mobrain/actions/runs/35413701789)):
+
+```text
+issue list -> only #1, still one open drift issue
+issue #1 comments -> 1, newest body starts:
+  Nightly pinned-next run failed against gbrain `0.99.0.0`.
+  Run: .../actions/runs/35413701789
+```
+
+Exactly one issue per drifting version, a comment on re-run, no duplicate. Issue #1 was closed by
+hand after the proof. Both arms are `continue-on-error` on the pinned-next side, so the pinned-current
+arm's colour is unaffected by a drift finding.
+
+---
+
+## F26 — the plan's A5 asserted a value from an admin-gated route
+
+**Found by Task 7 Step 4 on the first clean-host run that got past A3. FIXED HERE.** The plan's A5
+read `GET /api/wizard/state` and asserted `lifecycle === 'uninitialized'` from an unauthenticated
+fetch. But that route is wrapped in the wizard's `requireAdmin` guard
+(`src/control/routes/wizard.ts:68`), and on a box with no admin there is no session to read it, so
+the response is `401 { error: 'unauthorized' }` and `state.lifecycle` is `undefined`. The console
+does not use it to choose the bootstrap form anyway: `src/console/App.tsx:81` reads the **public**
+`GET /api/bootstrap` (`{ bootstrapped }`), and this is not a defect — gating the wizard state is
+correct, because it names the lifecycle, spaces and search mode.
+
+A5 now asserts the console shell, `GET /api/bootstrap -> { bootstrapped: false }` (the signal the
+bootstrap form is chosen from), and that `/api/wizard/state` returns `401` unauthenticated. That is
+strictly more than the plan asserted, not less.
+
+Measured on the clean runner, after the fix-in-progress, A3–A4:
+
+```text
+MEASURED health on a clean install: {"declared":"0.50.5.0","observed":"0.50.5.0","matches":true} {"controlDb":"ok","ops":"ok"}
+```
+
+---
+
+## F27 — `mock.module()` is process-global; a sibling's partial mock answered another file's import
+
+**Found by Task 7/13 CI stabilisation. FIXED HERE.** Bun's `mock.module()` is process-global, and
+the integration/contract suites run every file in one process, so a file that mocks a module with a
+*partial* export list poisons every file that imports the real module afterwards. Measured:
+
+- `test/integration/upgrades.test.ts` mocked `src/upgrade/capability.ts` with only `driftBetween`;
+  `test/integration/capability.test.ts` then read the mock's `driftBetween`, so the leg that must
+  prove `driftBetween` throws on one snapshot resolved instead.
+- `test/integration/routes.test.ts` mocked `src/control/opsClient.ts` without
+  `deleteCredentialJournal`; a later importer of the module failed to load.
+- `test/contract/usage.contract.ts` read `http://127.0.0.1:1/rpc` — a URL its own file never set.
+
+`--parallel=1` is **not** a fix: one worker still shares the mock registry, and a measured run of
+`bun test --parallel=1 test/integration/upgrades.test.ts test/integration/capability.test.ts` fails
+with `Export named 'latestSnapshotFor' not found`. `--isolate` alone does not isolate `mock.module`
+either. The fix is one OS process per file: `scripts/test-isolated.sh` runs each `*.test.ts` in its
+own `bun test`, used by the integration and contract CI jobs. That also bounds peak memory to one
+file's module graph, which the OOM-killed integration run needed. Three files that had leaned on the
+shared process were completed (`routes.test`, `upgrades.test`) or made explicit (`health.test`).
+
+---
+
+## F28 — the CI contract job was missing its own prerequisites
+
+**Found by Task 13's split. FIXED HERE.** After `adb7d53` gave the `contract` job the live stack, 16
+of 130 contract tests still failed for reasons that were purely missing CI setup, not product
+defects:
+
+- `runner.contract.test.ts` A5/A9 `pinDb()` and the upgrade-ledger legs need a Postgres at
+  `localhost:5432`; the job declared no `services:` (unlike `unit`/`integration`) — `ECONNREFUSED`.
+- `runner.contract.test.ts` A10 runs `docker run mobrain/agent-runner:2.1.274`; the overlay built
+  only `control-plane` and `scheduler`, so the runner image did not exist.
+- `lifecycle.contract.test.ts`'s `embed --stale` and `scheduler.contract.test.ts`'s
+  `embed --stale --source` refuse without the embedding key the slice0 harness names
+  (`openai:text-embedding-3-small requires OPENAI_API_KEY`); the job passed no provider key.
+
+The job now declares the scratch Postgres service and `CONTROL_DATABASE_URL`, builds and mirrors
+`agent-runner`, and injects `OPENAI_API_KEY` from a repo secret. `nightly.yml` gets the same
+prerequisites. Two more CI-only gaps surfaced on the first `contract` run after that and are fixed
+here: the seam-gate legs shell `docker compose --env-file .env` and a runner has no `.env` (now
+materialized from the job environment, never committed), and `nightly.yml`'s `bun run … | tee`
+masked the step's exit code (now `set -o pipefail`).
+
+---
+
+## F29 — the Gate A teardown hit Bun's 5 s default hook timeout
+
+**Found by Task 7 Step 4. FIXED HERE.** The `afterAll` that runs
+`docker compose … down -v` took longer than Bun's default 5 000 ms hook timeout; the teardown was
+reported as a second, unnamed failure (`a beforeEach/afterEach hook timed out`) after all eight legs
+had run and left `down -v` possibly incomplete. The hook now carries an explicit 300 000 ms budget.
+Per-test timeouts were added at the same time (`A2` 900 s, the rest 120–180 s) because the ~52 s
+install cannot meet the 5 s default.
+
+---
+
+## F30 — a docker-volume snapshot artifact is root-owned, so its operator cannot manage it
+
+**Found by contract `upgrade.contract.test.ts` A9 on the Linux runner. FIXED HERE.**
+`tarVolumeToFile` runs a throwaway `busybox` container as root, and Docker creates the bind-mounted
+archive as root. On the dev box (Windows bind-mount semantics) this is invisible; on a Linux host
+the operator — and A9's one-byte tamper — gets `EACCES` opening their own backup. The tar still runs
+as root (so restrictively-moded volume files stay readable) and a second one-shot `busybox chown
+<uid>:<gid>` hands the artifact to the invoking user; on a host with no `getuid` (Windows) the chown
+is skipped. `test/unit/snapshot.test.ts` was updated to expect the extra call — a fixture
+correction, not a weakened assertion.
 
 
