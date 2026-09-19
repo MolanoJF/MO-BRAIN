@@ -1,6 +1,13 @@
 import { test, expect, describe } from 'bun:test';
-import app from '../../src/control/app.ts';
-import { GBRAIN_PIN } from '../../src/contracts/pin.ts';
+
+// This suite exercises the control app IN-PROCESS with no ops sidecar: pin
+// verification must not fabricate a match against a container it never
+// reached. State that precondition explicitly instead of depending on a
+// sibling file's quiesce timing — `opsClient` binds OPS_RPC_URL at MODULE
+// LOAD, hence the dynamic import below.
+process.env.OPS_RPC_URL = 'http://127.0.0.1:1';
+const { default: app } = await import('../../src/control/app.ts');
+const { GBRAIN_PIN } = await import('../../src/contracts/pin.ts');
 
 describe('/api/health', () => {
   // /health and /metrics belong to gbrain-serve — live collisions. The

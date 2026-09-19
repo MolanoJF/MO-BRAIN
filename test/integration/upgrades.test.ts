@@ -25,8 +25,19 @@ type DriftResult = { signal: 'drift' | 'no_drift' | 'single_snapshot'; from: str
 let driftHandler: (from: string, to: string) => Promise<DriftResult> = async (from, to) => ({
   signal: 'single_snapshot', from, to, diff: null,
 });
+// Complete module: under per-file isolation a partial mock REPLACES the real
+// module, so `reconcile.ts`'s `recordCapabilitySnapshot` and `agent/claim.ts`'s
+// `latestSnapshotFor` imports must still resolve. Only `driftBetween` is
+// overridden; the stubs are inert and this file asserts nothing about them.
 mock.module('../../src/upgrade/capability.ts', () => ({
   driftBetween: async (from: string, to: string) => driftHandler(from, to),
+  recordCapabilitySnapshot: async () => ({ id: 'mock' }),
+  latestSnapshotFor: async () => null,
+  SingleSnapshotError: class SingleSnapshotError extends Error {
+    constructor(public readonly available: string[]) {
+      super('single snapshot'); this.name = 'SingleSnapshotError';
+    }
+  },
 }));
 
 // Task 9's real registry is version-specific and grows over time; the route

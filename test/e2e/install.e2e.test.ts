@@ -86,8 +86,14 @@ maybe('A4: the runner lane is DISABLED, because the question was answered no', a
 maybe('A5: the console door is the bootstrap form on a box with no admin', async () => {
   const html = await (await fetch('https://localhost/', { tls: { rejectUnauthorized: false } })).text();
   expect(html).toContain('<div id="root">');
-  const state = await (await fetch('https://localhost/api/wizard/state', { tls: { rejectUnauthorized: false } })).json() as any;
-  expect(state.lifecycle).toBe('uninitialized');
+  // The console chooses the bootstrap form from this PUBLIC signal (App.tsx's
+  // phaseFor), not from the wizard state. `/api/wizard/state` is admin-gated by
+  // design, so on a box with no admin it must 401 — asserting the gate here is
+  // the stronger form of "no admin can read the lifecycle yet".
+  const boot = await (await fetch('https://localhost/api/bootstrap', { tls: { rejectUnauthorized: false } })).json() as any;
+  expect(boot.bootstrapped).toBe(false);
+  const gate = await fetch('https://localhost/api/wizard/state', { tls: { rejectUnauthorized: false } });
+  expect(gate.status).toBe(401);
 }, 120_000);
 
 maybe('A6: /admin is NOT routed (S1)', async () => {
@@ -123,4 +129,4 @@ maybe('A8: nothing was BUILT — every image came from the registry', async () =
 afterAll(() => {
   if (!RUN) return;
   Bun.spawnSync(['docker', 'compose', '--env-file', `${WORK}/.env`, '-f', 'compose/docker-compose.yml', 'down', '-v']);
-});
+}, 300_000);

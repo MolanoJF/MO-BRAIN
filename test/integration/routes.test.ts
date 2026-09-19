@@ -76,6 +76,16 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return { committed: true, sha: 'abc123' };
   },
   inspectRepos: async () => [],
+  // The remaining real exports, for the same reason as `brainUsage` above:
+  // under per-file isolation a partial mock REPLACES the module, so every
+  // export the app graph imports must exist here or the graph fails to load.
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
+  deleteCredentialJournal: async () => ({ deleted: true }),
+  gitRange: async () => ({ commits: [], files: [] }),
+  gitPathExists: async () => ({ paths: [] }),
+  gitRevertRange: async () => ({ outcome: 'nothing_to_revert' }),
+  auditTail: async () => [],
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
