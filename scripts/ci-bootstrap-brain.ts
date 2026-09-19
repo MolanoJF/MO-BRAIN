@@ -98,6 +98,32 @@ async function state(cookie: string): Promise<Json> {
   return res.body;
 }
 
+/**
+ * `docker compose up --wait` returns as soon as each service's own healthcheck
+ * passes, but Caddy can still answer 502 until control-plane is accepting
+ * connections. Poll the public door before the first POST; a 502 or a refused
+ * connection is "not ready yet", not a failure.
+ */
+async function waitForControlPlane(): Promise<void> {
+  const deadline = Date.now() + 3 * 60_000;
+  for (;;) {
+    try {
+      const res = await fetch(`${BASE}/api/bootstrap`, {
+        ...(INSECURE ? { tls: { rejectUnauthorized: false } } : {}),
+        signal: AbortSignal.timeout(10_000),
+      } as RequestInit);
+      if (res.status < 500) {
+        console.log(`control-plane: ready (GET /api/bootstrap -> ${res.status})`);
+        return;
+      }
+    } catch { /* not listening yet */ }
+    if (Date.now() > deadline) throw new Error(`control-plane at ${BASE} did not answer within 180s`);
+    await Bun.sleep(2_000);
+  }
+}
+
+await waitForControlPlane();
+
 const boot = await request('POST', '/api/bootstrap', { email: EMAIL, password: PASSWORD, orgName: ORG });
 if (boot.status === 200) {
   console.log(`bootstrap: created first admin ${EMAIL} (${ORG})`);
