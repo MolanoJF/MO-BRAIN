@@ -1,0 +1,56 @@
+name: release-verify
+
+# Task 18 Step 4 — Gate A's assertion once more, against the actual release.
+# Runs on a fresh GitHub runner that did not build the images, pulls each
+# published artifact BY DIGEST (not by tag), and starts it. The digest is the
+# release; the tag is a label someone can move. Inputs default to v1.0.0.
+on:
+  workflow_dispatch:
+    inputs:
+      gbrain_base:
+        description: 'gbrain-base image reference (by digest)'
+        required: true
+        default: 'ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4'
+      control_plane:
+        description: 'control-plane image reference (by digest)'
+        required: true
+        default: 'ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c'
+      agent_runner:
+        description: 'agent-runner image reference (by digest)'
+        required: true
+        default: 'ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR to pull the published images
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull and start gbrain-base by digest
+        run: |
+          set -euo pipefail
+          IMG='${{ inputs.gbrain_base }}'
+          docker pull "$IMG"
+          docker inspect --format 'pulled {{index .RepoDigests 0}}' "$IMG"
+          docker run --rm "$IMG" gbrain --version
+
+      - name: Pull and start control-plane by digest
+        run: |
+          set -euo pipefail
+          IMG='${{ inputs.control_plane }}'
+          docker pull "$IMG"
+          docker inspect --format 'pulled {{index .RepoDigests 0}}' "$IMG"
+          docker run --rm "$IMG" bun --version
+
+      - name: Pull and start agent-runner by digest
+        run: |
+          set -euo pipefail
+          IMG='${{ inputs.agent_runner }}'
+          docker pull "$IMG"
+          docker inspect --format 'pulled {{index .RepoDigests 0}}' "$IMG"
+          docker run --rm "$IMG" claude --version
