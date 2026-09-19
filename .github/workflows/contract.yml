@@ -173,7 +173,6 @@ jobs:
             echo "IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io}"
             echo "IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-molanojf}"
             echo "OPENAI_API_KEY=${OPENAI_API_KEY}"
-            echo "COMPOSE_PROJECT_NAME=brainstand"
           } > .env
       - name: Build the pinned base image
         run: |

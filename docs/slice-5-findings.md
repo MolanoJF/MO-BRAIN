@@ -1314,7 +1314,11 @@ The job now declares the scratch Postgres service and `CONTROL_DATABASE_URL`, bu
 prerequisites. Two more CI-only gaps surfaced on the first `contract` run after that and are fixed
 here: the seam-gate legs shell `docker compose --env-file .env` and a runner has no `.env` (now
 materialized from the job environment, never committed), and `nightly.yml`'s `bun run … | tee`
-masked the step's exit code (now `set -o pipefail`).
+masked the step's exit code (now `set -o pipefail`). The first `.env` attempt set
+`COMPOSE_PROJECT_NAME=brainstand`, which collided with the slice0 test project's own default
+(`brainstand-slice0`, `compose/docker-compose.slice0.yml:3`) so slice0's `composeDown -v` tore down
+the main stack mid-suite; the materialized `.env` deliberately leaves the project name unset so each
+compose file keeps its frozen default.
 
 ---
 
