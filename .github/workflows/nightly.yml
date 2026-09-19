@@ -98,6 +98,16 @@ jobs:
             "mobrain/agent-runner:${HARNESS_VERSION}"
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
+      # F31: drive the product's own wizard so the main brain is
+      # operator-initialized before the seam legs (see contract.yml).
+      - name: Bootstrap the main brain through the wizard (F31)
+        run: bun run scripts/ci-bootstrap-brain.ts
+        env:
+          BOOTSTRAP_BASE_URL: https://localhost:8443
+          BOOTSTRAP_TLS_INSECURE: '1'
+          BOOTSTRAP_ADMIN_EMAIL: admin@example.test
+          BOOTSTRAP_ADMIN_PASSWORD: a-long-enough-password
+          BOOTSTRAP_ORG: Acme
       # tee so the failing test names survive into the issue body below. One
       # process per file: mock.module() is process-global (see test-isolated.sh).
       # `pipefail` is required or `tee`'s exit 0 masks every failure.

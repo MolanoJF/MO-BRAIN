@@ -197,6 +197,22 @@ jobs:
       # covers only the pinned binary), so the stack must be up first.
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
+      # F31: the slice3/slice3.5 seam legs (and the ops-backed usage read) run
+      # against the MAIN stack and assume an operator-initialized brain — a
+      # provider key in config.json and an OpenAI-width embedding column. A fresh
+      # compose stack cold-starts a 1280d template the pinned binary refuses to
+      # re-template, and a reset issued as a separate command loses the race to
+      # the worker recreating it. Drive the PRODUCT's own wizard over the
+      # control-plane API — the path every operator uses — never a hand-rolled
+      # `gbrain init`. Idempotent: a brain already ready is left alone.
+      - name: Bootstrap the main brain through the wizard (F31)
+        run: bun run scripts/ci-bootstrap-brain.ts
+        env:
+          BOOTSTRAP_BASE_URL: https://localhost:8443
+          BOOTSTRAP_TLS_INSECURE: '1'
+          BOOTSTRAP_ADMIN_EMAIL: admin@example.test
+          BOOTSTRAP_ADMIN_PASSWORD: a-long-enough-password
+          BOOTSTRAP_ORG: Acme
       # One process per file: see test:integration:isolated above.
       - run: bun run test:contract:isolated
       - name: Capture the capability snapshot and report drift
