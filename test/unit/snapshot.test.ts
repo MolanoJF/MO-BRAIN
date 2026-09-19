@@ -93,7 +93,8 @@ describe('the exact argv for each artifact', () => {
     expect(manifest.driver).toBe('docker-volume');
     expect(manifest.runId).toBe('run-1');
     expect(runner.calls.filter((c) => c.includes('pg_dump'))).toHaveLength(2);
-    const tarCalls = runner.calls.filter((c) => c[0] === 'docker' && c[1] === 'run');
+    // The tar calls, not the chown one-shot that follows each of them.
+    const tarCalls = runner.calls.filter((c) => c[0] === 'docker' && c[1] === 'run' && c.includes('tar'));
     expect(tarCalls).toHaveLength(2);
     // D3: the volume half never needs a running service — a throwaway
     // container only, so the driver works with everything stopped.
