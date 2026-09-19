@@ -111,7 +111,11 @@ jobs:
             control-plane scheduler
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
-      - run: bun run test:integration
+      # mock.module() is process-global, so one file's partial mock answers a
+      # sibling's import in a single Bun process. One process per file is the
+      # isolation the suite needs, and it bounds peak memory to one file's
+      # module graph (the full-stack + all-files run was OOM-killed).
+      - run: bun run test:integration:isolated
 
   contract:
     runs-on: ubuntu-latest
@@ -120,6 +124,7 @@ jobs:
       # G4/G1: pinned-current only on PR/push. pinned-next is nightly.yml's job.
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
+      APP_VERSION: '1.0.0'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -127,6 +132,24 @@ jobs:
       OPS_RPC_URL: http://127.0.0.1:3140
       ENCRYPTION_KEY: ci-encryption-key-at-least-32-characters-long
       BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-chars
+      # runner.contract's A5/A9 legs pinDb() against the scratch Postgres below.
+      CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
+      # The slice0 stack's `gbrain init`/`embed` refuse without the key their
+      # embedding model names (compose/docker-compose.slice0.yml passes it in).
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gbrain
+          POSTGRES_PASSWORD: ci-not-a-real-secret
+          POSTGRES_DB: control
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gbrain -d control"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -143,12 +166,20 @@ jobs:
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            control-plane scheduler
+            --build-arg "HARNESS_VERSION=${HARNESS_VERSION}" \
+            control-plane scheduler agent-runner
+      - name: Mirror the agent-runner under the bare name the contract test runs
+        run: |
+          # runner.contract.test.ts runs `docker run mobrain/agent-runner:<pin>`;
+          # the overlay tags it with the registry-qualified service name.
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION}" \
+            "mobrain/agent-runner:${HARNESS_VERSION}"
       # Most of test/contract targets the LIVE main stack (the slice0 harness
       # covers only the pinned binary), so the stack must be up first.
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
-      - run: bun run test:contract
+      # One process per file: see test:integration:isolated above.
+      - run: bun run test:contract:isolated
       - name: Capture the capability snapshot and report drift
         if: always()
         run: bun run capability:capture || true

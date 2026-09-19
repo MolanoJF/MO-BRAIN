@@ -8,6 +8,14 @@ on:
     # Nightly drift detection against pinned-current AND pinned-next (G1/G4).
     - cron: '17 5 * * *'
   workflow_dispatch:
+    inputs:
+      # Task 13 Step 3: dispatch a version that does not exist (e.g. 0.99.0.0)
+      # so the base build fails and the drift issue step is proven to fire.
+      gbrain_version:
+        description: 'Override the pinned-next arm (blank keeps 0.51.0.0)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   contract:
@@ -19,12 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         # pinned-current is the supported version; pinned-next is the tripwire.
-        gbrain: ['0.50.5.0', '0.51.0.0']
+        # A dispatch may replace the next arm to prove the tripwire fires.
+        gbrain: ["0.50.5.0", "${{ inputs.gbrain_version || '0.51.0.0' }}"]
     continue-on-error: ${{ matrix.gbrain != '0.50.5.0' }}
     env:
       PINNED_CURRENT: '0.50.5.0'
       GBRAIN_VERSION: ${{ matrix.gbrain }}
       HARNESS_VERSION: '2.1.274'
+      APP_VERSION: '1.0.0'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -32,6 +42,21 @@ jobs:
       OPS_RPC_URL: http://127.0.0.1:3140
       ENCRYPTION_KEY: ci-encryption-key-at-least-32-characters-long
       BETTER_AUTH_SECRET: ci-better-auth-secret-at-least-32-chars
+      CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gbrain
+          POSTGRES_PASSWORD: ci-not-a-real-secret
+          POSTGRES_DB: control
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gbrain -d control"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -48,12 +73,18 @@ jobs:
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            control-plane scheduler
+            --build-arg "HARNESS_VERSION=${HARNESS_VERSION}" \
+            control-plane scheduler agent-runner
+      - name: Mirror the agent-runner under the bare name the contract test runs
+        run: |
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION}" \
+            "mobrain/agent-runner:${HARNESS_VERSION}"
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
-      # tee so the failing test names survive into the issue body below.
+      # tee so the failing test names survive into the issue body below. One
+      # process per file: mock.module() is process-global (see test-isolated.sh).
       - name: Run the contract suite
-        run: bun run test:contract 2>&1 | tee contract-output.txt
+        run: bun run test:contract:isolated 2>&1 | tee contract-output.txt
       - name: Open or update a drift issue
         if: failure() && matrix.gbrain != '0.50.5.0'
         env:
