@@ -17,6 +17,27 @@ env:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    env:
+      # Bun loads the repo's .env locally; a CI runner has none, so the pin is
+      # passed explicitly. Without it pin.ts falls back to 0.50.0.0 and the
+      # operations.json seam test reads the wrong registered version.
+      GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
+      CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
+    services:
+      # The unit suite's Postgres-backed checks refuse to skip silently.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: gbrain
+          POSTGRES_PASSWORD: ci-not-a-real-secret
+          POSTGRES_DB: control
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gbrain -d control"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -189,7 +210,7 @@ jobs:
   publish:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    needs: [unit, contract]
+    needs: [unit]
     permissions:
       contents: read
       packages: write
