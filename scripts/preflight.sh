@@ -121,22 +121,34 @@ project_name() { printf '%s' "${COMPOSE_PROJECT_NAME:-brainstand}"; }
 # A port held by a container of THIS project is not a conflict — the stack is
 # already running. A port held by anything else is.
 port_busy() {
-  local port="$1" owners foreign hex
+  local port="$1" owners foreign hex f
   owners="$(docker ps --filter "publish=${port}" --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | grep -v '^[[:space:]]*$' || true)"
   if [ -n "$owners" ]; then
     foreign="$(printf '%s\n' "$owners" | grep -vxF "$(project_name)" || true)"
     [ -z "$foreign" ] && return 1
     return 0
   fi
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn 2>/dev/null | awk 'NR > 1 { print $4 }' | grep -qE "[:.]${port}$"; then
+      return 0
+    fi
+  fi
   if command -v netstat >/dev/null 2>&1; then
     if netstat -ano 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -qi LISTENING; then
       return 0
     fi
   fi
-  if [ -r /proc/net/tcp ]; then
-    printf -v hex '%04X' "$port"
-    if grep -qiE ":${hex}[[:space:]]" /proc/net/tcp; then return 0; fi
-  fi
+  # /proc/net/tcp{,6}: only the LOCAL address field, and only a LISTEN state
+  # (0A). The previous check matched the port anywhere in the file — including
+  # an outbound connection's REMOTE port — so any live HTTPS connection made
+  # this refuse 443. Measured on a stock GitHub Actions runner, 2026-09-19.
+  printf -v hex '%04X' "$port"
+  for f in /proc/net/tcp /proc/net/tcp6; do
+    [ -r "$f" ] || continue
+    if awk -v h="$hex" 'NR > 1 && $2 ~ (":" h "$") && $4 == "0A" { found = 1 } END { exit(found ? 0 : 1) }' "$f"; then
+      return 0
+    fi
+  done
   return 1
 }
 
