@@ -1,6 +1,6 @@
 # brainstand — Staged Delivery Roadmap
 
-> **For agentic workers:** This is the **stage map**, not an executable plan. **Slices 0–4 are COMPLETE and merged on `main` — do not re-execute any of those plans.** Each later stage has its own plan document. Execute stages in order; do not start a stage until its entry gate passes. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
+> **For agentic workers:** This is the **stage map**, not an executable plan. **Slices 0–5 are COMPLETE and merged on `main`; Mobrain 1.0.0 shipped (self-host GA) at the `v1.0.0` tag — do not re-execute any of those plans.** The next stage is the **deferred managed-cloud slice**, which has no plan yet and must be written at its own gate. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` against the *per-stage* plan documents. Start at [HANDOFF.md](../../../HANDOFF.md).
 
 **Goal:** Turn gbrain (a 415K-LOC CLI/MCP knowledge system) into a product a team deploys with one `docker compose up` and operates from a web console — with gbrain pinned and upgraded, never forked.
 
@@ -8,7 +8,7 @@
 
 **Upstream:** `C:\Users\juanp\Desktop\gbrain` — `gbrain` v0.50.0.0, MIT, © 2026 Garry Tan.
 
-**Working codename:** `brainstand`. Rename before any public artifact.
+**Working codename:** `brainstand`. **Renamed to Mobrain in Slice 5's Task 4**; the three frozen crypto strings keep their original bytes (they are key-derivation domain separators, D3).
 
 ---
 
@@ -89,7 +89,7 @@ Do not re-litigate these. Each was read out of the source, not inferred.
 
 ## Environment prerequisites
 
-**Current (2026-09-18):** Slices 0–3.5 **and Slice 4** are complete and merged on `main` (Slice 3.5 merged at `202a658`, Slice 4 at `6ba1754`), which is the only branch. Slice 4's exit gate is met (see [Slice 4](#slice-4--agent-runner) below) and all six verification commands are green. Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **Next executable stage is Slice 5 — its plan is not yet written, and it is additionally blocked on Open Question 2.**
+**Current (2026-09-19):** Slices 0–3.5, **Slice 4** and **Slice 5 (self-host GA)** are complete and merged on `main` (Slice 3.5 at `202a658`, Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag), which is the only branch. **Mobrain 1.0.0 shipped**; its three published digests are in [`CHANGELOG.md`](../../../CHANGELOG.md). Slice 5's exit gate is met (measured table below) and the eight verification commands are green. Docker Desktop is installed (Compose v5.5.1). This directory is a git repository. **The next stage is the deferred managed-cloud slice — no plan exists yet, and it carries Open Question 2 forward.**
 
 The gbrain checkout at `C:\Users\juanp\Desktop\gbrain` is a **read-only reference** — never edit it (G3).
 
@@ -104,10 +104,10 @@ Historical: when this roadmap was first written (2026-09-14), Docker was absent 
 Six stages. Each produces working, testable software on its own. **Each stage's exit gate is an end-to-end proof, not a test count.**
 
 ```
-Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.5 ──▶ Slice 4 ──▶ Slice 5
- prove       deploy      members     scheduler   deterministic  agent      managed
- the CLI     + 1 brain   +           (gbrain_    upgrades       runner     cloud
- lane        + 1 admin   connections  command)
+Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.5 ──▶ Slice 4 ──▶ Slice 5 ──▶ Slice 6
+ prove       deploy      members     scheduler   deterministic  agent      self-host   managed
+ the CLI     + 1 brain   +           (gbrain_    upgrades       runner     GA          cloud
+ lane        + 1 admin   connections  command)   ✅ v1.0.0                  ✅ 1.0.0    (deferred)
 ```
 
 ### Slice 0 — Prove the CLI lane
@@ -250,15 +250,55 @@ Slice 0 ──▶ Slice 1 ──▶ Slice 2 ──▶ Slice 3 ──▶ Slice 3.
 
 ---
 
-### Slice 5 — Managed cloud
+### Slice 5 — Self-host GA
 
-**Plan:** to be written at this gate.
+**Plan:** [`2026-09-18-slice-5-self-host-ga.md`](./2026-09-18-slice-5-self-host-ga.md) — **COMPLETE at the `v1.0.0` tag (Mobrain 1.0.0, 2026-09-19).** Findings: [`docs/slice-5-findings.md`](../../slice-5-findings.md) (U1–U3, P1–P9, F20–F32, the deferrals). Runbooks: [`docs/runbooks/install.md`](../../runbooks/install.md), [`docs/runbooks/backup-restore.md`](../../runbooks/backup-restore.md). Published digests: [`CHANGELOG.md`](../../../CHANGELOG.md).
 
-**Entry gate:** Slice 3.5 exit gate green **and** Slice 4 exit gate green — **both are now met.** Slice 3.5 closed on six green commands and a 77/0 e2e family; Slice 4's three promises are measured in its own section above, and the defects its gate and its operator walk found are fixed rather than papered over. Upgrades must be deterministic before this stage exists.
+**Why:** close the distance between "every test is green on the authors' machine" and "a stranger's machine runs this." Self-host GA was taken as the scope decision at this gate (2026-09-18); managed cloud deferred to Slice 6, billing deliberately out.
 
-**Scope:** our provisioner stands up the same stack per tenant; the user never sees compose. **N stacks, not one stack with tenants** — gbrain is single-brain-per-`GBRAIN_HOME` with no users table, and `source_id`/`federated_read` is the only isolation axis. This makes upgrade automation load-bearing for the business model, not a nicety. Billing.
+**Exit gate — measured, not asserted:**
 
-**Blocked on Open Question 2** (below) — the search-mode cost spread must be measured before pricing.
+| Roadmap promise | Measured outcome |
+|---|---|
+| A host that has never seen this repository installs the product from the registry and reaches a healthy console | **Met** — Gate A (A1–A8), green in CI in the `clean-install` job on a runner that first asserts none of our images is present (a pre-seeded runner fails the gate). F26 and F29 were fixed to make it honest. |
+| A production-shaped backup verifies its own quiesce and says which lane; an unverifiable quiesce refuses rather than claiming `true` | **Met** — P1: on a base-compose-only stack (no published ops port) the manifest read `"quiesced":"verified"` / `"quiesceLane":"relay"`; D6's refusal (`--allow-unquiesced`) covers the case the relay cannot speak. |
+| The wizard shows a measured cost ratio or says it was not measured — never upstream's number presented as ours | **Met (honest null)** — P5: every mode delta measured `$0.0000000` on a 7-page corpus, so `measuredCost` stays `null` for all three modes and the console says it was not measured (D7). F21 corrected the mode vocabulary to the pinned binary's real set. |
+| `/spend` states its own coverage before its totals, carries gbrain's `notCovered` list verbatim, and never sums the two meters | **Met** — U3/P9 C6: coverage displayed first with all four `notCovered` strings verbatim; C6 measured `ours=$0.0263051 unpriced=0 brainReachable=true`. F20 fixed the unreachable-ledger defect found on a stock stack. |
+| The nightly drift job has been seen to open an issue, and seen not to open a second one | **Met** — P6: a dispatch at `gbrain_version=0.99.0.0` opened issue #1; a second dispatch commented on it and opened no second issue. Closed by hand after the proof. |
+| Restore to a new domain has been drilled, with the grant-invalidation consequence measured and documented | **Met** — P8 + F23: the drill measures `active` **2 → 0** and **4** `connection_revoked` alerts over 21.2 s. Honest qualification: the wire-level OAuth issuer/redirect rejection was documented, not reproduced (no alternate hostname resolves on this host). |
+| Slice 3.5's rollback gate still passes on the renamed, re-published stack (C9) | **Met** — F25 fixed `buildImages` (it no longer prints "No services to build"); P9 C9 records `ledger[0.50.5.0]=applied`, `parity.regressed=[]`, `schemaVersionOk=true`; the whole `slice5.e2e.test.ts` is **10 pass / 0 fail**. |
+| The eight verification commands are green, e2e twice consecutively, with verbatim tails in `PROGRESS.md` | **Met** — Task 18 Step 1: `lint:forbidden` clean · `tsc` clean · unit **649/0** · integration **441 + 1 skip/0** · contract **146/0** · e2e **114 + 8 skip/0** twice · both build gates **PASS both arms**. F32 was found and fixed by this run. |
+| The three frozen crypto strings are unchanged, and `lint:forbidden` fails the build if anyone changes them | **Met** — P3 proves the live `secrets` rows still decrypt under the frozen domain separator; the `lint:forbidden` rule fails the build on any edit. |
+| A release is tagged, published, and pulled by digest from a machine that did not build it | **Met** — `v1.0.0` annotated tag; CI's `publish` job produced the three full `RepoDigest`s (in `CHANGELOG.md`); [`release-verify.yml`](../../../.github/workflows/release-verify.yml) pulled all three by digest and started them on a fresh runner (`verify` success in 44s, run [35445223097](https://github.com/MolanoJF/mobrain/actions/runs/35445223097): `gbrain 0.50.5.0`, `bun 1.3.13`, `2.1.274 (Claude Code)`). Verbatim output in `PROGRESS.md`. |
+
+The defects this gate found (F24–F32) are **fixed**, not smoothed; the deferrals (F22's Connection purge, the
+search-mode pricing input, D5's partial caller cure, the observability-track items) are named with their owner
+slices in [`docs/slice-5-findings.md`](../../slice-5-findings.md).
+
+---
+
+### Slice 6 — Managed cloud (deferred)
+
+**Plan:** to be written at this gate. **No provisioner exists yet.**
+
+**Entry gate:** Mobrain 1.0.0 shipped (Slice 5 exit gate green) — **met.**
+
+**Substrate decision (D12 — recorded so it is not re-litigated): one VM per tenant**, created through a
+cloud provider API and installed by running **this release's `install.sh` over SSH**, with the stack's own
+backup/restore and upgrade lanes operated per tenant. Rejected: a shared fleet with several compose projects
+per host (we would own port allocation, shared-Caddy routing, noisy-neighbour limits and cross-tenant blast
+radius), and Kubernetes (it forks the deployment artifact — self-host stays compose while cloud becomes
+manifests). **Nothing in Slice 5 builds a provisioner;** the decision is recorded because Slice 5's install,
+preflight and clean-host proof are its foundation.
+
+**Scope:** the provisioner stands up the same stack per tenant; the user never sees compose. **N stacks, not
+one stack with tenants** — gbrain is single-brain-per-`GBRAIN_HOME` with no users table, and
+`source_id`/`federated_read` is the only isolation axis. Upgrade automation is load-bearing for the business
+model, not a nicety. Billing.
+
+**Still blocked on Open Question 2** (below) — the search-mode cost spread must be measured on a populated
+corpus before pricing. Slice 5 deliberately left `measuredCost` `null` rather than publish a number it did
+not measure (P5, D7).
 
 ---
 
@@ -296,7 +336,7 @@ Get a lawyer's eye on naming and positioning before launch: *"built on gbrain"* 
 
 - Retrieval, embedding, ingestion, synthesis, the knowledge graph, the MCP server.
 - A replacement for `/admin`'s operator surfaces — and per S1 we don't expose them either. **Break-glass instead.**
-- **Shared-database multi-tenancy for cloud.** See Slice 5.
+- **Shared-database multi-tenancy for cloud.** See Slice 6.
 
 ---
 
@@ -320,7 +360,7 @@ Get a lawyer's eye on naming and positioning before launch: *"built on gbrain"* 
 ## Open questions to settle early
 
 1. **Does anything degrade with many sources** — search fan-out, `federated_read[]` array length, repo count on disk? Gates how hard we push Space-per-boundary (risk 10). **Measure during Slice 2**, with a synthetic 25-Space brain.
-2. **Managed-cloud pricing vs the search-mode cost spread.** We own the cost there and cannot show every tenant the matrix, so mode becomes a plan tier and the arithmetic has to precede pricing. **Blocks Slice 5.**
+2. **Managed-cloud pricing vs the search-mode cost spread.** We own the cost there and cannot show every tenant the matrix, so mode becomes a plan tier and the arithmetic has to precede pricing. **Blocks Slice 6 (the deferred managed-cloud slice). Still open after Mobrain 1.0.0** — Slice 5 left `measuredCost` `null` (P5, D7) rather than publish a ratio it had not measured.
 3. **Product name**, and whether to approach upstream before or after launch. **Blocks any public artifact.**
 
 ---

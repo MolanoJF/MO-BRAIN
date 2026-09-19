@@ -1,51 +1,116 @@
 # Handoff — read this first
 
-Written 2026-09-15; updated 2026-09-18. **Slices 0, 1, 2, 3, 3.5 and 4 are complete and merged on `main`** — Slice 3.5 at `202a658`, Slice 4 merged at `6ba1754`, which makes `main` the only branch again (it was the only branch before Slice 4 too). **All six verification commands are green** (numbers below): unit `628/0`, integration `434 pass + 1 skip`, contract `142/0`, e2e `104/0` twice consecutively, `lint:forbidden` and `tsc --noEmit` clean, and both build gates passing both arms. **Next action: write the Slice 5 plan** — it is not written, and it is additionally blocked on Open Question 2 (the search-mode cost spread must be measured before pricing).
-
-This file is the cold-start entry point. Historical mid-task resume notes (including “resume at Task 3 re-review” and branch `slice-1-deploy-one-brain`) are obsolete and were removed.
+**Mobrain 1.0.0 shipped.** This is the cold-start entry point for a released product, not a build in
+progress. Slices 0–5 are complete and merged on `main` (Slice 5 at the `v1.0.0` tag); `main` is the only
+branch. The eight verification commands are green on the frozen tree, e2e twice consecutively, with
+verbatim tails in [`PROGRESS.md`](docs/superpowers/plans/PROGRESS.md). The release artifacts are the three
+published digests below — **a release is its digests; a tag is a label someone can move.**
 
 ---
 
 ## What this project is
 
-**Mobrain** (the public product name; it was codenamed `brainstand` through Slices 0–4 and renamed in Slice 5's Task 4) wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with one `docker compose up` and operates from a web console.
+**Mobrain** wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with one
+`scripts/install.sh` and operates from a web console. It was codenamed `brainstand` through Slices 0–4 and
+renamed in Slice 5's Task 4; the three frozen crypto strings keep their original bytes because they are
+key-derivation domain separators, not product names (D3).
 
-The strategy rests on one bet: **gbrain is a pinned upstream dependency driven only through its published contracts. Never forked.** Its CLI is the control lane, its HTTP MCP is the data lane, and a small file plane covers what `config set` refuses. If you find yourself editing gbrain's source or reading its tables directly, stop.
+The strategy rests on one bet: **gbrain is a pinned upstream dependency driven only through its published
+contracts. Never forked.** Its CLI is the control lane, its HTTP MCP is the data lane, and a small file
+plane covers what `config set` refuses. If you find yourself editing gbrain's source or reading its tables
+directly, stop.
 
 `C:\Users\juanp\Desktop\gbrain` is a **read-only reference checkout**. Read it freely. Never edit it.
 
 ---
 
-## Where things stand
+## What shipped in 1.0.0
 
-| Slice | State |
-|---|---|
-| 0 — prove the CLI lane | **complete** on `main` |
-| 1 — deploy + one brain + one admin | **complete** on `main` (merged 2026-09-15, HEAD `77a18d1` at merge) |
-| 2 — members + connections | **complete** on `main` (Gates A/B/C green) |
-| 3 — scheduler, `gbrain_command` only | **complete** on `main` (Gates A/B/C green) |
-| 3.5 — deterministic upgrades | **complete** on `main` (Gates A/B/C green; merged 2026-09-17, HEAD `202a658` at merge) |
-| 4 — agent runner | **complete** on `main` (merged `6ba1754`; Gates A/B/C green; all six verification commands green) |
+- **Install:** `scripts/install.sh` + `scripts/preflight.sh` (Docker/Compose version floors, RAM, disk,
+  ports 80/443, DNS for `$DOMAIN`); the console's wizard reaches `ready` on a clean host.
+- **Images published from CI to `ghcr.io/molanojf`** (the only GHCR owner available; the product name is not
+  a registry namespace). The local `gh` OAuth token lacks `write:packages`, so CI owns every push — never
+  attempt a host-side `docker push`.
+- **Backup/restore:** the backup manifest's quiesce is three-state (`verified` / `unverified` / `failed`) and
+  a production-shaped stack proves it through the `compose exec` relay; restoring to a new `DOMAIN`
+  invalidates every grant, disables the affected schedules, and raises member-facing `connection_revoked`
+  alerts.
+- **Spend:** `GET /api/spend` states its own coverage before its totals, carries gbrain's `notCovered` list
+  verbatim, and never sums the two meters. Search-mode `measuredCost` stays `null` on this deployment
+  (P5), so no ratio is shown.
+- **Drift tripwire:** the nightly pinned-next arm opens exactly one issue per drifting version and comments
+  on re-run; the pinned-current arm stays blocking.
+- **Upgrades:** the host `scripts/upgrade.ts` lane still passes Slice 3.5's rollback gate on the renamed,
+  re-published stack (C9). An agent runner is never a path to an upgrade.
+- **Docs/licence:** `README.md`, `LICENSE` (MIT), `SECURITY.md`, `docs/support-policy.md`, plus the
+  install/backup-restore runbooks.
+- **Deliberately not in 1.0.0:** managed cloud, billing, any provisioner, any pricing page. The one
+  remaining open question is managed cloud (below).
 
-Do **not** re-execute the Slice 0, 1, 2, 3, 3.5 or 4 plan/gate work. Those are historical records. Slice 4's plan is [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md); its findings and measured spend are [`docs/slice-4-findings.md`](docs/slice-4-findings.md); its runbook is [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md).
+### The published digests (v1.0.0)
 
-### Live state on the dev stack (measured 2026-09-18, by the agent that closed Slice 4)
+| Image | Tag | RepoDigest |
+|---|---|---|
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4` |
+| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f` |
 
-- **The final-verification pass (2026-09-18, after the sign-in page and the runner-presence gate landed) re-measured the eight gates on the frozen tree**: `lint:forbidden` clean · `tsc --noEmit` clean · `test/unit` **628 / 0** (2267 `expect()` calls, 46 files, 2.05s) · `test/integration` **434 pass / 1 skip / 0 fail of 435** (1804 `expect()` calls, 50.80s) · `test/contract` **142 pass / 0 fail of 142** (594 `expect()` calls, 384.82s) · `pin.test.sh` / `harness-pin.test.sh` both PASS both arms (via Git bash, pins exported from `.env`). **`test/e2e` first came back red twice, and the reason was the environment, not the tree**: both red runs measured **93 pass / 11 fail** with `$0.0000000` Gate C spend, every failure downstream of the gateway answering `401 authentication_error` / `OAuth access token has been revoked.` for the org's stored credential — the rotating host secret described below. After it was re-provisioned host-side from `~/.claude/.credentials.json`, the two consecutive directory runs measured **104 pass / 0 fail** each (1011 `expect()` calls; 1336.39s and 1327.58s; Gate C's own teardown logging `$0.0656777` and `$0.0660306`, so the two runs cost **`$0.1317083`**). The earlier, independently measured state on this branch still stands: `test/unit` 602 / 0 · `test/integration` 428 / 1 skip / 0 · `test/contract` 142 / 0 · `bun test --parallel=1 test/e2e` **104 / 0 twice consecutively**. Verbatim tails are in `PROGRESS.md`'s Slice 4 section, and no test or gate was weakened to reach them. **Check `docker port brainstand-gbrain-ops-1` says `3140/tcp -> 0.0.0.0:3140` before the host-run suites** — after `test/integration` it will not, because `quiesce.test.ts` resumes through the base compose file alone; re-up the dev stack in between.
+Source of record: the `publish` job of the [`contract` workflow](.github/workflows/contract.yml). They are
+verified from a fresh runner that did not build them by
+[`release-verify.yml`](.github/workflows/release-verify.yml) (dispatch it; it pulls all three by digest and
+starts them). [`CHANGELOG.md`](CHANGELOG.md) carries the same three digests.
 
-- The dev stack runs **`0.50.5.0`** (`.env` `GBRAIN_VERSION=0.50.5.0`; `gbrain-ops`'s binary reports `gbrain 0.50.5.0`; `gbrain-serve` and `gbrain-worker` run `mobrain/gbrain-base:0.50.5.0`; `GET /api/health` is 200 with `pin: {declared:"0.50.5.0", observed:"0.50.5.0", matches:true}` and `components: {controlDb:"ok", ops:"ok"}`).
-- **The Spaces are `customers`, `internal` and `shared`** — 6 pages and 6 chunks in total (1 / 3 / 2). This is **thin, not the populated post-F4 brain** the stack held at Slice 3.5's close: the e2e family cycles the volumes with its own `down -v` (`restore.e2e.test.ts`) and the wizard re-provisions from scratch, so the deep fixture is gone and the next session starts from what the last e2e run left. A `slice3-probe` Space appears and disappears with `test/contract`'s Gate A fixture (`sources list` → `sources remove` → re-seed → `sources add`); seeing it is not a defect.
-- **The runner lane is ENABLED.** `RUNNER_TOKEN` is non-empty in `.env`; `agent-runner` is up on `mobrain/agent-runner:2.1.274`; it is polling: the control-plane log carries `POST /api/runs/claim 204 25s` continuously, and the container's own log reads `[runner] <id> up, harness 2.1.274, tools 7 on the closed list`. Left up and polling by the 2026-09-18 verification pass — it was down when that pass began, having been drained by a suite's own quiesce leg and not resumed by it, which is the documented behaviour (D12/D13), not a fault.
-- **`/api/health` carries the three-state `runner` block**: `{"state":"disabled" | "never_claimed" | "connected", "lastSeenAt": …, "version": …}`. `disabled` means `RUNNER_TOKEN` is unset or whitespace; `connected` is the **only** green state, and since **F19** it means a runner has been **seen** — inside `RUNNER_SEEN_WINDOW_MS` (50 s = 2 × the 25 s claim long-poll) **or** holding a live lease, so a long poll that finds nothing is a sighting; `never_claimed` is what the lane reads when no sighting is inside the window and no run is leased, which is the state a stopped runner leaves 50 s later — not “the runner is missing”. `lastSeenAt` is when a runner last was; `version` is the harness version it announced in the request that recorded it. The sighting record is the **`runner_presence`** table (`runner_id` PK, `last_seen_at`, `harness_version`), added by migration **`src/control/db/migrations/0007_runner_presence.sql`** (with `meta/0007_snapshot.json`) and excluded from the upgrade digest's census (`UNCOUNTED_TABLES`); it is deployment-wide by construction (a claim request names a runner and no organization) and holds no token, no client id and no connection detail.
-- **The console's door is a sign-in page (F18).** A returning operator is asked to sign in (`src/console/pages/SignIn.tsx`, the `signin` phase of `App.tsx`'s `phaseFor`) rather than being shown the bootstrap form; the fresh-install form remains for a box with no admin, and its `already_bootstrapped` refusal now routes to sign-in. Before F18 the shipped bundle had no sign-in page at all, so a returning operator was refused `already_bootstrapped` at a console that was working.
-- **Both secrets are present** in the control DB's `secrets` table, envelope-encrypted: `anthropic_api_key` and `openai_api_key`. Verified by name and length only; never print the values. **The anthropic row is a rotating host secret, and the e2e family's own cycles can drop it.** The stored value is the machine's Claude Code OAuth access token (the runbook's own measured fact), so the CLI's next refresh revokes it — every model call then answers `401 authentication_error` / `OAuth access token has been revoked.` with nothing changed in this repository — and `restore.e2e.test.ts`'s control-DB reload or the upgrade gate's rollback can put back a `secrets` generation that predates a rotation. Both halves were measured on 2026-09-18: the first e2e pass of the day went **93 pass / 11 fail** with that 401 as the only cause (B5–B8, C3–C8, C11, `$0.0000000` spend), and a version stored at 11:41:55 was gone from the control DB after the next pass's own cycle. Re-provision **after** a cycle, not before it: store the host's current token for the org the pass's own precondition line names (host-side act, value never printed), then let the money legs run. `docs/runbooks/agent-runner.md`, section "Rotating the Anthropic key", carries the procedure and the record.
-- **The harness is pinned at `2.1.274`** — `.env` `HARNESS_VERSION`, the image tag `mobrain/agent-runner:2.1.274`, `docker/agent-runner.Dockerfile`'s build-time gate, and the runner's own announcement all agree.
-- **All five schedules are DISABLED**: the 5-minute `live-sync` on `shared`, `nightly-dream`, `gate-c-nightly`, `gate-c-ambiguous` and `gate-b-throwaway`. Four carry `disabled_reason = "gate C upgrade window"` (the upgrade gate disables the writers for the window and restores them afterwards) and `gate-b-throwaway` carries `connection_revoked`. **The Slice-3-era warnings that `live-sync` was firing every 5 minutes and that `gate-c-nightly` / `gate-c-ambiguous` were still enabled and would resume as real paid `dream` runs after 2026-11-01 are no longer true; they were verified gone on this stack and removed from this file.**
-- **A pending `awaiting_admin_decision` item is still live and still blocks nothing else.** `playbook_ledger` holds `0.50.1.0`, `0.50.4.0` and `0.50.5.0` as `applied`, and `0.50.2.0` as `awaiting_admin_decision` with **8 `upgrade_checklist_items` still `pending`** — so the upgrade banner is up. Clear it at `/upgrades` or `POST /api/upgrades/checklist/:itemId/ack` (admin only); preflight refuses a new upgrade run while one is pending. **Verified still true on this stack — the warning stays.**
-- **Gate residue you should expect, and not mistake for product state:** 1 organization, 10 `memberships` (1 owner, 8 members, 1 viewer), and **7 active / 3 revoked Connections**, all left by repeated gate runs. Two alerts are open (`overlap_killed_previous`, `connection_revoked`); `/api/health` carries unacknowledged **kinds only**, and `/schedules` is the only place to acknowledge one.
-- **A restore or a quiesce leaves the runner DOWN by design** (D12/D13): `restoreLane` deliberately does not resume a service whose profile is inactive, and `agent-runner` drains on SIGTERM and exits 0. Bring it back with `docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml --profile runner up -d caddy-ca-export agent-runner` — the CA export first, it is a declared dependency.
-- The `bs-fp-pg` scratch Postgres is still up on `localhost:5432` for host-run tests (see `docs/slice-3-findings.md` F10); `test/integration` needs `CONTROL_DATABASE_URL` exported.
-- Pausing the scheduler is `docker compose stop scheduler` (see the scheduler runbook).
+### The one remaining open question — managed cloud
+
+Managed cloud is deferred to a later slice. The substrate decision is recorded as **D12** in the Slice 5
+plan and is **not** to be re-argued: **one VM per tenant, created through a cloud provider API, installed by
+running this release's `install.sh` over SSH**, with the stack's own backup/restore and upgrade lanes
+operated per tenant. Rejected: a shared fleet with several compose projects per host, and Kubernetes.
+**Nothing in this repository builds a provisioner yet, and nothing else about the cloud slice is presumed.**
+Pricing is still unsettled — **Open Question 2** (the search-mode cost spread) must be measured on a
+populated corpus before pricing, and that is the deferred slice's first job.
+
+---
+
+## Live state on the dev stack (measured 2026-09-19)
+
+- **The stack is up** on the base + dev compose files: `caddy`, `postgres` (healthy), `gbrain-ops` and
+  `control-plane` and `scheduler` (all `ghcr.io/molanojf/control-plane:dev`), `gbrain-serve`/`gbrain-worker`
+  (the pinned `gbrain-base`), and `agent-runner`. `docker port brainstand-gbrain-ops-1` reads
+  `3140/tcp -> 0.0.0.0:3140`.
+- **`GET /api/health` is 200**: `components: {controlDb:"ok", ops:"ok"}`, `pin: {declared:"0.50.5.0",
+  observed:"0.50.5.0", matches:true}`, and `runner: {state:"connected", version:"2.1.274"}`.
+- **The brain is thin:** 4 sources and 4 pages (the e2e family cycles the volumes with its own `down -v` and
+  the wizard re-provisions from scratch). A `slice3-probe` Space appears and disappears with
+  `test/contract`'s Gate A fixture; seeing it is not a defect.
+- **The dev stack runs local builds (`control-plane:dev`), not the released `1.0.0` tag.** The installer
+  pulls `control-plane:1.0.0`; the dev box deliberately runs `dev`.
+- **Both secrets are present** in the control DB's `secrets` table, envelope-encrypted:
+  `anthropic_api_key` and `openai_api_key` (verified by name only; never print the values). **The anthropic
+  row is a rotating host secret.** The stored value is the machine's Claude Code OAuth access token, so the
+  CLI's next refresh revokes it — every model call then answers `401 authentication_error` / `OAuth access
+  token has been revoked.` with nothing changed in this repository — and a restore or an upgrade rollback
+  can put back a `secrets` generation that predates a rotation. **Re-provision *after* a destructive cycle,
+  never before.** Procedure and record: `docs/runbooks/agent-runner.md`, "Rotating the Anthropic key".
+- **The D11 debt was cleared through product paths (Task 14, P7) — and a later destructive e2e cycle
+  restored it.** The release verification pass's own `test/e2e` runs restore control-DB snapshots from the
+  Slice 2/3 era, so the stack currently carries the **pre-Task-14** residue again, measured directly:
+  **1 organization, 10 memberships, 10 Connections (7 active / 3 revoked), 2 open alerts
+  (`overlap_killed_previous`, `connection_revoked`), 8 pending `upgrade_checklist_items` on `0.50.2.0`
+  (`awaiting_admin_decision`), and 5 schedules, all disabled.** This is expected from the destructive e2e
+  family, not a regression, and it is clearable through the product exactly as Task 14 proved: ack the
+  checklist at `/upgrades` (or `POST /api/upgrades/checklist/:itemId/ack`), ack alerts at `/schedules`, and
+  offboard residue members with `DELETE /api/members/:id`. No SQL is used to clear it.
+- **One required Connection-purge path does not exist (F22).** `POST /api/connections/:id/revoke` exists;
+  `DELETE /api/connections/:id` does not, so a revoked Connection survives until its member is offboarded
+  (which cascades) — and cannot be offboarded while a live schedule holds the member. Deferred to the next
+  hardening slice; see `docs/slice-5-findings.md`.
+- **A restore or a quiesce leaves the runner DOWN by design** (D12/D13): `restoreLane` deliberately does not
+  resume a service whose profile is inactive, and `agent-runner` drains on SIGTERM and exits 0. Bring it back
+  with the CA export first:
+  `docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml --profile runner up -d caddy-ca-export agent-runner`.
+- The `bs-fp-pg` scratch Postgres is still up on `localhost:5432` for host-run tests; `test/integration`
+  needs `CONTROL_DATABASE_URL` exported. Pausing the scheduler is `docker compose stop scheduler`.
 
 **Progress tracker:** [`docs/superpowers/plans/PROGRESS.md`](docs/superpowers/plans/PROGRESS.md)
 
@@ -59,7 +124,9 @@ Local stack (needs `.env` with `DOMAIN=localhost` and the secrets from `.env.exa
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
 ```
 
-The dev override is **not optional on this machine**: it publishes `gbrain-ops` on `3140:3140`, which every host-run suite reaches over `OPS_RPC_URL=http://127.0.0.1:3140`. A stack brought up from the base file alone leaves `test/contract` and `test/e2e` failing on `ConnectionRefused`.
+The dev override is **not optional on this machine**: it publishes `gbrain-ops` on `3140:3140`, which every
+host-run suite reaches over `OPS_RPC_URL=http://127.0.0.1:3140`. A stack brought up from the base file alone
+leaves `test/contract` and `test/e2e` failing on `ConnectionRefused`.
 
 The runner lane is additionally switched on with:
 
@@ -67,30 +134,71 @@ The runner lane is additionally switched on with:
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml --profile runner up -d caddy-ca-export agent-runner
 ```
 
-Clean-VM / production path is `scripts/install.sh` (passes `--env-file` so Compose interpolates the root `.env` it writes). Backup and restore are **host** operations (`scripts/backup.ts`, `scripts/restore.ts`); in-container `POST /api/backup` returns 503 when Docker is unavailable.
+Clean-VM / production path is `scripts/install.sh` (passes `--env-file` so Compose interpolates the root
+`.env` it writes). Backup and restore are **host** operations (`scripts/backup.ts`, `scripts/restore.ts`);
+in-container `POST /api/backup` returns 503 when Docker is unavailable. Slice 0 contract stack:
+`bun run stack:up` / `stack:down`.
 
-Slice 0 contract stack: `bun run stack:up` / `stack:down`.
+Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (several integration files
+default it locally and some do not). Run `test/integration` **before** `test/contract` / `test/e2e`, or re-up
+the dev stack in between: `test/integration/quiesce.test.ts` resumes through `compose/docker-compose.yml`
+alone and recreates `gbrain-ops` without the dev override's port publication.
 
-Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (several integration files default it locally and some do not). Run `test/integration` **before** `test/contract` / `test/e2e`, or re-up the dev stack in between: `test/integration/quiesce.test.ts` resumes through `compose/docker-compose.yml` alone and recreates `gbrain-ops` without the dev override's port publication.
+---
+
+## Runbooks and where the docs live
+
+| Document | What it is |
+|---|---|
+| [`docs/runbooks/install.md`](docs/runbooks/install.md) | Clean-host install and preflight |
+| [`docs/runbooks/backup-restore.md`](docs/runbooks/backup-restore.md) | Backup, quiesce lanes, new-domain restore |
+| [`docs/runbooks/upgrade.md`](docs/runbooks/upgrade.md) | The deterministic upgrade and rollback lane |
+| [`docs/runbooks/scheduler.md`](docs/runbooks/scheduler.md) | Schedules, quiet hours, catch-up/overlap |
+| [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) | Enable/disable, the three health states, revert, rotating the Anthropic key |
+| [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) | Operator recovery over the ops sidecar |
+| [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, upgrade cadence, the drift tripwire, what is not promised |
+| [`docs/slice-5-findings.md`](docs/slice-5-findings.md) | U1–U3, P1–P9, F20–F32 — every status and every deferral |
+| [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
+| [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
+
+**Support policy in one line:** we support exactly the pinned gbrain (`0.50.5.0`) and harness (`2.1.274`);
+upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
+tag; the nightly drift job is the tripwire. See `docs/support-policy.md` for the full promises and
+non-promises.
 
 ---
 
 ## What not to do
 
-- Don't fork gbrain, import past its `exports` map, read its tables directly, or screen-scrape human-readable CLI output.
+- Don't fork gbrain, import past its `exports` map, read its tables directly, or screen-scrape human-readable
+  CLI output.
 - Don't run `gbrain autopilot --install` in a container — `lint:forbidden` catches it.
 - Don't invoke `gbrain` through a shell string. Argv arrays only.
 - Don't weaken a test or gate to make it pass.
 - Don't mount the Docker socket into the control plane.
-- Don't `git add .env`. It holds a real `OPENAI_API_KEY` plus `RUNNER_TOKEN`, `OPS_RPC_TOKEN`, `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET` and the Postgres password. `sk-`-shaped strings in tests are deliberate fakes.
+- Don't `git add .env`. It holds a real `OPENAI_API_KEY` plus `RUNNER_TOKEN`, `OPS_RPC_TOKEN`,
+  `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET` and the Postgres password. `sk-`-shaped strings in tests are
+  deliberate fakes.
+- Don't attempt a host-side `docker push` to GHCR; the local token lacks `write:packages`. CI publishes.
 - **The runner lane:**
-  - **Never give `agent-runner` a database URL** (brain or control), `GBRAIN_HOME`, `OPS_RPC_TOKEN`, `ENCRYPTION_KEY` or a provider key. Its only credentials are `RUNNER_TOKEN` and the per-run gbrain token, and the container is a client of the control plane, never of the database.
-  - **Never mount the Docker socket into anything that touches agent output**, and never mount a volume into the runner at all (`volumes: []`, ever). Its workspace is a fresh directory under the `/tmp` tmpfs, created at claim and destroyed on every exit path.
+  - **Never give `agent-runner` a database URL** (brain or control), `GBRAIN_HOME`, `OPS_RPC_TOKEN`,
+    `ENCRYPTION_KEY` or a provider key. Its only credentials are `RUNNER_TOKEN` and the per-run gbrain
+    token, and the container is a client of the control plane, never of the database.
+  - **Never mount the Docker socket into anything that touches agent output**, and never mount a volume into
+    the runner at all (`volumes: []`, ever). Its workspace is a fresh directory under the `/tmp` tmpfs,
+    created at claim and destroyed on every exit path.
   - **Never add a host port to the runner.** Caddy is the only service publishing host ports.
-  - **The network is the fence, and the tool flags are only defence in depth.** `runner-net` is `internal: true` with no default route; `--allowedTools` / `--disallowedTools` narrow further. Never attach the runner to a second network and never route `/api/runs/*` or `/api/gateway/*` through Caddy — those surfaces are internal-only.
-  - **Bash is a distinct, higher-trust job class that Slice 4 deliberately does not implement.** `schedules` has no column, field or pass-through for a tool allowlist, permission mode or shell, so a payload carrying one dies as an unknown field. A prompt that asks for Bash produces no `tool_use` at all and `permission_denials: []` — `--tools ""` removes the built-in surface at the source.
-  - Never `--no-deps` the runner up (the dev CA export must run first), never edit a schedule's harness version to make a claim succeed, and never read the agent's closing message as the run's status or a `costUsd` of `null` as zero.
-  - Never revoke a Connection as a way to pause agent runs, and never `docker compose down -v` to “clean up” a run — revert is the way back, and it is a new commit, not a wipe.
+  - **The network is the fence, and the tool flags are only defence in depth.** `runner-net` is `internal:
+    true` with no default route; `--allowedTools` / `--disallowedTools` narrow further. Never attach the
+    runner to a second network and never route `/api/runs/*` or `/api/gateway/*` through Caddy.
+  - **Bash is a distinct, higher-trust job class that Slice 4 deliberately does not implement.** A prompt
+    that asks for Bash produces no `tool_use` at all and `permission_denials: []` — `--tools ""` removes the
+    built-in surface at the source.
+  - Never `--no-deps` the runner up (the dev CA export must run first), never edit a schedule's harness
+    version to make a claim succeed, and never read the agent's closing message as the run's status or a
+    `costUsd` of `null` as zero.
+  - Never revoke a Connection as a way to pause agent runs, and never `docker compose down -v` to "clean up" a
+    run — revert is the way back, and it is a new commit, not a wipe.
 
 ---
 
@@ -98,22 +206,13 @@ Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (
 
 | | |
 |---|---|
-| Branch | `main` only — Slices 0–4 all merged (Slice 3.5 at `202a658`, Slice 4 at `6ba1754`) |
+| Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
+| Branch | `main` only — Slices 0–5 all merged (Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag) |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
-| Slice 0 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md`](docs/superpowers/plans/2026-09-14-slice-0-cli-lane-proof.md) |
-| Slice 1 plan (historical) | [`docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md`](docs/superpowers/plans/2026-09-14-slice-1-deploy-one-brain.md) |
-| Slice 3 plan (historical) | [`docs/superpowers/plans/2026-09-15-slice-3-scheduler.md`](docs/superpowers/plans/2026-09-15-slice-3-scheduler.md) — carries the execution corrections inline |
-| Slice 3.5 plan (historical) | [`docs/superpowers/plans/2026-09-16-slice-3.5-deterministic-upgrades.md`](docs/superpowers/plans/2026-09-16-slice-3.5-deterministic-upgrades.md) — carries the execution corrections inline |
-| Slice 4 plan | [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md) — D1–D13, Tasks 1–18, the execution corrections inline |
-| Slice 0 risk register | [`docs/slice-0-findings.md`](docs/slice-0-findings.md) |
-| Slice 2 scale probe | [`docs/slice-2-findings.md`](docs/slice-2-findings.md) |
-| Slice 3 findings | [`docs/slice-3-findings.md`](docs/slice-3-findings.md) |
-| Slice 3.5 findings | [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md) — U1–U12, P1–P8, F1–F9, Gate C's measured numbers |
-| Slice 4 findings | [`docs/slice-4-findings.md`](docs/slice-4-findings.md) — U1–U8, P1–P9, F1–F19, Gate C's measured numbers and real spend |
-| Scheduler runbook | [`docs/runbooks/scheduler.md`](docs/runbooks/scheduler.md) |
-| Upgrade runbook | [`docs/runbooks/upgrade.md`](docs/runbooks/upgrade.md) |
-| **Agent runner runbook** | [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) — enable/disable, the three health states, “what did the 3am agent do”, revert, killing a run, rotating the Anthropic key |
-| Break-glass | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) |
+| Slice 5 plan | [`docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`](docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md) — D1–D13, Tasks 1–18 |
+| Slice 5 findings | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) — U1–U3, P1–P9, F20–F32, the deferrals |
+| Slice 4 plan | [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md) — historical |
+| Earlier findings | [`docs/slice-0-findings.md`](docs/slice-0-findings.md), [`docs/slice-2-findings.md`](docs/slice-2-findings.md), [`docs/slice-3-findings.md`](docs/slice-3-findings.md), [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md), [`docs/slice-4-findings.md`](docs/slice-4-findings.md) |
 | Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
 | gbrain pin | `v0.50.5.0` (exact, never a moving tag) |
 | Harness pin | `@anthropic-ai/claude-code@2.1.274` (exact; `HARNESS_VERSION` in `.env`) |
@@ -123,35 +222,26 @@ Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (
 
 ## Process facts the next session needs
 
-- **Agent spend limit.** Slice 3.5 was executed with two agents. The `claude` agent's monthly spend limit
-  exhausted during Task 1's phase 2, and **every task after Task 1 phase 2 was executed by the `opencode`
-  agent**. The plan's own text still assumes a single agent; treat that branch as mixed-authored, not as a
-  single run. Slice 4 was likewise authored by more than one agent (the findings doc and the gate files
-  name their authors where it matters).
+- **The next stage is the deferred cloud slice**, not more self-host GA work. Execute it from a new plan
+  written at that gate; D12 records the substrate decision and Open Question 2 keeps pricing open.
 - **`bash` on PATH is a broken WSL relay** (`C:\Windows\system32\bash.exe`). The two build gates
   (`test/build/pin.test.sh`, `test/build/harness-pin.test.sh`) must be run through **Git bash**:
   `"C:/Program Files/Git/bin/bash.exe" test/build/pin.test.sh`. Export `GBRAIN_VERSION` / `HARNESS_VERSION`
-  from `.env` first, or the scripts fall back to their `0.50.0.0` / `2.1.274` defaults.
+  from `.env` first, or the scripts fall back to their defaults.
 - **Machine-level opencode config (not a repo change).** The coordinator added a `permission` block to
   `~/.config/opencode/opencode.jsonc` — `read`/`glob`/`grep`/`list`/`lsp` set to `allow`, plus
   `external_directory` allow — because the `opencode` agent otherwise stalls on approval prompts mid-task.
-  This lives outside the repository, so a fresh VM or a different user needs it re-added before dispatching
-  `opencode` workers. It is not committed here and is not a product change.
-- **The six verification failures Slice 4 closed with are fixed, not open.** Commit `9efc992` closed them
-  the same day: three `test/integration/claim.test.ts` counts were stale against Task 5's deliberate
-  **second, server-side gbrain client per Connection** (the assertions now pin the contract by name), the
-  `capability_snapshots` fixture was shared with this slice's new `agent-runs.test.ts` (now scoped by a
-  per-run version suffix), `backup.test.ts` was answered by a sibling file's **process-wide
-  `mock.module` of `src/control/opsClient.ts`** (now: `test/helpers/stack.ts`'s cross-process
-  stack-exclusion lock plus running the real script in its own process), and
-  `test/contract/upgrade.contract.test.ts:295`'s operation-count pin moved **33 → 34** with its reason in
-  the comment. `PROGRESS.md`'s Slice 4 section carries the full account, the verbatim tails and the
-  hazard write-up. Nothing was weakened to hide any of them.
-- **Two hazards that fix does not remove, carried into Slice 5.** (a) The `mock.module` hazard is
-  contained, not cured: routing the runtime's ops access through an injectable caller — the shape
-  `src/upgrade/quiesce.ts`'s `OpsCaller` already uses — is Slice 5's work, so a **new** file that needs
-  the real ops client can still be answered by a sibling's mock. (b) `scripts/backup.ts`'s probe reads
-  `quiesced` through a client whose default URL is a container name
-  (`src/control/opsClient.ts:6`, `http://gbrain-ops:3140`), which cannot resolve on a production host
-  (no `:3140` published), and its `catch` turns that connection failure into `quiesced: true`. Also
-  carried: `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
+  It lives outside the repository, so a fresh VM or a different user needs it re-added before dispatching
+  `opencode` workers.
+- **Agent spend limit / mixed authorship.** Slice 3.5, 4 and 5 were authored by more than one agent (the
+  `claude` agent's monthly limit was exhausted mid-slice); the findings docs and gate files name their
+  authors where it matters. Treat the branches as mixed-authored.
+- **Workflow-file pushes need a temporary deploy key.** The `gh` OAuth token lacks the `workflow` scope, so a
+  push that changes anything under `.github/workflows/` needs a deploy key with write access; add it, push,
+  and delete it immediately.
+- **Hazards carried, not cured** (all recorded in `docs/slice-5-findings.md`): a new contract file can still
+  be answered by a sibling's process-global `mock.module` (F27/F32 containment); the host-side spend read
+  still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; and
+  `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
+- **OpenCode/coordinator note:** when a worker edits only docs, the eight verification commands need not be
+  re-run; when a worker edits runtime `src/`, they must.

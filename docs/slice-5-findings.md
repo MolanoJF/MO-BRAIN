@@ -1,12 +1,15 @@
 # Slice 5 findings — self-host GA
 
-> **In progress.** Opened by Task 2 of
-> `docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`. Probes **P\***,
-> upstream facts **U\*** and defects **F\*** are appended here as each task runs.
+> **Final.** Opened by Task 2 and closed by Task 18 of
+> `docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`. Every upstream
+> fact **U\***, probe **P\*** and defect **F\*** carries a status below; every
+> **F\*** carries a resolution. The deliberate deferrals are collected in
+> [Resolutions and deferrals](#resolutions-and-deferrals-final) — none is hidden
+> behind a green test.
 
 Status vocabulary: `confirmed` (the claim held as written) | `contradicted` (reality differed, and the
-correction is named here) | `inference` (no artifact carries the observation; stated as such, never dressed
-up as a measurement).
+correction is named here) | `partial` (part measured, part not, and the missing part is named) |
+`inference` (no artifact carries the observation; stated as such, never dressed up as a measurement).
 
 | # | Claim | Status |
 |---|---|---|
@@ -17,14 +20,50 @@ up as a measurement).
 | P5 | `fast` / `balanced` / `thorough` each move gbrain's `get_usage` ledger by a measurable amount on this deployment, so `SEARCH_MODES[].measuredCost` can carry a real ratio | `contradicted` — all three deltas are `$0.0000000`; two of the three values are refused by the pinned binary; `measuredCost` stays `null` (D7) |
 | P6 | The nightly pinned-next arm opens exactly one issue per drifting version and comments on it on re-run, instead of duplicating | `confirmed` — a `workflow_dispatch` of `nightly.yml` with `gbrain_version=0.99.0.0` opened issue **#1**; a second dispatch commented on #1 and opened no second issue. Closed by hand |
 | P7 | The D11 live-stack debt clears through product paths alone — eight admin checklist acks settle the `awaiting_admin_decision` ledger row to `applied`, `/schedules`' alert ack empties `/api/health`'s `scheduleAlerts`, and `DELETE /api/members/:id` offboards the residue — and the one path that does not exist is a purge for a revoked Connection (F22) | `confirmed` |
-| P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `partial` at Task 16 — the product's new-domain restore branch ran (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) and named **2** Connections needing re-issue, but **0** were invalidated: the console still showed the same **2** `active`, and no member-facing message existed. The physical `DOMAIN` was not changed (no alternate hostname resolves on this host), so the OAuth issuer/redirect-URI mismatch itself was not reproduced on the wire. **F23 (below) is now fixed: the same drill measures `active` 2 → 0 and 4 `connection_revoked` alerts.** |
+| P8 | Restoring a production-shaped archive into a stack whose `DOMAIN` differs invalidates every Connection and the console says so | `confirmed` after **F23** — Task 16 measured the branch (`domainChanged: true`, `doctorExitCode: 0`, 21.2 s) but **0** invalidated; F23 fixed it and the same drill now measures `active` **2 → 0** and **4** `connection_revoked` alerts. Honest qualification retained: the wire-level OAuth issuer/redirect-URI rejection was **not** reproduced, because the deployment's real `DOMAIN` was not changed (no alternate hostname resolves on this host). That consequence stays documented, not measured. |
+| P9 | The GA operator walk C1–C10 is green on one stack | `confirmed` — `bun test --parallel=1 test/e2e/slice5.e2e.test.ts`, one continuous walk, **10 pass / 0 fail** (100 `expect()`); C10's total model spend **$0.0263051** over 1 run |
 | F23 | A new-domain restore leaves every `active` Connection `active`: the console shows a working Connection that is not one, and nothing tells the member | `confirmed` — **FIXED HERE** (measured `active` 2 → 0 and `scheduleAlerts` [] → 4 `connection_revoked`; see F23 below) |
 | U1 | `compose/Caddyfile`'s public `@gbrain` route publishes an unauthenticated Prometheus `/metrics` surface naming brains, Spaces, models or spend | `contradicted` — the pinned `gbrain-serve` answers `401` with `{"error":"Admin authentication required"}`; no body, no cardinality. S1's argument does not need to be extended to `/metrics` on this pin |
 | U2 | The `operator` profile carries the `admin` scope `get_usage` requires, so no elevation to `full` is needed | `confirmed` |
 | U3 | `get_usage` over the HTTP MCP lane answers with totals and upstream's `coverage` block verbatim, and the short-TTL client minted for the call is revoked | `confirmed` |
 | F20 | On the stock compose stack `readBrainUsage` minted its client with the internal plain-HTTP data lane as the grant `--url`, which gbrain's `assertSecureEndpoint` refuses, so `/api/spend` shipped `brain: null` / `coverage.brainReachable: false` — the host-run contract test hid it by setting `GBRAIN_MCP_URL` | `confirmed` — fixed here |
 | F21 | Mobrain's `SEARCH_MODES` offers ids `fast` and `thorough`, but the pinned gbrain `0.50.5.0` accepts only `conservative \| balanced \| tokenmax`; `search.mode` is stored verbatim and the resolver silently falls back to `balanced`, so the product's mode picker does not change the search pipeline | `confirmed` — fixed here |
-| F22 | A revoked Connection has no product path to purge it: `POST /api/connections/:id/revoke` exists, but there is no `DELETE /api/connections/:id` route and the console offers no control, so a revoked row survives until its member is offboarded (which cascades) — and it cannot be offboarded if a live schedule still holds the member's Connection. The plan's Task 14 labels this `F2` | `confirmed` — deliberately deferred (reason in F22 below) |
+| F22 | A revoked Connection has no product path to purge it: `POST /api/connections/:id/revoke` exists, but there is no `DELETE /api/connections/:id` route and the console offers no control, so a revoked row survives until its member is offboarded (which cascades) — and it cannot be offboarded if a live schedule still holds the member's Connection. The plan's Task 14 labels this `F2` | `confirmed` — **deliberately deferred** with reason and named owner slice (see Resolutions and deferrals) |
+| F24 | A brain that chose a search mode under the old vocabulary (`fast` / `thorough`) kept it after F21, so `/api/wizard/state` rendered an id the pinned binary refuses and a re-run of `/finish` would hand it back to gbrain | `confirmed` — **FIXED HERE** (data-only migration `0008_search_mode_vocabulary.sql`; C2 measures `searchMode=conservative`) |
+| F25 | A rollback to a pre-rename pin cannot recreate its images, and `buildImages` was a silent no-op on the shipped compose ("No services to build"), leaving the ops RPC reporting the old binary | `confirmed` — **FIXED HERE** (`buildImages` resolves/pulls/builds/mirrors the pin and verifies both references exist) |
+| F26 | The plan's A5 asserted `lifecycle === 'uninitialized'` from the admin-gated `GET /api/wizard/state` on a box with no session, so it really read `401` / `undefined`; the console chooses the bootstrap form from the public `GET /api/bootstrap` | `confirmed` — **FIXED HERE** (A5 now asserts the public bootstrap door and that the wizard state is `401` unauthenticated — strictly more, not less) |
+| F27 | Bun's `mock.module()` is process-global, so a sibling file's partial mock answered another file's real import; `--parallel=1` and `--isolate` do not isolate it | `confirmed` — **FIXED HERE** (`scripts/test-isolated.sh`: one OS process per file for integration and contract) |
+| F28 | The CI `contract` job was missing its own prerequisites (no scratch Postgres, no runner image, no provider key, no `.env`) | `confirmed` — **FIXED HERE** (service, runner build/mirror, `OPENAI_API_KEY`, materialized `.env`, `pipefail`) |
+| F29 | The Gate A `afterAll` teardown exceeded Bun's 5 s default hook timeout and could leave `down -v` incomplete | `confirmed` — **FIXED HERE** (explicit 300 000 ms hook budget plus per-test timeouts) |
+| F30 | A docker-volume snapshot artifact is created root-owned by the throwaway `busybox`, so a Linux operator gets `EACCES` on their own backup | `confirmed` — **FIXED HERE** (one-shot `busybox chown`; skipped where there is no `getuid`) |
+| F31 | The slice3/3.5 seam legs assumed a wizard-initialized main brain, which a fresh CI compose stack did not have | `confirmed` — **FIXED HERE** (`scripts/ci-bootstrap-brain.ts` drives the product's own wizard over HTTP; no raw SQL, no `init` flag) |
+| F32 | A sibling contract file's process-wide `OPS_RPC_URL=http://127.0.0.1:1` answered the new spend test, because `opsClient.ts` bound the URL at module load | `confirmed` — **FIXED HERE** (endpoint/bearer resolved at call time; env restored in a `finally`). Containment, not D5's full cure — the host-side spend read still reaches `opsClient.ts` directly (see Resolutions and deferrals) |
+
+---
+
+## Resolutions and deferrals (final)
+
+**Fixed in Slice 5, with evidence above:** F20 (grant `--url` was the plain-HTTP data lane), F21
+(wizard search-mode vocabulary did not exist in the pinned binary), F23 (new-domain restore invalidated
+nothing), F24 (stored mode survived the vocabulary change), F25 (`buildImages` no-op on the shipped
+compose), F26 (A5 read an admin-gated route), F27 (process-global `mock.module`), F28 (CI contract job
+prerequisites), F29 (Gate A teardown timeout), F30 (root-owned snapshot artifact), F31 (CI main brain was
+never wizard-initialized), F32 (sibling `OPS_RPC_URL=:1` leaked through module-load binding).
+
+**Deferred — each with a reason and a named owner slice. Nothing below is hidden by a passing test.**
+
+| Deferral | Why it is deferred | Named owner |
+|---|---|---|
+| **F22 — no product path purges a revoked Connection.** `DELETE /api/connections/:id` does not exist; only offboarding the member cascades, and a live schedule can block that. | A purge is a new destructive admin surface with its own blast radius (`agent_runs.connection_id` is deliberately `on delete set null` so the audit survives; `schedules.connection_id` is not null, so a purge must decide the schedule's fate). D11 says Task 14 records the missing path, not builds it mid-cleanup. Two revoked rows are visible, inert, and explained. | **The next hardening slice after Slice 5 GA** — add `DELETE /api/connections/:id` for `state = 'revoked'` only, with the schedule interaction in the route, a console control, and a test. |
+| **Search-mode measured cost stays `null`, and `tokenmax` needs a reindex.** P5 measured every delta as `$0.0000000` on a 7-page corpus, so D7 forbids publishing a ratio; F21 renamed the vocabulary but the product does not run the pinned binary's own `gbrain reindex --markdown` backfill when a brain switches to `tokenmax`, so existing pages are not re-synopsised until an operator runs it. | The search-mode cost spread is the input to managed-cloud pricing (Open Question 2), which this self-host GA slice deliberately does not settle. Inventing a ratio on a thin corpus would violate D7. | **The deferred cloud/pricing slice** — measure the spread on a populated corpus, then decide whether `tokenmax`'s backfill becomes a product step. Open Question 2 stays open. |
+| **D5's injected-caller cure is partial.** F32's call-time read fixed the leak, but the host-side spend read still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; a future file that mutates other module-level state could still race a sibling. | The call-time fix removes the measured hazard without widening Task 10's blast radius; the systemic route-through-a-caller change touches more host-side call sites than this slice's honesty path needs. | **The next hardening slice after Slice 5 GA.** |
+| **Observability track items.** Alerting before the hard cap fires, queue-age p95, `doctor --json` trended over time, and the optional Prometheus/Grafana compose profile are all out. | Each needs a time series the product does not have; adding one for GA would be a subsystem, not a slice. The load-bearing half (the hard cap stops a run and alerts — Slice 4 C9) already ships. Task 8 deliberately made `/metrics` no more public, and C1 pins the negative (`401`/`403`/`404`). | **The deferred cloud/observability slice** (named in the Slice 5 plan, "deliberately not built"). |
+| **`capability_snapshots` multi-tenant rendering** (carried from Slice 3.5): the writer exists, the per-tenant view does not. | Not load-bearing for a single self-host deployment; the deferred cloud slice's one-VM-per-tenant shape (D12) decides whether it is ever needed. | **The deferred cloud slice.** |
+| **`runner_never_seen` alert kind has no product writer**; the claim refusal of the same name is a different surface. | Cosmetic/observability only; the runbook states it rather than implying a writer exists. | **The next hardening slice.** |
+| **No product path retries a `lease_expired` agent run** (Slice 4's F15). The retry policy exists and is classified; nothing calls it for that class. | C8's second attempt is written by the gate. Changing retry semantics is runner behaviour, which Slice 5's D13 freezes. | **The next runner slice.** |
+
+`U1`–`U3` are upstream facts measured at the pin, not defects; `U1`'s `/metrics` premise was
+`contradicted` (the pinned binary answers `401`), which is why no Caddyfile change shipped.
 
 ---
 

@@ -2,9 +2,9 @@
 
 **New session? Start with [HANDOFF.md](../../../HANDOFF.md).**
 
-**Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 0](./2026-09-14-slice-0-cli-lane-proof.md) (historical) · [Slice 1](./2026-09-14-slice-1-deploy-one-brain.md) (historical) · [Slice 4](./2026-09-17-slice-4-agent-runner.md)
-**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3. [docs/slice-4-findings.md](../../slice-4-findings.md) — U1–U8 and P1–P9 statuses, F1–F19, Gate C's measured numbers and real spend.
-**Branch:** `main` — the only branch. Slices 0–3.5 **and Slice 4** are all merged into it (Slice 3.5 at `202a658`, Slice 4 at `6ba1754`). Slice 4's six verification commands and the two build gates are run and pasted in the Slice 4 section below, with their baselines — **all six are green** (the last two were re-measured after the fix commit `9efc992`). **Next stage is Slice 5 — its plan is not written, and it is blocked on Open Question 2.**
+**Plans:** [roadmap](./2026-09-14-brainstand-roadmap.md) · [Slice 4](./2026-09-17-slice-4-agent-runner.md) (historical) · [Slice 5 — self-host GA](./2026-09-18-slice-5-self-host-ga.md) · Slice 0 / 1 (historical)
+**Findings:** [docs/slice-0-findings.md](../../slice-0-findings.md) — Slice 0 risk register. [docs/slice-2-findings.md](../../slice-2-findings.md) — Open Q1 25-Space scale probe. [docs/slice-3-findings.md](../../slice-3-findings.md) — upstream-claim statuses for Slice 3. [docs/slice-3.5-findings.md](../../slice-3.5-findings.md) — U1–U12, P1–P8, F1–F9. [docs/slice-4-findings.md](../../slice-4-findings.md) — U1–U8 and P1–P9 statuses, F1–F19. [docs/slice-5-findings.md](../../slice-5-findings.md) — U1–U3, P1–P9, F20–F32, and the deferrals with named owner slices.
+**Branch:** `main` — the only branch. Slices 0–3.5, **Slice 4** and **Slice 5 (self-host GA)** are all merged into it (Slice 3.5 at `202a658`, Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag). **Mobrain 1.0.0 shipped 2026-09-19**; its three published `RepoDigest`s are in [`CHANGELOG.md`](../../../CHANGELOG.md), and the eight verification commands and two build gates are green with verbatim tails in the Slice 5 section below. **The next stage is the deferred managed-cloud slice (Slice 6) — no plan exists yet, and it still carries Open Question 2 (managed-cloud pricing vs the search-mode cost spread).**
 
 ---
 
@@ -839,8 +839,10 @@ this reason.
 
 ## Slice 5 — Task 18 verification
 
-**Step 1 only.** The eight commands on the frozen tree at `703fea2`, in the plan's order, one at a time.
-The task's Steps 2–7 (findings finalisation, tag/publish, HANDOFF/roadmap rewrite) are not done here.
+**Steps 1–7.** Step 1 ran the eight commands on the frozen tree at `703fea2`, one at a time (verbatim tails
+below). Steps 2–7 finalised `docs/slice-5-findings.md`, created `CHANGELOG.md` with the three full
+`RepoDigest`s, tagged and pushed the release, verified the published artifacts from **outside this machine**
+(the `release-verify` run below), rewrote `HANDOFF.md`, and closed the roadmap.
 
 **Environment.** On entry the dev stack held only `caddy` and `postgres`: compose now defaults its image
 namespace to `${IMAGE_NAMESPACE:-molanojf}` (Task 5 / P4), the host's local tags were the pre-rename
@@ -964,6 +966,37 @@ cost `$0.0000000` (every refusal happens before any upstream connection). No tes
 reach any of these numbers.
 
 Recorded 2026-09-19 by the agent executing Task 18 Step 1.
+
+### Task 18 Step 4 — the release pulled by digest from a machine that did not build it
+
+The `publish` job of the `contract` workflow produced the three `RepoDigest`s below (run
+[35443874477](https://github.com/MolanoJF/mobrain/actions/runs/35443874477) at `a74e324`); they are the
+entries in `CHANGELOG.md`. `release-verify.yml` was then dispatched on a **fresh GitHub runner** — one that
+has never held this repository's images — and pulled each artifact **by digest** and started it. Run
+[35445223097](https://github.com/MolanoJF/mobrain/actions/runs/35445223097): **`verify` success in 44s**,
+every step green. Verbatim output:
+
+```
+verify  Pull and start gbrain-base by digest
+  Digest: sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
+  Status: Downloaded newer image for ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
+  pulled ghcr.io/molanojf/gbrain-base@sha256:9cd9ba37fe4feb78116ca70cfa91c2b8007d5a28ef934fb44261bd0858e4c7e4
+  gbrain 0.50.5.0
+verify  Pull and start control-plane by digest
+  Digest: sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
+  Status: Downloaded newer image for ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
+  pulled ghcr.io/molanojf/control-plane@sha256:67dbd8f492a5420e345e9e81879085e3c6b3a99cd811387e668068886bd8570c
+  1.3.13
+verify  Pull and start agent-runner by digest
+  Digest: sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
+  Status: Downloaded newer image for ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
+  pulled ghcr.io/molanojf/agent-runner@sha256:d02d1e8452d73a2de95e39df4841e55896b123caaae5f45807acdba31ed14b6f
+  2.1.274 (Claude Code)
+```
+
+All three pulled by digest and started: `gbrain 0.50.5.0` (the pinned base), the control-plane image's
+`bun 1.3.13`, and the agent-runner harness `2.1.274 (Claude Code)`. Gate A's assertion — *a host that did not
+build it can run it* — holds against the actual release, not the CI build of it.
 
 ---
 
