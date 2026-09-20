@@ -158,6 +158,7 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) | Operator recovery over the ops sidecar |
 | [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, upgrade cadence, the drift tripwire, what is not promised |
 | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) | U1–U3, P1–P9, F20–F32 — every status and every deferral |
+| [`docs/pending-tasks.md`](docs/pending-tasks.md) | The open backlog after 1.0.0, by owner slice and priority |
 | [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
 | [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
 
