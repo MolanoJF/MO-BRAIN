@@ -20,7 +20,7 @@ The images are registry-qualified and exactly pinned:
 
 ```text
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:0.50.5.0
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-1.0.0}
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:2.1.274   # only with the runner
 ```
 
@@ -63,6 +63,7 @@ When on, the runner is fenced to one internal network with no route out and its 
 | Dependency | Pin | Where |
 |---|---|---|
 | gbrain | **0.50.5.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
+| Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 
 Exact semver, never `latest` or `latest-stable`. The contract suite is run nightly against the pinned version and against a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.

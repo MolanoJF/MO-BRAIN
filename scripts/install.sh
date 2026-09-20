@@ -8,6 +8,10 @@ set -euo pipefail
 # working for one release, because .env files in the wild already use it.
 ENV_PATH="${MOBRAIN_ENV_PATH:-${BRAINSTAND_ENV_PATH:-.env}}"
 GBRAIN_VERSION="${GBRAIN_VERSION:-0.50.5.0}"
+# The product's app version (the published `control-plane` image tag).
+# APP_VERSION is the canonical name; the legacy aliases written below name the
+# same value so an older .env reader still resolves the released tag (D3 rename).
+APP_VERSION="${APP_VERSION:-1.0.0}"
 # G1: the second pinned dependency (D4). Required with no compose default, so
 # a deployment that never enables the runner still names a harness version.
 HARNESS_VERSION="${HARNESS_VERSION:-2.1.274}"
@@ -54,10 +58,11 @@ cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
 GBRAIN_VERSION=${GBRAIN_VERSION}
 HARNESS_VERSION=${HARNESS_VERSION}
-# Both names for one release: MOBRAIN_VERSION is current, BRAINSTAND_VERSION
-# is the legacy alias older .env files already carry (D3 rename).
-MOBRAIN_VERSION=dev
-BRAINSTAND_VERSION=dev
+APP_VERSION=${APP_VERSION}
+# Both names below are the legacy aliases older .env files already carry (D3
+# rename); APP_VERSION above is current, so all three name the released tag.
+MOBRAIN_VERSION=${APP_VERSION}
+BRAINSTAND_VERSION=${APP_VERSION}
 WORKER_CONCURRENCY=2
 
 POSTGRES_PASSWORD=$(gen)

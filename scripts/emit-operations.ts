@@ -2,7 +2,7 @@
 import { mkdir } from 'node:fs/promises';
 import { OPERATIONS } from '../src/contracts/registry.ts';
 
-const version = process.env.GBRAIN_VERSION ?? '0.50.0.0';
+const version = process.env.GBRAIN_VERSION ?? '0.50.5.0';
 const dir = `contracts/v${version}`;
 await mkdir(dir, { recursive: true });
 

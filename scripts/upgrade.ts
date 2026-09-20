@@ -241,7 +241,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export async function buildContext(
   args: { to: string; dryRun: boolean }, runId = `run-${randomUUID()}`,
 ): Promise<UpgradeContext> {
-  const fromVersion = process.env.GBRAIN_VERSION ?? '0.50.0.0';
+  const fromVersion = process.env.GBRAIN_VERSION ?? '0.50.5.0';
   const upgradeDir = join(UPGRADE_DIR, runId);
   let journal: Journal | null = null;
   if (!args.dryRun) {
@@ -1053,7 +1053,7 @@ if (import.meta.main) {
     }
     if (args.cmd === 'rollback') {
       const ctx = await buildContext(
-        { to: process.env.GBRAIN_VERSION ?? '0.50.0.0', dryRun: false }, args.runId,
+        { to: process.env.GBRAIN_VERSION ?? '0.50.5.0', dryRun: false }, args.runId,
       );
       const r = await rollback(ctx, args.runId, {
         buildImages: (c, version) => buildImages(c, version),

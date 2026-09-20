@@ -184,7 +184,7 @@ export async function runBackup(
 
     const manifest: BackupManifest = {
       id, createdAt: new Date().toISOString(),
-      gbrainVersion: process.env.GBRAIN_VERSION ?? '0.50.0.0',
+      gbrainVersion: process.env.GBRAIN_VERSION ?? '0.50.5.0',
       components, sha256: sums, quiesced, quiesceLane,
       warning:
         'Restoring requires the ENCRYPTION_KEY that sealed the secrets table. ' +
