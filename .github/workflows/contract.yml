@@ -3,6 +3,11 @@ name: contract
 # The PR and push workflow (Task 13): lint/tsc/unit, integration, the two build
 # gates, and the contract suite at PINNED-CURRENT only. The pinned-next drift
 # tripwire now lives in nightly.yml — a drift finding is news, not a broken PR.
+#
+# Publishing the three pinned images moved out of this file (Task 5) into
+# release.yml, which runs on a `v*` tag or a manual dispatch. An ordinary push
+# to main must never move the published artifacts: Gate A (clean-install) below
+# pulls the release images as published, not images this run rebuilt.
 on:
   push: { branches: [main] }
   pull_request:
@@ -293,40 +298,13 @@ jobs:
       - run: bun test test/e2e/slice2.e2e.test.ts
         timeout-minutes: 90
 
-  # Task 5: publish the three pinned images to GHCR. Gated to `main` (a merged,
-  # tested tree) or a manual dispatch — never a PR. The local `gh` OAuth token
-  # lacks write:packages, so this job is the only writer.
-  publish:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    needs: [unit]
-    permissions:
-      contents: read
-      packages: write
-    env:
-      IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
-      APP_VERSION: '1.0.0'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.3.14 }
-      - run: bun install --frozen-lockfile
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Publish the three pinned images
-        run: bash scripts/publish-images.sh 2>&1 | tee publish-output.txt
-      - name: Print the published RepoDigests
-        if: always()
-        run: grep -E '^ghcr\.io/' publish-output.txt || true
-
-  # Task 7 — Gate A: the clean-host install proof. Runs only after `publish`,
-  # on a fresh runner with none of our images, pulling them from GHCR.
+  # Task 7 — Gate A: the clean-host install proof. Runs on a fresh runner with
+  # none of our images, pulling the already-published RELEASE images from GHCR.
+  # Publishing moved to release.yml (tag/release-triggered), so an ordinary push
+  # to main no longer moves the artifacts this gate consumes.
   clean-install:
     runs-on: ubuntu-latest
-    needs: [publish]
+    needs: [unit]
     permissions:
       contents: read
       packages: read
