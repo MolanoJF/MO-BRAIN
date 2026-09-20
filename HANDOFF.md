@@ -29,7 +29,9 @@ directly, stop.
 - **Install:** `scripts/install.sh` + `scripts/preflight.sh` (Docker/Compose version floors, RAM, disk,
   ports 80/443, DNS for `$DOMAIN`); the console's wizard reaches `ready` on a clean host.
 - **Images published from CI to `ghcr.io/molanojf`** (the only GHCR owner available; the product name is not
-  a registry namespace). The local `gh` OAuth token lacks `write:packages`, so CI owns every push — never
+  a registry namespace). Publishing is **tag/release-triggered**: the [`release` workflow](.github/workflows/release.yml)
+  runs on a `v*` tag or a manual dispatch and is the only publisher — an ordinary push to `main` does not
+  move the artifacts. The local `gh` OAuth token lacks `write:packages`, so CI owns every push — never
   attempt a host-side `docker push`.
 - **Backup/restore:** the backup manifest's quiesce is three-state (`verified` / `unverified` / `failed`) and
   a production-shaped stack proves it through the `compose exec` relay; restoring to a new `DOMAIN`
@@ -51,11 +53,13 @@ directly, stop.
 
 | Image | Tag | RepoDigest |
 |---|---|---|
-| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e` |
-| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba` |
-| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950` |
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:3a96e62b64e1a007a07d5bf42e0d778786c7af6fb762b8bf118626db102dead1` |
+| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:a327595c357026322cbe7021771db99ad6be04a0589c60d554433e9043dc33e9` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:1727ee16b9f5d97f567d75a6893fa63e30d1301a8c126b2332b06837aa9b016b` |
 
-Source of record: the `publish` job of the [`contract` workflow](.github/workflows/contract.yml). They are
+Source of record: the `publish` job of the [`release` workflow](.github/workflows/release.yml), written
+into the [v1.0.0 GitHub Release](https://github.com/MolanoJF/mobrain/releases/tag/v1.0.0). Publishing is
+tag/release-triggered — an ordinary push to `main` does not rebuild or move these artifacts. They are
 verified from a fresh runner that did not build them by
 [`release-verify.yml`](.github/workflows/release-verify.yml) (dispatch it; it pulls all three by digest and
 starts them). [`CHANGELOG.md`](CHANGELOG.md) carries the same three digests.
@@ -180,7 +184,8 @@ non-promises.
 - Don't `git add .env`. It holds a real `OPENAI_API_KEY` plus `RUNNER_TOKEN`, `OPS_RPC_TOKEN`,
   `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET` and the Postgres password. `sk-`-shaped strings in tests are
   deliberate fakes.
-- Don't attempt a host-side `docker push` to GHCR; the local token lacks `write:packages`. CI publishes.
+- Don't attempt a host-side `docker push` to GHCR; the local token lacks `write:packages`. CI publishes, and
+  only the [`release` workflow](.github/workflows/release.yml) does (on a `v*` tag or a manual dispatch).
 - **The runner lane:**
   - **Never give `agent-runner` a database URL** (brain or control), `GBRAIN_HOME`, `OPS_RPC_TOKEN`,
     `ENCRYPTION_KEY` or a provider key. Its only credentials are `RUNNER_TOKEN` and the per-run gbrain

@@ -20,7 +20,7 @@ Priority: **P1** blocks the next stage · **P2** hardening, no GA impact · **P3
 | 6 | `capability_snapshots` per-tenant rendering | Cloud slice (Slice 6) | P3 | No |
 | 7 | Observability track: pre-cap alerting, queue-age p95, trended `doctor --json`, Prometheus/Grafana profile | Cloud/observability slice | P3 | No |
 | 8 | Managed-cloud provisioner + billing (Slice 6) | Slice 6 | P1 | Needs #1 |
-| 9 | Housekeeping batch (digest rot, stale `0.50.0.0` fallbacks, `package.json` name, dev-stack debt) | Whoever picks up next | P4 | No |
+| 9 | Housekeeping batch (digest rot **resolved**; stale `0.50.0.0` fallbacks, `package.json` name, dev-stack debt) | Whoever picks up next | P4 | No |
 
 ---
 
@@ -118,9 +118,13 @@ headline feature.
 
 ## P4 — Housekeeping discovered during the Slice 5 close
 
-- **Digest rot.** The `publish` job runs on every push to `main`, and image builds are not
-  bit-reproducible, so the tags/digests in `CHANGELOG.md`/`HANDOFF.md` move on each push. Either move
-  publishing to a tag/release trigger, or re-record digests after a push. Documented in `PROGRESS.md`.
+- **Digest rot — RESOLVED.** The `publish` job used to run on every push to `main`, and image builds are
+  not bit-reproducible, so the tags/digests in `CHANGELOG.md`/`HANDOFF.md` moved on each push. Publishing
+  now lives in [`release.yml`](../.github/workflows/release.yml), which runs only on a `v*` tag or a manual
+  dispatch; an ordinary push to `main` no longer rebuilds or moves the artifacts. The three full
+  `RepoDigest`s are written into the GitHub Release body, which is the record of the release. **A release
+  re-run still produces new digests** (the builds are not bit-reproducible): the release body is updated to
+  the newest set and the previous set remains in that run's log. Documented in `PROGRESS.md`.
 - **Remaining stale pin fallbacks.** `src/ops/dispatch.ts:11` and `src/upgrade/snapshot.ts:239` still
   fall back to `'0.50.0.0'` (the Slice 5 close fixed `scripts/backup.ts`, `scripts/emit-operations.ts`,
   `scripts/upgrade.ts`, and `docker/control-plane.Dockerfile`). Also the compose `:-dev` fallback and

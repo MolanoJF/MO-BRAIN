@@ -22,14 +22,16 @@ recorded, and managed-cloud pricing (Open Question 2) remains open.
 
 **A release is its digests, not its tag.** The tag `v1.0.0` is a label someone can move; these three
 `RepoDigest`s are the immutable artifacts, published by the `publish` job of the
-[`contract` workflow](.github/workflows/contract.yml) and verified from a fresh runner by
-[`release-verify.yml`](.github/workflows/release-verify.yml).
+[`release` workflow](.github/workflows/release.yml) (tag/release-triggered — an ordinary push to `main`
+does not publish) and recorded in the
+[v1.0.0 GitHub Release](https://github.com/MolanoJF/mobrain/releases/tag/v1.0.0), then verified from a
+fresh runner by [`release-verify.yml`](.github/workflows/release-verify.yml).
 
 | Image | Tag | RepoDigest |
 |---|---|---|
-| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:83c6e585681be27a15fa476b7307991ef0fb5334c92175686831008c60bfca0e` |
-| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:e6d9ecab9ce59f3762364098c12be850a12e743428db33fcdca62e0849e1a2ba` |
-| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:55372d5e8b80277c55004a14d9fe0db2ac35dc1f94ed5c83a2897b935e80e950` |
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:3a96e62b64e1a007a07d5bf42e0d778786c7af6fb762b8bf118626db102dead1` |
+| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:a327595c357026322cbe7021771db99ad6be04a0589c60d554433e9043dc33e9` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:1727ee16b9f5d97f567d75a6893fa63e30d1301a8c126b2332b06837aa9b016b` |
 
 Licence: MIT (this repository and its images; gbrain is MIT, © 2026 Garry Tan, and the gbrain base image
 ships his `LICENSE` at `/opt/gbrain-LICENSE`). See [`LICENSE`](LICENSE) and
