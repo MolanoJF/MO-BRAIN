@@ -29,7 +29,7 @@ export const wizard = new Hono();
  * so the moment someone puts HR docs in hr/ inside the company Space, every
  * member with read on that Space retrieves them via semantic search.
  */
-const ISOLATION_NOTICE =
+export const ISOLATION_NOTICE =
   'A Space is a whole gbrain source. Folders inside it are NOT access boundaries — ' +
   'every member with read on that Space can retrieve everything in it via semantic search. ' +
   'If something needs isolation, it needs its own Space.';
@@ -202,42 +202,79 @@ wizard.post('/schema', guard(async (c, { userId, orgId }) => {
   return c.json({ ok: true, lifecycle: 'schema-selected', pack });
 }));
 
-/** Step 4 — the first Space. One gbrain source, git-backed, created via the CLI lane. */
-wizard.post('/space', guard(async (c, { userId, orgId }) => {
-  const { sourceId, name, description } = await c.req.json();
+/** The shared Space-creation result. `body` is the exact refusal shape the
+ *  wizard has always returned, so both callers render the same conflict. */
+export type AddSpaceResult =
+  | { ok: true; sourceId: string }
+  | { ok: false; status: 400 | 409; body: Record<string, unknown> };
+
+/**
+ * Create one Space = one gbrain source: seed the git repo, `sources.add`,
+ * record the `spaces` row, advance the lifecycle, audit.
+ *
+ * LIFTED VERBATIM from the wizard's `/space` step so the wizard and the
+ * Sources admin page cannot drift. The ordering below is load-bearing:
+ *
+ *  - Ruling 1: seed a committed git repo BEFORE sources.add (V12 / Work Item D).
+ *  - Drop json: true — sources add does not support --json (Work Item N).
+ *  - --federated: a Space is the brain's own corpus, so an UNQUALIFIED read must
+ *    span it. Left unset, gbrain's inclusion check (`isSourceFederated`, literal
+ *    true) treats the source as isolated, and the sole-non-default resolver tier
+ *    only rescues a single-Space brain — with 2+ Spaces the anchor falls back to
+ *    'default' and `gbrain search` (no --source) sees no Space at all.
+ *
+ * `auditAction` is a parameter because the two callers are different events
+ * ('wizard.space' vs 'source.add'); everything else is identical.
+ */
+export async function addSpaceSource(
+  { userId, orgId }: { userId: string; orgId: string },
+  { sourceId, name, description }: { sourceId?: string; name?: string; description?: string },
+  auditAction = 'wizard.space',
+): Promise<AddSpaceResult> {
   if (!sourceId || !SOURCE_ID.test(sourceId)) {
-    return c.json({ error: 'sourceId must be lowercase letters, digits and hyphens' }, 400);
+    return { ok: false, status: 400, body: { error: 'sourceId must be lowercase letters, digits and hyphens' } };
   }
 
   const [dup] = await getDb().select().from(schema.spaces)
     .where(and(eq(schema.spaces.organizationId, orgId), eq(schema.spaces.sourceId, sourceId)));
-  if (dup) return c.json({ error: `${sourceId} is already a Space`, isolationNotice: ISOLATION_NOTICE }, 409);
+  if (dup) {
+    return { ok: false, status: 409, body: { error: `${sourceId} is already a Space`, isolationNotice: ISOLATION_NOTICE } };
+  }
 
   const brain = await loadBrain(orgId);
   const localPath = `/srv/brain-repos/${sourceId}`;
 
-  // Ruling 1: seed a committed git repo BEFORE sources.add (V12 / Work Item D).
-  // Drop json: true — sources add does not support --json (Work Item N).
-  // --federated: a Space is the brain's own corpus, so an UNQUALIFIED read must
-  // span it. Left unset, gbrain's inclusion check (`isSourceFederated`, literal
-  // true) treats the source as isolated, and the sole-non-default resolver tier
-  // only rescues a single-Space brain — with 2+ Spaces the anchor falls back to
-  // 'default' and `gbrain search` (no --source) sees no Space at all.
   await seedSpace(sourceId);
   const r = await callOps('sources.add', {
     id: sourceId, path: localPath, name: name ?? sourceId, federated: true,
   }, { timeoutMs: 300_000 });
-  if (!r.ok) return c.json({ error: `sources add failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+  if (!r.ok) return { ok: false, status: 400, body: { error: `sources add failed (exit ${r.exitCode})`, detail: r.stderr } };
 
   await getDb().insert(schema.spaces).values({
     id: randomUUID(), organizationId: orgId, sourceId,
     name: name ?? sourceId, description: description ?? null,
     kind: 'local-git', localPath,
   });
-  await advance(brain.id, brain.lifecycle as Lifecycle, 'sources-added');
-  await audit(orgId, userId, 'wizard.space', sourceId, { sourceId, kind: 'local-git' });
+  // The wizard advances from `schema-selected`. The Sources admin page adds to
+  // an already-`ready` brain, where `sources-added` is a STEP BACKWARD that
+  // `canAdvance` refuses — skip it there rather than throw 409 at an admin
+  // doing exactly what the page offers. `canAdvance(from, from)` is true, so
+  // the wizard's idempotent retry is preserved.
+  if (canAdvance(brain.lifecycle as Lifecycle, 'sources-added')) {
+    await advance(brain.id, brain.lifecycle as Lifecycle, 'sources-added');
+  }
+  await audit(orgId, userId, auditAction, sourceId, { sourceId, kind: 'local-git' });
 
-  return c.json({ ok: true, lifecycle: 'sources-added', sourceId, isolationNotice: ISOLATION_NOTICE });
+  return { ok: true, sourceId };
+}
+
+/** Step 4 — the first Space. One gbrain source, git-backed, created via the CLI lane. */
+wizard.post('/space', guard(async (c, { userId, orgId }) => {
+  const { sourceId, name, description } = await c.req.json();
+  const result = await addSpaceSource({ userId, orgId }, { sourceId, name, description });
+  if (!result.ok) return c.json(result.body, result.status);
+
+  return c.json({ ok: true, lifecycle: 'sources-added', sourceId: result.sourceId, isolationNotice: ISOLATION_NOTICE });
 }));
 
 /** Step 5 — init, config, sync, doctor. The brain becomes real here. */

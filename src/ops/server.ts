@@ -43,11 +43,17 @@ function authorized(req: Request): boolean {
 const liveRuns = new Map<string, ReturnType<typeof spawn>>();
 
 function runGbrain(
-  argv: string[], timeoutMs: number, runId?: string,
+  argv: string[], timeoutMs: number, runId?: string, env?: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    // argv array, no shell: no value can inject an argument (G2).
-    const child = spawn('gbrain', argv, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // argv array, no shell: no value can inject an argument (G2). `env` is
+    // spread in ONLY when a caller supplies one: `env: undefined` inherits
+    // just like omitting the key, but spelling it this way keeps every
+    // existing caller's spawn byte-for-byte unchanged.
+    const child = spawn('gbrain', argv, {
+      ...(env ? { env } : {}),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     if (runId) liveRuns.set(runId, child);
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
@@ -331,17 +337,29 @@ Bun.serve({
       }
 
       if (url.pathname === '/rpc') {
-        const { spec, values, json: wantJson, dryRun } = validateRequest(ops, body);
+        const { spec, values, json: wantJson, dryRun, packOverride } = validateRequest(ops, body);
         const argv = buildArgv(spec, values, { json: wantJson, dryRun });
         const timeoutMs = Number((body as { timeoutMs?: number }).timeoutMs ?? 600_000);
         const runId = typeof (body as { runId?: unknown }).runId === 'string'
           ? (body as { runId: string }).runId : undefined;
 
+        // The pack seam. The ONLY variable injected is GBRAIN_SCHEMA_PACK —
+        // tier 2 of the resolution chain (docs/schema-pack-findings.md S1) —
+        // scoped to this single spawn and never persisted, so the control
+        // plane can inspect a pack's fully extends-resolved manifest WITHOUT
+        // activating it. It must be the env tier with NO positional: a
+        // positional pack name returns the UNRESOLVED manifest (S4, e.g.
+        // gbrain-creator raw=1 vs effective=27), and reimplementing the
+        // merge in TypeScript would be a false claim (S4).
+        const exec = () => runGbrain(
+          argv, timeoutMs, runId,
+          packOverride ? { ...process.env, GBRAIN_SCHEMA_PACK: packOverride } : undefined,
+        );
+
         // S3: a file-plane-writing operation (post-upgrade's config.json
         // read-modify-write, check-update's cache file) serializes through the
         // CONTROL database's advisory lock — enforced here, not by caller
         // discipline.
-        const exec = () => runGbrain(argv, timeoutMs, runId);
         const r = spec.requiresLock
           ? await withAdvisoryLock(sql, `fileplane:op:${spec.id}`, exec)
           : await exec();

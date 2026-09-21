@@ -35,7 +35,12 @@ export const api = {
   get: <T = unknown>(path: string): Promise<T> => request<T>(path, 'GET'),
   post: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'POST', body ?? {}),
   patch: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'PATCH', body ?? {}),
-  delete: <T = unknown>(path: string): Promise<T> => request<T>(path, 'DELETE'),
+  /**
+   * A DELETE may carry a body: `DELETE /api/sources/:id` reads `{ mode, confirm }`
+   * to tell archive from remove. Bodyless callers (`scheduleApi.remove`,
+   * `Members.tsx`) are unchanged — `body` stays `undefined` and no body is sent.
+   */
+  delete: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'DELETE', body),
   put: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'PUT', body ?? {}),
 };
 
@@ -99,6 +104,140 @@ export const filesApi = {
     api.get<FileContent>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`),
   save: (sourceId: string, path: string, body: { content: string; expectedSha: string; message?: string }) =>
     api.put<FileSaveResult>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`, body),
+};
+
+/**
+ * The schema-pack surface (`src/control/routes/schema.ts`).
+ *
+ * Two honesty rules are encoded in these types, not in the pages:
+ *   - a pack that failed to resolve carries `error` and EMPTY arrays — never a
+ *     silent empty list that masquerades as "this pack brings nothing";
+ *   - `pageTypes` / `linkVerbs` on a per-Space row are `number | null`, and NULL
+ *     means the pack detail failed to resolve. Never render it as 0.
+ *
+ * `tier` on a per-Space row is `'per-source-db'` for an override; for an
+ * inherited row it is the brain-wide tier (e.g. `'home-config'`). At
+ * 0.50.5.0 gbrain offers no per-Space pack READBACK, so an override is the
+ * STORED intent (`config get schema_pack.source.<id>`), not a resolved state —
+ * see docs/schema-pack-findings.md S6 Gate 2.
+ */
+export type PackPageType = {
+  name: string;
+  primitive: string;
+  pathPrefixes: string[];
+  aliases: string[];
+  extractable: boolean;
+};
+
+export type PackDetail = {
+  name: string;
+  version: string | null;
+  description: string | null;
+  extends: string | null;
+  pageTypes: PackPageType[];
+  linkVerbs: string[];
+  takesKinds: string[];
+  error: string | null;
+};
+
+export type SchemaSyncPerPrefix = {
+  type: string;
+  prefix: string;
+  would_apply: number;
+  applied: number;
+  dead_prefix: boolean;
+  sample_slugs: string[];
+};
+
+/** gbrain's own `schema sync --json` envelope; preview and apply share it. */
+export type SchemaSync = {
+  apply: boolean;
+  pack_identity: string | null;
+  per_prefix: SchemaSyncPerPrefix[];
+  total_would_apply: number;
+  total_applied: number;
+};
+
+export type SchemaSourcePack = {
+  sourceId: string;
+  name: string;
+  kind: string;
+  pack: string | null;
+  tier: string | null;
+  pageTypes: number | null;
+  linkVerbs: number | null;
+  inherited: boolean;
+};
+
+export type SetSourcePackResult = {
+  ok: boolean;
+  sourceId: string;
+  pack: string;
+  tier: string;
+  inherited: boolean;
+};
+
+export const schemaPacksApi = {
+  /** Every known pack's EFFECTIVE manifest, via gbrain's own resolver. */
+  list: () => api.get<{ packs: PackDetail[] }>('/schema/packs'),
+  /** Each Space's stored-intent pack (or the inherited brain-wide pack). */
+  sources: () => api.get<{ sources: SchemaSourcePack[] }>('/schema/sources'),
+  setSourcePack: (sourceId: string, pack: string) =>
+    api.post<SetSourcePackResult>(`/schema/sources/${encodeURIComponent(sourceId)}`, { pack }),
+  resetSourcePack: (sourceId: string) =>
+    api.delete<{ ok: boolean; sourceId: string; pack: string | null; tier: string | null; inherited: true }>(
+      `/schema/sources/${encodeURIComponent(sourceId)}`,
+    ),
+  /** `source` absent is the brain-wide run, unchanged. */
+  previewSync: (source?: string) =>
+    api.post<SchemaSync>('/schema/preview', source === undefined ? {} : { source }),
+  runSync: (source?: string) =>
+    api.post<SchemaSync>('/schema/sync', source === undefined ? {} : { source }),
+};
+
+/**
+ * The Sources admin surface (`src/control/routes/sources.ts`).
+ *
+ * `pageCount` / `lastSyncAt` / `federated` are live gbrain values and are
+ * `null` when `sourcesListOk` is false; the page says so rather than showing 0.
+ * `inGbrain` flags a `spaces` row gbrain does not list, and `unregistered` is
+ * the other direction. `remove` is destructive: an unconfirmed remove answers
+ * HTTP 409 `{ error: 'confirmation_required', preview }`, which arrives as an
+ * `ApiError` whose body is the impact preview the operator must see first.
+ */
+export type SourceSummary = {
+  sourceId: string;
+  name: string;
+  kind: string;
+  pack: string | null;
+  tier: string | null;
+  pageTypes: number | null;
+  linkVerbs: number | null;
+  inherited: boolean;
+  pageCount: number | null;
+  lastSyncAt: string | null;
+  federated: boolean | null;
+  inGbrain: boolean;
+};
+
+export type RemoveSourceResult = {
+  ok: true;
+  mode: 'archive' | 'remove';
+  sourceId: string;
+  preview?: string;
+};
+
+export const sourcesApi = {
+  list: () =>
+    api.get<{ sources: SourceSummary[]; unregistered: string[]; sourcesListOk: boolean }>('/sources'),
+  add: (body: { sourceId: string; name: string; description?: string }) =>
+    api.post<{ ok: true; sourceId: string; isolationNotice: string }>('/sources', body),
+  rename: (sourceId: string, name: string) =>
+    api.patch<{ ok: true; sourceId: string; name: string }>(
+      `/sources/${encodeURIComponent(sourceId)}`, { name },
+    ),
+  remove: (sourceId: string, body: { mode: 'archive' | 'remove'; confirm?: boolean }) =>
+    api.delete<RemoveSourceResult>(`/sources/${encodeURIComponent(sourceId)}`, body),
 };
 
 /**

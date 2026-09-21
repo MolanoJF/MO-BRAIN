@@ -41,14 +41,21 @@ async function post<T>(path: string, body: unknown, timeoutMs = 600_000): Promis
  * The ONLY way the control plane reaches gbrain. It holds no brain
  * DATABASE_URL and mounts GBRAIN_HOME read-only (S2), so every privileged
  * action crosses this boundary.
+ *
+ * `packOverride` is the ONE env override the RPC accepts (Task 1): a single
+ * validated pack name injected as `GBRAIN_SCHEMA_PACK` for one spawn, so a
+ * pack can be inspected without activating it. See src/ops/server.ts.
  */
 export async function callOps<T = unknown>(
   op: string,
   params: Record<string, unknown> = {},
-  opts: { json?: boolean; dryRun?: boolean; timeoutMs?: number; runId?: string } = {},
+  opts: {
+    json?: boolean; dryRun?: boolean; timeoutMs?: number; runId?: string; packOverride?: string;
+  } = {},
 ): Promise<OpsResponse & { json: T | null }> {
   return post('/rpc', {
     op, params, json: opts.json, dryRun: opts.dryRun, timeoutMs: opts.timeoutMs, runId: opts.runId,
+    packOverride: opts.packOverride,
   }, opts.timeoutMs);
 }
 

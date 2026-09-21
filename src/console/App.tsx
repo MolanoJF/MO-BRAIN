@@ -15,9 +15,10 @@ import { Spend } from './pages/Spend.tsx';
 import { Upgrades } from './pages/Upgrades.tsx';
 import { Files } from './pages/Files.tsx';
 import { Schema } from './pages/Schema.tsx';
+import { Sources } from './pages/Sources.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades' | 'files' | 'schema';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades' | 'files' | 'schema' | 'sources';
 
 /**
  * What `GET /api/wizard/state` answered, as the screen chooser sees it: an HTTP
@@ -56,15 +57,18 @@ export function phaseFor(bootstrapped: boolean, probe: WizardProbe): Phase {
 /**
  * The SPA's only real routes. Everything else is a page switch, but a schedule
  * alert (or an upgrade banner) arrives as a link, so `/schedules` and
- * `/upgrades` have to survive a cold load.
+ * `/upgrades` have to survive a cold load. `pathname` is injectable so the
+ * mapping can be unit-tested without a DOM; production always takes the
+ * default.
  */
-function pageFromPath(): Page | null {
-  const path = window.location.pathname.replace(/\/+$/, '');
+export function pageFromPath(pathname: string = window.location.pathname): Page | null {
+  const path = pathname.replace(/\/+$/, '');
   if (path === '/schedules') return 'schedules';
   if (path === '/runs') return 'runs';
   if (path === '/spend') return 'spend';
   if (path === '/upgrades') return 'upgrades';
   if (path === '/files') return 'files';
+  if (path === '/sources') return 'sources';
   return null;
 }
 
@@ -123,6 +127,7 @@ export function App() {
             <button className="nav-item" onClick={() => setPage('members')}>Members</button>
             <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
             <button className="nav-item" onClick={() => setPage('schema')}>Schema</button>
+            <button className="nav-item" onClick={() => setPage('sources')}>Sources</button>
             <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
             <button className="nav-item" onClick={() => setPage('runs')}>Runs</button>
             <button className="nav-item" onClick={() => setPage('spend')}>Spend</button>
@@ -137,6 +142,7 @@ export function App() {
         {page === 'members' && <Members />}
         {page === 'connection' && <Connection />}
         {page === 'schema' && <Schema />}
+        {page === 'sources' && <Sources />}
         {page === 'schedules' && <Schedules />}
         {page === 'runs' && <Runs />}
         {page === 'spend' && <Spend />}

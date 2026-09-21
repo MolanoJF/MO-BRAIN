@@ -299,8 +299,12 @@ describe('Slice 3.5 seam gate A', () => {
     // `delete <slug> --source-id <id> --purge`, the operation the revert's
     // re-index needs to remove the page an agent run wrote
     // (docs/slice-4-findings.md, F16). The pinned
-    // contracts/v0.50.5.0/operations.json carries it.
-    expect(doc.operations.length).toBe(34);
+    // contracts/v0.50.5.0/operations.json carries it. The per-source
+    // schema-pack change (MolanoJF/schemas) re-emitted the artifact and added
+    // `schema.show`, `config.unset`, `sources.remove`, `sources.archive` and
+    // `sources.rename` (5 operations) on top of the 36 the file already
+    // carried, so the fence moves to 41.
+    expect(doc.operations.length).toBe(41);
     // U1/U3: neither declares a dry run, and only checkUpdate has --json.
     expect(byId['checkUpdate'].supportsJson).toBe(true);
     expect(byId['postUpgrade'].supportsJson).toBe(false);

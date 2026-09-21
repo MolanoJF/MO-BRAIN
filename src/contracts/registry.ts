@@ -76,12 +76,24 @@ export const OPERATIONS: Record<string, OperationSpec> = {
 
   // V4: the search-mode cost matrix is a post-init config set.
   // V11: upstream already routes vendor *_api_key writes away from the DB plane.
+  // Also the tier-3 write path (`schema_pack.source.<id>`, S1): the key is not
+  // in gbrain's KNOWN_CONFIG_KEY_PREFIXES, so `config set` exits 1 without the
+  // `force` param below (S6 probe 1).
   'config.set': {
     id: 'config.set',
     argv: ['config', 'set'],
     params: [
       { name: 'key', flag: '', kind: 'value', required: true },
       { name: 'value', flag: '', kind: 'value', required: true },
+      /**
+       * REQUIRED for the tier-3 key `schema_pack.source.<id>`: it is NOT in
+       * gbrain's `KNOWN_CONFIG_KEY_PREFIXES`, so `config set` exits 1 with
+       * `Unknown config key` unless `--force` is passed (MEASURED at 0.50.5.0;
+       * docs/schema-pack-findings.md S1 and S6 probe 1). With `--force` it
+       * lands in the brain DB `config` table, not the file plane — which is
+       * exactly the tier-3 plane the resolver reads.
+       */
+      { name: 'force', flag: '--force', kind: 'flag' },
     ],
     supportsJson: false,
     supportsDryRun: false,
@@ -107,6 +119,26 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     id: 'config.show',
     argv: ['config', 'show'],
     params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Clears one key. This is how a per-source pack override is reset: it
+   * removes the tier-3 key `schema_pack.source.<id>` from the brain DB
+   * `config` table (S1), so the source falls back to the brain-wide pack.
+   * MEASURED grammar (docs/schema-pack-findings.md S6 probe 5):
+   *   `gbrain config unset <key> | --pattern <prefix>`
+   * a no-arg call exits 1 with that usage line, and a missing key exits 1
+   * with `Config key not found`. `--pattern <prefix>` exists but is not
+   * exposed: the per-source reset names one key, never a prefix.
+   */
+  'config.unset': {
+    id: 'config.unset',
+    argv: ['config', 'unset'],
+    params: [{ name: 'key', flag: '', kind: 'value', required: true }],
     supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
@@ -450,6 +482,44 @@ export const OPERATIONS: Record<string, OperationSpec> = {
   },
 
   /**
+   * A pack's resolved manifest, without activating it. `params: []` is
+   * DELIBERATE: a positional pack name returns the *unresolved* manifest —
+   * MEASURED at 0.50.5.0, `gbrain schema show <pack> --json` runs
+   * `loadPackFromFile(path)` and never walks `extends`/`borrow_from`. Raw vs
+   * effective (docs/schema-pack-findings.md S4):
+   *
+   *   pack               | raw page types | effective
+   *   gbrain-base        | 27             | 27
+   *   gbrain-base-v2     | 19             | 19
+   *   gbrain-recommended | 12             | 32
+   *   gbrain-creator     |  1             | 27
+   *   gbrain-investor    |  2             | 29
+   *   gbrain-engineer    |  1             | 28
+   *   gbrain-everything  |  0             | 30
+   *
+   * Resolution must be done by gbrain's own resolver, via the env tier with
+   * NO positional (tier 2 of the chain, S1): `GBRAIN_SCHEMA_PACK=<pack>
+   * gbrain schema show --json` routes through `resolvePack` /
+   * `mergeInheritedManifest`. That env var is injected for one spawn by Task
+   * 1's `packOverride` seam in src/ops/server.ts. Reimplementing the merge in
+   * TypeScript would be a false claim — it is child-wins de-duplication, not a
+   * union (`gbrain-creator` is 27 effective from 27 base + 1 own, S4).
+   *
+   * supportsJson: true — unlike `active`/`list`, `runShow` DOES skip flags
+   * when finding the positional (`args.find(a => !a.startsWith('--'))`), so
+   * `--json` works in either position (S5).
+   */
+  'schema.show': {
+    id: 'schema.show',
+    argv: ['schema', 'show'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
    * Manifest-shape validation for one pack. The companion to `schema.lint`,
    * and NOT redundant with it: MEASURED at the pin, `schema lint <name>` on a
    * pack that exists but fails to parse answers the misleading
@@ -529,12 +599,23 @@ export const OPERATIONS: Record<string, OperationSpec> = {
    * `applied` counts. `supportsDryRun` fixed to false; our generic
    * `{ dryRun: true }` mechanism assumes gbrain literally has a `--dry-run`
    * flag, which this command does not.
+   *
+   * `--source <id>` is real and PROVEN to fence (Task 0 gate 4, superseding
+   * the plan's "unproven on the near-empty brain" note): with one untyped page
+   * seeded in each of two sources, `schema sync --source customers --json`
+   * reported `total_would_apply: 1` where the brain-wide run reported 2, and
+   * `probePrefix`/`applyTypeAssignment` both append `AND source_id = $N` — the
+   * fence covers the count, the sample AND the UPDATE (S6 probe 4, S3).
+   * Sync is additive-only: it fills blank types (`(type IS NULL OR type = '')`)
+   * and cannot reclassify, delete or unembed anything (S3). The UI copy must
+   * say "fills blank types", never "reclassifies".
    */
   'schema.sync': {
     id: 'schema.sync',
     argv: ['schema', 'sync'],
     params: [
       { name: 'apply', flag: '--apply', kind: 'flag' },
+      { name: 'source', flag: '--source', kind: 'value' },
     ],
     supportsJson: true,
     supportsDryRun: false,
@@ -547,6 +628,75 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     argv: ['sources', 'list'],
     params: [],
     supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Permanently delete a source. Per gbrain's own help this CASCADES pages,
+   * chunks and embeddings. MEASURED grammar (docs/schema-pack-findings.md S6
+   * probe 6): `remove <id> [--yes] [--confirm-destructive] [--dry-run]
+   * [--keep-storage]`, and the no-arg call prints exactly
+   * `Usage: gbrain sources remove <id> [--yes] [--confirm-destructive] [--dry-run] [--keep-storage]`.
+   * We expose `--yes`, `--confirm-destructive` and `--dry-run`, not
+   * `--keep-storage`.
+   *
+   * `--dry-run` is a REAL flag on this command, so it is modelled as an
+   * ORDINARY param — NOT via our generic `dryRun` mechanism, which appends
+   * `--dry-run` at the END and is gated on `supportsDryRun`. `supportsDryRun`
+   * therefore stays false; a caller passes `dryRun: true` among `params`.
+   *
+   * supportsJson: false — `--json` is accepted but IGNORED; remove prints the
+   * same box-drawing impact preview with or without it (MEASURED). Exit codes,
+   * both failures so okExitCodes is [0]: a data-bearing source without
+   * `--confirm-destructive` exits 5 (`This will permanently delete…`), and a
+   * missing source exits 4 (`Source "<id>" not found`).
+   */
+  'sources.remove': {
+    id: 'sources.remove',
+    argv: ['sources', 'remove'],
+    params: [
+      { name: 'id', flag: '', kind: 'value', required: true },
+      { name: 'confirmDestructive', flag: '--confirm-destructive', kind: 'flag' },
+      { name: 'dryRun', flag: '--dry-run', kind: 'flag' },
+      { name: 'yes', flag: '--yes', kind: 'flag' },
+    ],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Soft-delete: hide from search, preserve data for 72h. gbrain's help says
+   * "For most workflows prefer the soft-delete path", so this is the default
+   * the UI offers. MEASURED grammar (S6 probe 6): `archive <id>`; prose only,
+   * no `--json`.
+   */
+  'sources.archive': {
+    id: 'sources.archive',
+    argv: ['sources', 'archive'],
+    params: [{ name: 'id', flag: '', kind: 'value', required: true }],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Rename the display name only — the id is immutable. MEASURED grammar
+   * (S6 probe 6): `rename <id> <new-name>`; prose only, no `--json`.
+   * `buildArgv` emits positionals in array order, so `id` must stay first.
+   */
+  'sources.rename': {
+    id: 'sources.rename',
+    argv: ['sources', 'rename'],
+    params: [
+      { name: 'id', flag: '', kind: 'value', required: true },
+      { name: 'newName', flag: '', kind: 'value', required: true },
+    ],
+    supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
     okExitCodes: [0],

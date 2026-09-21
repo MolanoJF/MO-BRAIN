@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.5.0",
-  "generatedAt": "2026-09-21T17:46:23.235Z",
+  "generatedAt": "2026-09-21T19:04:10.076Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -282,6 +282,11 @@
           "flag": "",
           "kind": "value",
           "required": true
+        },
+        {
+          "name": "force",
+          "flag": "--force",
+          "kind": "flag"
         }
       ],
       "supportsJson": false,
@@ -298,6 +303,27 @@
         "show"
       ],
       "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "config.unset",
+      "argv": [
+        "config",
+        "unset"
+      ],
+      "params": [
+        {
+          "name": "key",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
       "supportsJson": false,
       "supportsDryRun": false,
       "privilege": "brain-db",
@@ -806,6 +832,20 @@
       ]
     },
     {
+      "id": "schema.show",
+      "argv": [
+        "schema",
+        "show"
+      ],
+      "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "schema.sync",
       "argv": [
         "schema",
@@ -816,6 +856,11 @@
           "name": "apply",
           "flag": "--apply",
           "kind": "flag"
+        },
+        {
+          "name": "source",
+          "flag": "--source",
+          "kind": "value"
         }
       ],
       "supportsJson": true,
@@ -971,6 +1016,27 @@
       ]
     },
     {
+      "id": "sources.archive",
+      "argv": [
+        "sources",
+        "archive"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "sources.list",
       "argv": [
         "sources",
@@ -1014,6 +1080,69 @@
         }
       ],
       "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.remove",
+      "argv": [
+        "sources",
+        "remove"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "confirmDestructive",
+          "flag": "--confirm-destructive",
+          "kind": "flag"
+        },
+        {
+          "name": "dryRun",
+          "flag": "--dry-run",
+          "kind": "flag"
+        },
+        {
+          "name": "yes",
+          "flag": "--yes",
+          "kind": "flag"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "sources.rename",
+      "argv": [
+        "sources",
+        "rename"
+      ],
+      "params": [
+        {
+          "name": "id",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "newName",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
       "supportsDryRun": false,
       "privilege": "brain-db",
       "okExitCodes": [

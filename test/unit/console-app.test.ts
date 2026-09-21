@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { phaseFor } from '../../src/console/App.tsx';
+import { phaseFor, pageFromPath } from '../../src/console/App.tsx';
 import { signInError } from '../../src/console/pages/SignIn.tsx';
 import { ApiError } from '../../src/console/api.ts';
 
@@ -44,6 +44,25 @@ describe('the console door: the bootstrap form, the sign-in page, or the app (D1
   test('a failing probe never claims the install is empty', () => {
     expect(phaseFor(true, { status: 'unreachable' })).toBe('signin');
     expect(phaseFor(true, { status: 500 })).toBe('signin');
+  });
+});
+
+describe('cold-load routes survive a page load', () => {
+  test('/sources is a real route, so a bookmarked Sources page is not lost', () => {
+    expect(pageFromPath('/sources')).toBe('sources');
+    // A trailing slash is the same route.
+    expect(pageFromPath('/sources/')).toBe('sources');
+  });
+
+  test('the sibling cold-load routes still resolve', () => {
+    expect(pageFromPath('/schedules')).toBe('schedules');
+    expect(pageFromPath('/upgrades')).toBe('upgrades');
+    expect(pageFromPath('/files')).toBe('files');
+  });
+
+  test('an unknown path is not silently mapped to a page', () => {
+    expect(pageFromPath('/nope')).toBeNull();
+    expect(pageFromPath('/')).toBeNull();
   });
 });
 

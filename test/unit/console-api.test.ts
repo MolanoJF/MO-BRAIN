@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from 'bun:test';
-import { api, ApiError, runApi, scheduleApi, sessionApi, toDiffSummary, toRunnerStatus, toSpaceHeads } from '../../src/console/api.ts';
+import { api, ApiError, runApi, scheduleApi, sessionApi, schemaPacksApi, sourcesApi, toDiffSummary, toRunnerStatus, toSpaceHeads } from '../../src/console/api.ts';
 
 const orig = globalThis.fetch;
 afterEach(() => { globalThis.fetch = orig; });
@@ -64,6 +64,22 @@ describe('console api client', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(404);
     expect((err as ApiError).message).toMatch(/member not found/);
+  });
+
+  test('delete carries a body when one is given, and none when it is not', async () => {
+    // `DELETE /api/sources/:id` reads `{ mode, confirm }`, so the client must be
+    // able to send a body; the bodyless callers must keep sending nothing.
+    let seen = { body: undefined as string | undefined };
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      seen = { body: init?.body === undefined ? undefined : String(init.body) };
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    await api.delete('/sources/customers', { mode: 'remove' });
+    expect(JSON.parse(seen.body!)).toEqual({ mode: 'remove' });
+
+    await api.delete('/members/abc');
+    expect(seen.body).toBeUndefined();
   });
 });
 
@@ -233,3 +249,96 @@ describe('the agent payload and the signed-in identity', () => {
     expect(await sessionApi.me()).toBeNull();
   });
 });
+
+/**
+ * The schema-pack and Sources clients. The assertions are the URLs and the
+ * bodies: an id must be encoded, a per-Space pack write must address its own
+ * Space, and a sync either fences to one Space or is brain-wide.
+ */
+describe('the schema-pack and sources api clients', () => {
+  const captureBody = (body: unknown = {}) => {
+    const seen: { url: string; method: string; body: string } = { url: '', method: '', body: '' };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      seen.url = url; seen.method = init?.method ?? 'GET';
+      seen.body = init?.body === undefined ? '' : String(init.body);
+      return new Response(JSON.stringify(body), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    return seen;
+  };
+
+  test('schemaPacksApi.list and .sources address their own routes', async () => {
+    const list = captureBody({ packs: [] });
+    await schemaPacksApi.list();
+    expect(list.url).toBe('/api/schema/packs');
+    expect(list.method).toBe('GET');
+
+    const sources = captureBody({ sources: [] });
+    await schemaPacksApi.sources();
+    expect(sources.url).toBe('/api/schema/sources');
+  });
+
+  test('setSourcePack POSTs to the encoded Space with { pack }', async () => {
+    const seen = captureBody({ ok: true });
+    await schemaPacksApi.setSourcePack('team one', 'gbrain-investor');
+    expect(seen.url).toBe('/api/schema/sources/team%20one');
+    expect(seen.method).toBe('POST');
+    expect(JSON.parse(seen.body)).toEqual({ pack: 'gbrain-investor' });
+  });
+
+  test('resetSourcePack DELETEs the encoded Space with no body', async () => {
+    const seen = captureBody({ ok: true });
+    await schemaPacksApi.resetSourcePack('customers');
+    expect(seen.url).toBe('/api/schema/sources/customers');
+    expect(seen.method).toBe('DELETE');
+    expect(seen.body).toBe('');
+  });
+
+  test('previewSync / runSync are brain-wide with no source and fenced with one', async () => {
+    const wide = captureBody({ apply: false });
+    await schemaPacksApi.previewSync();
+    expect(wide.url).toBe('/api/schema/preview');
+    expect(JSON.parse(wide.body)).toEqual({});
+
+    const fenced = captureBody({ apply: false });
+    await schemaPacksApi.runSync('customers');
+    expect(fenced.url).toBe('/api/schema/sync');
+    expect(JSON.parse(fenced.body)).toEqual({ source: 'customers' });
+  });
+
+  test('sourcesApi.remove sends { mode, confirm } to the encoded id', async () => {
+    const archive = captureBody({ ok: true, mode: 'archive', sourceId: 'customers' });
+    await sourcesApi.remove('customers', { mode: 'archive' });
+    expect(archive.url).toBe('/api/sources/customers');
+    expect(archive.method).toBe('DELETE');
+    expect(JSON.parse(archive.body)).toEqual({ mode: 'archive' });
+
+    const confirmed = captureBody({ ok: true });
+    await sourcesApi.remove('customers', { mode: 'remove', confirm: true });
+    expect(JSON.parse(confirmed.body)).toEqual({ mode: 'remove', confirm: true });
+  });
+
+  test("an unconfirmed remove's 409 carries the impact preview in the body", async () => {
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({
+        error: 'confirmation_required', mode: 'remove', sourceId: 'customers',
+        preview: 'Pages: 3  Chunks: 9',
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )) as unknown as typeof fetch;
+    const err = await sourcesApi.remove('customers', { mode: 'remove' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).body.preview).toBe('Pages: 3  Chunks: 9');
+  });
+
+  test('sourcesApi.add POSTs the id and name to /api/sources', async () => {
+    const seen = captureBody({ ok: true, sourceId: 'customers', isolationNotice: 'x' });
+    await sourcesApi.add({ sourceId: 'customers', name: 'Customers' });
+    expect(seen.url).toBe('/api/sources');
+    expect(seen.method).toBe('POST');
+    expect(JSON.parse(seen.body)).toEqual({ sourceId: 'customers', name: 'Customers' });
+  });
+});
+

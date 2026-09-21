@@ -1,7 +1,9 @@
 import { test, expect, describe } from 'bun:test';
 import {
   activeSummary, divergenceWarning, canApply, syncSummary, ADDITIVE_NOTICE,
+  packSummary, pageTypeLabel, inheritanceNote,
 } from '../../src/console/pages/Schema.tsx';
+import type { PackDetail, PackPageType } from '../../src/console/api.ts';
 
 const ACTIVE = {
   pack: 'gbrain-base-v2', version: '1.2.0', source: 'home-config',
@@ -107,4 +109,99 @@ test('the page states plainly that a switch does not re-type existing pages', ()
   // a blank type, so pages typed under the old pack keep their old type.
   expect(ADDITIVE_NOTICE).toMatch(/does not re-type/i);
   expect(ADDITIVE_NOTICE).toMatch(/keep the type/i);
+});
+
+/**
+ * The pack browser. These are the counts and labels an admin decides from, so
+ * they are pure functions the test can pin without a DOM.
+ */
+
+const pageType = (name: string, over: Partial<PackPageType> = {}): PackPageType => ({
+  name,
+  primitive: 'concept',
+  pathPrefixes: [],
+  aliases: [],
+  extractable: true,
+  ...over,
+});
+
+const detail = (over: Partial<PackDetail> = {}): PackDetail => ({
+  name: 'gbrain-base-v2',
+  version: '1.2.0',
+  description: null,
+  extends: null,
+  pageTypes: [],
+  linkVerbs: [],
+  takesKinds: [],
+  error: null,
+  ...over,
+});
+
+describe('the pack summary', () => {
+  test('reports effective page types and link verbs, and the parent when it extends one', () => {
+    const s = packSummary(detail({
+      name: 'gbrain-investor',
+      extends: 'gbrain-base',
+      pageTypes: Array.from({ length: 29 }, (_, i) => pageType(`t${i}`)),
+      linkVerbs: Array.from({ length: 12 }, (_, i) => `v${i}`),
+    }));
+    expect(s).toContain('29 page types');
+    expect(s).toContain('12 link verbs');
+    expect(s).toContain('extends gbrain-base');
+  });
+
+  test('a pack that does not extend anything omits the parent clause', () => {
+    const s = packSummary(detail({ pageTypes: [pageType('x')], linkVerbs: ['y'] }));
+    expect(s).toContain('1 page type');
+    expect(s).toContain('1 link verb');
+    expect(s).not.toContain('extends');
+  });
+
+  test('REGRESSION: gbrain-creator is 27 effective page types, not its raw 1', () => {
+    // `gbrain schema show <pack>` prints the UNRESOLVED manifest; gbrain-creator
+    // declares 1 there and 27 effective. Serving/rendering the raw number is the
+    // false claim Task 1's packOverride seam exists to prevent (S4).
+    const creator = detail({
+      name: 'gbrain-creator',
+      extends: 'gbrain-base',
+      pageTypes: Array.from({ length: 27 }, (_, i) => pageType(`t${i}`)),
+      linkVerbs: Array.from({ length: 12 }, (_, i) => `v${i}`),
+    });
+    const s = packSummary(creator);
+    expect(s).toContain('27 page types');
+    expect(s).not.toContain('1 page type');
+  });
+});
+
+describe('the page type label', () => {
+  test('names the type, its primitive and its path prefixes', () => {
+    const label = pageTypeLabel(pageType('thesis', {
+      primitive: 'concept', pathPrefixes: ['investing/theses/', 'theses/'],
+    }));
+    expect(label).toContain('thesis');
+    expect(label).toContain('concept');
+    expect(label).toContain('investing/theses/');
+    expect(label).toContain('theses/');
+  });
+
+  test('a type with no primitive or prefixes is just its name', () => {
+    expect(pageTypeLabel(pageType('bare', { primitive: '', pathPrefixes: [] }))).toBe('bare');
+  });
+});
+
+describe('the inheritance note', () => {
+  test('an inherited pack is named as the brain default, with the pack', () => {
+    const note = inheritanceNote(true, 'gbrain-base-v2');
+    expect(note).toMatch(/inherits the brain default/i);
+    expect(note).toContain('gbrain-base-v2');
+  });
+
+  test('an override is not an inheritance note — the caller must name it as stored', () => {
+    expect(inheritanceNote(false, 'gbrain-investor')).toBeNull();
+  });
+
+  test('an inherited pack with no resolved name still says it inherits', () => {
+    const note = inheritanceNote(true, null);
+    expect(note).toMatch(/inherits the brain default/i);
+  });
 });

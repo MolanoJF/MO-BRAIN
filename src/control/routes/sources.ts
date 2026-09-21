@@ -1,0 +1,199 @@
+import { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
+import { and, eq } from 'drizzle-orm';
+import { getDb, schema } from '../db/client.ts';
+import { requireRole, type Role } from '../rbac.ts';
+import { callOps } from '../opsClient.ts';
+import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
+import { resolveSourcePacks } from './schema.ts';
+
+/**
+ * `/api/sources/*` — the Sources admin API (Task 5). A Space is a gbrain
+ * source; this is where an admin adds, renames, archives and removes one, and
+ * sees the schema pack each resolves.
+ *
+ * `GET` joins our `spaces` rows with gbrain's live `sources.list` and Task 4's
+ * pack resolution, and FLAGS mismatches (a source in one plane but not the
+ * other) rather than hiding them. Every route is `admin`-only: removal is
+ * destructive and irreversible.
+ */
+export const sourceRoutes = new Hono();
+
+type GbrainSource = {
+  id: string;
+  name: string;
+  local_path: string | null;
+  federated: boolean;
+  page_count: number | null;
+  last_sync_at: string | null;
+};
+
+type SpaceRow = { id: string; sourceId: string; name: string; kind: string };
+
+async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
+  // S3c: `after` is a redacted summary — never a raw request body.
+  await getDb().insert(schema.auditLog)
+    .values({ id: randomUUID(), organizationId: orgId, actor, action, target, before: null, after: after as object });
+}
+
+const guard = (min: Role, handler: (c: any, ctx: { userId: string; orgId: string; role: Role }) => Promise<Response>) =>
+  async (c: any) => {
+    let ctx;
+    try { ctx = await requireRole(c, min); } catch (r) { return r as Response; }
+    try { return await handler(c, ctx); }
+    catch (e: any) { return c.json({ error: e?.message ?? 'sources_error' }, e?.status ?? 400); }
+  };
+
+/** The `(organizationId, sourceId)` pair is uniquely indexed, so a Space from
+ *  another org can never be resolved here. Validated before ANY destructive
+ *  call or interpolated into a gbrain config key. */
+async function spaceFor(orgId: string, sourceId: string): Promise<SpaceRow | null> {
+  const [space] = await getDb().select({
+    id: schema.spaces.id,
+    sourceId: schema.spaces.sourceId,
+    name: schema.spaces.name,
+    kind: schema.spaces.kind,
+  }).from(schema.spaces).where(and(
+    eq(schema.spaces.organizationId, orgId),
+    eq(schema.spaces.sourceId, sourceId),
+  ));
+  return space ?? null;
+}
+
+/**
+ * Delete the `spaces` row and clear the per-source pack override together.
+ *
+ * There is deliberately NO `spaces.schema_pack` column: gbrain's DB config is
+ * the truth for tier 3, so a mirrored column would only add a divergence
+ * surface. Removing the Space must therefore clear the key too, or a future
+ * source reusing the id would inherit a pack nobody chose for it.
+ */
+async function dropSourceRow(spaceId: string, sourceId: string): Promise<void> {
+  await getDb().delete(schema.spaces).where(eq(schema.spaces.id, spaceId));
+  await callOps('config.unset', { key: `schema_pack.source.${sourceId}` }, { timeoutMs: 60_000 });
+}
+
+sourceRoutes.get('/sources', guard('admin', async (c, { orgId }) => {
+  const [packResolved, listed] = await Promise.all([
+    resolveSourcePacks(orgId),
+    callOps<{ sources: GbrainSource[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 }),
+  ]);
+
+  // A failed `sources.list` is NOT an empty brain: rows keep `pageCount: null`,
+  // never 0, and the payload says the list could not be read.
+  const gbrain = listed.ok && listed.json && Array.isArray(listed.json.sources)
+    ? listed.json.sources
+    : null;
+  const byId = new Map((gbrain ?? []).map((s) => [s.id, s]));
+
+  const sources = packResolved.map((s) => {
+    const g = byId.get(s.sourceId);
+    return {
+      sourceId: s.sourceId,
+      name: s.name,
+      kind: s.kind,
+      pack: s.pack,
+      tier: s.tier,
+      pageTypes: s.pageTypes,
+      linkVerbs: s.linkVerbs,
+      inherited: s.inherited,
+      pageCount: g?.page_count ?? null,
+      lastSyncAt: g?.last_sync_at ?? null,
+      federated: g?.federated ?? null,
+      inGbrain: g !== undefined,
+    };
+  });
+
+  // Flag the other direction of the mismatch too: a gbrain source with no
+  // `spaces` row is invisible to the console unless we name it.
+  const known = new Set(packResolved.map((s) => s.sourceId));
+  const unregistered = (gbrain ?? []).filter((s) => !known.has(s.id)).map((s) => s.id);
+
+  return c.json({ sources, unregistered, sourcesListOk: gbrain !== null });
+}));
+
+sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
+  const { sourceId, name, description } = await c.req.json();
+  // ONE implementation, shared with `/api/wizard/space`, so they cannot drift.
+  const result = await addSpaceSource({ userId, orgId }, { sourceId, name, description }, 'source.add');
+  if (!result.ok) return c.json(result.body, result.status);
+  return c.json({ ok: true, sourceId: result.sourceId, isolationNotice: ISOLATION_NOTICE });
+}));
+
+sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+  const sourceId = c.req.param('sourceId') ?? '';
+  const space = await spaceFor(orgId, sourceId);
+  if (!space) return c.json({ error: `unknown source ${sourceId}` }, 400);
+
+  const body = await c.req.json().catch(() => ({}));
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) return c.json({ error: 'name is required' }, 400);
+
+  // The id is immutable; only the display name moves.
+  const r = await callOps('sources.rename', { id: sourceId, newName: name }, { timeoutMs: 60_000 });
+  if (!r.ok) return c.json({ error: `sources rename failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+
+  await getDb().update(schema.spaces).set({ name }).where(eq(schema.spaces.id, space.id));
+  await audit(orgId, userId, 'source.rename', sourceId, { name });
+  return c.json({ ok: true, sourceId, name });
+}));
+
+sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+  const sourceId = c.req.param('sourceId') ?? '';
+  const space = await spaceFor(orgId, sourceId);
+  if (!space) return c.json({ error: `unknown source ${sourceId}` }, 400);
+
+  const body = await c.req.json().catch(() => ({}));
+  const mode = typeof body?.mode === 'string' ? body.mode : 'archive';
+  if (mode !== 'archive' && mode !== 'remove') {
+    return c.json({ error: 'mode must be archive or remove' }, 400);
+  }
+
+  // Archive is the DEFAULT and the primary action gbrain's own help recommends
+  // ("For most workflows prefer the soft-delete path"): hide from search,
+  // preserve data for 72h.
+  if (mode === 'archive') {
+    const r = await callOps('sources.archive', { id: sourceId }, { timeoutMs: 120_000 });
+    if (!r.ok) return c.json({ error: `sources archive failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+    await dropSourceRow(space.id, sourceId);
+    await audit(orgId, userId, 'source.archive', sourceId, { mode });
+    return c.json({ ok: true, mode, sourceId });
+  }
+
+  // Remove CASCADES pages, chunks and embeddings. Refuse until the caller
+  // explicitly confirms, and hand back the `--dry-run` impact preview so the
+  // confirmation is informed. `--dry-run` is passed as an ORDINARY param:
+  // `sources.remove` has `supportsDryRun: false` (the generic mechanism appends
+  // `--dry-run` too late / only when gbrain declares it), so it must be the
+  // op's own `dryRun` flag. MEASURED, docs/schema-pack-findings.md S6 probe 6.
+  if (body?.confirm !== true) {
+    const preview = await callOps('sources.remove', { id: sourceId, dryRun: true }, { timeoutMs: 120_000 });
+    if (!preview.ok) {
+      return c.json({
+        error: `sources remove dry-run failed (exit ${preview.exitCode})`,
+        detail: preview.stderr || preview.stdout,
+      }, 400);
+    }
+    return c.json({
+      error: 'confirmation_required',
+      mode: 'remove',
+      sourceId,
+      preview: preview.stdout,
+    }, 409);
+  }
+
+  // Preview first (captured for the receipt), THEN the destructive call.
+  const preview = await callOps('sources.remove', { id: sourceId, dryRun: true }, { timeoutMs: 120_000 });
+  const r = await callOps('sources.remove', { id: sourceId, confirmDestructive: true }, { timeoutMs: 300_000 });
+  if (!r.ok) {
+    return c.json({
+      error: `sources remove failed (exit ${r.exitCode})`,
+      detail: r.stderr || r.stdout,
+      preview: preview.stdout,
+    }, 400);
+  }
+
+  await dropSourceRow(space.id, sourceId);
+  await audit(orgId, userId, 'source.remove', sourceId, { mode });
+  return c.json({ ok: true, mode, sourceId, preview: preview.stdout });
+}));

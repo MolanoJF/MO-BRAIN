@@ -40,4 +40,24 @@ describe('validateRequest', () => {
       expect(['brain-db', 'read-only']).toContain(spec.privilege);
     }
   });
+
+  // Task 1: the ONE named env override. It is validated against the same
+  // pack-name guard as src/ops/fileplane.ts, so no other variable — and no
+  // path or whitespace — can cross the RPC.
+  test('returns a validated packOverride', () => {
+    const r = validateRequest(ops, { op: 'schema.show', params: {}, packOverride: 'gbrain-creator' });
+    expect(r.packOverride).toBe('gbrain-creator');
+  });
+
+  test('rejects an invalid packOverride', () => {
+    for (const bad of ['../etc', 'Has Spaces', 'A']) {
+      expect(() => validateRequest(ops, { op: 'schema.show', params: {}, packOverride: bad }))
+        .toThrow('invalid packOverride');
+    }
+  });
+
+  test('absent packOverride stays undefined', () => {
+    const r = validateRequest(ops, { op: 'sources.list', params: {} });
+    expect(r.packOverride).toBeUndefined();
+  });
 });

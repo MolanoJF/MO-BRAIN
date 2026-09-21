@@ -3,7 +3,7 @@ import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
 import { parseSchemaActiveProse } from '../../src/contracts/capability.ts';
-import { composeUp, composeDown, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
+import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
 
 beforeAll(async () => {
   await composeUp();
@@ -72,3 +72,68 @@ test('schema sync previews without --apply and still refuses --dry-run', async (
   expect(() => buildArgv(OPERATIONS['schema.sync']!, {}, { dryRun: true }))
     .toThrow(/does not support --dry-run/);
 });
+
+test('schema.show resolves through the env tier, not the raw manifest', async () => {
+  // S4 regression fence: the POSITIONAL form `schema show <pack>` returns the
+  // UNRESOLVED manifest — gbrain-creator would report 1 page type. The env
+  // tier with no positional routes through gbrain's own resolver and yields
+  // 27. If anyone ever switches this entry back to a positional pack name,
+  // this assertion breaks. See docs/schema-pack-findings.md S4.
+  const creator = await execOperation(OPERATIONS['schema.show']!, {}, {
+    json: true, env: { GBRAIN_SCHEMA_PACK: 'gbrain-creator' },
+  });
+  assertOk(OPERATIONS['schema.show']!, creator);
+  const c = creator.json as { page_types?: unknown[] } | null;
+  expect(c?.page_types?.length).toBe(27);
+
+  const base = await execOperation(OPERATIONS['schema.show']!, {}, {
+    json: true, env: { GBRAIN_SCHEMA_PACK: 'gbrain-base' },
+  });
+  assertOk(OPERATIONS['schema.show']!, base);
+  const b = base.json as { page_types?: unknown[] } | null;
+  expect(b?.page_types?.length).toBe(27);
+}, 120_000);
+
+test('config.unset clears a per-source pack override written by config.set --force', async () => {
+  // The tier-3 key is NOT in gbrain's KNOWN_CONFIG_KEY_PREFIXES, so a plain
+  // `config set` exits 1 on the unknown-key gate (S1/S6 probe 1). This is the
+  // regression fence for the `force` param.
+  const key = 'schema_pack.source.zz-contract-probe';
+  const noForce = await execOperation(OPERATIONS['config.set']!, { key, value: 'gbrain-investor' });
+  expect(noForce.exitCode).toBe(1);
+  expect(noForce.stdout + noForce.stderr).toMatch(/Unknown config key/);
+
+  const set = await execOperation(OPERATIONS['config.set']!, { key, value: 'gbrain-investor', force: true });
+  assertOk(OPERATIONS['config.set']!, set);
+
+  const got = await execOperation(OPERATIONS['config.get']!, { key });
+  assertOk(OPERATIONS['config.get']!, got);
+  expect(got.stdout).toContain('gbrain-investor');
+
+  // config.unset clears it; the key then answers exit 1 with `Config key not
+  // found` (S6 probe 5). We never touch the brain-wide active pack.
+  const unset = await execOperation(OPERATIONS['config.unset']!, { key });
+  assertOk(OPERATIONS['config.unset']!, unset);
+
+  const after = await execOperation(OPERATIONS['config.get']!, { key });
+  expect(after.exitCode).toBe(1);
+  expect(after.stdout + after.stderr).toMatch(/Config key not found/);
+}, 120_000);
+
+// Grammar coverage only: the registry marks `id` required, so a true no-arg
+// call cannot be built by buildArgv. Run the bare verbs through composeExec and
+// assert gbrain's own usage refusal (exit 2). No source is fabricated.
+test('sources remove/archive/rename with no argument exit 2 with usage', async () => {
+  const cases = [
+    ['sources.remove', 'remove'],
+    ['sources.archive', 'archive'],
+    ['sources.rename', 'rename'],
+  ] as const;
+  for (const [id, verb] of cases) {
+    const spec = OPERATIONS[id]!;
+    expect(spec.argv).toEqual(['sources', verb]);
+    const r = await composeExec('gbrain-ops', ['gbrain', ...spec.argv]);
+    expect(r.exitCode).toBe(2);
+    expect(r.stdout + r.stderr).toMatch(/usage:/i);
+  }
+}, 120_000);

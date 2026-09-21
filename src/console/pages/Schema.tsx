@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api.ts';
+import { api, schemaPacksApi, type PackDetail, type PackPageType, type SchemaSync } from '../api.ts';
 
 type Active = {
   pack: string | null; version: string | null; source: string | null;
@@ -8,8 +8,7 @@ type Active = {
 type State = { stored: string | null; active: Active; packs: string[]; diverged: boolean };
 type LintRule = { rule: string; message: string; hint?: string };
 type Lint = { ok: boolean; errors: LintRule[]; warnings: LintRule[] };
-type PerPrefix = { type: string; prefix: string; would_apply: number; applied: number; dead_prefix: boolean; sample_slugs: string[] };
-type Sync = { apply: boolean; pack_identity: string | null; per_prefix: PerPrefix[]; total_would_apply: number; total_applied: number };
+type Sync = SchemaSync;
 
 /**
  * A pack switch is additive: `gbrain schema sync` only fills a blank `type`,
@@ -62,8 +61,43 @@ export function syncSummary(report: Sync): string {
   return `${report.total_would_apply} page(s) would be typed · ${report.total_applied} applied`;
 }
 
+/**
+ * One pack's EFFECTIVE counts, as the row renders them. The counts come from
+ * `/api/schema/packs`, which routes through gbrain's own resolver: `gbrain-creator`
+ * reports 27 effective page types from a manifest that declares 1. Reading the
+ * raw manifest here would be the false claim Task 1's `packOverride` seam exists
+ * to prevent (MEASURED, docs/schema-pack-findings.md S4).
+ */
+export function packSummary(detail: PackDetail): string {
+  const types = `${detail.pageTypes.length} page type${detail.pageTypes.length === 1 ? '' : 's'}`;
+  const verbs = `${detail.linkVerbs.length} link verb${detail.linkVerbs.length === 1 ? '' : 's'}`;
+  const base = `${types} · ${verbs}`;
+  return detail.extends ? `${base} · extends ${detail.extends}` : base;
+}
+
+/** One page type's label: `thesis (concept) — investing/theses/, theses/`. */
+export function pageTypeLabel(pageType: PackPageType): string {
+  const primitive = pageType.primitive ? ` (${pageType.primitive})` : '';
+  const prefixes = pageType.pathPrefixes.length > 0 ? ` — ${pageType.pathPrefixes.join(', ')}` : '';
+  return `${pageType.name}${primitive}${prefixes}`;
+}
+
+/**
+ * The inherited-vs-override sentence. `inherited` means no per-Space override
+ * is set, so the brain-wide pack applies. An override returns null: the caller
+ * names it as the STORED intent, never as a resolved state (S6 Gate 2 — gbrain
+ * offers no per-Space readback at this pin).
+ */
+export function inheritanceNote(inherited: boolean, pack: string | null): string | null {
+  if (!inherited) return null;
+  return `Inherits the brain default${pack ? ` (${pack})` : ''}.`;
+}
+
 export function Schema() {
   const [state, setState] = useState<State | null>(null);
+  const [details, setDetails] = useState<PackDetail[]>([]);
+  const [packsError, setPacksError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [pack, setPack] = useState('');
   const [lint, setLint] = useState<Lint | null>(null);
   const [preview, setPreview] = useState<Sync | null>(null);
@@ -76,7 +110,12 @@ export function Schema() {
     setState(s);
     setPack((current) => current || s.stored || s.active.pack || '');
   };
-  useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed')); }, []);
+  useEffect(() => {
+    void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
+    void schemaPacksApi.list()
+      .then((body) => setDetails(body.packs))
+      .catch((e) => setPacksError(e instanceof Error ? e.message : 'The pack list could not be loaded.'));
+  }, []);
 
   const step = async (fn: () => Promise<void>) => {
     setBusy(true); setError(null);
@@ -88,6 +127,14 @@ export function Schema() {
   // Any change to the candidate invalidates the gate: a preview of the old
   // pack must never authorize applying a different one.
   const choose = (name: string) => { setPack(name); setLint(null); setPreview(null); setApplied(null); };
+
+  // Expanding a pack makes it the candidate and invalidates the gate. Collapsing
+  // leaves the candidate alone — the controls are only rendered while expanded.
+  const toggle = (name: string) => {
+    if (expanded === name) { setExpanded(null); return; }
+    setExpanded(name);
+    choose(name);
+  };
 
   const runLint = () => step(async () => setLint(await api.post<Lint>('/schema/lint', { pack, withDb: true })));
   const runPreview = () => step(async () => setPreview(await api.post<Sync>('/schema/preview', {})));
@@ -134,59 +181,122 @@ export function Schema() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Change pack</h2>
+        <h2 className="text-sm font-semibold">Schema packs</h2>
         <p className="text-sm text-muted">{ADDITIVE_NOTICE}</p>
-        <select
-          className="w-full" value={pack} disabled={busy}
-          onChange={(e) => choose(e.currentTarget.value)}
-        >
-          {state.packs.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-
-        <div className="flex gap-2">
-          <button disabled={busy || pack === ''} onClick={runLint}>Lint</button>
-          <button disabled={busy} onClick={runPreview}>Preview sync</button>
-          <button disabled={!applyEnabled} onClick={runApply}>
-            {changing ? `Apply ${pack}` : 'Apply'}
-          </button>
-        </div>
-        {!applyEnabled && pack !== '' && (
-          <p className="text-xs text-muted">Lint clean and a sync preview are both required before applying.</p>
-        )}
+        {packsError && <div className="text-danger text-sm">{packsError}</div>}
+        {!packsError && details.length === 0 && <p className="text-sm text-muted">Loading packs…</p>}
+        {details.map((d) => {
+          const isActive = d.name === state.active.pack;
+          const isOpen = expanded === d.name;
+          return (
+            <div key={d.name} className="card space-y-2">
+              <button
+                className="nav-item flex items-center justify-between gap-2"
+                disabled={busy}
+                onClick={() => toggle(d.name)}
+              >
+                <span className="font-mono">{isOpen ? '▾' : '▸'} {d.name}</span>
+                {isActive && (
+                  <span className="text-ok text-xs shrink-0">
+                    {state.active.source ? `ACTIVE (${state.active.source})` : 'ACTIVE'}
+                  </span>
+                )}
+              </button>
+              {d.error
+                ? <div className="text-danger text-sm">{d.error}</div>
+                : <div className="text-sm text-muted">{packSummary(d)}</div>}
+              {isOpen && d.error === null && (
+                <div className="space-y-3 pt-2">
+                  <PackTypesView detail={d} />
+                  <div className="flex flex-wrap gap-2">
+                    <button className="nav-item" disabled={busy || pack === ''} onClick={runLint}>Lint</button>
+                    <button className="nav-item" disabled={busy} onClick={runPreview}>Preview sync</button>
+                    <button className="btn-primary" disabled={!applyEnabled} onClick={runApply}>
+                      {changing ? `Apply ${pack}` : 'Apply'}
+                    </button>
+                  </div>
+                  {!applyEnabled && pack !== '' && (
+                    <p className="text-xs text-muted">Lint clean and a sync preview are both required before applying.</p>
+                  )}
+                  {lint && <LintReport lint={lint} />}
+                  {preview && <SyncTable title="Preview — nothing written" report={preview} />}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </section>
-
-      {lint && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Lint — {lint.ok ? 'clean' : 'errors'}</h2>
-          {lint.errors.map((e, i) => (
-            <div key={`e${i}`} className="text-danger text-sm">
-              <code>{e.rule}</code>: {e.message}{e.hint ? ` — ${e.hint}` : ''}
-            </div>
-          ))}
-          {lint.warnings.map((w, i) => (
-            <div key={`w${i}`} className="text-muted text-sm">
-              <code>{w.rule}</code>: {w.message}{w.hint ? ` — ${w.hint}` : ''}
-            </div>
-          ))}
-          {lint.ok && lint.warnings.length === 0 && <div className="text-sm text-muted">No findings.</div>}
-        </section>
-      )}
-
-      {preview && <SyncTable title="Preview — nothing written" report={preview} />}
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Backfill types</h2>
         <p className="text-sm text-muted">
           Fills in pages that have no type yet, using the active pack's path prefixes. {ADDITIVE_NOTICE}
         </p>
-        <button disabled={busy} onClick={runSync}>Run sync</button>
+        <button className="nav-item" disabled={busy} onClick={runSync}>Run sync</button>
         {applied && <SyncTable title={`Applied — ${applied.total_applied} page(s) typed`} report={applied} />}
       </section>
     </div>
   );
 }
 
-function SyncTable({ title, report }: { title: string; report: Sync }) {
+/**
+ * A pack's resolved page types and link verbs, or its error. EXACTLY one of
+ * those is ever rendered: a pack that failed to resolve shows the error, never
+ * an empty type list that reads as "this pack brings nothing".
+ *
+ * Exported so the Sources page renders a per-Space pack the same way — one
+ * implementation, not two.
+ */
+export function PackTypesView({ detail }: { detail: PackDetail }) {
+  if (detail.error !== null) return <div className="text-danger text-sm">{detail.error}</div>;
+  return (
+    <div className="space-y-3">
+      {detail.description && <p className="text-sm text-muted">{detail.description}</p>}
+      <div>
+        <h3 className="text-xs font-semibold text-muted">Page types</h3>
+        {detail.pageTypes.length === 0 ? (
+          <p className="text-sm text-muted">This pack declares no page types.</p>
+        ) : (
+          <ul className="text-sm">
+            {detail.pageTypes.map((p) => (
+              <li key={p.name}><code>{pageTypeLabel(p)}</code></li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div>
+        <h3 className="text-xs font-semibold text-muted">Link verbs</h3>
+        {detail.linkVerbs.length === 0 ? (
+          <p className="text-sm text-muted">This pack declares no link verbs.</p>
+        ) : (
+          <p className="text-sm">{detail.linkVerbs.join(' · ')}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LintReport({ lint }: { lint: Lint }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">Lint — {lint.ok ? 'clean' : 'errors'}</h2>
+      {lint.errors.map((e, i) => (
+        <div key={`e${i}`} className="text-danger text-sm">
+          <code>{e.rule}</code>: {e.message}{e.hint ? ` — ${e.hint}` : ''}
+        </div>
+      ))}
+      {lint.warnings.map((w, i) => (
+        <div key={`w${i}`} className="text-muted text-sm">
+          <code>{w.rule}</code>: {w.message}{w.hint ? ` — ${w.hint}` : ''}
+        </div>
+      ))}
+      {lint.ok && lint.warnings.length === 0 && <div className="text-sm text-muted">No findings.</div>}
+    </section>
+  );
+}
+
+/** Exported so the Sources page reuses the same summary and table. */
+export function SyncTable({ title, report }: { title: string; report: Sync }) {
   const live = report.per_prefix.filter((p) => !p.dead_prefix);
   return (
     <section className="space-y-2">
