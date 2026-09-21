@@ -13,9 +13,10 @@ import { Schedules } from './pages/Schedules.tsx';
 import { Runs } from './pages/Runs.tsx';
 import { Spend } from './pages/Spend.tsx';
 import { Upgrades } from './pages/Upgrades.tsx';
+import { Files } from './pages/Files.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades';
+type Page = 'health' | 'setup' | 'members' | 'connection' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades' | 'files';
 
 /**
  * What `GET /api/wizard/state` answered, as the screen chooser sees it: an HTTP
@@ -62,6 +63,7 @@ function pageFromPath(): Page | null {
   if (path === '/runs') return 'runs';
   if (path === '/spend') return 'spend';
   if (path === '/upgrades') return 'upgrades';
+  if (path === '/files') return 'files';
   return null;
 }
 
@@ -116,6 +118,7 @@ export function App() {
         <button className="nav-item" onClick={() => setPage('setup')}>Setup</button>
         {phase === 'ready' && (
           <>
+            <button className="nav-item" onClick={() => setPage('files')}>Files</button>
             <button className="nav-item" onClick={() => setPage('members')}>Members</button>
             <button className="nav-item" onClick={() => setPage('connection')}>Connection</button>
             <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
@@ -136,6 +139,7 @@ export function App() {
         {page === 'spend' && <Spend />}
         {page === 'upgrades' && <Upgrades />}
         {page === 'access' && <Access />}
+        {page === 'files' && <Files />}
       </main>
     </div>
   );

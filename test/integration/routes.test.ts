@@ -50,6 +50,33 @@ function defaultOk(op: string, opts?: CallOpts): OpsResult {
 let callOpsHandler: (op: string, params?: Record<string, unknown>, opts?: CallOpts) => Promise<OpsResult> | OpsResult =
   (op, _params, opts) => defaultOk(op, opts);
 
+// S1: the Files routes pass the ops tree/read result straight through, so the
+// mocks are controllable per test rather than a fixed shape.
+type TreeFixture = {
+  sourceId: string;
+  root: string;
+  entries: Array<{ path: string; size: number; isMarkdown: boolean }>;
+};
+type ReadFixture = { content: string; sha: string; size: number };
+
+let treeHandler: (sourceId: string) => TreeFixture =
+  (sourceId) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] });
+let readFileHandler: (sourceId: string, path: string) => ReadFixture =
+  () => ({ content: '', sha: '', size: 0 });
+
+// S2: the PUT route drives `gitWriteFile`, so the mock records every request
+// and lets a test force both a commit and the stale refusal.
+type WriteRequest = {
+  sourceId: string; path: string; content: string; expectedSha: string;
+  actor: { name: string; email: string }; message: string;
+};
+type WriteFixture =
+  | { committed: true; sha: string }
+  | { committed: false; error: 'stale'; sha: string | null };
+const writeRequests: WriteRequest[] = [];
+let writeFileHandler: (req: WriteRequest) => WriteFixture =
+  () => ({ committed: true, sha: 'written-sha' });
+
 mock.module('../../src/control/opsClient.ts', () => ({
   // `src/control/spend.ts` imports this alongside the others; a mock that
   // omits a real export makes the whole graph unloadable (Slice 4 hazard (a)).
@@ -86,6 +113,14 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitPathExists: async () => ({ paths: [] }),
   gitRevertRange: async () => ({ outcome: 'nothing_to_revert' }),
   auditTail: async () => [],
+  // S1: `routes/files.ts` imports these alongside the rest, so omitting them
+  // makes the whole app graph unloadable; these are controllable per test.
+  gitTree: async (sourceId: string) => treeHandler(sourceId),
+  gitReadFile: async (sourceId: string, path: string) => readFileHandler(sourceId, path),
+  gitWriteFile: async (req: WriteRequest) => {
+    writeRequests.push(req);
+    return writeFileHandler(req);
+  },
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
@@ -178,6 +213,10 @@ beforeEach(async () => {
   takes.length = 0;
   commits.length = 0;
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
+  treeHandler = (sourceId) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] });
+  readFileHandler = () => ({ content: '', sha: '', size: 0 });
+  writeRequests.length = 0;
+  writeFileHandler = () => ({ committed: true, sha: 'written-sha' });
 });
 
 afterAll(async () => {
@@ -204,6 +243,17 @@ const ROUTE_TABLE: {
   { method: 'POST', path: '/api/connections/not-a-real-id/commit', body: { message: 'x' }, unauth: 401, viewer: 404, member: 404, admin: 404 },
   { method: 'GET', path: '/api/harnesses', unauth: 401, viewer: 200, member: 200, admin: 200 },
   { method: 'GET', path: '/api/access-overview', unauth: 401, viewer: 200, member: 200, admin: 200 },
+  // S1 Files browse. `/api/spaces` is viewer-allowed (it only lists what the
+  // caller can open). The file routes are 403 for viewer/member because the
+  // beforeAll fixture seeds NO connections; admin bypasses with `write`.
+  { method: 'GET', path: '/api/spaces', unauth: 401, viewer: 200, member: 200, admin: 200 },
+  { method: 'GET', path: '/api/spaces/customers/files', unauth: 401, viewer: 403, member: 403, admin: 200 },
+  { method: 'GET', path: '/api/spaces/customers/files/notes/readme.md', unauth: 401, viewer: 403, member: 403, admin: 200 },
+  // S2 write path: `viewer` is below `member` so the guard refuses before any
+  // Space grant is consulted; `member` clears the role but has no Connection to
+  // `customers` in the shared fixture, so the Space grant is null → 403. Admin
+  // and owner resolve to `write` from the role alone (the explicit bypass).
+  { method: 'PUT', path: '/api/spaces/customers/files/notes/readme.md', body: { content: '', expectedSha: 'sha-0' }, unauth: 401, viewer: 403, member: 403, admin: 200 },
   { method: 'POST', path: '/api/claim/not-a-real-token', body: { email: 'claim-table@example.test' }, unauth: 400, viewer: 400, member: 400, admin: 400 },
 ];
 
@@ -224,6 +274,195 @@ describe('route table', () => {
     if (ct.includes('application/json')) {
       expect(res.status).toBe(404);
     }
+  });
+});
+
+// S1 §1.4: the permission model the Access matrix renders and the Files routes
+// enforce. A read Connection must open the tree; no Connection must not; and an
+// admin bypasses the Connection check entirely.
+describe('S1 Space Files read gate', () => {
+  async function freshMember(role: 'member' | 'admin' = 'member') {
+    const email = `rt-s1-${randomUUID().slice(0, 8)}@example.test`;
+    const signed = await app.request('/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: PASS, name: email }),
+    });
+    expect(signed.status).toBe(200);
+    const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
+    const membershipId = randomUUID();
+    await getDb().insert(schema.memberships).values({
+      id: membershipId, userId: u!.id, organizationId: orgId, role,
+    });
+    const cookie = await signIn(email, PASS);
+    return { cookie, membershipId };
+  }
+
+  test('a member with only READ Connection access to a Space gets the tree', async () => {
+    const { cookie, membershipId } = await freshMember('member');
+    const created = await hit('POST', '/api/connections', adminCookie, {
+      membershipId,
+      writeSpaceId: writeSpace.id,
+      readSpaceIds: [readSpace.id],
+      harness: 'generic',
+    });
+    expect(created.status).toBe(200);
+
+    // The ops result is passed through unchanged, nested markdown and all.
+    treeHandler = (sourceId) => ({
+      sourceId,
+      root: `/repos/${sourceId}`,
+      entries: [
+        { path: 'guides/setup.md', size: 42, isMarkdown: true },
+        { path: 'guides/logo.png', size: 7, isMarkdown: false },
+      ],
+    });
+    const res = await hit('GET', '/api/spaces/shared/files', cookie);
+    expect(res.status).toBe(200);
+    const body = await res.json() as TreeFixture;
+    expect(body.sourceId).toBe('shared');
+    expect(body.root).toBe('/repos/shared');
+    expect(body.entries).toEqual([
+      { path: 'guides/setup.md', size: 42, isMarkdown: true },
+      { path: 'guides/logo.png', size: 7, isMarkdown: false },
+    ]);
+  });
+
+  test('a member with NO Connection to the Space gets 403', async () => {
+    const { cookie } = await freshMember('member');
+    const res = await hit('GET', '/api/spaces/customers/files', cookie);
+    expect(res.status).toBe(403);
+  });
+
+  test('an admin with NO Connection to the Space gets the tree (admin bypass)', async () => {
+    treeHandler = (sourceId) => ({
+      sourceId,
+      root: `/repos/${sourceId}`,
+      entries: [{ path: 'a.md', size: 1, isMarkdown: true }],
+    });
+    const res = await hit('GET', '/api/spaces/customers/files', adminCookie);
+    expect(res.status).toBe(200);
+    const body = await res.json() as TreeFixture;
+    expect(body.entries).toEqual([{ path: 'a.md', size: 1, isMarkdown: true }]);
+  });
+});
+
+// S2 §2.3: the write gate. A Connection's READ access opens the file but never
+// the write; a role-only admin write carries the explicit `bypass` through the
+// response and the redacted audit row; and a stale compare is a rendered result,
+// not a thrown error and not a commit.
+describe('S2 Space Files write gate', () => {
+  async function freshMember(role: 'member' | 'admin' = 'member') {
+    const email = `rt-s2-${randomUUID().slice(0, 8)}@example.test`;
+    const signed = await app.request('/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: PASS, name: email }),
+    });
+    expect(signed.status).toBe(200);
+    const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
+    const membershipId = randomUUID();
+    await getDb().insert(schema.memberships).values({
+      id: membershipId, userId: u!.id, organizationId: orgId, role,
+    });
+    const cookie = await signIn(email, PASS);
+    return { cookie, membershipId };
+  }
+
+  test('a member whose Connection gives only READ access gets 403 on PUT (and 200 on GET)', async () => {
+    // Invariant: a read-only Connection is enough to open the file and NEVER
+    // enough to write it — the same grant the Access matrix renders as `read`.
+    const { cookie, membershipId } = await freshMember('member');
+    const created = await hit('POST', '/api/connections', adminCookie, {
+      membershipId,
+      writeSpaceId: readSpace.id,
+      readSpaceIds: [writeSpace.id],
+      harness: 'generic',
+    });
+    expect(created.status).toBe(200);
+
+    readFileHandler = () => ({ content: '# hello', sha: 'sha-1', size: 7 });
+    const got = await hit('GET', '/api/spaces/customers/files/notes/readme.md', cookie);
+    expect(got.status).toBe(200);
+
+    const put = await hit('PUT', '/api/spaces/customers/files/notes/readme.md', cookie, {
+      content: 'sneaky rewrite', expectedSha: 'sha-1',
+    });
+    expect(put.status).toBe(403);
+    expect(writeRequests.length).toBe(0);
+  });
+
+  test('a member with NO Connection to the Space gets 403 on PUT', async () => {
+    // Invariant: no grant is a refusal, not an implicit read or write.
+    const { cookie } = await freshMember('member');
+    const put = await hit('PUT', '/api/spaces/customers/files/notes/readme.md', cookie, {
+      content: 'sneaky rewrite', expectedSha: 'sha-1',
+    });
+    expect(put.status).toBe(403);
+    expect(writeRequests.length).toBe(0);
+  });
+
+  test('an admin with no Connection writes with an explicit bypass and a redacted audit row', async () => {
+    // Invariant: the admin bypass is explicit, not silent — it is carried in the
+    // response and the audit row, and the audit row holds SHAs and a byte count,
+    // never the file's content (S3c).
+    const content = 'admin-bypass-secret-body';
+    writeFileHandler = () => ({ committed: true, sha: 'commit-sha-admin' });
+    const res = await hit('PUT', '/api/spaces/customers/files/notes/admin-bypass.md', adminCookie, {
+      content, expectedSha: 'sha-0',
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { committed: boolean; sha: string; bypass: boolean };
+    expect(body.committed).toBe(true);
+    expect(body.sha).toBe('commit-sha-admin');
+    expect(body.bypass).toBe(true);
+
+    const [row] = await getDb().select().from(schema.auditLog)
+      .where(eq(schema.auditLog.target, 'customers:notes/admin-bypass.md'));
+    expect(row).toBeDefined();
+    expect(row?.action).toBe('space.file.write');
+    expect(row?.actor).toBe((await getDb().select().from(schema.users)
+      .where(eq(schema.users.email, 'rt-admin@example.test')))[0]!.id);
+    expect(row?.before).toEqual({ sha: 'sha-0' });
+    expect(row?.after).toEqual({ sha: 'commit-sha-admin', bytes: Buffer.byteLength(content, 'utf8'), bypass: true });
+    expect(JSON.stringify(row)).not.toContain(content);
+  });
+
+  test('a stale gitWriteFile result is a 200 result: no audit row, no sync', async () => {
+    // Invariant: a `stale` compare is a choice the console renders, not a thrown
+    // error — and because nothing was committed, nothing is audited or indexed.
+    writeFileHandler = () => ({ committed: false, error: 'stale', sha: 'current-sha' });
+    const res = await hit('PUT', '/api/spaces/customers/files/notes/stale.md', adminCookie, {
+      content: 'x', expectedSha: 'old-sha',
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { committed: boolean; error: string; sha: string; bypass: boolean };
+    // The admin has no write Connection here, so the bypass flag is true even
+    // on a refusal; the console only DISCLOSES it on a committed save.
+    expect(body).toEqual({ committed: false, error: 'stale', sha: 'current-sha', bypass: true });
+
+    const rows = await getDb().select().from(schema.auditLog)
+      .where(eq(schema.auditLog.target, 'customers:notes/stale.md'));
+    expect(rows).toEqual([]);
+    expect(calls.some((c) => c.op === 'sync' || c.op === 'embed')).toBe(false);
+  });
+
+  test('a successful write indexes the Space: sync first, then embed --stale, both fenced', async () => {
+    // Invariant: the write path reuses the revert's `syncAndEmbed` order and the
+    // scheduler's Connection fence — the caller cannot supply `--source`.
+    writeFileHandler = () => ({ committed: true, sha: 'commit-indexed' });
+    const res = await hit('PUT', '/api/spaces/customers/files/notes/index.md', adminCookie, {
+      content: '# body', expectedSha: 'sha-0',
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { index: { sync: { classification: string }; embed: { classification: string } | null } };
+    expect(body.index.sync.classification).toBe('ok');
+    expect(body.index.embed?.classification).toBe('ok');
+
+    const ops = calls.filter((c) => c.op === 'sync' || c.op === 'embed');
+    expect(ops.map((c) => c.op)).toEqual(['sync', 'embed']);
+    expect(ops[0]!.params).toEqual({ source: 'customers' });
+    expect(ops[1]!.params).toEqual({ source: 'customers', stale: true });
   });
 });
 

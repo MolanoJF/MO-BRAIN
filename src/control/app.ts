@@ -7,6 +7,7 @@ import { authRoutes } from './routes/auth.ts';
 import { wizard } from './routes/wizard.ts';
 import { backup } from './routes/backup.ts';
 import { members } from './routes/members.ts';
+import { fileRoutes } from './routes/files.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { upgrades } from './routes/upgrades.ts';
@@ -30,6 +31,8 @@ app.route('/api', authRoutes);
 app.route('/api/wizard', wizard);
 app.route('/api', backup);
 app.route('/api', members);
+// S1: the read-only Space Files browse lives under /api/spaces.
+app.route('/api', fileRoutes);
 app.route('/api', connectionRoutes);
 app.route('/api', scheduleRoutes);
 app.route('/api', upgrades);

@@ -40,9 +40,9 @@ import { OPERATIONS } from '../contracts/registry.ts';
 import { getDb, schema } from '../control/db/client.ts';
 import { callOps, gitPathExists, gitRange, gitRevertRange } from '../control/opsClient.ts';
 import type { RangeFile, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
-import { SCHEDULER_COMMANDS, fenceParams, validateParams, type SchedulerCommand } from '../scheduler/commands.ts';
 import { classifyExit, type Classification } from '../scheduler/execute.ts';
 import { attributeCommits, type RangeFetcher } from './diff.ts';
+import { INDEX_TIMEOUT_MS, syncAndEmbed, type IndexStep } from './reindex.ts';
 
 /**
  * What `revertRun` knows about the run: the write Space, the member the range is
@@ -59,17 +59,6 @@ export type RevertTarget = {
   after: string | null;
   revertedAt: Date | null;
   revertCommit: string | null;
-};
-
-/**
- * One indexing step's receipt: the argv the scheduler path built, what it exited
- * with, and how `classifyExit` read it — L8's vocabulary, not a second one.
- */
-export type IndexStep = {
-  argv: string[];
-  exitCode: number;
-  stderr: string;
-  classification: Classification;
 };
 
 /**
@@ -184,10 +173,6 @@ export type RevertDeps = {
   callOps: typeof callOps;
   now: () => number;
 };
-
-/** How long each re-index step may take. Named rather than inherited from a
- *  client default: a human is sitting behind this request. */
-const INDEX_TIMEOUT_MS = 600_000;
 
 export async function revertRun(
   args: { runId: string; actor: { name: string; email: string }; confirm?: 'concurrent' },
@@ -343,23 +328,8 @@ async function reindex(
   deps: RevertDeps,
 ): Promise<{ purge: PagePurge[]; sync: IndexStep; embed: IndexStep | null }> {
   const purge = await purgeRemovedPages(writeSourceId, revertFiles, deps);
-
-  const sync = SCHEDULER_COMMANDS['sync'];
-  const embed = SCHEDULER_COMMANDS['embed'];
-  if (!sync || !embed) throw new Error('the scheduler allowlist is missing sync or embed');
-
-  const syncStep = await runIndexStep(
-    sync, fenceParams(sync, validateParams(sync, {}), writeSourceId), deps,
-  );
-  if (syncStep.classification !== 'ok') return { purge, sync: syncStep, embed: null };
-
-  return {
-    purge,
-    sync: syncStep,
-    embed: await runIndexStep(
-      embed, fenceParams(embed, validateParams(embed, { stale: true }), writeSourceId), deps,
-    ),
-  };
+  const { sync, embed } = await syncAndEmbed(writeSourceId, deps);
+  return { purge, sync, embed };
 }
 
 /**
@@ -541,34 +511,6 @@ async function purgeRemovedPages(
     }
   }
   return out;
-}
-
-async function runIndexStep(
-  command: SchedulerCommand,
-  params: Record<string, string | boolean>,
-  deps: RevertDeps,
-): Promise<IndexStep> {
-  const spec = OPERATIONS[command.operation];
-  if (!spec) throw new Error(`scheduler command ${command.id} names an unknown operation ${command.operation}`);
-  const argv = redactArgv(spec, ['gbrain', ...buildArgv(spec, params, { json: command.json })]);
-
-  try {
-    const r = await deps.callOps(command.operation, params, {
-      json: command.json, timeoutMs: INDEX_TIMEOUT_MS,
-    });
-    return {
-      argv, exitCode: r.exitCode, stderr: r.stderr,
-      classification: classifyExit(command.id, r.exitCode, r.json),
-    };
-  } catch (e) {
-    // The op never produced an exit code: -1 classifies as a plain failure, and
-    // the thrown message is the only diagnosis there is (execute.ts's runStep
-    // holds the same line).
-    return {
-      argv, exitCode: -1, stderr: e instanceof Error ? e.message : String(e),
-      classification: classifyExit(command.id, -1, null),
-    };
-  }
 }
 
 /** One string value out of a jsonb head map, validated: an unreadable map entry

@@ -28,6 +28,7 @@ import {
 } from '../../agent/claim.ts';
 import { revertRun } from '../../agent/revert.ts';
 import type { AgentRunEvent } from '../../agent/types.ts';
+import { actorIdentity } from '../actor.ts';
 
 export const runRoutes = new Hono();
 
@@ -398,11 +399,3 @@ runRoutes.post('/:id/revert', guard('admin', async (c, ctx) => {
   if ('error' in outcome) return c.json(outcome, 409);
   return c.json(outcome);
 }));
-
-/** The acting admin's identity, from the session's user row — never a body. */
-async function actorIdentity(userId: string): Promise<{ name: string; email: string }> {
-  const [user] = await getDb().select({ name: schema.users.name, email: schema.users.email })
-    .from(schema.users).where(eq(schema.users.id, userId));
-  if (!user) throw Object.assign(new Error('actor_unknown'), { status: 401 });
-  return { name: user.name ?? user.email, email: user.email };
-}

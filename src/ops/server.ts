@@ -16,7 +16,9 @@ import {
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { readBrainUsage } from './usage.ts';
-import { commitAs, diffRange, inspectRepos, probeTreePaths, revertRange } from './git.ts';
+import {
+  commitAs, diffRange, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths, revertRange,
+} from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -232,6 +234,45 @@ Bun.serve({
           return json({ error: 'every path must be a string' }, 400);
         }
         return json(await probeTreePaths(sourceId, paths as string[], { sql }));
+      }
+
+      // Stage 1 browsing: the WORKING TREE a Space's pages live in, and one
+      // file's bytes. Both READ and take NO lock — a reader never blocks a
+      // writer, and traversal is rejected inside `git.ts` regardless of what
+      // the caller sent, so this route cannot forget it.
+      if (url.pathname === '/git/tree') {
+        const { sourceId } = body as { sourceId?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        return json(await gitTree(sourceId, { sql }));
+      }
+
+      if (url.pathname === '/git/read-file') {
+        const { sourceId, path } = body as { sourceId?: unknown; path?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof path !== 'string' || !path) return json({ error: 'path required' }, 400);
+        return json(await gitReadFile(sourceId, path, { sql }));
+      }
+
+      // Stage 2 write path: the expectedSha the caller read makes a concurrent
+      // writer a `stale` RESULT (not a throw), and the actor signs the commit.
+      // `content` may be an empty string, so it is type-checked only.
+      if (url.pathname === '/git/write-file') {
+        const { sourceId, path, content, expectedSha, actor, message } = body as {
+          sourceId?: unknown; path?: unknown; content?: unknown; expectedSha?: unknown;
+          message?: unknown; actor?: { name?: unknown; email?: unknown };
+        };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        if (typeof path !== 'string' || !path) return json({ error: 'path required' }, 400);
+        if (typeof content !== 'string') return json({ error: 'content required' }, 400);
+        if (typeof expectedSha !== 'string' || !expectedSha) return json({ error: 'expectedSha required' }, 400);
+        if (typeof message !== 'string' || !message) return json({ error: 'message required' }, 400);
+        if (!actor || typeof actor.name !== 'string' || typeof actor.email !== 'string') {
+          return json({ error: 'actor name and email required' }, 400);
+        }
+        return json(await gitWriteFile(
+          { sourceId, path, content, expectedSha, message, actor: { name: actor.name, email: actor.email } },
+          { sql },
+        ));
       }
 
       // D10 steps 1+2: the revert and the commit that signs it are ONE locked

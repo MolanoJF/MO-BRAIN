@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
@@ -336,6 +336,172 @@ function statOrThrow(absPath: string): boolean {
     if (code === 'ENOENT' || code === 'ENOTDIR') return false;
     throw new Error(`could not stat ${absPath}: ${code ?? String(e)}`);
   }
+}
+
+/** One file the WORKING TREE holds, as the browser sees it. `size` is bytes on
+ *  disk; `isMarkdown` is gbrain's importable page shape. */
+export type TreeEntry = { path: string; size: number; isMarkdown: boolean };
+
+export type RepoTree = { sourceId: string; root: string; entries: TreeEntry[] };
+
+/** gbrain imports `.md` and `.markdown`; case never changes which. */
+const MARKDOWN_RE = /\.(md|markdown)$/i;
+
+/** Recurse the working tree, skipping `.git/` entire, and collect FILES only.
+ *  `.git` is skipped by name at every level: nothing under it is a page, and
+ *  walking it would list the repo's own bookkeeping as content. */
+async function walkWorkingTree(dir: string, prefix: string, out: TreeEntry[]): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === '.git') continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkWorkingTree(abs, rel, out);
+    } else if (entry.isFile()) {
+      const s = await stat(abs);
+      out.push({ path: rel, size: s.size, isMarkdown: MARKDOWN_RE.test(rel) });
+    }
+  }
+}
+
+/**
+ * READ-ONLY. Every file the Space's WORKING TREE holds, `.git/` excluded.
+ *
+ * `root` is the repo's resolved top-level, so the caller can place each `path`
+ * without knowing where the repo lives. No lock: a reader never blocks a
+ * writer, and the working tree is the truth a browser wants to see.
+ */
+export async function gitTree(
+  sourceId: string,
+  opts: { root?: string; sql?: SQL },
+): Promise<RepoTree> {
+  if (!SOURCE_ID_RE.test(sourceId)) throw new Error(`invalid sourceId: ${sourceId}`);
+  const cwd = join(opts.root ?? REPOS_ROOT, sourceId);
+
+  // Resolve the root first: if the Space has no repo, this fails by name
+  // rather than returning an empty tree.
+  const top = await git(cwd, ['rev-parse', '--show-toplevel']);
+  if (top.exitCode !== 0) throw new Error(`git rev-parse ${sourceId} failed: ${gitFailure(top)}`);
+  const root = top.stdout.trim();
+
+  const entries: TreeEntry[] = [];
+  await walkWorkingTree(root, '', entries);
+  entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { sourceId, root, entries };
+}
+
+/** One file's content, its git blob sha and its byte length. */
+export type ReadFileResult = { content: string; sha: string; size: number };
+
+/**
+ * READ-ONLY. One file's bytes from a Space's working tree, plus the GIT BLOB
+ * sha of that path.
+ *
+ * The sha is `git hash-object`, so Stage 2's conflict check compares like with
+ * like: a writer that changed the file since this read gets a different blob
+ * sha for the same path. Validation happens BEFORE the file is touched: a
+ * traversing `sourceId` or `path` throws, never spawns, and never reads.
+ */
+export async function gitReadFile(
+  sourceId: string,
+  path: string,
+  opts: { root?: string; sql?: SQL },
+): Promise<ReadFileResult> {
+  if (!SOURCE_ID_RE.test(sourceId)) throw new Error(`invalid sourceId: ${sourceId}`);
+  const rel = assertRepoRelative(path);
+  const cwd = join(opts.root ?? REPOS_ROOT, sourceId);
+
+  let content: string;
+  try {
+    content = await readFile(join(cwd, rel), 'utf8');
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    throw new Error(`could not read ${rel} in ${sourceId}: ${code ?? String(e)}`);
+  }
+
+  const hashed = await git(cwd, ['hash-object', '--', rel]);
+  if (hashed.exitCode !== 0) throw new Error(`git hash-object ${sourceId} failed: ${gitFailure(hashed)}`);
+
+  return { content, sha: hashed.stdout.trim(), size: Buffer.byteLength(content) };
+}
+
+/** One `/git/write-file` request. `expectedSha` is the blob sha the caller read,
+ *  so a writer that got there first turns this into a refusal rather than a
+ *  silent overwrite; the actor signs the commit. */
+export type WriteFileRequest = {
+  sourceId: string; path: string; content: string; expectedSha: string;
+  actor: { name: string; email: string }; message: string;
+};
+
+/**
+ * `stale` is a RESULT, not an error: the caller's `expectedSha` no longer names
+ * the file on disk, so nothing was written and the console can offer the current
+ * `sha` as the choice to reload from — the same shape `revertRange` gives a
+ * conflict. A commit is the only other outcome.
+ */
+export type WriteFileOutcome =
+  | { committed: true; sha: string }
+  | { committed: false; error: 'stale'; sha: string | null };
+
+/** The working tree file's git blob sha, or null when it is not there. ENOENT is
+ *  the one answer that means absent; anything else refuses (as `gitReadFile`). */
+async function currentBlobSha(cwd: string, rel: string): Promise<string | null> {
+  try {
+    await readFile(join(cwd, rel));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw new Error(`could not read ${rel}: ${code ?? String(e)}`);
+  }
+  const hashed = await git(cwd, ['hash-object', '--', rel]);
+  if (hashed.exitCode !== 0) throw new Error(`git hash-object failed: ${gitFailure(hashed)}`);
+  return hashed.stdout.trim();
+}
+
+/**
+ * Stage 2 — the write path behind the Space file console: write the member's
+ * bytes, then commit them AS the member, but ONLY when the blob they read is the
+ * blob still on disk.
+ *
+ * The WHOLE read-compare-write-commit runs inside one `withRepoLock`, and it must:
+ * the compare and the write are one critical section, or two writers both reading
+ * sha X would both pass the check. `commitAs` is deliberately NOT called here —
+ * it takes the same lock itself, and nesting two advisory locks on a reserved
+ * pooled connection deadlocks a small pool (see `revertRange`). Its commit LOGIC
+ * is inlined instead, over the private `git()` helper.
+ *
+ * A byte-identical content is an idempotent save, not a failure: `git commit`
+ * exits non-zero "nothing to commit", and an empty staged diff turns that back
+ * into `committed: true` with the unchanged HEAD. Any other git failure throws.
+ */
+export async function gitWriteFile(
+  req: WriteFileRequest,
+  opts: { sql: SQL; root?: string },
+): Promise<WriteFileOutcome> {
+  // Both validations run BEFORE the lock and before any spawn: a traversing
+  // sourceId or path must never reach a repo.
+  if (!SOURCE_ID_RE.test(req.sourceId)) throw new Error(`invalid sourceId: ${req.sourceId}`);
+  const rel = assertRepoRelative(req.path);
+  const cwd = join(opts.root ?? REPOS_ROOT, req.sourceId);
+
+  return withRepoLock(opts.sql, req.sourceId, async () => {
+    const current = await currentBlobSha(cwd, rel);
+    if (current === null || current !== req.expectedSha) {
+      return { committed: false, error: 'stale', sha: current };
+    }
+
+    await writeFile(join(cwd, rel), req.content, 'utf8');
+    await git(cwd, ['add', '--', rel]);
+    const commit = await git(cwd, commitArgs(req.actor, req.message));
+    if (commit.exitCode !== 0) {
+      // Nothing staged is the idempotent-save shape, not a failure.
+      const staged = await git(cwd, ['diff', '--cached', '--quiet']);
+      if (staged.exitCode === 0) return { committed: true, sha: await resolveCommit(cwd, 'HEAD') };
+      throw new Error(`git commit failed for ${req.sourceId}: ${gitFailure(commit)}`);
+    }
+    return { committed: true, sha: await resolveCommit(cwd, 'HEAD') };
+  });
 }
 
 /**

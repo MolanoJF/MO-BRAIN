@@ -636,3 +636,200 @@ describe('git path-exists', () => {
       .toEqual([{ path: 'draft.md', onDisk: false, inGit: false }]);
   });
 });
+
+// Stage 1 browsing: `/git/tree` walks the WORKING TREE and `/git/read-file`
+// returns a file's bytes plus its GIT BLOB sha, so Stage 2's conflict check can
+// compare like with like. Both are reads and take no repo lock. The fixture
+// carries nested markdown, a non-markdown file, and a `.git/` that must never
+// appear in the tree.
+const filesSpace = (() => {
+  let fixture: Promise<{ repo: string; run: (argv: string[]) => Promise<string> }> | null = null;
+  return () => {
+    fixture ??= (async () => {
+      const repo = join(reposDir, 'files-space');
+      await mkdir(repo, { recursive: true });
+      const run = gitRunner(repo);
+      await run(['init', '-q']);
+      await mkdir(join(repo, 'docs'), { recursive: true });
+      await mkdir(join(repo, 'assets'), { recursive: true });
+      await writeFile(join(repo, 'README.md'), '# readme\n');
+      await writeFile(join(repo, 'docs', 'guide.md'), '# guide\n');
+      await writeFile(join(repo, 'assets', 'pic.bin'), 'not markdown');
+      await run(['add', '-A']);
+      await run(['-c', 'user.name=Seed Human', '-c', 'user.email=seed@example.test', 'commit', '-m', 'seed files']);
+      return { repo, run };
+    })();
+    return fixture;
+  };
+})();
+
+const BLOB_SHA_RE = /^[0-9a-f]{40}$/;
+
+describe('git tree', () => {
+  // The tree is the WORKING TREE, not the commit graph: `.git/` is skipped
+  // entirely, entries are sorted for stable output, and `isMarkdown` is the
+  // page shape gbrain imports.
+  test('lists nested files, excludes .git, sorts entries and marks markdown', async () => {
+    const { repo } = await filesSpace();
+    const r = await gitPost('/git/tree', { sourceId: 'files-space' });
+    expect(r.status).toBe(200);
+    const body = await r.json() as {
+      sourceId: string; root: string;
+      entries: Array<{ path: string; size: number; isMarkdown: boolean }>;
+    };
+    expect(body.sourceId).toBe('files-space');
+    expect(body.root).toBe(repo.replace(/\\/g, '/'));
+
+    expect(body.entries.map((e) => e.path)).toEqual(['README.md', 'assets/pic.bin', 'docs/guide.md']);
+    expect(body.entries.map((e) => e.path).some((p) => p === '.git/config' || p.startsWith('.git/'))).toBe(false);
+    expect(body.entries.every((e) => typeof e.size === 'number' && e.size >= 0)).toBe(true);
+
+    const byPath = Object.fromEntries(body.entries.map((e) => [e.path, e]));
+    expect(byPath['README.md']!.isMarkdown).toBe(true);
+    expect(byPath['docs/guide.md']!.isMarkdown).toBe(true);
+    expect(byPath['assets/pic.bin']!.isMarkdown).toBe(false);
+  });
+});
+
+describe('git read-file', () => {
+  test('returns the content, the byte size and a stable git blob sha', async () => {
+    const { run } = await filesSpace();
+    const r = await gitPost('/git/read-file', { sourceId: 'files-space', path: 'docs/guide.md' });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { content: string; sha: string; size: number };
+    expect(body.content).toBe('# guide\n');
+    expect(body.size).toBe(Buffer.byteLength('# guide\n'));
+    expect(body.sha).toMatch(BLOB_SHA_RE);
+    // The sha is git's own blob hash, which is what Stage 2 compares against.
+    expect(body.sha).toBe(await run(['hash-object', '--', 'docs/guide.md']));
+
+    const again = await gitPost('/git/read-file', { sourceId: 'files-space', path: 'docs/guide.md' });
+    expect((await again.json() as { sha: string }).sha).toBe(body.sha);
+  });
+
+  // A path is a filesystem name under the repo root, and git is handed `--`, so
+  // a traversal, an absolute path, a backslash separator or an empty string is
+  // refused before git or the filesystem sees it.
+  test('refuses traversal and absolute paths without returning content', async () => {
+    for (const bad of ['../../etc/passwd', '/etc/passwd', 'a/../../b.md', 'x\\y.md', '']) {
+      const r = await gitPost('/git/read-file', { sourceId: 'files-space', path: bad });
+      expect({ bad, status: r.status }).toEqual({ bad, status: 400 });
+      const body = await r.json() as { error: string; content?: unknown };
+      expect(body.error)
+        .toMatch(/path required|must be repo-relative|must not contain|use '\/' as its separator|non-empty string/);
+      expect(body.content).toBeUndefined();
+    }
+  });
+
+  test('refuses an unknown Space and a traversing sourceId', async () => {
+    const unknown = await gitPost('/git/tree', { sourceId: 'no-such-space' });
+    expect(unknown.status).toBe(400);
+    const nobody = await unknown.json() as { error: string; entries?: unknown };
+    expect(nobody.error).toMatch(/git rev-parse|ENOENT/);
+    expect(nobody.entries).toBeUndefined();
+
+    const traversing = await gitPost('/git/tree', { sourceId: '../etc' });
+    expect(traversing.status).toBe(400);
+    expect((await traversing.json() as { error: string }).error).toMatch(/invalid sourceId/);
+
+    const readUnknown = await gitPost('/git/read-file', { sourceId: 'no-such-space', path: 'page.md' });
+    expect(readUnknown.status).toBe(400);
+    expect((await readUnknown.json() as { error: string }).error).toMatch(/could not read|ENOENT/);
+
+    const readTraversing = await gitPost('/git/read-file', { sourceId: '../etc', path: 'page.md' });
+    expect(readTraversing.status).toBe(400);
+    expect((await readTraversing.json() as { error: string }).error).toMatch(/invalid sourceId/);
+  });
+});
+
+// Stage 2 write path: the caller reads a file (and its blob sha) through
+// `/git/read-file`, then writes with that sha as `expectedSha`. A matching sha
+// commits AS THE MEMBER; a mismatched one is a `stale` RESULT that writes
+// nothing — the conflict is a choice the console renders, not an error.
+async function writeRepo(name: string) {
+  const repo = join(reposDir, name);
+  await mkdir(repo, { recursive: true });
+  const run = gitRunner(repo);
+  await run(['init', '-q']);
+  await writeFile(join(repo, 'page.md'), '# hello\n');
+  await run(['add', '-A']);
+  await run(['-c', 'user.name=Seed Human', '-c', 'user.email=seed@example.test', 'commit', '-m', 'seed page']);
+  return { repo, run, sourceId: name };
+}
+
+describe('git write-file', () => {
+  test('a matching expectedSha commits with the member identity and the message', async () => {
+    const { run, sourceId } = await writeRepo('write-space');
+    const read = await gitPost('/git/read-file', { sourceId, path: 'page.md' });
+    const sha = (await read.json() as { sha: string }).sha;
+
+    const r = await gitPost('/git/write-file', {
+      sourceId, path: 'page.md', content: '# hello\n\nmember wrote this\n',
+      expectedSha: sha, actor: { name: 'Alice Example', email: 'alice@example.test' },
+      message: 'write the page',
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { committed: boolean; sha: string };
+    expect(body.committed).toBe(true);
+    expect(body.sha).toMatch(HEAD_RE);
+
+    // A NAMED MEMBER signed it — author and committer — never "the system".
+    expect(await run(['log', '-1', '--format=%an <%ae> %s']))
+      .toBe('Alice Example <alice@example.test> write the page');
+    expect(await run(['show', 'HEAD:page.md'])).toBe('# hello\n\nmember wrote this');
+    expect(await run(['status', '--porcelain'])).toBe('');
+  });
+
+  // The concurrent-writer rule: a caller holding a sha some other writer has
+  // since replaced gets `stale` and the repo is left byte-identical — HEAD,
+  // history, the index and the file. Mirror of the conflicting revert-range case.
+  test('a stale expectedSha is refused, and the repo is left byte-identical', async () => {
+    const { repo, run, sourceId } = await writeRepo('write-stale');
+    const headBefore = await run(['rev-parse', 'HEAD']);
+    const logBefore = await run(['log', '--format=%H']);
+    const statusBefore = await run(['status', '--porcelain']);
+    const pageBefore = await run(['show', 'HEAD:page.md']);
+    const onDiskBefore = await Bun.file(join(repo, 'page.md')).text();
+
+    const r = await gitPost('/git/write-file', {
+      sourceId, path: 'page.md', content: '# overwritten\n',
+      expectedSha: 'f'.repeat(40), actor: { name: 'Alice Example', email: 'alice@example.test' },
+      message: 'should not land',
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { committed: boolean; error?: string; sha: string | null };
+    expect(body.committed).toBe(false);
+    expect(body.error).toBe('stale');
+    // The current blob sha comes back so the console can offer a reload.
+    expect(body.sha).toBe(await run(['hash-object', '--', 'page.md']));
+
+    expect(await run(['rev-parse', 'HEAD'])).toBe(headBefore);
+    expect(await run(['log', '--format=%H'])).toBe(logBefore);
+    expect(await run(['status', '--porcelain'])).toBe(statusBefore);
+    expect(await run(['show', 'HEAD:page.md'])).toBe(pageBefore);
+    expect(await Bun.file(join(repo, 'page.md')).text()).toBe(onDiskBefore);
+  });
+
+  test('an invalid sourceId or a missing field is 400, not executed', async () => {
+    const badSource = await gitPost('/git/write-file', {
+      sourceId: '../etc', path: 'page.md', content: 'x', expectedSha: 'a'.repeat(40),
+      actor: ADMIN, message: 'm',
+    });
+    expect(badSource.status).toBe(400);
+    expect((await badSource.json() as { error: string }).error).toMatch(/invalid sourceId/);
+
+    const noActor = await gitPost('/git/write-file', {
+      sourceId: 'customers', path: 'page.md', content: 'x', expectedSha: 'a'.repeat(40), message: 'm',
+    });
+    expect(noActor.status).toBe(400);
+    expect((await noActor.json() as { error: string }).error).toMatch(/actor name and email required/);
+
+    // `content` may legitimately be empty, so it is only type-checked.
+    const noContent = await gitPost('/git/write-file', {
+      sourceId: 'customers', path: 'page.md', expectedSha: 'a'.repeat(40), actor: ADMIN, message: 'm',
+    });
+    expect(noContent.status).toBe(400);
+    expect((await noContent.json() as { error: string }).error).toMatch(/content required/);
+  });
+});
+
