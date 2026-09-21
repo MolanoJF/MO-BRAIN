@@ -234,4 +234,31 @@ else
   echo "FAIL: INSTALL_MODE export does not precede the preflight call"; fail=1
 fi
 
+echo "--- local mode's closing message explains the certificate warning (parse script; no Docker)"
+# The user WILL see a browser warning; an installer that doesn't say so first
+# reads as a broken install. This copy is the spec's, not a paraphrase.
+if grep -q 'from any device on your network' scripts/install.sh && \
+   grep -q "private local CA, not a mistake" scripts/install.sh; then
+  echo "PASS: local mode's closing copy is present"
+else
+  echo "FAIL: local mode's closing copy is missing"; fail=1
+fi
+
+echo "--- the domain-mode internal-TLS warning is gated to domain mode (parse script; no Docker)"
+# Local mode prints its own, friendlier version of the same fact; printing the
+# stern domain-mode block too would say it twice, the second time alarmingly.
+if grep -q 'INSTALL_MODE" = "domain" \] && \[ "\$MOBRAIN_TLS_MODE" = "internal"' scripts/install.sh; then
+  echo "PASS: the internal-TLS warning is domain-mode-gated"
+else
+  echo "FAIL: the internal-TLS warning is not gated on INSTALL_MODE"; fail=1
+fi
+
+echo "--- the /admin note is printed in both modes (parse script; no Docker)"
+# A real security fact about the stack, not a domain-mode detail.
+if [ "$(grep -c 'deliberately NOT routed' scripts/install.sh)" -eq 1 ]; then
+  echo "PASS: the /admin note is printed once, outside the mode branch"
+else
+  echo "FAIL: the /admin note is duplicated into the mode branches or missing"; fail=1
+fi
+
 exit $fail

@@ -219,16 +219,32 @@ if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; t
 fi
 docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml up -d --wait
 
-cat <<EOF
+if [ "$INSTALL_MODE" = "local" ]; then
+  cat <<EOF
+
+Stack is up. Open https://${DOMAIN} from any device on your network and create
+your first admin.
+
+Your browser will warn about the certificate the first time — that's expected,
+it's a private local CA, not a mistake. See docs/runbooks/install.md.
+EOF
+else
+  cat <<EOF
 
 Stack is up. Open https://${DOMAIN} and create your first admin.
+EOF
+fi
+
+cat <<EOF
 
 Note: https://${DOMAIN}/admin is deliberately NOT routed — gbrain's embedded
 admin SPA is a second control plane with god rights over the same brain.
 See docs/runbooks/break-glass.md for the recovery path.
 EOF
 
-if [ "$MOBRAIN_TLS_MODE" = "internal" ]; then
+# Domain mode only: in local mode the friendlier line above already said this,
+# and the stern version would be the second time the user hears it.
+if [ "$INSTALL_MODE" = "domain" ] && [ "$MOBRAIN_TLS_MODE" = "internal" ]; then
   cat <<EOF
 
 MOBRAIN_TLS_MODE=internal: Caddy issued a certificate from its own local CA,
