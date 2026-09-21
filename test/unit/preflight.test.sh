@@ -22,4 +22,11 @@ echo "$out" | grep -qE "[0-9]+ ?(MB|GB)" || fail "the RAM refusal does not state
 
 # A clean host passes and says nothing alarming.
 expect_code 0 "PREFLIGHT_SKIP_DNS=1 bash scripts/preflight.sh"
+
+# MOBRAIN_TLS_MODE=internal implies the DNS check is satisfied even with a
+# domain that would otherwise refuse (exit 15) — internal TLS mode exists
+# precisely for a domain with no public DNS.
+expect_code 0 "DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain bash scripts/preflight.sh"
+out=$(DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain bash scripts/preflight.sh 2>&1 || true)
+echo "$out" | grep -qi "MOBRAIN_TLS_MODE=internal" || fail "the internal-mode DNS skip does not name the mode that caused it"
 echo PASS

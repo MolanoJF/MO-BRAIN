@@ -76,7 +76,7 @@ Stop whatever holds the port. A port held by a container of *this* Compose proje
 ```text
 PREFLIGHT: DOMAIN nx.invalid does not resolve to this host; point its A/AAAA record here before installing.
 ```
-Point the domain's DNS at this host first; Caddy needs it for the ACME challenge. For a private-network install with no public DNS, set `PREFLIGHT_SKIP_DNS=1` — preflight then prints a warning and continues rather than passing silently.
+Point the domain's DNS at this host first; Caddy needs it for the ACME challenge. For a private-network install with no public DNS, see "Private-network install (no public DNS)" below — `PREFLIGHT_SKIP_DNS=1` alone only silences this check, it does not change how Caddy gets a certificate.
 
 **Exit 16 — the pinned images cannot be pulled.**
 ```text
@@ -96,6 +96,20 @@ docker compose --env-file .env -f compose/docker-compose.yml up -d --wait
 ```
 
 This is a documented fallback, not the default path: it needs the source tree, the toolchains and the build time. The build overlay (`compose/docker-compose.build.yml`) is the only place build stanzas live; the production file must never gain one.
+
+## Private-network install (no public DNS)
+
+By default (`MOBRAIN_TLS_MODE=public`, unset is the same thing) Caddy requests a real certificate from Let's Encrypt for `DOMAIN`, which needs that domain publicly resolvable and reachable on 80/443 for the ACME HTTP-01 challenge. That's not possible for a brain that only lives on an internal network.
+
+For that case, set `MOBRAIN_TLS_MODE=internal`:
+
+```bash
+MOBRAIN_TLS_MODE=internal DOMAIN=brain.internal.acme-co.lan bash scripts/install.sh
+```
+
+This does two things: it tells `compose/Caddyfile`'s main site to issue from Caddy's own local CA (`tls internal`) instead of attempting public ACME, and it makes preflight treat the DNS check as satisfied — the same effect as `PREFLIGHT_SKIP_DNS=1`, but explained in terms of the mode that's actually active rather than a bare skip.
+
+**The tradeoff is real, not cosmetic.** Caddy's local CA is self-signed and known to nobody but this Caddy instance. Every browser and API client that talks to `https://<DOMAIN>` will show an untrusted-certificate warning (or fail closed, for a client that doesn't let you click through) until you separately distribute that CA's root certificate and have each client trust it. `PREFLIGHT_SKIP_DNS=1` on its own does none of this — it only silences preflight's DNS check, leaving Caddy still attempting (and endlessly failing) public ACME, so the stack reports healthy via `docker compose --wait` while HTTPS never actually works and the browser-only first-admin step has nothing to load. Use `MOBRAIN_TLS_MODE=internal`, not a bare DNS skip, for a real private-network install.
 
 ## Create the first admin
 

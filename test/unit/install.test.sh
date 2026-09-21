@@ -23,6 +23,30 @@ if [ "$(grep -c '^OPS_RPC_TOKEN=' "$work/.env")" -eq 1 ] && \
   echo "PASS: distinct secrets"
 else echo "FAIL: secrets collide"; fail=1; fi
 
+echo "--- MOBRAIN_TLS_MODE=internal writes tls internal into MOBRAIN_CADDY_TLS_DIRECTIVE"
+DOMAIN=brain-internal.test MOBRAIN_TLS_MODE=internal MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.internal" bash scripts/install.sh >/dev/null 2>&1
+if grep -q '^MOBRAIN_TLS_MODE=internal$' "$work/.env.internal" && grep -q '^MOBRAIN_CADDY_TLS_DIRECTIVE=tls internal$' "$work/.env.internal"; then
+  echo "PASS: internal mode written"
+else
+  echo "FAIL: internal mode not written as expected"; fail=1
+fi
+
+echo "--- MOBRAIN_TLS_MODE=internal does not require DOMAIN to resolve"
+# No PREFLIGHT_SKIP_DNS here on purpose: MOBRAIN_TLS_MODE=internal alone must
+# be enough to satisfy preflight's DNS check for a domain with no public DNS.
+if DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.nodns" bash scripts/install.sh >/dev/null 2>&1; then
+  echo "PASS: internal mode bypassed the DNS refusal"
+else
+  echo "FAIL: internal mode still hit the DNS refusal"; fail=1
+fi
+
+echo "--- rejects an unrecognized MOBRAIN_TLS_MODE"
+if DOMAIN=brain.test MOBRAIN_TLS_MODE=bogus PREFLIGHT_SKIP_DNS=1 MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.bogus" bash scripts/install.sh >/dev/null 2>&1; then
+  echo "FAIL: accepted an invalid MOBRAIN_TLS_MODE"; fail=1
+else
+  echo "PASS: rejected invalid MOBRAIN_TLS_MODE"
+fi
+
 echo "--- refuses to clobber an existing .env"
 if DOMAIN=brain.test BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env" bash scripts/install.sh >/dev/null 2>&1; then
   echo "FAIL: overwrote an existing .env"; fail=1
