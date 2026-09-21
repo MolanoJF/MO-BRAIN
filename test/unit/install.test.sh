@@ -27,7 +27,7 @@ if [ "$(grep -c '^OPS_RPC_TOKEN=' "$work/.env")" -eq 1 ] && \
 else echo "FAIL: secrets collide"; fail=1; fi
 
 echo "--- MOBRAIN_TLS_MODE=internal writes tls internal into MOBRAIN_CADDY_TLS_DIRECTIVE"
-DOMAIN=brain-internal.test MOBRAIN_TLS_MODE=internal MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.internal" bash scripts/install.sh >/dev/null 2>&1
+DOMAIN=brain-internal.test MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.internal" bash scripts/install.sh >/dev/null 2>&1
 if grep -q '^MOBRAIN_TLS_MODE=internal$' "$work/.env.internal" && grep -q '^MOBRAIN_CADDY_TLS_DIRECTIVE=tls internal$' "$work/.env.internal"; then
   echo "PASS: internal mode written"
 else
@@ -37,7 +37,7 @@ fi
 echo "--- MOBRAIN_TLS_MODE=internal does not require DOMAIN to resolve"
 # No PREFLIGHT_SKIP_DNS here on purpose: MOBRAIN_TLS_MODE=internal alone must
 # be enough to satisfy preflight's DNS check for a domain with no public DNS.
-if DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.nodns" bash scripts/install.sh >/dev/null 2>&1; then
+if DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.nodns" bash scripts/install.sh >/dev/null 2>&1; then
   echo "PASS: internal mode bypassed the DNS refusal"
 else
   echo "FAIL: internal mode still hit the DNS refusal"; fail=1
@@ -61,7 +61,7 @@ if PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free
 else echo "PASS: required DOMAIN"; fi
 
 echo "--- ENABLE_RUNNER=n skips the prompt and leaves the runner off"
-DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 ENABLE_RUNNER=n BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=n BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
 if grep -q '^RUNNER_TOKEN=$' "$work/.env3" && ! grep -q '^COMPOSE_PROFILES=runner$' "$work/.env3"; then
   echo "PASS: runner left off"
 else
@@ -69,7 +69,7 @@ else
 fi
 
 echo "--- ENABLE_RUNNER=y skips the prompt and enables the runner"
-DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 ENABLE_RUNNER=y BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env4" bash scripts/install.sh </dev/null >/dev/null 2>&1
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=y BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env4" bash scripts/install.sh </dev/null >/dev/null 2>&1
 if grep -q '^RUNNER_TOKEN=.\+' "$work/.env4" && grep -q '^COMPOSE_PROFILES=runner$' "$work/.env4"; then
   echo "PASS: runner enabled"
 else
