@@ -20,6 +20,10 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:?required}
+      # MOBRAIN_TLS_MODE (scripts/install.sh): empty/unset means public ACME,
+      # the Caddyfile's default. `tls internal` here is what actually switches
+      # the main site to Caddy's local CA for a private-network install.
+      MOBRAIN_CADDY_TLS_DIRECTIVE: ${MOBRAIN_CADDY_TLS_DIRECTIVE:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

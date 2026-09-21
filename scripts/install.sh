@@ -38,6 +38,22 @@ if [ -z "$DOMAIN" ]; then
   exit 2
 fi
 
+# public (default): Caddy requests a real cert from Let's Encrypt, which needs
+# $DOMAIN publicly resolvable and reachable on 80/443. internal: Caddy issues
+# from its own local CA instead (compose/Caddyfile's `tls internal`), for a
+# private-network install with no public DNS — refused rather than defaulted,
+# because silently downgrading to an untrusted cert would be worse than
+# stopping. See docs/runbooks/install.md for the trust tradeoff.
+MOBRAIN_TLS_MODE="${MOBRAIN_TLS_MODE:-public}"
+case "$MOBRAIN_TLS_MODE" in
+  public) CADDY_TLS_DIRECTIVE="" ;;
+  internal) CADDY_TLS_DIRECTIVE="tls internal" ;;
+  *)
+    echo "MOBRAIN_TLS_MODE must be 'public' or 'internal', got '${MOBRAIN_TLS_MODE}'." >&2
+    exit 2
+    ;;
+esac
+
 # D12: the runner is optional, and the question is asked in plain words because
 # a yes here hands a container the org's key and nobody watching. Anything but
 # an explicit yes (including EOF on a non-interactive install) leaves it off.
@@ -56,6 +72,12 @@ esac
 umask 077
 cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
+# MOBRAIN_CADDY_TLS_DIRECTIVE is what compose/Caddyfile actually substitutes
+# in; MOBRAIN_TLS_MODE is recorded alongside it only so a human (or this
+# script, on re-read) can see which mode produced it without decoding Caddy
+# syntax.
+MOBRAIN_TLS_MODE=${MOBRAIN_TLS_MODE}
+MOBRAIN_CADDY_TLS_DIRECTIVE=${CADDY_TLS_DIRECTIVE}
 GBRAIN_VERSION=${GBRAIN_VERSION}
 HARNESS_VERSION=${HARNESS_VERSION}
 APP_VERSION=${APP_VERSION}
@@ -117,3 +139,14 @@ Note: https://${DOMAIN}/admin is deliberately NOT routed — gbrain's embedded
 admin SPA is a second control plane with god rights over the same brain.
 See docs/runbooks/break-glass.md for the recovery path.
 EOF
+
+if [ "$MOBRAIN_TLS_MODE" = "internal" ]; then
+  cat <<EOF
+
+MOBRAIN_TLS_MODE=internal: Caddy issued a certificate from its own local CA,
+not a publicly trusted one. Browsers and API clients will show an untrusted-
+certificate warning until you distribute and trust that CA yourself — this is
+a real security-posture difference from a public cert, not a cosmetic one.
+See docs/runbooks/install.md.
+EOF
+fi

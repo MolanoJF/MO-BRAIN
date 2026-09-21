@@ -25,10 +25,12 @@
 #   PREFLIGHT_FAKE_PORT_80=busy   /  PREFLIGHT_FAKE_PORT_443=busy
 #   PREFLIGHT_FAKE_DNS=nxdomain
 #   PREFLIGHT_FAKE_PULL=missing
-# PREFLIGHT_SKIP_DNS=1 skips the DNS check for a private-network install; it
-# prints a warning rather than passing silently. The image-pull check is
-# network-bound, so it is off unless explicitly enabled with
-# PREFLIGHT_SKIP_PULL=0.
+# PREFLIGHT_SKIP_DNS=1 skips the DNS check outright; it prints a warning
+# rather than passing silently. MOBRAIN_TLS_MODE=internal (scripts/install.sh)
+# implies the same skip: a domain that will never resolve publicly is exactly
+# what internal-CA TLS mode is for, so the DNS check would refuse the very
+# thing that mode is meant to allow. The image-pull check is network-bound,
+# so it is off unless explicitly enabled with PREFLIGHT_SKIP_PULL=0.
 set -uo pipefail
 
 MIN_COMPOSE_MAJOR=2
@@ -195,6 +197,10 @@ resolve_ips() {
 
 check_dns() {
   local domain="${DOMAIN:-}" resolved local_ips ip
+  if [ "${MOBRAIN_TLS_MODE:-public}" = "internal" ]; then
+    warn "skipping the DNS check for ${domain:-<unset DOMAIN>} (MOBRAIN_TLS_MODE=internal); Caddy will issue from its own local CA instead of public ACME, so no public A/AAAA record is needed."
+    return
+  fi
   if [ "${PREFLIGHT_SKIP_DNS:-0}" = "1" ]; then
     warn "skipping the DNS check for ${domain:-<unset DOMAIN>} (PREFLIGHT_SKIP_DNS=1); make sure it resolves to this host before exposing 443."
     return
