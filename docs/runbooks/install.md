@@ -7,7 +7,7 @@ Mobrain is a self-hosted Docker Compose stack. This runbook takes you from a cle
 - A host with **Docker Engine 24+** (or Docker Desktop) and the **Compose v2 plugin, v2.20 or newer**, with a reachable daemon.
 - **At least 4096 MB of RAM** and **20 GB free on the Docker data root**.
 - **Ports 80 and 443 free.** Caddy is the only service that publishes a host port; nothing else does.
-- A **`DOMAIN`** you control whose A/AAAA record already points at this host. Caddy obtains a real TLS certificate for it. (A port already held by *this* stack is not a conflict.)
+- **Either** a `DOMAIN` you control whose A/AAAA record already points at this host (Caddy obtains a real TLS certificate for it), **or** nothing at all — leave the domain blank and Mobrain installs against this host's own LAN address with a private certificate. (A port already held by *this* stack is not a conflict.)
 
 The installer runs `scripts/preflight.sh` before it generates any secret, so a host that cannot run the stack never ends up holding an `ENCRYPTION_KEY` it cannot use.
 
@@ -16,17 +16,20 @@ The installer runs `scripts/preflight.sh` before it generates any secret, so a h
 From the repository root:
 
 ```bash
-DOMAIN=brain.acme-co.com bash scripts/install.sh
+bash scripts/install.sh            # local: this machine on your own network
+DOMAIN=brain.acme-co.com bash scripts/install.sh   # domain: a public certificate
 ```
 
 The installer, in order:
 
 1. refuses if an `.env` already exists (delete it deliberately if you mean to reinstall — regenerating `ENCRYPTION_KEY` makes every stored secret unrecoverable);
-2. runs preflight, and exits with the failing check's code if the host cannot run the stack;
-3. reads `DOMAIN` from the environment, or prompts for it if unset;
+2. reads `DOMAIN` from the environment, or asks for it — *"Domain for this brain (leave blank to just use this machine on your local network):"*. A blank answer selects **local mode**: the installer detects this host's LAN address (`hostname -I`, then the outbound route's source address, then `localhost`), uses it as `DOMAIN`, and forces `MOBRAIN_TLS_MODE=internal`. A non-blank answer selects **domain mode**, unchanged from previous releases;
+3. runs preflight, and exits with the failing check's code if the host cannot run the stack. In domain mode this now includes the DNS check against the domain you just gave it; in local mode the DNS check is skipped and says so;
 4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — unless `ENABLE_RUNNER` is already set in the environment, in which case it skips the prompt and uses that value directly. Either way, anything but an explicit yes (`y`/`yes`, case-insensitive — including EOF on a non-interactive install with neither variable set) leaves the runner **off**;
 5. generates four independent secrets and writes `.env` at mode `600`;
 6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}` and runs `docker compose up -d --wait`.
+
+Preflight still runs before a single secret is generated, so a host that cannot run the stack never ends up holding an `ENCRYPTION_KEY` it cannot use.
 
 ### Running it non-interactively
 
@@ -34,6 +37,12 @@ For a fully non-interactive install (CI, a coding agent, an automation script), 
 
 ```bash
 ENABLE_RUNNER=n DOMAIN=brain.acme-co.com bash scripts/install.sh
+```
+
+For a non-interactive **local** install, set `INSTALL_MODE=local` — it skips the domain prompt without needing a `DOMAIN`:
+
+```bash
+INSTALL_MODE=local ENABLE_RUNNER=n bash scripts/install.sh
 ```
 
 Use `ENABLE_RUNNER=n` unless you specifically want the agent runner on (see [`agent-runner.md`](agent-runner.md) first — it changes the trust model); use `ENABLE_RUNNER=y` to enable it without the prompt.
@@ -148,6 +157,8 @@ This is a documented fallback, not the default path: it needs the source tree, t
 
 ## Private-network install (no public DNS)
 
+> If you have no domain at all, you want **local mode** — leave the domain prompt blank (or set `INSTALL_MODE=local`) and the installer does all of this for you against the host's LAN address. This section is for the different case: you *have* an internal hostname (`brain.internal.acme-co.lan`) that only resolves on your own network.
+
 By default (`MOBRAIN_TLS_MODE=public`, unset is the same thing) Caddy requests a real certificate from Let's Encrypt for `DOMAIN`, which needs that domain publicly resolvable and reachable on 80/443 for the ACME HTTP-01 challenge. That's not possible for a brain that only lives on an internal network.
 
 For that case, set `MOBRAIN_TLS_MODE=internal`:
@@ -156,17 +167,29 @@ For that case, set `MOBRAIN_TLS_MODE=internal`:
 MOBRAIN_TLS_MODE=internal DOMAIN=brain.internal.acme-co.lan bash scripts/install.sh
 ```
 
-This does two things: it tells `compose/Caddyfile`'s main site to issue from Caddy's own local CA (`tls internal`) instead of attempting public ACME, and it makes preflight treat the DNS check as satisfied — the same effect as `PREFLIGHT_SKIP_DNS=1`, but explained in terms of the mode that's actually active rather than a bare skip.
+This does two things: it tells `compose/Caddyfile`'s main site to issue from Caddy's own local CA (`tls internal`) instead of attempting public ACME, and it makes preflight treat the DNS check as satisfied — the same effect as `PREFLIGHT_SKIP_DNS=1`, but explained in terms of the mode that's actually active rather than a bare skip. `INSTALL_MODE=local` skips that same check for the same reason — there is no public name to resolve — and its warning names the active mode.
 
 **The tradeoff is real, not cosmetic.** Caddy's local CA is self-signed and known to nobody but this Caddy instance. Every browser and API client that talks to `https://<DOMAIN>` will show an untrusted-certificate warning (or fail closed, for a client that doesn't let you click through) until you separately distribute that CA's root certificate and have each client trust it. `PREFLIGHT_SKIP_DNS=1` on its own does none of this — it only silences preflight's DNS check, leaving Caddy still attempting (and endlessly failing) public ACME, so the stack reports healthy via `docker compose --wait` while HTTPS never actually works and the browser-only first-admin step has nothing to load. Use `MOBRAIN_TLS_MODE=internal`, not a bare DNS skip, for a real private-network install.
 
 ## Create the first admin
 
-When the installer finishes it prints:
+In domain mode:
 
 ```text
 Stack is up. Open https://<DOMAIN> and create your first admin.
 ```
+
+In local mode:
+
+```text
+Stack is up. Open https://<lan-ip> from any device on your network and create
+your first admin.
+
+Your browser will warn about the certificate the first time — that's expected,
+it's a private local CA, not a mistake. See docs/runbooks/install.md.
+```
+
+In local mode that address works from the host itself and from any phone, tablet or laptop on the same network. The certificate warning appears once per device and per browser; clicking through is expected. To remove it, distribute Caddy's local CA root and trust it on each device — the same tradeoff described under [Private-network install](#private-network-install-no-public-dns).
 
 Open `https://<DOMAIN>`. A box with no admin shows the bootstrap form; create the first admin (owner). That account can then add members, Connections, and the org's provider API keys. A returning operator sees the sign-in page instead.
 

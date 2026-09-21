@@ -11,10 +11,18 @@
 Mobrain is deployed from a checkout of this repository, on the host that will run it. From the repository root:
 
 ```bash
+bash scripts/install.sh
+```
+
+It asks one question. **Leave the domain blank** and Mobrain installs for this machine only: it detects the host's LAN address, issues a certificate from Caddy's own local CA, and the brain is reachable at `https://<lan-ip>` from any device on your network. Your browser warns about that certificate once — it is a private CA, not a broken install.
+
+**Answer with a domain** you control and you get today's public path instead: Caddy obtains a real Let's Encrypt certificate, which needs that domain's A/AAAA record already pointing at this host.
+
+```bash
 DOMAIN=brain.acme-co.com bash scripts/install.sh
 ```
 
-That one command runs the preflight below, asks whether to enable the optional agent runner, generates the four secrets into a `.env`, pulls the pinned images, and brings the stack up with `docker compose up -d --wait`. When it finishes, open `https://brain.acme-co.com` and create the first admin.
+Either way the one command runs the preflight below, asks whether to enable the optional agent runner, generates the four secrets into a `.env`, pulls the pinned images, and brings the stack up with `docker compose up -d --wait`. When it finishes, open the URL it prints and create the first admin.
 
 The images are registry-qualified and exactly pinned:
 
@@ -44,7 +52,7 @@ Never use a moving tag. The gbrain and harness versions are exact, and the produ
 | Free space on the Docker data root | **20 GB** |
 | Compose project name | not already running containers on this host |
 | TCP ports 80 and 443 | free (a port held by this stack is not a conflict) |
-| `DOMAIN` | resolves to one of this host's addresses |
+| `DOMAIN` (domain mode only) | resolves to one of this host's addresses — not checked in local mode, which has no public name |
 | The pinned images | pullable (`ghcr.io/molanojf/...`) |
 
 `scripts/install.sh` picks a `COMPOSE_PROJECT_NAME` for you if you don't set one — deterministically, from the checkout's own path, so two unrelated checkouts on the same host never collide by default. See [`docs/runbooks/install.md`](docs/runbooks/install.md#compose-project-name) for why that matters and how to pin one yourself.
