@@ -89,6 +89,55 @@ export function parseSchemaPacksProse(raw: string): SchemaPacksSnapshot {
   return { bundled, raw };
 }
 
+/**
+ * `gbrain schema active` — the ONLY honest readback of which pack the engine
+ * will actually query with.
+ *
+ * Two reasons this is prose-parsed rather than JSON. (1) `schema active`
+ * ignores `--json` exactly the way `schema list` does — MEASURED at the pin,
+ * `gbrain schema active` and `gbrain schema active --json` emit byte-identical
+ * stdout, despite `schema --help` claiming "All new verbs accept --json".
+ * (2) `gbrain config get schema_pack` is NOT a substitute: with a DB-plane
+ * value set it prints the FILE value plus the note "a DB-plane value also
+ * exists and is shadowed at runtime", which is backwards — tier 4 (DB) OUTRANKS
+ * tier 6 (file) in resolveActivePackName. See docs/schema-pack-findings.md S2.
+ *
+ * `source` is the resolution tier, one of: per-call, env, per-source-db,
+ * db-config, gbrain-yml, home-config, default. We write home-config, so any
+ * other value on an apply is a divergence to surface, never to round up.
+ *
+ * Never throws: an unparseable response yields nulls and keeps `raw`.
+ */
+export type SchemaActive = {
+  pack: string | null;
+  version: string | null;
+  source: string | null;
+  identity: string | null;
+  pageTypes: number | null;
+  linkVerbs: number | null;
+  raw: string;
+};
+
+export function parseSchemaActiveProse(raw: string): SchemaActive {
+  const text = raw ?? '';
+  const num = (re: RegExp): number | null => {
+    const m = text.match(re);
+    if (!m) return null;
+    const n = Number.parseInt(m[1]!, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  const activeLine = text.match(/^\s*Active pack:\s*(\S+)\s+v(\S+)\s*$/m);
+  return {
+    pack: activeLine?.[1] ?? null,
+    version: activeLine?.[2] ?? null,
+    source: text.match(/^\s*Source:\s*(\S+)\s*$/m)?.[1] ?? null,
+    identity: text.match(/^\s*Pack identity:\s*(\S+)\s*$/m)?.[1] ?? null,
+    pageTypes: num(/^\s*Page types:\s*(\d+)\s*$/m),
+    linkVerbs: num(/^\s*Link verbs:\s*(\d+)\s*$/m),
+    raw: text,
+  };
+}
+
 const missing = (from: string[], to: string[]) => from.filter((x) => !to.includes(x));
 
 export function diffCapability(before: CapabilitySnapshot, after: CapabilitySnapshot): CapabilityDrift {

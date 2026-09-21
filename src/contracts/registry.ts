@@ -19,6 +19,22 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       { name: 'url', flag: '--url', kind: 'value', secret: true },
       { name: 'embeddingModel', flag: '--embedding-model', kind: 'value' },
       { name: 'embeddingDimensions', flag: '--embedding-dimensions', kind: 'value' },
+      /**
+       * UNDOCUMENTED but allowlisted and honored. `gbrain init --help` does
+       * not list it, but it is in the per-command flag allowlist — MEASURED at
+       * 0.50.5.0: `gbrain init --schema-pack` (no value) answers
+       * `--schema-pack requires a value`, whereas `gbrain init --bogus-flag`
+       * answers `unknown flag --bogus-flag for 'gbrain init'`. Run with a value
+       * it prints `[init] Using schema pack: <name>` and the choice takes
+       * effect (src/commands/init.ts:53-56, 1346, 1687).
+       *
+       * This is where the wizard's pack choice has to land, not a post-init
+       * `config set`: init WRITES config.json's schema_pack itself, defaulting
+       * new brains to `gbrain-base-v2`, so anything written beforehand is
+       * stamped over — and the pack must already be active when `sync` runs
+       * for imported pages to be typed by it.
+       */
+      { name: 'schemaPack', flag: '--schema-pack', kind: 'value' },
     ],
     supportsJson: false,
     supportsDryRun: false,
@@ -402,6 +418,67 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     supportsJson: false,
     supportsDryRun: false,
     privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * The honest readback for which pack the engine actually resolves. Prose
+   * only: MEASURED at 0.50.5.0, `gbrain schema active` and
+   * `gbrain schema active --json` emit byte-identical stdout — `runActive`
+   * takes `_args` and never reads it, the same defect shape as `schema list`
+   * (Work Item K). `schema --help`'s blanket "All new verbs accept --json" is
+   * wrong. supportsJson is false so a caller cannot ask for a structured reply
+   * this command will never give; parse it with `parseSchemaActiveProse`.
+   *
+   * This is the ONLY command that reports the resolution TIER, which is what
+   * makes it load-bearing: a brain-DB-plane `schema_pack` (tier 4) silently
+   * outranks the ~/.gbrain/config.json value we write (tier 6), and
+   * `gbrain schema use` will report success while changing nothing in that
+   * state (MEASURED). `gbrain config get schema_pack` cannot be used instead —
+   * its shadowing note is inverted. See docs/schema-pack-findings.md S2.
+   *
+   * Reads DB config for tier 4, so: brain-db.
+   */
+  'schema.active': {
+    id: 'schema.active',
+    argv: ['schema', 'active'],
+    params: [],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * Manifest-shape validation for one pack. The companion to `schema.lint`,
+   * and NOT redundant with it: MEASURED at the pin, `schema lint <name>` on a
+   * pack that exists but fails to parse answers the misleading
+   * `Pack not found: <name>` — `runLintCmd` swallows the loader exception
+   * (`catch { raw = null; }`) — while `schema validate <name>` gives the real
+   * diagnosis, e.g. `manifest validation failed: page_types.0.primitive:
+   * Invalid option: expected one of "entity"|"media"|...`. An admin needs the
+   * second message, so the console runs both.
+   *
+   * Grammar: the pack name is a POSITIONAL and optional (absent falls back to
+   * gbrain-base, NOT to the active pack — `runValidate` hardcodes
+   * `packPathByName('gbrain-base')`, schema.ts:329). supportsJson is false for
+   * two compounding reasons: `runValidate` reads `args[0]` raw and never calls
+   * `parseFlags`, so a LEADING `--json` is misparsed as the pack name and exits
+   * 1 (MEASURED: `schema validate --json dirpack` → exit 1), while a TRAILING
+   * `--json` is silently ignored and prose is printed anyway (MEASURED:
+   * `schema validate dirpack --json` → exit 0, prose). Exit 0 = valid,
+   * 1 = unknown pack or invalid manifest; the caller reads stdout/stderr for
+   * the reason.
+   */
+  'schema.validate': {
+    id: 'schema.validate',
+    argv: ['schema', 'validate'],
+    params: [
+      { name: 'packName', flag: '', kind: 'value' },
+    ],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'read-only',
     okExitCodes: [0],
   },
 
