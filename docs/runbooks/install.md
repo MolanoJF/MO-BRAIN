@@ -52,6 +52,33 @@ DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash sc
 
 Every variable in the generated file is documented in [`.env.example`](../../.env.example).
 
+## Compose project name
+
+`compose/docker-compose.yml` names its Compose project from `COMPOSE_PROJECT_NAME`, and Compose
+uses that name to decide which containers and volumes a given `up` owns. If you never set it, the
+installer picks one for you and writes it into `.env`: `mobrain-<12 hex chars derived from this
+checkout's absolute path>`. It prints the name it chose — it is never silent about this. Running
+`scripts/install.sh` again from the *same* checkout path derives the *same* name, so a later
+upgrade or reinstall keeps targeting the same containers; a *different* checkout gets a different
+name automatically, so two unrelated installs on one host default to separate projects and can
+never share containers or volumes.
+
+Set `COMPOSE_PROJECT_NAME` yourself if you want a stable, memorable name instead of the derived
+one — an explicit value always wins:
+
+```bash
+DOMAIN=brain.acme-co.com COMPOSE_PROJECT_NAME=mobrain-prod bash scripts/install.sh
+```
+
+Preflight refuses (exit 17, below) if the resolved name — derived or explicit — already has
+containers on this host, whether or not they are running: that is exactly how a second, unrelated
+install once silently recreated a first install's live containers in place, reattaching its
+Postgres volume under freshly generated secrets that didn't match what was already stored there.
+The pre-1.0 fallback baked into the compose file (`brainstand`, with no `COMPOSE_PROJECT_NAME` set)
+is left as-is on purpose: every deployment from before this behavior already has volumes named
+`brainstand_*`, and changing that fallback would make Compose treat them as a new, empty project on
+their next `up`.
+
 ## When preflight refuses
 
 Preflight prints one line per refusal and exits with that check's code. Nothing has been written when it exits, so fix the cause and re-run.
@@ -81,6 +108,12 @@ Add RAM or move to a larger host. (If the host cannot be measured at all, prefli
 PREFLIGHT: Mobrain needs at least 20 GB free on the Docker data root; this host reports 5 GB — free space before installing.
 ```
 Free space where Docker stores images and volumes (`docker info` reports `DockerRootDir`). On Docker Desktop for Windows/macOS that path is inside the VM, so preflight falls back to the host filesystem.
+
+**Exit 17 — `COMPOSE_PROJECT_NAME` already has containers on this host.**
+```text
+PREFLIGHT: a Compose project named 'brainstand' already has containers on this host (brainstand-caddy-1 brainstand-postgres-1 ...); installing here would recreate them in place with THIS install's freshly generated secrets, likely breaking whatever is already using them. Choose a different COMPOSE_PROJECT_NAME, or remove that project first if it's really yours to replace.
+```
+Either this is genuinely a second install (pick a different, unique `COMPOSE_PROJECT_NAME`, or unset it and let the installer derive one — see above), or the named project really is meant to be replaced (stop and remove it deliberately first, outside the installer).
 
 **Exit 14 — port 80 or 443 is already in use.**
 ```text

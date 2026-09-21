@@ -23,8 +23,31 @@ if [ -e "$ENV_PATH" ]; then
   exit 1
 fi
 
+# compose/docker-compose.yml's own fallback (`${COMPOSE_PROJECT_NAME:-brainstand}`)
+# is frozen: every pre-1.0 deployment already has volumes named `brainstand_*`,
+# and changing that fallback would make Compose treat them as a different
+# project on their next `up`, orphaning live data. So the frozen default stays
+# put — instead, every NEW install (this script only ever writes .env once;
+# see the refusal above) picks its own name here, derived from the checkout's
+# absolute path so two unrelated checkouts on the same host land on different
+# projects by default and can never share containers or volumes. This is what
+# let a second install silently recreate a first install's live containers in
+# place with mismatched secrets — see docs/runbooks/install.md. An explicit
+# COMPOSE_PROJECT_NAME always wins, and is exported before preflight runs so
+# its port-conflict check reasons about the name this install will actually use.
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}"
+if [ -z "$COMPOSE_PROJECT_NAME" ]; then
+  COMPOSE_PROJECT_NAME="mobrain-$(pwd -P | sha256sum | cut -c1-12)"
+  echo "No COMPOSE_PROJECT_NAME set; using '${COMPOSE_PROJECT_NAME}' (derived from $(pwd -P))." >&2
+  echo "Set COMPOSE_PROJECT_NAME explicitly if you need a stable or memorable name." >&2
+fi
+export COMPOSE_PROJECT_NAME
+
 # Preflight BEFORE any secret is generated: a host that cannot run the stack
-# must not end up holding an ENCRYPTION_KEY it will never use.
+# must not end up holding an ENCRYPTION_KEY it will never use. Preflight also
+# refuses if COMPOSE_PROJECT_NAME already names a project with containers on
+# this host — the exact silent-clobber case above, caught before anything
+# for this install is written.
 if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
   bash "$(dirname "$0")/preflight.sh" || exit $?
 fi
@@ -77,6 +100,10 @@ esac
 umask 077
 cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
+# Pins this install to its own Compose project (see the comment above this
+# script's preflight call) — do not delete this line even if you never
+# noticed it get chosen.
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 # MOBRAIN_CADDY_TLS_DIRECTIVE is what compose/Caddyfile actually substitutes
 # in; MOBRAIN_TLS_MODE is recorded alongside it only so a human (or this
 # script, on re-read) can see which mode produced it without decoding Caddy
@@ -109,6 +136,7 @@ chmod 600 "$ENV_PATH"
 cat <<EOF
 
 Wrote $ENV_PATH (mode 600).
+Compose project: ${COMPOSE_PROJECT_NAME}
 
 BACK UP ENCRYPTION_KEY SEPARATELY FROM YOUR DATABASE BACKUPS.
 Without it, every stored secret is unrecoverable. With both in one place,

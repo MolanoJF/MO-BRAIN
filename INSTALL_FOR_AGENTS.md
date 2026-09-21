@@ -27,7 +27,8 @@ You cannot self-serve these — get them from the person who asked you to instal
   trust Caddy's local CA — this is a materially different security posture from a public cert, not
   cosmetic. See `docs/runbooks/install.md`'s "Private-network install (no public DNS)" section.
 - **Whether this host will ever run more than one Mobrain instance, or already has one running.**
-  See §4 — this matters more than it looks like it should.
+  See §4 — this matters more than it looks like it should, even though the installer now defends
+  against the worst case on its own.
 - **Whether to enable the agent runner.** Default to declining (see §3) unless the user explicitly
   asks for it.
 
@@ -87,29 +88,43 @@ If `scripts/install.sh` reports `Refusing to overwrite an existing .env` — **s
 user**, don't delete it yourself. Deleting `.env` and reinstalling regenerates `ENCRYPTION_KEY`,
 which makes every secret already stored in that deployment's database permanently unrecoverable.
 
-## 4. Set a unique `COMPOSE_PROJECT_NAME` — the general docs don't tell you this, but you need it
+## 4. `COMPOSE_PROJECT_NAME` — the installer now defaults this safely, but still pass one explicitly
 
-`compose/docker-compose.yml` hardcodes its Compose project name to `brainstand` when
-`COMPOSE_PROJECT_NAME` isn't set — **every Mobrain install on a given Docker host shares that same
-default**, regardless of which directory or checkout it runs from.
+This used to be a real footgun and is now fixed, but the history matters for judgment calls, so it
+stays documented here.
 
-This was verified to be actively dangerous: installing from a second, unrelated checkout on a host
-that already had a Mobrain instance running caused Compose to recreate the *existing* instance's
-live containers in place and reattach its Postgres volume — but with the new install's
-freshly-generated secrets, which didn't match the passwords already in that volume. Result: the
-pre-existing instance's `control-plane` and `scheduler` crash-looped on a Postgres auth failure
-until manually restored with its own original `.env`. No data was lost (volumes survive container
-recreation), but the running instance was knocked out until fixed by hand.
+`compose/docker-compose.yml` still hardcodes its Compose project name to `brainstand` when
+`COMPOSE_PROJECT_NAME` isn't set — that fallback is now frozen on purpose, because every
+pre-existing Mobrain deployment already has volumes named `brainstand_*`, and changing it would
+make Compose treat that live data as belonging to a brand-new, empty project on its next `up`. What
+changed instead: `scripts/install.sh` no longer leaves `COMPOSE_PROJECT_NAME` unset for a new
+install. If you don't pass one, it derives a name deterministically from the checkout's absolute
+path (`mobrain-<12 hex chars>`), writes it into the generated `.env`, and **prints the name it
+chose** — so two unrelated checkouts on the same host now default to different projects and can't
+collide by accident the way they used to.
 
-**Always pass an explicit, unique `COMPOSE_PROJECT_NAME`:**
+This was verified to have been actively dangerous before the fix: installing from a second,
+unrelated checkout on a host that already had a Mobrain instance running caused Compose to recreate
+the *existing* instance's live containers in place and reattach its Postgres volume — but with the
+new install's freshly-generated secrets, which didn't match the passwords already in that volume.
+Result: the pre-existing instance's `control-plane` and `scheduler` crash-looped on a Postgres auth
+failure until manually restored with its own original `.env`. No data was lost (volumes survive
+container recreation), but the running instance was knocked out until fixed by hand. `preflight.sh`
+now also refuses outright (exit 17) if the resolved project name — derived or explicit — already
+has containers on this host, so even a coincidental or deliberate name reuse gets caught before any
+secret for the new install is generated.
+
+**Still pass an explicit, unique `COMPOSE_PROJECT_NAME` yourself when you can** — the derived
+default is collision-safe, but it's an opaque hash, and a human (or you, six months from now,
+reading `docker ps`) will thank you for `mobrain-prod` instead of `mobrain-2e2e744bde35`:
 
 ```bash
 ENABLE_RUNNER=n DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-<something-unique> bash scripts/install.sh
 ```
 
-This does not solve port conflicts (see next paragraph) — it only prevents container/volume name
-collisions between separate instances. If you don't know whether this host already runs Mobrain (or
-anything else), check first:
+Either way (derived or explicit), this does not solve port conflicts (see next paragraph) — it only
+prevents container/volume name collisions between separate instances. If you don't know whether
+this host already runs Mobrain (or anything else), check first:
 
 ```bash
 docker ps --format '{{.Names}}\t{{.Ports}}' | grep -E ':80->|:443->'
@@ -119,7 +134,11 @@ Caddy binds host ports 80 and 443 directly and they are not configurable in the 
 file — **only one Mobrain instance (or anything else on 80/443) can run per host**, no matter what
 `COMPOSE_PROJECT_NAME` you choose. If something already holds those ports, preflight will refuse
 cleanly with exit 14 before writing anything (verified) — that's expected, and the fix is a
-different host or freeing the port, not a different project name.
+different host or freeing the port, not a different project name. If preflight instead refuses with
+exit 17 (`a Compose project named '<name>' already has containers on this host`), that means the
+resolved name — whichever you're using — collides with an existing project's *identity*, even if
+its ports happen to be free right now (e.g. it's stopped); pick a different `COMPOSE_PROJECT_NAME`
+or confirm with the user that removing the existing project is really what they want.
 
 ## 5. If preflight refuses
 
@@ -135,6 +154,7 @@ the cause:
 | 14 | Port 80 or 443 already in use | Something else (or another instance) holds it — see §4 |
 | 15 | `DOMAIN` doesn't resolve to this host | Point its A/AAAA record here, or use `MOBRAIN_TLS_MODE=internal` for a real private-network install (see §1) |
 | 16 | Pinned images can't be pulled | Registry unreachable/private (see §6), or build locally |
+| 17 | `COMPOSE_PROJECT_NAME` already has containers on this host | Choose a different `COMPOSE_PROJECT_NAME` (see §4), or confirm with the user before removing the existing project |
 
 `SKIP_PREFLIGHT=1` exists but is for the installer's own tests, not for you — don't set it.
 
