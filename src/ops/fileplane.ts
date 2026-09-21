@@ -187,10 +187,25 @@ export async function patchConfig(patch: Record<string, unknown>, opts: { sql: S
   await writeFilePlane(CONFIG_PATH, (current) => mergeConfigJson(current, patch), opts);
 }
 
-/** Write a user schema pack YAML. 0644: gbrain reads it as another user. */
+/**
+ * Absolute path of a user pack's manifest.
+ *
+ * gbrain discovers a user pack ONLY as a directory named after the pack with
+ * `pack.yaml` / `pack.yml` / `pack.json` inside it (`defaultPackLocator`,
+ * src/core/schema-pack/load-active.ts; `runList` enumerates subdirectories the
+ * same way). MEASURED against the pinned 0.50.5.0 container: a flat
+ * `<name>.yaml` written here is invisible to `schema list` and answers
+ * `Pack not found: <name>` from `schema lint`. See
+ * docs/schema-pack-findings.md S1.
+ */
+export function packPath(name: string): string {
+  return join(SCHEMA_PACK_DIR, name, 'pack.yaml');
+}
+
+/** Write a user schema pack manifest. 0644: gbrain reads it as another user. */
 export async function writeSchemaPack(name: string, yaml: string, opts: { sql: SQL }): Promise<void> {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error(`invalid schema pack name: ${name}`);
-  await writeFilePlane(join(SCHEMA_PACK_DIR, `${name}.yaml`), () => yaml, { ...opts, mode: 0o644 });
+  await writeFilePlane(packPath(name), () => yaml, { ...opts, mode: 0o644 });
 }
 
 /**
