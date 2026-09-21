@@ -48,31 +48,39 @@ don't need to check RAM/disk yourself, just Docker, Compose, and the domain.
 
 ## 3. The install command — run it non-interactively like this
 
-`scripts/install.sh` has **two interactive prompts**, and only one of them is avoidable by setting
-an env var. Handle both up front:
+`scripts/install.sh` has **two interactive prompts**, and both are now avoidable by setting an env
+var up front — set both `DOMAIN` and `ENABLE_RUNNER` before running it:
 
 ```bash
-DOMAIN=brain.example.com bash scripts/install.sh
+ENABLE_RUNNER=n DOMAIN=brain.example.com bash scripts/install.sh
 ```
 
-This alone still stops and blocks waiting for keyboard input, because the runner-enable prompt
-(`read -r -p "...Enable it? [y/N]: "`) fires **unconditionally** — it is not gated on `DOMAIN` being
-set, unlike the domain prompt. Run it like this instead, piping the runner answer over stdin:
+`ENABLE_RUNNER` works exactly like `DOMAIN`: when it's already set in the environment, the
+runner-enable prompt (`read -r -p "...Enable it? [y/N]: "`) is skipped and that value is used
+directly instead. Unset, it still fires unconditionally and blocks on stdin — that prompt is **not**
+gated on `DOMAIN` being set, so setting `DOMAIN` alone is not enough to avoid it.
+
+Use `ENABLE_RUNNER=n` (decline the runner) unless the user has explicitly asked for the agent
+runner enabled — it runs model-written code against the brain using the org's API key,
+unsupervised, on a schedule. Verified: `ENABLE_RUNNER=n` leaves `RUNNER_TOKEN` empty and correctly
+disables the runner profile, with no prompt fired. If the user does want it on, set
+`ENABLE_RUNNER=y` instead and read
+[`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) first — it changes the trust model.
+Accepted "on" values match the domain prompt's own case statement (`y`, `Y`, `yes`, `YES`, etc.,
+case-insensitive); anything else — including garbage — falls through to **off**, same as the
+interactive prompt would.
+
+If you can't set the env var for some reason, the older stdin-piping workaround still works as a
+fallback, since an unset `ENABLE_RUNNER` still falls through to the interactive `read`:
 
 ```bash
 printf 'n\n' | DOMAIN=brain.example.com bash scripts/install.sh
 ```
 
-Use `printf 'n\n'` (decline the runner) unless the user has explicitly asked for the agent runner
-enabled — it runs model-written code against the brain using the org's API key, unsupervised, on a
-schedule. Verified: piping `n` leaves `RUNNER_TOKEN` empty and correctly disables the runner
-profile. If the user does want it on, pipe `y` instead and read
-[`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) first — it changes the trust model.
-
 For an internal/no-public-DNS install, add `MOBRAIN_TLS_MODE=internal`:
 
 ```bash
-printf 'n\n' | MOBRAIN_TLS_MODE=internal DOMAIN=brain.internal.acme-co.lan bash scripts/install.sh
+ENABLE_RUNNER=n MOBRAIN_TLS_MODE=internal DOMAIN=brain.internal.acme-co.lan bash scripts/install.sh
 ```
 
 If `scripts/install.sh` reports `Refusing to overwrite an existing .env` — **stop and ask the
@@ -96,7 +104,7 @@ recreation), but the running instance was knocked out until fixed by hand.
 **Always pass an explicit, unique `COMPOSE_PROJECT_NAME`:**
 
 ```bash
-printf 'n\n' | DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-<something-unique> bash scripts/install.sh
+ENABLE_RUNNER=n DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-<something-unique> bash scripts/install.sh
 ```
 
 This does not solve port conflicts (see next paragraph) — it only prevents container/volume name
@@ -134,8 +142,9 @@ the cause:
 
 This was hit and fixed during initial verification of this doc: the images were briefly private on
 GHCR, so anonymous pulls were rejected outright. As of this writing they're public and pull
-anonymously. If you see `denied` on `docker compose ... pull` again, don't assume it's your
-environment — verify with a direct anonymous pull first:
+anonymously (and CI now verifies this stays true on every release — see
+[`docs/support-policy.md`](docs/support-policy.md)). If you see `denied` on `docker compose ...
+pull` again, don't assume it's your environment — verify with a direct anonymous pull first:
 
 ```bash
 docker pull ghcr.io/molanojf/control-plane:1.0.0
@@ -178,7 +187,7 @@ Mobrain stores.
 git clone https://github.com/MolanoJF/mobrain.git
 cd mobrain
 docker ps --format '{{.Ports}}' | grep -E ':80->|:443->'   # confirm nothing else holds 80/443
-printf 'n\n' | DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-prod bash scripts/install.sh
+ENABLE_RUNNER=n DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-prod bash scripts/install.sh
 curl -sk https://brain.example.com/api/health
 ```
 

@@ -57,8 +57,13 @@ esac
 # D12: the runner is optional, and the question is asked in plain words because
 # a yes here hands a container the org's key and nobody watching. Anything but
 # an explicit yes (including EOF on a non-interactive install) leaves it off.
-ENABLE_RUNNER=""
-read -r -p "This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]: " ENABLE_RUNNER || true
+# Same escape hatch as DOMAIN above: a caller that already knows the answer
+# (CI, a coding agent, an automation script) sets ENABLE_RUNNER beforehand and
+# skips the prompt, instead of having to pipe an answer over stdin.
+ENABLE_RUNNER="${ENABLE_RUNNER:-}"
+if [ -z "$ENABLE_RUNNER" ]; then
+  read -r -p "This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]: " ENABLE_RUNNER || true
+fi
 
 gen() { head -c 48 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-48; }
 

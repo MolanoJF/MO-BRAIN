@@ -24,9 +24,25 @@ The installer, in order:
 1. refuses if an `.env` already exists (delete it deliberately if you mean to reinstall — regenerating `ENCRYPTION_KEY` makes every stored secret unrecoverable);
 2. runs preflight, and exits with the failing check's code if the host cannot run the stack;
 3. reads `DOMAIN` from the environment, or prompts for it if unset;
-4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — and treats anything but an explicit yes (including EOF on a non-interactive install) as **off**;
+4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — unless `ENABLE_RUNNER` is already set in the environment, in which case it skips the prompt and uses that value directly. Either way, anything but an explicit yes (`y`/`yes`, case-insensitive — including EOF on a non-interactive install with neither variable set) leaves the runner **off**;
 5. generates four independent secrets and writes `.env` at mode `600`;
 6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}` and runs `docker compose up -d --wait`.
+
+### Running it non-interactively
+
+For a fully non-interactive install (CI, a coding agent, an automation script), set both `DOMAIN` and `ENABLE_RUNNER` up front so neither prompt fires:
+
+```bash
+ENABLE_RUNNER=n DOMAIN=brain.acme-co.com bash scripts/install.sh
+```
+
+Use `ENABLE_RUNNER=n` unless you specifically want the agent runner on (see [`agent-runner.md`](agent-runner.md) first — it changes the trust model); use `ENABLE_RUNNER=y` to enable it without the prompt.
+
+If you can't set the env var for some reason, piping the answer over stdin still works as a fallback, since an unset `ENABLE_RUNNER` still falls through to the interactive `read`:
+
+```bash
+printf 'n\n' | DOMAIN=brain.acme-co.com bash scripts/install.sh
+```
 
 To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release):
 

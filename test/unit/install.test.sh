@@ -57,6 +57,22 @@ if BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env2" bash scripts/install.s
   echo "FAIL: ran without DOMAIN"; fail=1
 else echo "PASS: required DOMAIN"; fi
 
+echo "--- ENABLE_RUNNER=n skips the prompt and leaves the runner off"
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 ENABLE_RUNNER=n BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
+if grep -q '^RUNNER_TOKEN=$' "$work/.env3" && ! grep -q '^COMPOSE_PROFILES=runner$' "$work/.env3"; then
+  echo "PASS: runner left off"
+else
+  echo "FAIL: ENABLE_RUNNER=n did not leave the runner off"; fail=1
+fi
+
+echo "--- ENABLE_RUNNER=y skips the prompt and enables the runner"
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 ENABLE_RUNNER=y BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env4" bash scripts/install.sh </dev/null >/dev/null 2>&1
+if grep -q '^RUNNER_TOKEN=.\+' "$work/.env4" && grep -q '^COMPOSE_PROFILES=runner$' "$work/.env4"; then
+  echo "PASS: runner enabled"
+else
+  echo "FAIL: ENABLE_RUNNER=y did not enable the runner"; fail=1
+fi
+
 # Parse the script source — BRAINSTAND_SKIP_UP must not skip this check.
 # Without --env-file, Compose loads .env from the project dir of the first -f
 # (compose/), so the secrets install.sh just wrote never reach interpolation.
