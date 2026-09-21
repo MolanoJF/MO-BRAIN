@@ -87,8 +87,10 @@ bash scripts/install.sh
 The command asks for a domain: a blank answer installs against the machine's own LAN address with a private certificate, and a domain answer takes the public-certificate path.
 
 Before touching anything, `preflight.sh` checks Docker (24+/Compose v2.20+), 4 GB RAM, 20 GB
-disk, ports 80/443 free, and that `DOMAIN` actually resolves to this host — refusing with a
-specific exit code and a one-line fix if not. Once preflight passes, the installer:
+disk, and ports 80/443 free in both modes, plus that `DOMAIN` actually resolves to this host
+on the public-certificate (domain) path only — in local mode that check is skipped, since the
+"domain" is a bare LAN address or `localhost` — refusing with a specific exit code and a
+one-line fix if not. Once preflight passes, the installer:
 
 1. asks, in plain language, whether to turn on the agent runner (default: **no**);
 2. generates four secrets (`POSTGRES_PASSWORD`, `OPS_RPC_TOKEN`, `ENCRYPTION_KEY`,
