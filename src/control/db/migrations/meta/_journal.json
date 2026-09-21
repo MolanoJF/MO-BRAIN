@@ -64,6 +64,13 @@
       "when": 1789745000000,
       "tag": "0008_search_mode_vocabulary",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0009_brain_schema_pack",
+      "breakpoints": true
     }
   ]
 }

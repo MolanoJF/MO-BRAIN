@@ -96,6 +96,18 @@ export const brains = pgTable('brains', {
   gbrainVersion: text('gbrain_version'),
   embeddingModel: text('embedding_model'),
   searchMode: text('search_mode'),
+  /**
+   * The schema pack the admin chose: what kinds of pages the brain
+   * recognizes. Stored the same way searchMode is, and passed to
+   * `gbrain init --schema-pack` at /wizard/finish.
+   *
+   * This is INTENT, not resolved truth. gbrain resolves the active pack
+   * through a 7-tier chain in which a brain-DB-plane value (tier 4) silently
+   * outranks the ~/.gbrain/config.json value we write (tier 6). Always read
+   * the truth back with `gbrain schema active` and surface any divergence
+   * rather than trusting this column — see docs/schema-pack-findings.md S2.
+   */
+  schemaPack: text('schema_pack'),
   lifecycle: text('lifecycle').notNull().default('uninitialized'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
