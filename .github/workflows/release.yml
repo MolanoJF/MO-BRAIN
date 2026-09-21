@@ -122,3 +122,28 @@ jobs:
           else
             gh release create "$TAG" --title "Mobrain ${TAG}" --notes-file release-notes.md
           fi
+
+  # Catches the exact regression a from-scratch install dry run once hit: the
+  # three GHCR packages got flipped to private, so `docker compose ... pull`
+  # (no credentials, exactly what scripts/install.sh runs) failed `denied` for
+  # everyone, even though README advertises a one-line anonymous install.
+  # `publish`'s own docker/login-action call is scoped to THAT job's runner
+  # only — GitHub Actions gives every job a fresh VM, so this job starts with
+  # no ghcr.io credential in scope. check-public-images.sh also `docker
+  # logout`s first, belt-and-braces, so this stays true even if a future edit
+  # adds a login step above it in this same job.
+  verify-public:
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: read
+    env:
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: molanojf
+      GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
+      APP_VERSION: ${{ inputs.version || '1.0.0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the three pinned images are publicly, anonymously pullable
+        run: bash scripts/ci/check-public-images.sh
