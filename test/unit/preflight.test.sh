@@ -45,4 +45,18 @@ expect_code 0 "PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_P
 expect_code 0 "DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh"
 out=$(DOMAIN=nx.invalid MOBRAIN_TLS_MODE=internal PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh 2>&1 || true)
 echo "$out" | grep -qi "MOBRAIN_TLS_MODE=internal" || fail "the internal-mode DNS skip does not name the mode that caused it"
+
+# INSTALL_MODE=local means there is no public name to resolve — the "domain" is
+# a bare LAN IP or `localhost`. The DNS check is skipped outright, and says so.
+expect_code 0 "INSTALL_MODE=local DOMAIN=192.168.1.50 PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh"
+out=$(INSTALL_MODE=local DOMAIN=192.168.1.50 PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh 2>&1 || true)
+echo "$out" | grep -qi "INSTALL_MODE=local" || fail "the local-mode DNS skip does not name the mode that caused it"
+
+# And the skip is local-mode ONLY: domain mode must still refuse the same input.
+expect_code 15 "INSTALL_MODE=domain DOMAIN=nx.invalid PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh"
+
+# Every other check is mode-independent: a local install on a too-small host is
+# just as doomed as a domain one.
+expect_code 12 "INSTALL_MODE=local PREFLIGHT_FAKE_RAM_MB=1024 bash scripts/preflight.sh"
+expect_code 14 "INSTALL_MODE=local PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=busy bash scripts/preflight.sh"
 echo PASS

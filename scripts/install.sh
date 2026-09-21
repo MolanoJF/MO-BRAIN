@@ -43,31 +43,73 @@ if [ -z "$COMPOSE_PROJECT_NAME" ]; then
 fi
 export COMPOSE_PROJECT_NAME
 
-# Preflight BEFORE any secret is generated: a host that cannot run the stack
-# must not end up holding an ENCRYPTION_KEY it will never use. Preflight also
-# refuses if COMPOSE_PROJECT_NAME already names a project with containers on
-# this host — the exact silent-clobber case above, caught before anything
-# for this install is written.
-if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
-  bash "$(dirname "$0")/preflight.sh" || exit $?
-fi
+# The address a local-mode brain answers on. `hostname -I` first (its first
+# field is the primary address on every distro that has it), then the source
+# address the kernel would pick for an outbound route, then `localhost` — an
+# unusual network namespace still gets a working single-machine install rather
+# than an empty DOMAIN and a Caddyfile with no site name.
+# MOBRAIN_FAKE_LAN_IP is TEST-ONLY, the same convention as preflight's
+# PREFLIGHT_FAKE_*: it exists so the local path can be exercised on a host
+# without either command, and must never be set in production.
+lan_ip() {
+  local ip=""
+  if [ -n "${MOBRAIN_FAKE_LAN_IP:-}" ]; then printf '%s' "$MOBRAIN_FAKE_LAN_IP"; return; fi
+  ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+(\.[0-9]+){3}$' | head -n1 || true)"
+  if [ -z "$ip" ]; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*[[:space:]]src[[:space:]]\{1,\}\([0-9.]\{1,\}\).*/\1/p' | head -n1 || true)"
+  fi
+  printf '%s' "${ip:-localhost}"
+}
 
+# Two installs, one question. A person with a domain answers it; a person who
+# just wants their own machine on their own network presses Enter and is never
+# asked about DNS, certificates or a cloud account. Same escape hatch as
+# ENABLE_RUNNER below: a caller that already knows (CI, an automation script)
+# pre-sets DOMAIN or INSTALL_MODE and no prompt fires.
+INSTALL_MODE="${INSTALL_MODE:-}"
 DOMAIN="${DOMAIN:-}"
-if [ -z "$DOMAIN" ]; then
-  read -r -p "Domain for this brain (e.g. brain.acme-co.com): " DOMAIN || true
+if [ -z "$INSTALL_MODE" ] && [ -z "$DOMAIN" ]; then
+  read -r -p "Domain for this brain (leave blank to just use this machine on your local network): " DOMAIN || true
 fi
-if [ -z "$DOMAIN" ]; then
-  echo "A domain is required: Caddy obtains a TLS certificate for it." >&2
-  exit 2
+if [ -z "$INSTALL_MODE" ]; then
+  if [ -n "$DOMAIN" ]; then INSTALL_MODE=domain; else INSTALL_MODE=local; fi
 fi
 
-# public (default): Caddy requests a real cert from Let's Encrypt, which needs
-# $DOMAIN publicly resolvable and reachable on 80/443. internal: Caddy issues
-# from its own local CA instead (compose/Caddyfile's `tls internal`), for a
-# private-network install with no public DNS — refused rather than defaulted,
-# because silently downgrading to an untrusted cert would be worse than
-# stopping. See docs/runbooks/install.md for the trust tradeoff.
-MOBRAIN_TLS_MODE="${MOBRAIN_TLS_MODE:-public}"
+MOBRAIN_TLS_MODE="${MOBRAIN_TLS_MODE:-}"
+case "$INSTALL_MODE" in
+  domain)
+    if [ -z "$DOMAIN" ]; then
+      echo "INSTALL_MODE=domain needs a DOMAIN: Caddy obtains a TLS certificate for it." >&2
+      echo "Leave DOMAIN unset (or set INSTALL_MODE=local) to install for this machine only." >&2
+      exit 2
+    fi
+    MOBRAIN_TLS_MODE="${MOBRAIN_TLS_MODE:-public}"
+    ;;
+  local)
+    # Public ACME cannot issue for a bare LAN address, so `internal` is not a
+    # default here, it is the only coherent answer — and an explicit `public`
+    # is a contradiction worth naming rather than silently overriding.
+    if [ -n "$MOBRAIN_TLS_MODE" ] && [ "$MOBRAIN_TLS_MODE" != "internal" ]; then
+      echo "INSTALL_MODE=local always uses MOBRAIN_TLS_MODE=internal; got '${MOBRAIN_TLS_MODE}'." >&2
+      echo "A public certificate authority will not issue for a LAN address. Set a DOMAIN for a public cert." >&2
+      exit 2
+    fi
+    MOBRAIN_TLS_MODE=internal
+    DOMAIN="$(lan_ip)"
+    echo "No domain given; installing for this machine only, reachable at https://${DOMAIN} on your network." >&2
+    ;;
+  *)
+    echo "INSTALL_MODE must be 'local' or 'domain', got '${INSTALL_MODE}'." >&2
+    exit 2
+    ;;
+esac
+
+# public (default in domain mode): Caddy requests a real cert from Let's
+# Encrypt, which needs $DOMAIN publicly resolvable and reachable on 80/443.
+# internal: Caddy issues from its own local CA instead (compose/Caddyfile's
+# `tls internal`). In domain mode it is refused rather than defaulted, because
+# silently downgrading to an untrusted cert would be worse than stopping.
+# See docs/runbooks/install.md for the trust tradeoff.
 case "$MOBRAIN_TLS_MODE" in
   public) CADDY_TLS_DIRECTIVE="" ;;
   internal) CADDY_TLS_DIRECTIVE="tls internal" ;;
@@ -76,6 +118,19 @@ case "$MOBRAIN_TLS_MODE" in
     exit 2
     ;;
 esac
+
+# Exported so preflight reasons about the install that is actually happening:
+# its DNS check needs all three to decide between refusing and skipping.
+export INSTALL_MODE DOMAIN MOBRAIN_TLS_MODE
+
+# Preflight BEFORE any secret is generated: a host that cannot run the stack
+# must not end up holding an ENCRYPTION_KEY it will never use. Preflight also
+# refuses if COMPOSE_PROJECT_NAME already names a project with containers on
+# this host — the exact silent-clobber case above, caught before anything
+# for this install is written.
+if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+  bash "$(dirname "$0")/preflight.sh" || exit $?
+fi
 
 # D12: the runner is optional, and the question is asked in plain words because
 # a yes here hands a container the org's key and nobody watching. Anything but

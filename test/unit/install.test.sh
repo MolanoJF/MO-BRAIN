@@ -55,10 +55,86 @@ if DOMAIN=brain.test BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env" bash 
   echo "FAIL: overwrote an existing .env"; fail=1
 else echo "PASS: refused to overwrite"; fi
 
-echo "--- refuses to run without DOMAIN"
-if PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env2" bash scripts/install.sh </dev/null >/dev/null 2>&1; then
-  echo "FAIL: ran without DOMAIN"; fail=1
-else echo "PASS: required DOMAIN"; fi
+echo "--- a blank DOMAIN answer installs in local mode against the detected LAN IP"
+# MOBRAIN_FAKE_LAN_IP pins detection: this suite runs on hosts where neither
+# `hostname -I` nor `ip route` exists (Git Bash on Windows), and the case is
+# about what local mode WRITES, not about how the address was found.
+printf '\n' | MOBRAIN_FAKE_LAN_IP=192.168.1.50 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.local" bash scripts/install.sh >/dev/null 2>&1
+if grep -q '^DOMAIN=192\.168\.1\.50$' "$work/.env.local" && \
+   grep -q '^MOBRAIN_TLS_MODE=internal$' "$work/.env.local" && \
+   grep -q '^MOBRAIN_CADDY_TLS_DIRECTIVE=tls internal$' "$work/.env.local"; then
+  echo "PASS: local mode wrote the LAN IP and internal TLS"
+else
+  echo "FAIL: local mode did not write the LAN IP / internal TLS"; fail=1
+fi
+
+echo "--- INSTALL_MODE=local skips the prompt entirely (no stdin needed)"
+INSTALL_MODE=local MOBRAIN_FAKE_LAN_IP=10.0.0.7 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.local2" bash scripts/install.sh </dev/null >/dev/null 2>&1
+if grep -q '^DOMAIN=10\.0\.0\.7$' "$work/.env.local2"; then
+  echo "PASS: INSTALL_MODE=local needs no stdin"
+else
+  echo "FAIL: INSTALL_MODE=local did not skip the prompt"; fail=1
+fi
+
+echo "--- local mode never refuses on DNS, with no PREFLIGHT_SKIP_DNS and a faked NXDOMAIN"
+if INSTALL_MODE=local MOBRAIN_FAKE_LAN_IP=192.168.1.51 PREFLIGHT_FAKE_DNS=nxdomain \
+   PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+   MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.local3" bash scripts/install.sh </dev/null >/dev/null 2>&1; then
+  echo "PASS: local mode bypassed the DNS refusal"
+else
+  echo "FAIL: local mode still hit the DNS refusal"; fail=1
+fi
+
+echo "--- LAN detection falls back to a usable address with no fake set"
+printf '\n' | PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.local4" bash scripts/install.sh >/dev/null 2>&1
+detected=$(grep '^DOMAIN=' "$work/.env.local4" | cut -d= -f2-)
+# Either a real address off this host, or the documented `localhost` fallback —
+# never empty, which is what would silently produce a Caddyfile with no site.
+if echo "$detected" | grep -qE '^(([0-9]{1,3}\.){3}[0-9]{1,3}|localhost)$'; then
+  echo "PASS: detection produced '$detected'"
+else
+  echo "FAIL: detection produced '${detected:-<empty>}'"; fail=1
+fi
+
+echo "--- a non-blank DOMAIN answer is still domain mode, unchanged"
+printf 'brain.typed.test\n' | PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.typed" bash scripts/install.sh >/dev/null 2>&1
+if grep -q '^DOMAIN=brain\.typed\.test$' "$work/.env.typed" && \
+   grep -q '^MOBRAIN_TLS_MODE=public$' "$work/.env.typed"; then
+  echo "PASS: a typed domain still takes the public-TLS domain path"
+else
+  echo "FAIL: a typed domain did not take the domain path"; fail=1
+fi
+
+echo "--- refuses INSTALL_MODE=local with an explicit MOBRAIN_TLS_MODE=public"
+# Let's Encrypt does not issue for a bare LAN IP. Defaulting quietly to
+# internal would hide the contradiction; refusing names it.
+if INSTALL_MODE=local MOBRAIN_TLS_MODE=public MOBRAIN_FAKE_LAN_IP=192.168.1.52 \
+   PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+   MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.contradiction" bash scripts/install.sh </dev/null >/dev/null 2>&1; then
+  echo "FAIL: accepted local mode with public TLS"; fail=1
+else
+  echo "PASS: refused local mode with public TLS"
+fi
+
+echo "--- rejects an unrecognized INSTALL_MODE"
+if INSTALL_MODE=sideways PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+   MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.badmode" bash scripts/install.sh </dev/null >/dev/null 2>&1; then
+  echo "FAIL: accepted an invalid INSTALL_MODE"; fail=1
+else
+  echo "PASS: rejected invalid INSTALL_MODE"
+fi
+
+echo "--- INSTALL_MODE=domain with no DOMAIN still refuses"
+if INSTALL_MODE=domain PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
+   MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env.nodomain" bash scripts/install.sh </dev/null >/dev/null 2>&1; then
+  echo "FAIL: domain mode ran without a DOMAIN"; fail=1
+else
+  echo "PASS: domain mode still requires a DOMAIN"
+fi
 
 echo "--- ENABLE_RUNNER=n skips the prompt and leaves the runner off"
 DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=n BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
@@ -148,6 +224,14 @@ if [ -n "$export_line" ] && [ -n "$preflight_line" ] && [ "$export_line" -lt "$p
 else
   echo "FAIL: COMPOSE_PROJECT_NAME export does not precede the preflight call"
   fail=1
+fi
+
+echo "--- INSTALL_MODE is exported before preflight runs (parse script; no Docker)"
+mode_export=$(grep -n '^export INSTALL_MODE' scripts/install.sh | head -n1 | cut -d: -f1)
+if [ -n "$mode_export" ] && [ -n "$preflight_line" ] && [ "$mode_export" -lt "$preflight_line" ]; then
+  echo "PASS: INSTALL_MODE exported (line $mode_export) before preflight (line $preflight_line)"
+else
+  echo "FAIL: INSTALL_MODE export does not precede the preflight call"; fail=1
 fi
 
 exit $fail

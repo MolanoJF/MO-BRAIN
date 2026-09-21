@@ -28,10 +28,11 @@
 #   PREFLIGHT_FAKE_PULL=missing
 #   PREFLIGHT_FAKE_PROJECT_EXISTS=1
 # PREFLIGHT_SKIP_DNS=1 skips the DNS check outright; it prints a warning
-# rather than passing silently. MOBRAIN_TLS_MODE=internal (scripts/install.sh)
-# implies the same skip: a domain that will never resolve publicly is exactly
-# what internal-CA TLS mode is for, so the DNS check would refuse the very
-# thing that mode is meant to allow. The image-pull check is network-bound,
+# rather than passing silently. INSTALL_MODE=local (scripts/install.sh) implies
+# the same skip, and so does MOBRAIN_TLS_MODE=internal: a domain that will
+# never resolve publicly — or is not a domain at all, but this host's own LAN
+# address — is exactly what those modes are for, so the DNS check would refuse
+# the very thing they exist to allow. The image-pull check is network-bound,
 # so it is off unless explicitly enabled with PREFLIGHT_SKIP_PULL=0.
 set -uo pipefail
 
@@ -199,6 +200,13 @@ resolve_ips() {
 
 check_dns() {
   local domain="${DOMAIN:-}" resolved local_ips ip
+  # INSTALL_MODE=local (scripts/install.sh): there is no public name to check.
+  # DOMAIN here is this host's own LAN address, or `localhost` — resolving it
+  # publicly is not merely unnecessary, it is meaningless.
+  if [ "${INSTALL_MODE:-domain}" = "local" ]; then
+    warn "skipping the DNS check (INSTALL_MODE=local); this brain is reachable at ${domain:-this machine} on your own network and has no public name to resolve."
+    return
+  fi
   if [ "${MOBRAIN_TLS_MODE:-public}" = "internal" ]; then
     warn "skipping the DNS check for ${domain:-<unset DOMAIN>} (MOBRAIN_TLS_MODE=internal); Caddy will issue from its own local CA instead of public ACME, so no public A/AAAA record is needed."
     return
