@@ -42,9 +42,12 @@ Never use a moving tag. The gbrain and harness versions are exact, and the produ
 | Docker Compose plugin | **v2.20** |
 | Host memory | **4096 MB** |
 | Free space on the Docker data root | **20 GB** |
+| Compose project name | not already running containers on this host |
 | TCP ports 80 and 443 | free (a port held by this stack is not a conflict) |
 | `DOMAIN` | resolves to one of this host's addresses |
 | The pinned images | pullable (`ghcr.io/molanojf/...`) |
+
+`scripts/install.sh` picks a `COMPOSE_PROJECT_NAME` for you if you don't set one — deterministically, from the checkout's own path, so two unrelated checkouts on the same host never collide by default. See [`docs/runbooks/install.md`](docs/runbooks/install.md#compose-project-name) for why that matters and how to pin one yourself.
 
 Each refusal prints exactly one line saying what to do; the codes are listed in the [install runbook](docs/runbooks/install.md).
 

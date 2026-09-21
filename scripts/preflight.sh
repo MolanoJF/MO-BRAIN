@@ -14,6 +14,7 @@
 #   14  TCP port 80 or 443 is already in use
 #   15  $DOMAIN does not resolve to one of this host's addresses
 #   16  the pinned images cannot be pulled
+#   17  COMPOSE_PROJECT_NAME already names a project with containers on this host
 #
 # Every check reads the real host unless the matching PREFLIGHT_FAKE_* variable
 # is set. Those variables are TEST-ONLY: they exist so the refusals can be
@@ -25,6 +26,7 @@
 #   PREFLIGHT_FAKE_PORT_80=busy   /  PREFLIGHT_FAKE_PORT_443=busy
 #   PREFLIGHT_FAKE_DNS=nxdomain
 #   PREFLIGHT_FAKE_PULL=missing
+#   PREFLIGHT_FAKE_PROJECT_EXISTS=1
 # PREFLIGHT_SKIP_DNS=1 skips the DNS check for a private-network install; it
 # prints a warning rather than passing silently. The image-pull check is
 # network-bound, so it is off unless explicitly enabled with
@@ -221,6 +223,28 @@ check_dns() {
   refuse 15 "DOMAIN ${domain} does not resolve to this host; point its A/AAAA record here before installing."
 }
 
+# check_ports() below only refuses on 80/443, and only catches the collision
+# when the pre-existing project also happens to be up (holding those ports).
+# The install.sh-generated default now makes two checkouts collide only by
+# coincidence, but an explicit COMPOSE_PROJECT_NAME (or a stopped project
+# whose ports are free right now) would sail past that check — and reusing a
+# name that already has containers is exactly how a second install silently
+# recreated a first install's containers with mismatched secrets. `-a`
+# because a STOPPED container of that project still means its volumes likely
+# already exist, and `up` would reattach them the same way.
+check_project_identity() {
+  local name containers
+  name="$(project_name)"
+  if [ "${PREFLIGHT_FAKE_PROJECT_EXISTS:-0}" = "1" ]; then
+    refuse 17 "a Compose project named '${name}' already has containers on this host (fake); choose a different COMPOSE_PROJECT_NAME or remove that project first."
+  fi
+  command -v docker >/dev/null 2>&1 || return 0
+  containers="$(docker ps -a --filter "label=com.docker.compose.project=${name}" --format '{{.Names}}' 2>/dev/null || true)"
+  if [ -n "$containers" ]; then
+    refuse 17 "a Compose project named '${name}' already has containers on this host ($(printf '%s' "$containers" | tr '\n' ' ' | sed 's/ $//')); installing here would recreate them in place with THIS install's freshly generated secrets, likely breaking whatever is already using them. Choose a different COMPOSE_PROJECT_NAME, or remove that project first if it's really yours to replace."
+  fi
+}
+
 check_images() {
   if [ -n "${PREFLIGHT_FAKE_PULL:-}" ]; then
     refuse 16 "the pinned Mobrain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
@@ -238,6 +262,7 @@ check_docker
 check_compose
 check_ram
 check_disk
+check_project_identity
 check_ports
 check_dns
 check_images
