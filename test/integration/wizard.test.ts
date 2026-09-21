@@ -23,7 +23,11 @@ mock.module('../../src/control/opsClient.ts', () => ({
       ok: true,
       exitCode: 0,
       argv: ['gbrain', ...op.split('.')],
-      stdout: op === 'schema.list' ? 'Bundled packs:\n  gbrain-base-v2\n' : 'ok',
+      stdout: op === 'schema.list'
+        ? 'Bundled packs:\n  gbrain-base-v2\n'
+        : op === 'schema.active'
+          ? 'Active pack: gbrain-base-v2 v2.0.0\nSource: home-config\n'
+          : 'ok',
       stderr: '',
       json: null,
     };

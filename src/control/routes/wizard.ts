@@ -8,6 +8,7 @@ import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema } from '../o
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
+import { parseSchemaActiveProse } from '../../contracts/capability.ts';
 
 /**
  * Json flag for wizard `/finish` callOps. Only request --json when the
@@ -76,6 +77,7 @@ wizard.get('/state', guard(async (c, { orgId }) => {
     searchModes: SEARCH_MODES,
     searchMode: brain.searchMode,
     embeddingModel: brain.embeddingModel,
+    schemaPack: brain.schemaPack,
     spaces: spaces.map((s) => ({ sourceId: s.sourceId, name: s.name, kind: s.kind })),
     isolationNotice: ISOLATION_NOTICE,
   });
@@ -144,26 +146,58 @@ wizard.post('/search-mode', guard(async (c, { userId, orgId }) => {
  * `Bundled packs:` prose block the same way Slice 0's own
  * `parseSchemaPacksProse()` (src/contracts/capability.ts) already does.
  */
-wizard.get('/schema-packs', guard(async (c) => {
+/**
+ * Every pack gbrain will accept: bundled plus user-installed. Prose-parsed
+ * because `schema list` ignores `--json` (Work Item K) — asking for it throws
+ * in buildArgv. Both the wizard step and the Schema admin page validate
+ * against this, so an unknown name is refused before it reaches gbrain.
+ */
+export async function listSchemaPacks(): Promise<string[]> {
   const r = await callOps<never>('schema.list', {}, { timeoutMs: 60_000 });
-  const bundled: string[] = [];
-  let inBundled = false;
+  const packs: string[] = [];
+  let section: 'none' | 'bundled' | 'installed' = 'none';
   for (const line of (r.stdout ?? '').split('\n')) {
-    if (/^\s*Bundled packs:\s*$/.test(line)) { inBundled = true; continue; }
-    if (!inBundled) continue;
+    if (/^\s*Bundled packs:\s*$/.test(line)) { section = 'bundled'; continue; }
+    if (/^\s*Installed packs\b/.test(line)) { section = 'installed'; continue; }
+    if (section === 'none') continue;
     const t = line.trim();
-    if (t === '') break;
-    bundled.push(t);
+    // A blank line ends a block; the "No user-installed packs" sentence is
+    // prose, not a pack name.
+    if (t === '') { section = 'none'; continue; }
+    if (/^No user-installed packs/.test(t)) { section = 'none'; continue; }
+    packs.push(t);
   }
-  return c.json({ packs: bundled });
+  return packs;
+}
+
+wizard.get('/schema-packs', guard(async (c) => {
+  return c.json({ packs: await listSchemaPacks() });
 }));
 
+/**
+ * Step 3 — schema pack.
+ *
+ * The pack is PERSISTED here and APPLIED at /finish via
+ * `gbrain init --schema-pack`. It deliberately is not applied here: at this
+ * point in the wizard the brain has not been init'd, and `init` writes
+ * config.json's `schema_pack` itself (defaulting to `gbrain-base-v2`), so a
+ * pre-init write would simply be stamped over. See
+ * docs/schema-pack-findings.md S2.
+ *
+ * Validated against gbrain's own pack list rather than a hardcoded set, so a
+ * user-installed pack is selectable the moment it is on disk.
+ */
 wizard.post('/schema', guard(async (c, { userId, orgId }) => {
   const { pack } = await c.req.json();
   if (!pack || typeof pack !== 'string') return c.json({ error: 'pack is required' }, 400);
 
+  const known = await listSchemaPacks();
+  if (!known.includes(pack)) {
+    return c.json({ error: `unknown schema pack ${pack}`, packs: known }, 400);
+  }
+
   const brain = await loadBrain(orgId);
-  await advance(brain.id, brain.lifecycle as Lifecycle, 'schema-selected');
+  await advance(brain.id, brain.lifecycle as Lifecycle, 'schema-selected', { schemaPack: pack });
   await audit(orgId, userId, 'wizard.schema', pack, { pack });
   return c.json({ ok: true, lifecycle: 'schema-selected', pack });
 }));
@@ -228,6 +262,10 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     nonInteractive: true,
     force: true,
     embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
+    // Undocumented but allowlisted (see the registry entry). Omitted entirely
+    // when unset so init falls back to its own gbrain-base-v2 default rather
+    // than being handed an empty pack name.
+    ...(brain.schemaPack ? { schemaPack: brain.schemaPack } : {}),
   });
   // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
   // recorded in the control DB during /space (git repos on disk survive).
@@ -247,9 +285,25 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   await run('embed', 'embed', { stale: true });
 
   const doctor = await run('doctor', 'doctor', {});
+
+  // Honesty: report the pack the engine actually RESOLVED, not the one we
+  // asked for. A brain-DB-plane schema_pack (tier 4) outranks the
+  // config.json value init writes (tier 6), so these can legitimately differ.
+  const activeRaw = await callOps<never>('schema.active', {}, { timeoutMs: 60_000 });
+  const active = parseSchemaActiveProse(activeRaw.stdout ?? '');
+
   const ok = steps.every((s) => s.ok);
   if (ok) await advance(brain.id, 'sources-added', 'ready');
-  await audit(orgId, userId, 'wizard.finish', brain.id, { steps, doctorExit: doctor.exitCode });
+  await audit(orgId, userId, 'wizard.finish', brain.id, {
+    steps,
+    doctorExit: doctor.exitCode,
+    schemaPackRequested: brain.schemaPack ?? null,
+    schemaPackResolved: active.pack,
+    schemaPackSource: active.source,
+  });
 
-  return c.json({ ok, lifecycle: ok ? 'ready' : brain.lifecycle, steps }, ok ? 200 : 500);
+  return c.json({
+    ok, lifecycle: ok ? 'ready' : brain.lifecycle, steps,
+    schemaPack: { requested: brain.schemaPack ?? null, resolved: active.pack, source: active.source },
+  }, ok ? 200 : 500);
 }));

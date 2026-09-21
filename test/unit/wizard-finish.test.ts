@@ -23,3 +23,28 @@ describe('wizard /finish json flags', () => {
     ).toThrow('config.set does not support --json');
   });
 });
+
+test('finish passes the stored schema pack to init', () => {
+  // The pack has to reach `init`, not a later `config set`: init writes
+  // config.json's schema_pack itself (defaulting to gbrain-base-v2) and would
+  // stamp over anything written first, and the pack must already be active
+  // when `sync` runs for imported pages to be typed by it.
+  const argv = buildArgv(OPERATIONS.init!, {
+    nonInteractive: true,
+    force: true,
+    embeddingModel: 'openai:text-embedding-3-small',
+    schemaPack: 'gbrain-recommended',
+  });
+  expect(argv).toContain('--schema-pack');
+  expect(argv[argv.indexOf('--schema-pack') + 1]).toBe('gbrain-recommended');
+});
+
+test('finish omits --schema-pack entirely when no pack was chosen', () => {
+  // An absent value must not become an empty string: `gbrain init
+  // --schema-pack ""` would set a pack name of "" rather than fall back to
+  // init's own default.
+  const argv = buildArgv(OPERATIONS.init!, {
+    nonInteractive: true, force: true, embeddingModel: 'openai:text-embedding-3-small',
+  });
+  expect(argv).not.toContain('--schema-pack');
+});
