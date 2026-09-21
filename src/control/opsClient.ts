@@ -1,8 +1,11 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
-import type { GitRange, RepoStatus, RevertOutcome, RevertRequest, TreeProbe } from '../ops/git.ts';
+import type {
+  GitRange, ReadFileResult, RepoStatus, RepoTree, RevertOutcome, RevertRequest, TreeProbe,
+  WriteFileOutcome, WriteFileRequest,
+} from '../ops/git.ts';
 import type { BrainUsage } from '../ops/usage.ts';
 
-export type { RepoStatus };
+export type { ReadFileResult, RepoStatus, RepoTree, WriteFileOutcome, WriteFileRequest };
 
 /**
  * Resolve the ops endpoint at CALL time, not at module load.
@@ -99,6 +102,21 @@ export async function gitRange(sourceId: string, before: string, after: string):
  */
 export async function gitPathExists(sourceId: string, paths: readonly string[]): Promise<TreeProbe> {
   return post('/git/path-exists', { sourceId, paths }, 60_000);
+}
+
+/** S1 — the Space repo's working tree, for the Files browser. Read-only. */
+export async function gitTree(sourceId: string): Promise<RepoTree> {
+  return post('/git/tree', { sourceId }, 30_000);
+}
+
+/** S1 — one file's text plus the git blob sha the editor must send back on save. */
+export async function gitReadFile(sourceId: string, path: string): Promise<ReadFileResult> {
+  return post('/git/read-file', { sourceId, path }, 30_000);
+}
+
+/** S2 — write one file and commit it as the acting member. Read-compare-write-commit under one repo lock. */
+export async function gitWriteFile(req: WriteFileRequest): Promise<WriteFileOutcome> {
+  return post('/git/write-file', req, 60_000);
 }
 
 /**

@@ -149,16 +149,25 @@ function SchemaStep({ busy, onSubmit }: { busy: boolean; onSubmit: (pack: string
   );
 }
 
+/**
+ * The first Space of a brand-new brain needs no naming decision to be useful:
+ * it is the org's own corpus and nothing else exists to tell it apart from.
+ * Exported so the tests can assert the exact payload without a DOM.
+ */
+export const FIRST_SPACE = { sourceId: 'my-brain', name: 'My Brain' } as const;
+
 function SpaceStep(
   { busy, notice, onSubmit }: { busy: boolean; notice: string; onSubmit: (b: unknown) => void },
 ) {
-  const [sourceId, setSourceId] = useState('');
-  const [name, setName] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
   return (
     <section className="space-y-3">
       <h2 className="font-medium">Create your first Space</h2>
-      {/* S4b: a blocking choice, not a tooltip. */}
+      <p className="text-sm text-muted">
+        Your brain starts with one Space, <span className="font-mono">{FIRST_SPACE.sourceId}</span>.
+        You can add more later.
+      </p>
+      {/* S4b: a blocking choice, not a tooltip. Naming went away; consent did not. */}
       <div className="card border-warning">
         <p className="text-sm">{notice}</p>
         <label className="mt-2 flex items-center gap-2 text-sm">
@@ -167,13 +176,9 @@ function SpaceStep(
           I understand folders inside a Space are not access boundaries.
         </label>
       </div>
-      <input className="field font-mono" placeholder="source id, e.g. shared"
-             value={sourceId} onChange={(e) => setSourceId(e.target.value)} />
-      <input className="field" placeholder="Display name, e.g. Shared company wiki"
-             value={name} onChange={(e) => setName(e.target.value)} />
-      <button className="btn-primary" disabled={busy || !acknowledged || !sourceId}
-              onClick={() => onSubmit({ sourceId, name })}>
-        {busy ? 'Creating…' : 'Create Space'}
+      <button className="btn-primary" disabled={busy || !acknowledged}
+              onClick={() => onSubmit({ ...FIRST_SPACE })}>
+        {busy ? 'Creating…' : 'Continue'}
       </button>
     </section>
   );

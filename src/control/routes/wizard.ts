@@ -34,7 +34,7 @@ const ISOLATION_NOTICE =
   'every member with read on that Space can retrieve everything in it via semantic search. ' +
   'If something needs isolation, it needs its own Space.';
 
-const SOURCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const SOURCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 async function loadBrain(orgId: string) {
   const [brain] = await getDb().select().from(schema.brains)

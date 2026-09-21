@@ -41,6 +41,12 @@ mock.module('../../src/control/opsClient.ts', () => ({
   takeGrantCredentials: async () => null,
   deleteCredentialJournal: async () => ({ deleted: true }),
   auditTail: async () => [],
+  // S1: routes/files.ts imports these alongside the rest, so a mock that omits
+  // them makes the whole app graph unloadable.
+  gitTree: async (sourceId: string) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] }),
+  gitReadFile: async (sourceId: string, path: string) => ({ content: '', sha: '', size: 0 }),
+  gitWriteFile: async (req: { sourceId: string; path: string; content: string; expectedSha: string }) =>
+    ({ committed: true, sha: 'written-sha' }),
 }));
 
 // mock.module must be registered before the app's import graph loads.

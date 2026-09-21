@@ -36,6 +36,7 @@ export const api = {
   post: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'POST', body ?? {}),
   patch: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'PATCH', body ?? {}),
   delete: <T = unknown>(path: string): Promise<T> => request<T>(path, 'DELETE'),
+  put: <T = unknown>(path: string, body?: unknown): Promise<T> => request<T>(path, 'PUT', body ?? {}),
 };
 
 /**
@@ -61,6 +62,43 @@ export const sessionApi = {
     if (typeof user?.email !== 'string' || user.email === '') return null;
     return { email: user.email, name: typeof user.name === 'string' ? user.name : null };
   },
+};
+
+/**
+ * The Files surface (`src/control/routes/spaces.ts`). Types mirror the routes'
+ * projections exactly: the Space list carries each Connection's access so the
+ * picker can say read-only vs can-edit without a second, admin-only call, and
+ * the tree carries only the entries an operator may browse. Stage 2's PUT is
+ * not wired here yet — this client is read-only.
+ */
+
+export type SpaceSummary = { id: string; sourceId: string; name: string; access: 'read' | 'write' };
+export type FileEntry = { path: string; size: number; isMarkdown: boolean };
+export type SpaceTree = { sourceId: string; root: string; entries: FileEntry[] };
+export type FileContent = { content: string; sha: string; size: number };
+
+/** Encode each path segment but keep `/` as the separator. */
+export function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
+ * The put result. `committed: false, error: 'stale'` is a RESULT, not a
+ * throw: another writer changed the file on disk, so the save wrote NOTHING and
+ * the page renders the reload choice. `index` is the route's index-step
+ * envelope and stays `unknown` here — the page shows the commit, not the steps.
+ */
+export type FileSaveResult =
+  | { committed: true; sha: string; bypass: boolean; index: unknown }
+  | { committed: false; error: 'stale'; sha: string | null; bypass: boolean };
+
+export const filesApi = {
+  list: () => api.get<{ spaces: SpaceSummary[] }>('/spaces'),
+  tree: (sourceId: string) => api.get<SpaceTree>(`/spaces/${encodeURIComponent(sourceId)}/files`),
+  file: (sourceId: string, path: string) =>
+    api.get<FileContent>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`),
+  save: (sourceId: string, path: string, body: { content: string; expectedSha: string; message?: string }) =>
+    api.put<FileSaveResult>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`, body),
 };
 
 /**

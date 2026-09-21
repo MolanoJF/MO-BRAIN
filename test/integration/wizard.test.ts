@@ -48,6 +48,12 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitRange: async () => ({ sourceId: '', before: '', after: '', commits: [], files: [] }),
   gitPathExists: async () => ({ sourceId: '', paths: [] }),
   gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
+  // S1: routes/files.ts imports these alongside the rest, so a mock that omits
+  // them makes the whole app graph unloadable.
+  gitTree: async (sourceId: string) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] }),
+  gitReadFile: async (sourceId: string, path: string) => ({ content: '', sha: '', size: 0 }),
+  gitWriteFile: async (req: { sourceId: string; path: string; content: string; expectedSha: string }) =>
+    ({ committed: true, sha: 'written-sha' }),
 }));
 
 const { default: app } = await import('../../src/control/app.ts');

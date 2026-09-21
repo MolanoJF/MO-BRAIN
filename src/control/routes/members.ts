@@ -6,6 +6,7 @@ import { requireRole, type Role } from '../rbac.ts';
 import { auth } from '../auth.ts';
 import { mintClaimLink } from '../claim.ts';
 import { revokeConnection } from '../connections.ts';
+import { accessFromConnections } from '../spaceAccess.ts';
 
 export const members = new Hono();
 
@@ -148,20 +149,24 @@ members.get('/access-overview', guard('viewer', async (c, { orgId }) => {
       inArray(schema.connections.state, ['pending', 'active']),
     ));
 
-  const cellMap = new Map<string, 'write' | 'read'>();
+  // ONE derivation, shared with the Files routes: admin/owner show `write` on
+  // every Space in the org, and a member's cells come only from their
+  // connections. Grouping is just to avoid re-scanning every connection per
+  // (member, Space) pair.
+  const connsByMembership = new Map<string, typeof conns>();
   for (const conn of conns) {
-    cellMap.set(`${conn.membershipId}\0${conn.writeSpaceId}`, 'write');
-    const reads = Array.isArray(conn.readSpaceIds) ? conn.readSpaceIds : [];
-    for (const sid of reads) {
-      if (typeof sid !== 'string') continue;
-      const key = `${conn.membershipId}\0${sid}`;
-      if (cellMap.get(key) !== 'write') cellMap.set(key, 'read');
+    const list = connsByMembership.get(conn.membershipId);
+    if (list) list.push(conn); else connsByMembership.set(conn.membershipId, [conn]);
+  }
+
+  const cells: Array<{ membershipId: string; spaceId: string; access: 'read' | 'write' }> = [];
+  for (const member of memberRows) {
+    const memberConns = connsByMembership.get(member.membershipId) ?? [];
+    for (const space of spaces) {
+      const access = accessFromConnections(member.role as Role, memberConns, space.id);
+      if (access !== null) cells.push({ membershipId: member.membershipId, spaceId: space.id, access });
     }
   }
-  const cells = [...cellMap.entries()].map(([key, access]) => {
-    const sep = key.indexOf('\0');
-    return { membershipId: key.slice(0, sep), spaceId: key.slice(sep + 1), access };
-  });
 
   return c.json({ members: memberRows, spaces, cells });
 }));

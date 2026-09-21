@@ -1,5 +1,7 @@
 import { test, expect, describe } from 'bun:test';
-import { classifyLock, commitArgs, diffRange, revertRange } from '../../src/ops/git.ts';
+import {
+  classifyLock, commitArgs, diffRange, gitReadFile, gitTree, gitWriteFile, revertRange,
+} from '../../src/ops/git.ts';
 import type { GitRange, RangeCommit, RevertRequest, TreeProbe } from '../../src/ops/git.ts';
 import { attributeCommits, captureHeads, diffForRun } from '../../src/agent/diff.ts';
 import { purgeCandidates, revertRun } from '../../src/agent/revert.ts';
@@ -218,6 +220,65 @@ describe('diffRange sourceId', () => {
   test('refuses a traversing sourceId before spawning git', async () => {
     await expect(diffRange('../etc', 'HEAD', 'HEAD', { sql: {} as never }))
       .rejects.toThrow(/invalid sourceId/);
+  });
+});
+
+// Stage 1 read endpoints: a bad sourceId or a path that could name a file
+// outside the Space must be refused BEFORE any git spawn or repo lock. The
+// dummy `{} as never` sql is the proof: a read that took a lock would throw on
+// it, and a read that spawned git would need a real repo.
+describe('gitTree sourceId', () => {
+  test('refuses a traversing sourceId before spawning git', async () => {
+    await expect(gitTree('../etc', { sql: {} as never })).rejects.toThrow(/invalid sourceId/);
+  });
+});
+
+describe('gitReadFile validation', () => {
+  test('refuses a traversing sourceId before spawning git', async () => {
+    await expect(gitReadFile('../etc', 'page.md', { sql: {} as never }))
+      .rejects.toThrow(/invalid sourceId/);
+  });
+
+  // The path never reaches git: `assertRepoRelative` refuses a `..` segment, an
+  // absolute path, a backslash separator and an empty string by name.
+  test('refuses a traversing or absolute path before reading anything', async () => {
+    const refused = /must be repo-relative|must not contain|use '\/' as its separator|non-empty string/;
+    await expect(gitReadFile('customers', '../../etc/passwd', { sql: {} as never }))
+      .rejects.toThrow(refused);
+    await expect(gitReadFile('customers', '/etc/passwd', { sql: {} as never }))
+      .rejects.toThrow(refused);
+    await expect(gitReadFile('customers', 'a/../../b.md', { sql: {} as never }))
+      .rejects.toThrow(refused);
+    await expect(gitReadFile('customers', 'x\\y.md', { sql: {} as never }))
+      .rejects.toThrow(refused);
+    await expect(gitReadFile('customers', '', { sql: {} as never }))
+      .rejects.toThrow(refused);
+  });
+});
+
+// Stage 2 write path: the same validation-first contract as the read side — a
+// traversing sourceId or path is refused BEFORE the repo lock or any spawn, and
+// the dummy `{} as never` sql is the proof: a write that reached the lock would
+// throw on it, and one that reached git would need a real repo.
+describe('gitWriteFile validation', () => {
+  const REQ = {
+    path: 'page.md', content: 'x', expectedSha: 'a'.repeat(40),
+    actor: { name: 'Alice Example', email: 'alice@example.test' }, message: 'write page',
+  };
+
+  test('refuses a traversing sourceId before spawning git', async () => {
+    await expect(gitWriteFile({ ...REQ, sourceId: '../etc' }, { sql: {} as never }))
+      .rejects.toThrow(/invalid sourceId/);
+  });
+
+  // The path never reaches git or the filesystem: `assertRepoRelative` refuses a
+  // `..` segment, an absolute path and a backslash separator by name.
+  test('refuses a traversing or absolute path before writing anything', async () => {
+    const refused = /must be repo-relative|must not contain|use '\/' as its separator|non-empty string/;
+    for (const path of ['../../etc/passwd', '/etc/passwd', 'x\\y.md']) {
+      await expect(gitWriteFile({ ...REQ, sourceId: 'customers', path }, { sql: {} as never }))
+        .rejects.toThrow(refused);
+    }
   });
 });
 
