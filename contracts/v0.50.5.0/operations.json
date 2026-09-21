@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.5.0",
-  "generatedAt": "2026-09-18T23:52:50.075Z",
+  "generatedAt": "2026-09-21T17:46:23.235Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -428,6 +428,11 @@
           "name": "embeddingDimensions",
           "flag": "--embedding-dimensions",
           "kind": "value"
+        },
+        {
+          "name": "schemaPack",
+          "flag": "--schema-pack",
+          "kind": "value"
         }
       ],
       "supportsJson": false,
@@ -748,6 +753,20 @@
       "requiresLock": true
     },
     {
+      "id": "schema.active",
+      "argv": [
+        "schema",
+        "active"
+      ],
+      "params": [],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "schema.lint",
       "argv": [
         "schema",
@@ -802,6 +821,26 @@
       "supportsJson": true,
       "supportsDryRun": false,
       "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "schema.validate",
+      "argv": [
+        "schema",
+        "validate"
+      ],
+      "params": [
+        {
+          "name": "packName",
+          "flag": "",
+          "kind": "value"
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "read-only",
       "okExitCodes": [
         0
       ]
