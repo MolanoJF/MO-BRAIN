@@ -24,9 +24,25 @@ The installer, in order:
 1. refuses if an `.env` already exists (delete it deliberately if you mean to reinstall — regenerating `ENCRYPTION_KEY` makes every stored secret unrecoverable);
 2. runs preflight, and exits with the failing check's code if the host cannot run the stack;
 3. reads `DOMAIN` from the environment, or prompts for it if unset;
-4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — and treats anything but an explicit yes (including EOF on a non-interactive install) as **off**;
+4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — unless `ENABLE_RUNNER` is already set in the environment, in which case it skips the prompt and uses that value directly. Either way, anything but an explicit yes (`y`/`yes`, case-insensitive — including EOF on a non-interactive install with neither variable set) leaves the runner **off**;
 5. generates four independent secrets and writes `.env` at mode `600`;
 6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}` and runs `docker compose up -d --wait`.
+
+### Running it non-interactively
+
+For a fully non-interactive install (CI, a coding agent, an automation script), set both `DOMAIN` and `ENABLE_RUNNER` up front so neither prompt fires:
+
+```bash
+ENABLE_RUNNER=n DOMAIN=brain.acme-co.com bash scripts/install.sh
+```
+
+Use `ENABLE_RUNNER=n` unless you specifically want the agent runner on (see [`agent-runner.md`](agent-runner.md) first — it changes the trust model); use `ENABLE_RUNNER=y` to enable it without the prompt.
+
+If you can't set the env var for some reason, piping the answer over stdin still works as a fallback, since an unset `ENABLE_RUNNER` still falls through to the interactive `read`:
+
+```bash
+printf 'n\n' | DOMAIN=brain.acme-co.com bash scripts/install.sh
+```
 
 To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release):
 
@@ -35,6 +51,33 @@ DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash sc
 ```
 
 Every variable in the generated file is documented in [`.env.example`](../../.env.example).
+
+## Compose project name
+
+`compose/docker-compose.yml` names its Compose project from `COMPOSE_PROJECT_NAME`, and Compose
+uses that name to decide which containers and volumes a given `up` owns. If you never set it, the
+installer picks one for you and writes it into `.env`: `mobrain-<12 hex chars derived from this
+checkout's absolute path>`. It prints the name it chose — it is never silent about this. Running
+`scripts/install.sh` again from the *same* checkout path derives the *same* name, so a later
+upgrade or reinstall keeps targeting the same containers; a *different* checkout gets a different
+name automatically, so two unrelated installs on one host default to separate projects and can
+never share containers or volumes.
+
+Set `COMPOSE_PROJECT_NAME` yourself if you want a stable, memorable name instead of the derived
+one — an explicit value always wins:
+
+```bash
+DOMAIN=brain.acme-co.com COMPOSE_PROJECT_NAME=mobrain-prod bash scripts/install.sh
+```
+
+Preflight refuses (exit 17, below) if the resolved name — derived or explicit — already has
+containers on this host, whether or not they are running: that is exactly how a second, unrelated
+install once silently recreated a first install's live containers in place, reattaching its
+Postgres volume under freshly generated secrets that didn't match what was already stored there.
+The pre-1.0 fallback baked into the compose file (`brainstand`, with no `COMPOSE_PROJECT_NAME` set)
+is left as-is on purpose: every deployment from before this behavior already has volumes named
+`brainstand_*`, and changing that fallback would make Compose treat them as a new, empty project on
+their next `up`.
 
 ## When preflight refuses
 
@@ -66,6 +109,12 @@ PREFLIGHT: Mobrain needs at least 20 GB free on the Docker data root; this host 
 ```
 Free space where Docker stores images and volumes (`docker info` reports `DockerRootDir`). On Docker Desktop for Windows/macOS that path is inside the VM, so preflight falls back to the host filesystem.
 
+**Exit 17 — `COMPOSE_PROJECT_NAME` already has containers on this host.**
+```text
+PREFLIGHT: a Compose project named 'brainstand' already has containers on this host (brainstand-caddy-1 brainstand-postgres-1 ...); installing here would recreate them in place with THIS install's freshly generated secrets, likely breaking whatever is already using them. Choose a different COMPOSE_PROJECT_NAME, or remove that project first if it's really yours to replace.
+```
+Either this is genuinely a second install (pick a different, unique `COMPOSE_PROJECT_NAME`, or unset it and let the installer derive one — see above), or the named project really is meant to be replaced (stop and remove it deliberately first, outside the installer).
+
 **Exit 14 — port 80 or 443 is already in use.**
 ```text
 PREFLIGHT: port 443 is already in use; stop the process or container bound to 443 before installing.
@@ -76,7 +125,7 @@ Stop whatever holds the port. A port held by a container of *this* Compose proje
 ```text
 PREFLIGHT: DOMAIN nx.invalid does not resolve to this host; point its A/AAAA record here before installing.
 ```
-Point the domain's DNS at this host first; Caddy needs it for the ACME challenge. For a private-network install with no public DNS, set `PREFLIGHT_SKIP_DNS=1` — preflight then prints a warning and continues rather than passing silently.
+Point the domain's DNS at this host first; Caddy needs it for the ACME challenge. For a private-network install with no public DNS, see "Private-network install (no public DNS)" below — `PREFLIGHT_SKIP_DNS=1` alone only silences this check, it does not change how Caddy gets a certificate.
 
 **Exit 16 — the pinned images cannot be pulled.**
 ```text
@@ -96,6 +145,20 @@ docker compose --env-file .env -f compose/docker-compose.yml up -d --wait
 ```
 
 This is a documented fallback, not the default path: it needs the source tree, the toolchains and the build time. The build overlay (`compose/docker-compose.build.yml`) is the only place build stanzas live; the production file must never gain one.
+
+## Private-network install (no public DNS)
+
+By default (`MOBRAIN_TLS_MODE=public`, unset is the same thing) Caddy requests a real certificate from Let's Encrypt for `DOMAIN`, which needs that domain publicly resolvable and reachable on 80/443 for the ACME HTTP-01 challenge. That's not possible for a brain that only lives on an internal network.
+
+For that case, set `MOBRAIN_TLS_MODE=internal`:
+
+```bash
+MOBRAIN_TLS_MODE=internal DOMAIN=brain.internal.acme-co.lan bash scripts/install.sh
+```
+
+This does two things: it tells `compose/Caddyfile`'s main site to issue from Caddy's own local CA (`tls internal`) instead of attempting public ACME, and it makes preflight treat the DNS check as satisfied — the same effect as `PREFLIGHT_SKIP_DNS=1`, but explained in terms of the mode that's actually active rather than a bare skip.
+
+**The tradeoff is real, not cosmetic.** Caddy's local CA is self-signed and known to nobody but this Caddy instance. Every browser and API client that talks to `https://<DOMAIN>` will show an untrusted-certificate warning (or fail closed, for a client that doesn't let you click through) until you separately distribute that CA's root certificate and have each client trust it. `PREFLIGHT_SKIP_DNS=1` on its own does none of this — it only silences preflight's DNS check, leaving Caddy still attempting (and endlessly failing) public ACME, so the stack reports healthy via `docker compose --wait` while HTTPS never actually works and the browser-only first-admin step has nothing to load. Use `MOBRAIN_TLS_MODE=internal`, not a bare DNS skip, for a real private-network install.
 
 ## Create the first admin
 

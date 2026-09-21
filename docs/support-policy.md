@@ -29,6 +29,7 @@ Two things make the target honest:
 
 - **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up and blocks nothing else.
 - **The nightly drift job is the tripwire.** `.github/workflows/contract.yml` runs on a nightly cron against **pinned-current** (`0.50.5.0`, blocking) and **pinned-next** (`0.51.0.0`, `continue-on-error`). The pinned-next arm is the early warning that an upstream release will break the contract suite; a drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade.
+- **The three pinned images stay publicly, anonymously pullable.** `scripts/ci/check-public-images.sh` runs a credential-less `docker pull` of `gbrain-base`, `control-plane`, and `agent-runner` — the same thing `scripts/install.sh` does for an external user. `release.yml`'s `verify-public` job runs it right after every publish and fails that release outright if any image isn't public; `.github/workflows/ghcr-visibility.yml` reruns the same check daily and opens/updates a GitHub issue on failure, because GHCR package visibility is a GitHub setting outside this repo's release pipeline and can regress independently of any release (a manual toggle, or a package deleted and recreated, which defaults to private).
 
 ## What this policy does and does not promise
 

@@ -1,4 +1,12 @@
 {$DOMAIN} {
+	# MOBRAIN_TLS_MODE (scripts/install.sh): empty here means public ACME
+	# (default) — Caddy requests a real Let's Encrypt cert and needs $DOMAIN
+	# publicly reachable on 80/443. `tls internal` here (MOBRAIN_TLS_MODE=internal)
+	# switches to Caddy's own local CA, for a private-network install with no
+	# public DNS — trades a real cert for one no external client trusts by
+	# default. See docs/runbooks/install.md.
+	{$MOBRAIN_CADDY_TLS_DIRECTIVE}
+
 	encode zstd gzip
 
 	header {
