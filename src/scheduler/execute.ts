@@ -4,7 +4,7 @@ import { OPERATIONS } from '../contracts/registry.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { getDb, schema } from '../control/db/client.ts';
 import { callOps, cancelRun, writeReport } from '../control/opsClient.ts';
-import { SCHEDULER_COMMANDS, fenceParams, validateParams, type SchedulerCommand } from './commands.ts';
+import { SCHEDULER_COMMANDS, fenceParams, readAutopilotReport, validateParams, type SchedulerCommand } from './commands.ts';
 import { drainHeldNotifications } from './briefing.ts';
 import { finishRun, heartbeat, type ClaimedRun } from './claim.ts';
 import { renderReport, type ReportStep } from './report.ts';
@@ -30,11 +30,27 @@ const HEARTBEAT_MS = 15_000;
  *  - sources push maps 5 to blocked/refused and 1 to conflict/failure; a
  *    non-fast-forward arrives as status 'push_failed' on exit 1 and must
  *    surface as an alert, never a swallow.
+ *  - autopilot-status is a TRIPWIRE, and its verdict is the JSON, not the exit
+ *    code. Upstream exits 0 for a `fresh` install — the worst case for us, a
+ *    second live scheduler — and its 1 ("needs attention") and 2 ("disabled")
+ *    collide with its own usage-error exits, which print no report. So: an
+ *    install in any state is `conflict` (two schedulers own one brain, the
+ *    same shape as a push conflict, already in run_classification_valid);
+ *    not_installed on exit 0 is `ok`; anything unreadable is `failed`,
+ *    because a gate that cannot read its evidence must not pass (Slice 0 V6).
  */
 export function classifyExit(commandId: string, exitCode: number, payload: unknown): Classification {
-  if (exitCode === 0) return 'ok';
   if (exitCode === 4) return 'lock_lost';
   if (exitCode === 143) return 'timeout';
+
+  if (commandId === 'autopilot-status') {
+    const report = readAutopilotReport(payload);
+    if (report?.installed) return 'conflict';
+    if (report && exitCode === 0) return 'ok';
+    return 'failed';
+  }
+
+  if (exitCode === 0) return 'ok';
 
   if (commandId === 'sources-push') {
     const status = payload && typeof payload === 'object'
@@ -388,6 +404,9 @@ function summaryStatus(payload: unknown): string | null {
 }
 
 function alertKind(commandId: string, classification: Classification): string {
+  if (commandId === 'autopilot-status' && classification === 'conflict') {
+    return 'autopilot_installed';
+  }
   if (commandId === 'sources-push') {
     if (classification === 'conflict') return 'push_rejected';
     if (classification === 'blocked' || classification === 'refused') return 'push_blocked';
