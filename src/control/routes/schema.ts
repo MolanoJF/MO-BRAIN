@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { callOps, patchFilePlaneConfig, putSchemaPack } from '../opsClient.ts';
+import { readConfigValue } from '../configValue.ts';
 import { listSchemaPacks } from './wizard.ts';
 import { parseSchemaActiveProse, type SchemaActive } from '../../contracts/capability.ts';
 
@@ -192,22 +193,6 @@ async function spaceExists(orgId: string, sourceId: string): Promise<boolean> {
   const [row] = await getDb().select({ id: schema.spaces.id }).from(schema.spaces)
     .where(and(eq(schema.spaces.organizationId, orgId), eq(schema.spaces.sourceId, sourceId)));
   return row !== undefined;
-}
-
-/**
- * `gbrain config get <key>` reads the DB plane, which is the truth for a
- * per-source override. It prints the value on the first line then a
- * `[config] source: ...` note; a missing key exits 1 with
- * `Config key not found`. `callOps` returns `{ ok: false }` on that — it does
- * NOT throw on a non-zero op exit. Parse the first non-`[config]` line.
- * MEASURED; docs/schema-pack-findings.md S1 and S6 probe 1.
- */
-async function readConfigValue(key: string): Promise<string | null> {
-  const r = await callOps<never>('config.get', { key }, { timeoutMs: 60_000 });
-  if (!r.ok) return null;
-  const line = (r.stdout ?? '').split('\n').map((l) => l.trim())
-    .find((l) => l !== '' && !l.startsWith('[config]'));
-  return line ?? null;
 }
 
 export type SourcePackResolution = {
