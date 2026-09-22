@@ -39,6 +39,17 @@
 #   15  the control plane did not come back healthy
 set -uo pipefail
 
+# Git Bash on Windows rewrites any argument that looks like a POSIX path before
+# the process ever sees it. Measured on this host: `exec -e REDEPLOY_PATH=/api/health`
+# is delivered as `C:/Program Files/Git/api/health`, and a bare `/app/dist/console`
+# as `C:/Program Files/Git/app/dist/console`. EVERY path in this script is a path
+# inside a Linux container, so that conversion is always wrong — it silently
+# retargets the `rm -rf` and `cp` of the console lane, and it made the health
+# probe fetch an invalid URL and time out on a control plane that was serving
+# perfectly well. Both variables are inert on Linux and macOS.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 # Compose paths in the -f flags are relative, so every run must start from the
 # repo root no matter where the caller invoked this from.
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 2
@@ -48,7 +59,9 @@ case "${1:-}" in
   --full) FULL=1 ;;
   '') : ;;
   -h|--help)
-    sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Derive the range rather than hard-coding it: print from line 2 to the
+    # first non-comment line, so the help cannot drift as the header grows.
+    sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p'
     exit 0 ;;
   *) echo "redeploy: unknown argument '$1' (expected --full or nothing)" >&2; exit 2 ;;
 esac
@@ -80,20 +93,46 @@ fi
 # proves serveStatic is answering with the new bytes, not merely that a file
 # landed somewhere in the image. 3150 is the control plane's in-container port
 # (CONTROL_URL in compose/docker-compose.yml); nothing publishes it to the host.
+# The origin is joined to the path HERE and the whole URL is handed over as one
+# value: something starting with `http://` is never mistaken for a POSIX path,
+# so the probe stays correct even somewhere MSYS_NO_PATHCONV above is ignored.
+CONTROL_ORIGIN='http://localhost:3150'
+
 serve_body() {  # $1 path -> body on stdout
-  "${COMPOSE[@]}" exec -T -e REDEPLOY_PATH="$1" control-plane bun -e '
-    const r = await fetch("http://localhost:3150" + process.env.REDEPLOY_PATH);
+  "${COMPOSE[@]}" exec -T -e "REDEPLOY_URL=${CONTROL_ORIGIN}$1" control-plane bun -e '
+    const r = await fetch(process.env.REDEPLOY_URL);
     process.stdout.write(await r.text());
   '
 }
 
-serve_status() {  # $1 path -> numeric HTTP status on stdout
-  "${COMPOSE[@]}" exec -T -e REDEPLOY_PATH="$1" control-plane bun -e '
+serve_status() {  # $1 path -> numeric HTTP status on stdout, or 0 if unreachable
+  "${COMPOSE[@]}" exec -T -e "REDEPLOY_URL=${CONTROL_ORIGIN}$1" control-plane bun -e '
     try {
-      const r = await fetch("http://localhost:3150" + process.env.REDEPLOY_PATH);
+      const r = await fetch(process.env.REDEPLOY_URL);
       console.log(r.status);
     } catch { console.log(0); }
   ' 2>/dev/null | tr -d '\r'
+}
+
+# Caddy is the stack's ONLY ingress: compose/docker-compose.dev.yml publishes
+# 8443/8080 on it and nothing publishes the control plane's 3150 at all. So the
+# console URL is only true while Caddy is up, and the verification above cannot
+# see that — it probes the control plane from inside its own container, which
+# keeps answering perfectly with Caddy dead. Printing the URL unconditionally
+# advertises a link that does not work.
+console_url_line() {  # $1 optional suffix for the working case
+  local ccid state
+  ccid="$("${COMPOSE[@]}" ps -aq caddy 2>/dev/null | head -1)"
+  state="$(docker inspect -f '{{.State.Status}}' "$ccid" 2>/dev/null)"
+  if [ "$state" = "running" ]; then
+    echo "  console     -> https://localhost:8443/${1:-}"
+  else
+    echo "  console     -> UNREACHABLE from the host: the caddy container is '${state:-absent}'"
+    echo "                 and it is this stack's only ingress. The console IS deployed —"
+    echo "                 start caddy to see it:"
+    echo "                   docker compose --env-file .env -f compose/docker-compose.yml \\"
+    echo "                     -f compose/docker-compose.dev.yml up -d caddy"
+  fi
 }
 
 wait_healthy() {  # polls until the control plane answers below 500, or gives up
@@ -161,7 +200,7 @@ if [ "$FULL" = 1 ]; then
   echo
   echo "REDEPLOYED (full): image rebuilt, control-plane + scheduler + gbrain-ops recreated."
   echo "  /api/health -> HTTP ${health}"
-  echo "  console     -> https://localhost:8443/"
+  console_url_line
   exit 0
 fi
 
@@ -198,7 +237,7 @@ health="$(serve_status /api/health)"
 echo
 echo "REDEPLOYED (console only) in the running container."
 echo "  /api/health -> HTTP ${health}"
-echo "  console     -> https://localhost:8443/  (hard-reload: Ctrl+Shift+R)"
+console_url_line "  (hard-reload: Ctrl+Shift+R)"
 echo
 echo "  EPHEMERAL: the control-plane IMAGE still carries the old console. This"
 echo "  patch is lost on any container replacement (--force-recreate, down,"
