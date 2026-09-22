@@ -33,7 +33,7 @@ export function AccountBox({ onOpenSettings }: { onOpenSettings: () => void }) {
       <span className="account-email">{email ?? ''}</span>
       <button
         type="button"
-        className="nav-item"
+        className="icon-btn"
         onClick={onOpenSettings}
         aria-label="Settings"
         title="Settings"
@@ -42,7 +42,7 @@ export function AccountBox({ onOpenSettings }: { onOpenSettings: () => void }) {
       </button>
       <button
         type="button"
-        className="nav-item"
+        className="icon-btn"
         onClick={signOut}
         aria-label="Sign out"
         title="Sign out"

@@ -42,7 +42,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
 
 /* ---- Markdown editor (src/console/editor) ---- */
 .markdown-editor {
-  height: 100%; overflow: hidden;
+  height: 100%; min-height: 0; overflow: hidden;
   background: var(--color-bg);
   border: 1px solid var(--color-subtle); border-radius: 8px;
 }
@@ -89,12 +89,19 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .account-box .account-email {
+  flex: 1 1 auto;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0;
 }
+.icon-btn {
+  width: 28px; height: 28px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--color-muted); border-radius: 4px;
+}
+.icon-btn:hover { color: var(--color-text); background: var(--color-bg); }
 .source-switcher { border-bottom: 1px solid var(--color-subtle); padding: 8px 12px; }
 .source-switcher button { width: 100%; }
 .file-tree { flex: 1; overflow-y: auto; padding: 6px 0; }
-.main { flex: 1; min-width: 0; overflow: auto; }
+.main { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
 
 /* ---- Tree rows ---- */
 .tree-row {
@@ -143,6 +150,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: var(-
 /* ---- Focus visibility ---- */
 .tree-row:focus-visible,
 .nav-item:focus-visible,
+.icon-btn:focus-visible,
 .account-box button:focus-visible {
   outline: 2px solid var(--color-accent); outline-offset: -2px;
 }

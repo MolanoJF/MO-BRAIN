@@ -138,7 +138,7 @@ export function Editor(props: {
 
   if (sourceId === null) {
     return (
-      <div className="main flex flex-col">
+      <div className="flex flex-col h-full min-h-0">
         <p className="text-sm text-muted">No Sources you can reach.</p>
       </div>
     );
@@ -146,14 +146,14 @@ export function Editor(props: {
 
   if (path === null) {
     return (
-      <div className="main flex flex-col">
+      <div className="flex flex-col h-full min-h-0">
         <p className="text-sm text-muted">Pick a file to read it.</p>
       </div>
     );
   }
 
   return (
-    <div className="main flex flex-col space-y-2">
+    <div className="flex flex-col h-full min-h-0 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs text-muted font-mono">{path}</div>
         {canEdit(access) && file !== null && (
