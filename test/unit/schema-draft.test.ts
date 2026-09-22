@@ -66,7 +66,7 @@ describe('draftToManifest', () => {
       kind: 'contract', directory: 'contracts/', examples: [], description: 'A signed agreement',
     });
   });
-  test('omits extends entirely for a standalone ontology', () => {
+  test('emits an explicit extends:null for a standalone ontology', () => {
     const r = validateDraft({ ...good, extends: null, linkVerbs: [] });
     if (!r.ok) throw new Error('fixture');
     const m = draftToManifest(r.draft, '0.50.5.0');
