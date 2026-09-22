@@ -623,6 +623,58 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * Copies a pack's RAW manifest to `~/.gbrain/schema-packs/<to>/pack.json`
+   * at version 0.0.1 (runForkCmd). The one way to make a bundled pack
+   * editable: mutations refuse bundled packs with PACK_READONLY. MEASURED,
+   * docs/schema-pack-findings.md S7.
+   */
+  'schema.fork': {
+    id: 'schema.fork',
+    argv: ['schema', 'fork'],
+    params: [
+      { name: 'from', flag: '', kind: 'value', required: true },
+      { name: 'to', flag: '', kind: 'value', required: true },
+    ],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'read-only',
+    okExitCodes: [0],
+  },
+
+  /**
+   * The UNRESOLVED manifest: a pack's own declarations only. The editor needs
+   * it to tell "own" from "inherited". Never use it for counts; those come
+   * from 'schema.show' + packOverride (S4).
+   */
+  'schema.showRaw': {
+    id: 'schema.showRaw',
+    argv: ['schema', 'show'],
+    params: [{ name: 'packName', flag: '', kind: 'value', required: true }],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
+  /**
+   * gbrain's ATOMIC batch mutator, through the trusted local `call` lane:
+   * every mutation is validated in memory and the pack file is written at
+   * most once (applyMutationsAtomic). A failed batch returns
+   * `{error:'mutation_failed', code, failed_at_index, pack_unchanged:true}`,
+   * and `call` still exits 0 (S7 step 1), so callers MUST inspect the body.
+   * Not the admin MCP lane: no agent grant ever carries this.
+   */
+  'schema.mutate': {
+    id: 'schema.mutate',
+    argv: ['call', 'schema_apply_mutations'],
+    params: [{ name: 'payload', flag: '', kind: 'value', required: true }],
+    supportsJson: false,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0],
+  },
+
   'sources.list': {
     id: 'sources.list',
     argv: ['sources', 'list'],

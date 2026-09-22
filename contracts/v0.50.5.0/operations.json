@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.5.0",
-  "generatedAt": "2026-09-21T19:04:10.076Z",
+  "generatedAt": "2026-09-22T17:39:25.443Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -793,6 +793,33 @@
       ]
     },
     {
+      "id": "schema.fork",
+      "argv": [
+        "schema",
+        "fork"
+      ],
+      "params": [
+        {
+          "name": "from",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        },
+        {
+          "name": "to",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "read-only",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "schema.lint",
       "argv": [
         "schema",
@@ -832,12 +859,54 @@
       ]
     },
     {
+      "id": "schema.mutate",
+      "argv": [
+        "call",
+        "schema_apply_mutations"
+      ],
+      "params": [
+        {
+          "name": "payload",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
+      "supportsJson": false,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
       "id": "schema.show",
       "argv": [
         "schema",
         "show"
       ],
       "params": [],
+      "supportsJson": true,
+      "supportsDryRun": false,
+      "privilege": "brain-db",
+      "okExitCodes": [
+        0
+      ]
+    },
+    {
+      "id": "schema.showRaw",
+      "argv": [
+        "schema",
+        "show"
+      ],
+      "params": [
+        {
+          "name": "packName",
+          "flag": "",
+          "kind": "value",
+          "required": true
+        }
+      ],
       "supportsJson": true,
       "supportsDryRun": false,
       "privilege": "brain-db",
