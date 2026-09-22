@@ -1,4 +1,5 @@
 import type { DiffSummary, ReadSpaceMove, SpaceHeads } from '../agent/types.ts';
+import type { PackDraft, PackMutation } from '../control/schemaDraft.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -156,6 +157,57 @@ export type PackDetail = {
   error: string | null;
 };
 
+/**
+ * The authoring surface's response shapes, mirroring Task 5's routes exactly.
+ * A pack's `own` declarations come from the UNRESOLVED manifest
+ * (`schema.showRaw`), so the editor can tell "own" from "inherited"; it is
+ * NULL when that read failed, and a caller must not treat that as "owns
+ * nothing". `SchemaLint` is gbrain's own lint envelope.
+ */
+export type SchemaLintRule = { rule: string; message: string; hint?: string };
+export type SchemaLint = { ok: boolean; errors: SchemaLintRule[]; warnings: SchemaLintRule[] };
+
+export type PackOwnDeclarations = { pageTypes: string[]; linkVerbs: string[] };
+
+export type PackDetailResponse = {
+  effective: PackDetail;
+  own: PackOwnDeclarations | null;
+  editable: boolean;
+  usedBy: { brain: boolean; sources: string[] };
+};
+
+export type PackCreateBody =
+  | { mode: 'draft'; draft: PackDraft }
+  | { mode: 'fork'; from: string; name: string };
+
+export type PackCreateResult = {
+  ok: boolean;
+  name: string;
+  /** gbrain's `validate` diagnosis; `errors` arrives only on a 400 refusal. */
+  error: string | null;
+  lint: SchemaLint | null;
+};
+
+export type ScaffoldResult = {
+  sourceId: string;
+  pack: string | null;
+  created: string[];
+  skipped: string[];
+  error: string | null;
+};
+
+export type PackMutateResult = {
+  ok: boolean;
+  batchId: string;
+  applied: number;
+  error: string | null;
+  lint: SchemaLint | null;
+  scaffolded: ScaffoldResult[];
+};
+
+export type PackRemoveResult = { ok: boolean; removed: boolean };
+export type ScaffoldResponse = { ok: boolean; results: ScaffoldResult[] };
+
 export type SchemaSyncPerPrefix = {
   type: string;
   prefix: string;
@@ -209,6 +261,19 @@ export const schemaPacksApi = {
     api.post<SchemaSync>('/schema/preview', source === undefined ? {} : { source }),
   runSync: (source?: string) =>
     api.post<SchemaSync>('/schema/sync', source === undefined ? {} : { source }),
+
+  /** One pack's effective detail, plus its own declarations and its users. */
+  get: (name: string) => api.get<PackDetailResponse>(`/schema/packs/${encodeURIComponent(name)}`),
+  /** Create from a validated draft, or fork an existing pack. Not activation. */
+  create: (body: PackCreateBody) => api.post<PackCreateResult>('/schema/packs', body),
+  /** One atomic batch through gbrain's own mutator; a refusal is a 409. */
+  mutate: (name: string, mutations: PackMutation[]) =>
+    api.post<PackMutateResult>(`/schema/packs/${encodeURIComponent(name)}/mutations`, { mutations }),
+  /** Refused with a 409 while the brain or a Space still resolves the pack. */
+  remove: (name: string) => api.delete<PackRemoveResult>(`/schema/packs/${encodeURIComponent(name)}`),
+  /** Create-only folder scaffolding, per Space. Never one green summary. */
+  scaffold: (source?: string) =>
+    api.post<ScaffoldResponse>('/schema/scaffold', source === undefined ? {} : { source }),
 };
 
 /**

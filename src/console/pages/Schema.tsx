@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
-import { api, schemaPacksApi, type PackDetail, type PackPageType, type SchemaSync } from '../api.ts';
+import {
+  api, schemaPacksApi,
+  type PackDetail, type PackPageType, type ScaffoldResult, type SchemaSync,
+} from '../api.ts';
 import { Badge, Button, Card, Empty, Table, TableWrap } from '../ui/index.tsx';
+import { NewPackPanel, PackEditor, ScaffoldResults } from './SchemaBuilder.tsx';
 
 type Active = {
   pack: string | null; version: string | null; source: string | null;
@@ -105,17 +109,20 @@ export function Schema() {
   const [applied, setApplied] = useState<Sync | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [builder, setBuilder] = useState<{ mode: 'new' } | { mode: 'edit'; name: string } | null>(null);
+  const [scaffold, setScaffold] = useState<ScaffoldResult[] | null>(null);
 
   const load = async () => {
     const s = await api.get<State>('/schema');
     setState(s);
     setPack((current) => current || s.stored || s.active.pack || '');
   };
+  const loadPacks = () => schemaPacksApi.list()
+    .then((body) => { setDetails(body.packs); setPacksError(null); })
+    .catch((e) => setPacksError(e instanceof Error ? e.message : 'The pack list could not be loaded.'));
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
-    void schemaPacksApi.list()
-      .then((body) => setDetails(body.packs))
-      .catch((e) => setPacksError(e instanceof Error ? e.message : 'The pack list could not be loaded.'));
+    void loadPacks();
   }, []);
 
   const step = async (fn: () => Promise<void>) => {
@@ -145,6 +152,7 @@ export function Schema() {
     await load();
   });
   const runSync = () => step(async () => { setApplied(await api.post<Sync>('/schema/sync', {})); await load(); });
+  const runScaffold = () => step(async () => setScaffold((await schemaPacksApi.scaffold()).results));
 
   if (!state) return <Empty>Loading…</Empty>;
 
@@ -182,8 +190,23 @@ export function Schema() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Schema packs</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Schema packs</h2>
+          <Button disabled={busy} onClick={() => setBuilder({ mode: 'new' })}>New pack</Button>
+        </div>
         <p className="text-sm text-muted">{ADDITIVE_NOTICE}</p>
+
+        {builder?.mode === 'new' && (
+          <NewPackPanel
+            parent={state.active.pack}
+            packs={details}
+            onCreated={() => { setBuilder(null); void loadPacks(); }}
+          />
+        )}
+        {builder?.mode === 'edit' && (
+          <PackEditor name={builder.name} onSaved={() => { void loadPacks(); }} />
+        )}
+
         {packsError && <div className="text-[length:var(--control-font)] text-danger">{packsError}</div>}
         {!packsError && details.length === 0 && <Empty>Loading packs…</Empty>}
         {details.map((d) => {
@@ -207,7 +230,14 @@ export function Schema() {
               </Button>
               {d.error
                 ? <div className="text-[length:var(--control-font)] text-danger">{d.error}</div>
-                : <div className="text-[length:var(--control-font)] text-muted">{packSummary(d)}</div>}
+                : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[length:var(--control-font)] text-muted">{packSummary(d)}</div>
+                    <Button disabled={busy} onClick={() => setBuilder({ mode: 'edit', name: d.name })}>
+                      {d.bundled ? 'Fork to edit' : 'Edit'}
+                    </Button>
+                  </div>
+                )}
               {isOpen && d.error === null && (
                 <div className="space-y-3 pt-2">
                   <PackTypesView detail={d} />
@@ -235,7 +265,11 @@ export function Schema() {
         <p className="text-sm text-muted">
           Fills in pages that have no type yet, using the active pack's path prefixes. {ADDITIVE_NOTICE}
         </p>
-        <Button disabled={busy} onClick={runSync}>Run sync</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button disabled={busy} onClick={runSync}>Run sync</Button>
+          <Button disabled={busy} onClick={runScaffold}>Create folders</Button>
+        </div>
+        {scaffold && <ScaffoldResults results={scaffold} />}
         {applied && <SyncTable title={`Applied — ${applied.total_applied} page(s) typed`} report={applied} />}
       </section>
     </div>
