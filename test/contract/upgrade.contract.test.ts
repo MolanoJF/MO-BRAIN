@@ -303,8 +303,12 @@ describe('Slice 3.5 seam gate A', () => {
     // schema-pack change (MolanoJF/schemas) re-emitted the artifact and added
     // `schema.show`, `config.unset`, `sources.remove`, `sources.archive` and
     // `sources.rename` (5 operations) on top of the 36 the file already
-    // carried, so the fence moves to 41.
-    expect(doc.operations.length).toBe(41);
+    // carried (41). Custom schema packs then added `schema.fork`,
+    // `schema.showRaw` and `schema.mutate` to the registry and re-emitted the
+    // artifact with them (commit da8db9e, the custom-schema-packs Task 1), so
+    // the fence moves to 44. Nothing about checkUpdate/postUpgrade — the two
+    // assertions below — changed.
+    expect(doc.operations.length).toBe(44);
     // U1/U3: neither declares a dry run, and only checkUpdate has --json.
     expect(byId['checkUpdate'].supportsJson).toBe(true);
     expect(byId['postUpgrade'].supportsJson).toBe(false);
