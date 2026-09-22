@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CircleAlert, Monitor, Moon, RefreshCw, Sun, Trash2 } from 'lucide-react';
 import {
   Badge, Button, Card, ConfirmButton, Dialog, Empty, Field, Icon, IconButton,
-  Input, Notice, Select, Spinner, Table, TableWrap, Textarea, Toolbar,
+  Input, Link, NavItem, Notice, Select, Spinner, Table, TableWrap, Textarea, Toolbar,
   type ButtonVariant, type Tone,
 } from '../ui/index.tsx';
 import { setTheme, storedTheme, type ThemeChoice } from '../theme.ts';
@@ -37,6 +37,10 @@ const DESIGN_TOKENS: ReadonlyArray<readonly [string, string]> = [
   ['--warn', 'Needs attention'],
   ['--danger', 'Destructive and failed'],
   ['--trigger', 'Automation and triggers'],
+  // Not one of qm's eleven. It is here because it is the token that replaced
+  // the console's last colour literal, and a scrim nobody can see listed is a
+  // scrim somebody re-hardcodes.
+  ['--scrim', 'The dim behind a modal (used at 60%)'],
 ];
 
 const TONES: readonly Tone[] = ['ok', 'warning', 'danger', 'muted', 'neutral'];
@@ -75,6 +79,10 @@ export function DesignSystem() {
   const [choice, setChoice] = useState<ThemeChoice>(() => storedTheme());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [invalid, setInvalid] = useState(false);
+  const [navTab, setNavTab] = useState('sources');
+  /** The controlled `ConfirmButton` specimen, armed from here so the "Keep it"
+   *  button beside it is a real one rather than a picture of one. */
+  const [armed, setArmed] = useState(false);
 
   const pickTheme = (next: ThemeChoice) => {
     setChoice(next);
@@ -148,8 +156,29 @@ export function DesignSystem() {
           <IconButton label="Refresh"><Icon glyph={RefreshCw} size={16} /></IconButton>
           <IconButton label="Delete" disabled><Icon glyph={Trash2} size={16} /></IconButton>
         </Spec>
-        <Spec label="ConfirmButton" note="first press arms, second confirms, blur disarms">
+        <Spec label="Button layout" note="center is the default; between is a disclosure row, and the only justify-content the button emits">
+          <Button className="w-64" layout="between">
+            <span className="font-mono">▸ core</span>
+            <Badge tone="ok">ACTIVE</Badge>
+          </Button>
+          <Button className="w-64" layout="start">Left-aligned label</Button>
+        </Spec>
+        <Spec label="ConfirmButton" note="uncontrolled: first press arms, second confirms, blur disarms">
           <ConfirmButton label="Delete" confirmLabel="Press again to delete" onConfirm={() => {}} />
+        </Spec>
+        <Spec
+          label="ConfirmButton, controlled"
+          note="the caller owns armed, so it can render the way out — blur no longer disarms, because reaching for Keep it blurs the button"
+        >
+          <ConfirmButton
+            label="Delete"
+            confirmLabel="Confirm delete"
+            armed={armed}
+            onArm={() => setArmed(true)}
+            onCancel={() => setArmed(false)}
+            onConfirm={() => setArmed(false)}
+          />
+          {armed && <Button onClick={() => setArmed(false)}>Keep it</Button>}
         </Spec>
         <Spec label="Spinner">
           <Spinner />
@@ -208,8 +237,53 @@ export function DesignSystem() {
             ))}
           </div>
         </Spec>
+        <Spec
+          label={'Notice layout="stack"'}
+          note="the warning card the plan called <Card tone=&quot;warning&quot;>: stacked lines, no w-full wrapper, no flex-col passed through"
+        >
+          <Notice layout="stack" className="w-full">
+            <div className="font-medium">3 open schedule alerts</div>
+            <p>A stacked notice lays its children out as lines rather than as one row.</p>
+            <Toolbar>
+              <Button>Acknowledge</Button>
+              <Button>Dismiss</Button>
+            </Toolbar>
+          </Notice>
+        </Spec>
         <Spec label="Empty">
           <Empty>No runs in this window.</Empty>
+        </Spec>
+      </Section>
+
+      <Section
+        title="Navigation and links"
+        blurb="Two shapes Button cannot take: a left-aligned borderless rail row, and a real anchor. Both exist because a Button wearing overrides cannot be relied on to win — see rule 2 in ui/classes.ts."
+      >
+        <Spec label="NavItem" note="the settings rail; active is the surface/CTA pair and carries aria-current">
+          <nav className="w-56 rounded-[var(--radius)] border border-border bg-bg p-2" aria-label="Example sections">
+            {['sources', 'schema', 'members'].map((t) => (
+              <NavItem key={t} active={t === navTab} onClick={() => setNavTab(t)}>
+                {t}
+              </NavItem>
+            ))}
+          </nav>
+        </Spec>
+        <Spec label="Link" note='surface="page" is CTA-coloured and underlines on hover'>
+          <Link href="#" onClick={(e) => e.preventDefault()}>Open Schedules to acknowledge →</Link>
+        </Spec>
+        <Spec
+          label={'Link surface="notice"'}
+          note="--cta is a dark navy that all but disappears on the dark theme's olive --warn-surface, so a link there inherits the notice's own copy colour and keeps a permanent underline"
+        >
+          <Notice layout="stack" className="w-full">
+            <p>Two links on the same fill. Switch to dark above and compare them.</p>
+            <Link surface="notice" href="#" onClick={(e) => e.preventDefault()}>
+              surface=&quot;notice&quot; — legible
+            </Link>
+            <Link href="#" onClick={(e) => e.preventDefault()}>
+              surface=&quot;page&quot; — the failure this prop exists to prevent
+            </Link>
+          </Notice>
         </Spec>
       </Section>
 
@@ -222,6 +296,24 @@ export function DesignSystem() {
             <tbody>
               <tr><td className="font-mono">a1b2c3d</td><td><Badge tone="ok">succeeded</Badge></td><td>$0.0412</td></tr>
               <tr><td className="font-mono">e4f5a6b</td><td><Badge tone="danger">failed</Badge></td><td>$0.0090</td></tr>
+              <tr><td className="font-mono">c7d8e9f</td><td><Badge tone="muted">skipped</Badge></td><td className="text-muted">not priced</td></tr>
+            </tbody>
+          </Table>
+        </TableWrap>
+        {/* The same three columns with `align`. A `text-right` written on the
+            `th` itself would lose to the header rule's compiled selector, which
+            is why this is a prop and not something a call site spells out. */}
+        <p className="mt-4 mb-2 text-[length:var(--control-font)] text-muted">
+          <code className="font-mono">align={'{'}['left', 'center', 'right']{'}'}</code> — positional, one entry per column.
+        </p>
+        <TableWrap>
+          <Table align={['left', 'center', 'right']}>
+            <thead>
+              <tr><th>Run</th><th>State</th><th>Cost</th></tr>
+            </thead>
+            <tbody>
+              <tr><td className="font-mono">a1b2c3d</td><td><Badge tone="ok">succeeded</Badge></td><td className="font-mono">$0.0412</td></tr>
+              <tr><td className="font-mono">e4f5a6b</td><td><Badge tone="danger">failed</Badge></td><td className="font-mono">$0.0090</td></tr>
               <tr><td className="font-mono">c7d8e9f</td><td><Badge tone="muted">skipped</Badge></td><td className="text-muted">not priced</td></tr>
             </tbody>
           </Table>

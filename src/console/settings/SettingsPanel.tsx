@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { visibleTabs, type SettingsTab } from './tabs.ts';
-import { Button } from '../ui/index.tsx';
+import { Button, NavItem } from '../ui/index.tsx';
 
 /**
  * Every tab's page, lazily. `Schedules.tsx` (1,487 lines) and `Runs.tsx`
@@ -34,24 +34,23 @@ const LABEL: Record<SettingsTab, string> = {
  * Pages mount unchanged — this component never sees their props or internals,
  * only their default-exported component.
  *
- * Two `.nav-item` clusters live here and only one of them migrates.
+ * Two `.nav-item` clusters used to live here, and neither does now.
  *
- * The header's Close becomes a `Button`: it is an ordinary auto-width control
- * in a header row, which is exactly what `Button` is. `settings-close` stays
- * in its class list on purpose — `Dialog`'s `initialFocus` defaults to that
- * selector, and it is how focus lands somewhere sensible when the modal opens.
- * Dropping the class would not fail a test; it would just quietly stop moving
- * focus.
+ * The header's Close is a `Button`: an ordinary auto-width control in a header
+ * row, which is exactly what `Button` is. `settings-close` stays in its class
+ * list on purpose — `Dialog`'s `initialFocus` defaults to that selector, and it
+ * is how focus lands somewhere sensible when the modal opens. Dropping the
+ * class would not fail a test; it would just quietly stop moving focus.
  *
- * The tab rows do NOT become `Button`, and that is a reported gap rather than
- * a preference. `buttonClass` hardcodes `justify-center` and a `border`, and
- * `ui/classes.ts` states as a rule that no two utilities in one class string
- * may set the same property — so a caller cannot reach in with `justify-start`
- * or `border-0` and rely on winning, because the emitted CSS order decides,
- * not the attribute order. A settings nav is a left-aligned, borderless,
- * full-width list; `ui/` has no primitive for that shape, and `ui/**` is not
- * this phase's to extend. `.nav-item` is kept alive through Phase 4 for
- * precisely this kind of site.
+ * The tab rows are `NavItem`. They are still not `Button`, for the reason the
+ * migration reported: `buttonClass` sets a border and (until the layout became
+ * a prop) centred its label, and `ui/classes.ts` states as a rule that no two
+ * utilities in one class string may set the same property — so a caller cannot
+ * reach in with `justify-start border-0` and rely on winning, because the
+ * emitted CSS order decides, not the attribute order. A left-aligned,
+ * borderless, full-width rail is a different control, so it got a primitive
+ * instead of a prop that quietly undoes half of `Button`. This was the last
+ * live `.nav-item` in the console, and that rule is now deleted.
  */
 export function SettingsPanel({
   tab, isAdmin, onTab, onClose,
@@ -73,14 +72,9 @@ export function SettingsPanel({
       <div className="settings-body">
         <nav className="settings-nav" aria-label="Settings sections">
           {visibleTabs(isAdmin).map((t) => (
-            <button
-              key={t.id}
-              className={`nav-item${t.id === tab ? ' active' : ''}`}
-              aria-current={t.id === tab ? 'page' : undefined}
-              onClick={() => onTab(t.id)}
-            >
+            <NavItem key={t.id} active={t.id === tab} onClick={() => onTab(t.id)}>
               {t.label}
-            </button>
+            </NavItem>
           ))}
         </nav>
         <section className="settings-content" aria-label={LABEL[tab]}>

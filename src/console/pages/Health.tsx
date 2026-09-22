@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
-import { Badge, Card, Empty, Notice, Table, TableWrap, toneClass } from '../ui/index.tsx';
+import { Badge, Card, Empty, Link, Notice, Table, TableWrap, toneClass } from '../ui/index.tsx';
 import { alertLabel, alertTone, isPinnedAlert } from './Schedules.tsx';
 
 type RepoStatus = {
@@ -54,36 +54,39 @@ export function Health() {
           acknowledging happens on the Schedules page, where the alert is
           authenticated. */}
       {alerts.length > 0 && (
-        <Notice>
-          <div className="w-full space-y-2">
-            <div className="font-medium">
-              {alerts.length} open schedule alert{alerts.length === 1 ? '' : 's'}
-            </div>
-            {pinned.map((alert) => (
-              <div key={alert.id}>
-                {/* An alert label is a whole sentence, not a chip, so it stays
-                    toned text rather than becoming a Badge. */}
-                <span className={toneClass(alertTone(alert.kind))}>
-                  {alertLabel(alert.kind)}
-                </span>
-                <span className="text-xs text-muted font-mono">
-                  {' '}· {new Date(alert.at).toLocaleString()}
-                </span>
-              </div>
-            ))}
-            {alerts.length > pinned.length && (
-              <div className="text-muted">
-                {alerts.length - pinned.length} more, listed on the Schedules page.
-              </div>
-            )}
-            {/* Underlined rather than tinted: this link sits on `--warn-surface`,
-                and `--cta` is a dark navy that all but disappears against the
-                dark theme's olive warning fill. The underline is the affordance
-                that survives both themes. */}
-            <a className="underline underline-offset-2" href="/schedules">
-              Open Schedules to acknowledge →
-            </a>
+        // `layout="stack"` rather than the row shape plus a `w-full` wrapper:
+        // this is a block of lines, not an icon beside one.
+        <Notice layout="stack">
+          <div className="font-medium">
+            {alerts.length} open schedule alert{alerts.length === 1 ? '' : 's'}
           </div>
+          {pinned.map((alert) => (
+            <div key={alert.id}>
+              {/* An alert label is a whole sentence, not a chip, so it stays
+                  toned text rather than becoming a Badge. */}
+              <span className={toneClass(alertTone(alert.kind))}>
+                {alertLabel(alert.kind)}
+              </span>
+              <span className="text-xs text-muted font-mono">
+                {' '}· {new Date(alert.at).toLocaleString()}
+              </span>
+            </div>
+          ))}
+          {alerts.length > pinned.length && (
+            <div className="text-muted">
+              {alerts.length - pinned.length} more, listed on the Schedules page.
+            </div>
+          )}
+          {/* `surface="notice"`, which is why this link is underlined and
+              inherits the notice's copy colour instead of going CTA blue:
+              `--cta` is a dark navy that all but disappears against the dark
+              theme's olive `--warn-surface`. The rule lives in `linkClass` now
+              rather than as a bare `underline` nobody could see the reason
+              for — `<a>` was the shape `buttonClass('link')` could never serve,
+              since its `enabled:hover:` never matches an anchor. */}
+          <Link surface="notice" href="/schedules">
+            Open Schedules to acknowledge →
+          </Link>
         </Notice>
       )}
 

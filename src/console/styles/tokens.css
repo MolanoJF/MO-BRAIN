@@ -47,6 +47,14 @@
   --cta-hover: oklch(0.33 0.07 250);
   --cta-foreground: oklch(0.99 0 0);
   --trigger: #6b5cf0;
+  /* The modal scrim, qm's value. It is a token rather than the literal
+     `rgba(0, 0, 0, .6)` the settings backdrop used to carry — the last colour
+     outside these two blocks, and the one Phase 1's comment promised. A scrim
+     cannot be mixed from --text, which INVERTS between themes and would paint
+     white over the page in dark mode; it is its own near-black in both, tuned
+     per theme so it dims that theme's page rather than a generic black. The
+     0.6 alpha lives at the call site, not here, so the token stays a colour. */
+  --scrim: oklch(0.145 0 0);
   --radius: 8px;
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
   --sidebar-w: 280px;
@@ -78,6 +86,7 @@
      --trigger, so dark inherits this exact purple from :root; writing it out
      is visually verbatim and keeps the pairing invariant whole. */
   --trigger: #6b5cf0;
+  --scrim: oklch(0.11 0.03 250);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 

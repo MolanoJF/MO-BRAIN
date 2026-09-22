@@ -1,5 +1,6 @@
 import { test, expect, describe } from 'bun:test';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -21,6 +22,8 @@ import { join } from 'node:path';
  *  3. A raw hex outside the theme blocks cannot be themed at all. Rule 3 is
  *     what stops the system drifting back to the nine hardcoded colours this
  *     port removed.
+ *  4. A `--color-*` that `tokens.css` names but the BUNDLE never emits. Rules
+ *     1-3 read source text, so they cannot see this one at all. Rule 4 builds.
  */
 
 const CONSOLE_DIR = join(import.meta.dir, '../../src/console');
@@ -157,6 +160,90 @@ describe('rule 3: no colour literal lives outside the theme blocks', () => {
     expect(rest.match(/#[0-9a-fA-F]{3,8}\b/g)).toBeNull();
     expect(rest.match(/oklch\(/g)).toBeNull();
   });
+});
+
+describe('rule 4: every --color-* a .ts/.tsx reads survives into the built CSS', () => {
+  /**
+   * The hole rule 1 cannot see.
+   *
+   * Rule 1 calls a token "defined" because `tokens.css` writes its name. But
+   * `@theme inline` does not put a theme variable in the bundle just for being
+   * declared — Tailwind emits one only when something it SCANS uses it, and
+   * `src/console/editor/theme.ts` builds its CodeMirror theme out of
+   * `var(--color-*)` strings handed to CodeMirror at runtime, which is outside
+   * the CSS entirely.
+   *
+   * Today those references survive because Tailwind's source detection reaches
+   * the `.ts` files and emits each one it sees. What that means is that the
+   * console's syntax colours depend on a detection step nothing asserts: narrow
+   * `@source`, move the editor out of the scanned root, or let the directory
+   * fall under a gitignore rule, and every one of them resolves to nothing.
+   * CodeMirror paints a dead `var()` as no colour at all and throws nothing, so
+   * the editor goes monochrome and every text-scanning rule above still passes.
+   *
+   * This is deliberately written against whatever the sources happen to
+   * reference rather than against a list, so it keeps holding while
+   * `editor/theme.ts` is being edited and keeps holding for the next file that
+   * reads a token from TypeScript.
+   */
+  const REPO = join(import.meta.dir, '../..');
+  /** Relative, because vite resolves `--outDir` against its own `root`
+   *  (`src/console`) exactly as `vite.config.ts` does. */
+  const OUT_REL = '../../dist/console-token-check';
+  const OUT_DIR = join(REPO, 'dist/console-token-check');
+
+  /** Built once and reused: this is the only test in `test/unit` that shells
+   *  out, and a second build would double the suite's cost for nothing. */
+  let cached: string | null = null;
+  const builtCss = (): string => (cached ??= buildCss());
+
+  function buildCss(): string {
+    // Vite's own bin, run by this runtime, with no shell in between: the repo
+    // path contains a space, and a shell would hand vite two arguments where
+    // the test meant one. A separate outDir, so running the tests never
+    // clobbers a real build.
+    const built = spawnSync(
+      process.execPath,
+      [join(REPO, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', OUT_REL, '--emptyOutDir', '--logLevel', 'error'],
+      { cwd: REPO, encoding: 'utf8' },
+    );
+    if (built.status !== 0) {
+      throw new Error(`vite build failed (${built.status}):\n${built.stdout}\n${built.stderr}`);
+    }
+    const assets = join(OUT_DIR, 'assets');
+    const css = readdirSync(assets).filter((f) => f.endsWith('.css'));
+    if (css.length === 0) throw new Error(`the build emitted no CSS into ${assets}`);
+    return css.map((f) => readFileSync(join(assets, f), 'utf8')).join('\n');
+  }
+
+  test('a token a .ts reads is a token the bundle declares', () => {
+    const wanted = new Map<string, string[]>();
+    for (const [name, source] of TS_SOURCES) {
+      for (const ref of new Set(noFallbackReferences(source))) {
+        if (!ref.startsWith('--color-')) continue;
+        wanted.set(ref, [...(wanted.get(ref) ?? []), name]);
+      }
+    }
+
+    // A guard on the guard: if nothing references a token from TypeScript any
+    // more, this test must say so rather than pass on an empty set.
+    expect(wanted.size).toBeGreaterThan(0);
+
+    const declared = definedProperties(builtCss());
+    const missing = [...wanted]
+      .filter(([token]) => !declared.has(token))
+      .map(([token, files]) => `${token} (read by ${files.join(', ')})`);
+    expect(missing).toEqual([]);
+  }, 180_000);
+
+  test('and the emitted CSS is a real stylesheet — the build actually ran', () => {
+    // Without this, a build that emitted a near-empty stylesheet would satisfy
+    // the assertion above vacuously (nothing declared, nothing to be missing
+    // from) and still be reported as fine.
+    expect(builtCss().length).toBeGreaterThan(10_000);
+    // The scratch build is disposable; only the assertions are the artifact.
+    if (existsSync(OUT_DIR)) rmSync(OUT_DIR, { recursive: true, force: true });
+  }, 180_000);
 });
 
 describe('the bridge itself: @theme inline, not @theme', () => {

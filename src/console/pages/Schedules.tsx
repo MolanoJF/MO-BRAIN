@@ -754,6 +754,17 @@ export function Schedules() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [runsFor, setRunsFor] = useState<string | null>(null);
 
+  /**
+   * Which schedule's delete is armed, by id — at most one at a time, which is
+   * what the single `string | null` buys over a boolean per row.
+   *
+   * This lives here rather than inside `ConfirmButton` so the row can render an
+   * explicit "Keep it" beside the armed control. `ConfirmButton`'s own armed
+   * state only disarms on blur, and a destructive action whose only way out is
+   * to stop looking at it is not an escape hatch anyone can see.
+   */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
   const [name, setName] = useState('');
   const [presetId, setPresetId] = useState('live-sync');
   const [connectionId, setConnectionId] = useState('');
@@ -937,6 +948,7 @@ export function Schedules() {
   });
 
   const removeSchedule = (schedule: ScheduleRow) => step(async () => {
+    setConfirmDelete(null);
     await scheduleApi.remove(schedule.id);
     if (runsFor === schedule.id) setRunsFor(null);
     setNotice(`Deleted ${schedule.name}. Its run history went with it.`);
@@ -1089,20 +1101,29 @@ export function Schedules() {
               <Button disabled={busy} onClick={() => void toggleRuns(schedule)}>
                 {runsFor === schedule.id ? 'Hide runs' : 'Run history'}
               </Button>
-              {/* Still two clicks, and the second still says "Confirm delete":
-                  deleting a schedule takes its whole run history with it, so the
-                  press-twice gate is the behaviour, not the styling. What moves
-                  is where the armed state lives — `ConfirmButton` keeps it, and
-                  disarms on blur rather than behind a "Keep it" button, so an
-                  armed delete cannot be left sitting in the page for whoever
-                  clicks there next. */}
+              {/* Still two clicks, the second still says "Confirm delete", and
+                  the way out is still a button that says "Keep it": deleting a
+                  schedule takes its whole run history with it, so all three are
+                  the behaviour, not the styling.
+
+                  The armed state is this page's (`confirmDelete`), not
+                  `ConfirmButton`'s, and that is the whole reason "Keep it" can
+                  exist — a component that owns its own armed flag has no way to
+                  let a sibling clear it, which left blur as the only escape and
+                  no visible affordance at all. */}
               <ConfirmButton
                 label="Delete"
                 confirmLabel="Confirm delete"
                 variant="danger"
                 disabled={busy}
+                armed={confirmDelete === schedule.id}
+                onArm={() => setConfirmDelete(schedule.id)}
+                onCancel={() => setConfirmDelete(null)}
                 onConfirm={() => void removeSchedule(schedule)}
               />
+              {confirmDelete === schedule.id && (
+                <Button onClick={() => setConfirmDelete(null)}>Keep it</Button>
+              )}
             </Toolbar>
 
             {runsFor === schedule.id && (
@@ -1178,7 +1199,7 @@ export function Schedules() {
               absent from it is refused here in the same words the server uses.
             </p>
             {refusals.length > 0 && (
-              <Notice className="flex-col">
+              <Notice layout="stack">
                 <p className="text-sm text-warning">
                   This payload would be refused at creation, so Create is off:
                 </p>
@@ -1462,7 +1483,7 @@ function RefusalCard({
       ? conflictMessage({ nextFree, requested }, holder)
       : `That slot is taken. Next free: ${nextFree === null ? 'none this hour' : hhmm(requested.hour, nextFree)}`;
     return (
-      <Notice className="flex-col">
+      <Notice layout="stack">
         <p className="text-sm text-warning">{message}</p>
         <Toolbar>
           <Button disabled={busy || nextFree === null}
@@ -1479,7 +1500,7 @@ function RefusalCard({
     const holderName = typeof body.holder === 'string' ? body.holder : null;
     const detail = typeof body.detail === 'string' ? body.detail : null;
     return (
-      <Notice className="flex-col">
+      <Notice layout="stack">
         <p className="text-sm text-warning">{subHourlyMessage({ holder: holderName, detail })}</p>
         <Toolbar>
           {holderId && (
@@ -1494,7 +1515,7 @@ function RefusalCard({
   }
 
   return (
-    <Notice className="flex-col">
+    <Notice layout="stack">
       <p className="text-sm text-warning">{refusalMessage(body)}</p>
       <Toolbar>
         <Button onClick={onDismiss}>Dismiss</Button>

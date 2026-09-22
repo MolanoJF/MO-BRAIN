@@ -191,20 +191,19 @@ export function Schema() {
           const isOpen = expanded === d.name;
           return (
             <Card key={d.name} className="space-y-2">
-              {/* The row's layout sits on a span INSIDE the button rather than on
-                  the button: `Button` centres its own content, and a
-                  `justify-between` passed alongside would leave two
-                  justify-content utilities fighting over an emit order the class
-                  attribute does not control. */}
-              <Button className="w-full" disabled={busy} onClick={() => toggle(d.name)}>
-                <span className="flex w-full items-center justify-between gap-2">
-                  <span className="font-mono">{isOpen ? '▾' : '▸'} {d.name}</span>
-                  {isActive && (
-                    <Badge tone="ok">
-                      {state.active.source ? `ACTIVE (${state.active.source})` : 'ACTIVE'}
-                    </Badge>
-                  )}
-                </span>
+              {/* A disclosure row: the pack's name on the left, its ACTIVE badge
+                  on the right. `layout="between"` is the button's own
+                  justify-content rather than a `justify-between` passed through
+                  `className`, so there is only ever one such utility and no
+                  emit order to lose to. The inner `<span>` that used to carry
+                  the layout is gone with it. */}
+              <Button className="w-full" layout="between" disabled={busy} onClick={() => toggle(d.name)}>
+                <span className="font-mono">{isOpen ? '▾' : '▸'} {d.name}</span>
+                {isActive && (
+                  <Badge tone="ok">
+                    {state.active.source ? `ACTIVE (${state.active.source})` : 'ACTIVE'}
+                  </Badge>
+                )}
               </Button>
               {d.error
                 ? <div className="text-[length:var(--control-font)] text-danger">{d.error}</div>
@@ -311,10 +310,8 @@ export function SyncTable({ title, report }: { title: string; report: Sync }) {
       </div>
       {live.length > 0 && (
         <TableWrap>
-          {/* The two count columns are right-aligned from the table, not from
-              each cell: `Table`'s `[&_th]:text-left` compiles to a selector that
-              outranks a `text-right` class sitting on the `th` itself. */}
-          <Table className="[&_th:nth-child(n+3)]:text-right [&_td:nth-child(n+3)]:text-right">
+          {/* Two labels, then two counts. */}
+          <Table align={['left', 'left', 'right', 'right']}>
             <thead>
               <tr>
                 <th>Type</th>

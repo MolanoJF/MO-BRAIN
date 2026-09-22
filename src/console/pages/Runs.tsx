@@ -821,7 +821,7 @@ export function Runs() {
           {/* Honesty rule 10: the finding comes before anything that could read
               as routine. */}
           {moved !== null && (
-            <Notice tone="danger" className="flex-col">
+            <Notice tone="danger" layout="stack">
               <h2 className="text-lg font-semibold">Read isolation broke</h2>
               <p className="text-sm">{moved}</p>
             </Notice>
@@ -870,7 +870,7 @@ export function Runs() {
             </Toolbar>
             {reverted !== null && <div className="text-sm text-ok">{reverted}</div>}
             {refusal !== null && (
-              <Notice className="flex-col">
+              <Notice layout="stack">
                 <p className="text-sm text-warning">{refusal.headline}</p>
                 {refusal.context.map((line) => (
                   <p key={line} className="text-xs text-muted">{line}</p>

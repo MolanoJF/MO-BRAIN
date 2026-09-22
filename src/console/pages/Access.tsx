@@ -210,11 +210,9 @@ export function Access() {
       {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
       {/* D12: what enabling the runner means, before anyone reads the matrix. */}
-      <Notice>
-        <div className="w-full space-y-1">
-          <h2 className="m-0 text-[length:var(--section-font)] font-medium">The agent runner</h2>
-          <p>{AGENT_RUNNER_WARNING}</p>
-        </div>
+      <Notice layout="stack">
+        <h2 className="m-0 text-[length:var(--section-font)] font-medium">The agent runner</h2>
+        <p>{AGENT_RUNNER_WARNING}</p>
       </Notice>
 
       <section className="space-y-3">
@@ -317,15 +315,13 @@ export function Access() {
         </Field>
 
         {/* S4b: a blocking choice, not a tooltip. */}
-        <Notice>
-          <div className="w-full">
-            <p>{notice}</p>
-            <label className="mt-2 flex items-center gap-2">
-              <input type="checkbox" checked={acknowledged}
-                     onChange={(e) => setAcknowledged(e.target.checked)} />
-              I understand folders inside a Source are not access boundaries.
-            </label>
-          </div>
+        <Notice layout="stack">
+          <p>{notice}</p>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={acknowledged}
+                   onChange={(e) => setAcknowledged(e.target.checked)} />
+            I understand folders inside a Source are not access boundaries.
+          </label>
         </Notice>
 
         <div>
@@ -524,7 +520,7 @@ function PreviewCard({
           // as toned lines, and a Notice around each of them would flatten that
           // difference back out.
           const body = (
-            <div className="w-full">
+            <div>
               <span className={verify ? '' : w.severity === 'info' ? 'text-muted' : 'text-warning'}>
                 {w.id}
               </span>
@@ -535,17 +531,15 @@ function PreviewCard({
             </div>
           );
           return verify
-            ? <Notice key={w.id}>{body}</Notice>
+            ? <Notice key={w.id} layout="stack">{body}</Notice>
             : <div key={w.id} className="text-[length:var(--control-font)]">{body}</div>;
         })}
       </div>
 
       {verifyAmber && (
-        <Notice>
-          <div className="w-full">
-            <div className="font-medium">mcp verify{exitCode === 2 ? ' exit 2' : ''}</div>
-            <p>server checks passed, harness evidence missing.</p>
-          </div>
+        <Notice layout="stack">
+          <div className="font-medium">mcp verify{exitCode === 2 ? ' exit 2' : ''}</div>
+          <p>server checks passed, harness evidence missing.</p>
         </Notice>
       )}
     </Card>

@@ -69,12 +69,11 @@ function SpendTable({ title, unitLabel, emptyText, rows }: {
         <Empty>{emptyText}</Empty>
       ) : (
         <TableWrap>
-          {/* The numeric columns are right-aligned through a descendant variant
-              rather than a `text-right` class on each cell: `Table` bakes in
-              `[&_th]:text-left`, whose compiled selector outranks a bare
-              utility on the `th` itself, so a per-cell class would silently
-              lose and the money column would drift back to the left. */}
-          <Table className="[&_th:not(:first-child)]:text-right [&_td:not(:first-child)]:text-right">
+          {/* Two numbers and a label. `align` is positional, so this says the
+              same thing the column order does, and the page no longer has to
+              know that `Table`'s header rule out-specifies a `text-right` on
+              the `th`. */}
+          <Table align={['left', 'right', 'right']}>
             <thead>
               <tr>
                 <th>key</th>

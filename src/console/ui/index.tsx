@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { badgeClass, buttonClass, fieldClass, toneClass, type ButtonVariant, type Tone } from './classes.ts';
+import {
+  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, fieldClass, linkClass,
+  navItemClass, noticeClass, tableClass, toneClass,
+  type ButtonLayout, type ButtonVariant, type ColumnAlign, type LinkSurface,
+  type NoticeLayout, type Tone,
+} from './classes.ts';
 
 /**
  * The console's primitives — one module, mirroring `qm/plugins/admin/ui/shared.ts`
@@ -17,22 +22,80 @@ import { badgeClass, buttonClass, fieldClass, toneClass, type ButtonVariant, typ
  * base rules in `qm/plugins/admin/public/index.html`.
  */
 
-export { badgeClass, buttonClass, fieldClass, toneClass };
-export type { ButtonVariant, Tone };
+export { badgeClass, buttonClass, fieldClass, linkClass, navItemClass, noticeClass, tableClass, toneClass };
+export type { ButtonLayout, ButtonVariant, ColumnAlign, LinkSurface, NoticeLayout, Tone };
 export { Icon } from './Icon.tsx';
 
 /* ------------------------------------------------------------------ Button */
 
 export function Button({
-  variant = 'secondary', className, type = 'button', children, ...rest
+  variant = 'secondary', layout = 'center', className, type = 'button', children, ...rest
 }: {
   variant?: ButtonVariant;
+  /** How the button distributes its own children. `between` is what a
+   *  disclosure row wants — a label left, a badge right — and passing
+   *  `justify-between` through `className` instead would leave two
+   *  `justify-content` utilities fighting over an emit order the class
+   *  attribute does not control. */
+  layout?: ButtonLayout;
   className?: string;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type={type} className={buttonClass(variant, className)} {...rest}>
+    <button type={type} className={buttonClass(variant, className, layout)} {...rest}>
       {children}
     </button>
+  );
+}
+
+/**
+ * A row in a vertical nav rail — the settings modal's section list, and the
+ * last live `.nav-item` in the console.
+ *
+ * It is not a `Button` with props turned off: see `navItemClass` for why a
+ * left-aligned borderless full-width row is a different control rather than a
+ * `Button` wearing three overrides that may or may not win.
+ */
+export function NavItem({
+  active = false, className, type = 'button', children, ...rest
+}: {
+  active?: boolean;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const base = navItemClass(active);
+  return (
+    <button
+      type={type}
+      // `aria-current` is what actually tells a screen reader which section is
+      // open; the CTA colour alone never does.
+      aria-current={active ? 'page' : undefined}
+      className={className ? `${base} ${className}` : base}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A real anchor. `<Button variant="link">` is a `<button>` and cannot be one:
+ * it has no `href`, so it is invisible to "open in a new tab", to a middle
+ * click and to a crawler — and its hover underline is `enabled:hover:`, which
+ * never matches an `<a>` at all.
+ *
+ * `surface` is not decoration. See `linkClass`: `text-cta` is unsafe on a
+ * warning notice's fill in dark mode, so a link there inherits the notice's own
+ * legible copy colour instead.
+ */
+export function Link({
+  surface = 'page', className, children, ...rest
+}: {
+  surface?: LinkSurface;
+  className?: string;
+} & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return (
+    <a className={linkClass(surface, className)} {...rest}>
+      {children}
+    </a>
   );
 }
 
@@ -60,33 +123,62 @@ export function IconButton({
 }
 
 /**
- * The press-twice confirmation, as one primitive instead of the three hand-rolled
- * copies in `Schedules.tsx`, `Sources.tsx` and `Runs.tsx`. Arming is local and
- * disappears on blur: an armed destructive button left sitting in the page is a
- * trap for whoever clicks it next, and the operator who walked away from it is
- * exactly the person who will not remember it is armed.
+ * The press-twice confirmation, as one primitive instead of the three
+ * hand-rolled copies in `Schedules.tsx`, `Sources.tsx` and `Runs.tsx`.
+ *
+ * It works two ways, and the second one is not a convenience.
+ *
+ * **Uncontrolled** (no `armed` prop): arming is local and disappears on blur.
+ * An armed destructive button left sitting in the page is a trap for whoever
+ * clicks it next, and the operator who walked away from it is exactly the
+ * person who will not remember it is armed.
+ *
+ * **Controlled** (`armed` + `onArm` + `onCancel`): the caller owns the state,
+ * which is what lets it render an explicit way out — a "Keep it" button — beside
+ * the armed control. Phase 1 had only the uncontrolled form, and that quietly
+ * removed `Schedules.tsx`'s "Keep it": the only remaining way to back out of an
+ * armed delete was to blur the button, which is not an affordance anyone can
+ * see. Blur-to-disarm is therefore OFF while controlled (see
+ * `confirmDisarmsOnBlur`): moving the pointer toward "Keep it" blurs this
+ * button, and disarming there would pull the escape hatch out from under it.
  */
 export function ConfirmButton({
-  label, confirmLabel, onConfirm, variant = 'danger', className, disabled,
+  label, confirmLabel, onConfirm, onArm, onCancel, armed: armedProp,
+  variant = 'danger', className, disabled,
 }: {
   label: string;
   confirmLabel: string;
   onConfirm: () => void;
+  /** Fired by the first press. Supply it with `armed` to own the state. */
+  onArm?: () => void;
+  /** Fired when the button disarms itself — today, only on blur. */
+  onCancel?: () => void;
+  /** Supplying this makes the component controlled. */
+  armed?: boolean;
   variant?: ButtonVariant;
   className?: string;
   disabled?: boolean;
 }) {
-  const [armed, setArmed] = useState(false);
+  const [selfArmed, setSelfArmed] = useState(false);
+  const controlled = armedProp !== undefined;
+  const armed = controlled ? armedProp : selfArmed;
+
   return (
     <Button
       variant={variant}
       className={className}
       disabled={disabled}
       aria-live="polite"
-      onBlur={() => setArmed(false)}
+      onBlur={confirmDisarmsOnBlur(controlled)
+        ? () => { setSelfArmed(false); onCancel?.(); }
+        : undefined}
       onClick={() => {
-        if (!armed) return setArmed(true);
-        setArmed(false);
+        if (confirmPress(armed) === 'arm') {
+          if (!controlled) setSelfArmed(true);
+          onArm?.();
+          return;
+        }
+        if (!controlled) setSelfArmed(false);
         onConfirm();
       }}
     >
@@ -239,13 +331,23 @@ export function TableWrap({ children, className }: { children: ReactNode; classN
  * one component rather than forcing every call site to import a `Th` and a `Td`
  * and remember to use them — the version of this that relies on remembering is
  * the version where one page's table ends up 2px out of step with every other.
+ *
+ * `align` is the per-column escape hatch, and it is the reason `tableClass`
+ * exists: the header rule compiles to a selector that outranks a `text-right`
+ * written on the `th` itself, so `Spend`'s money column silently drifted left
+ * and two call sites grew their own descendant variants to out-specify it.
+ * Nobody calling `Table` should have to know that; they say which columns are
+ * numbers.
  */
-export function Table({ children, className }: { children: ReactNode; className?: string }) {
-  const base =
-    'w-full border-collapse text-[length:var(--control-font)] ' +
-    '[&_th]:px-3 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-xs [&_th]:font-normal ' +
-    '[&_th]:leading-[1.4] [&_th]:text-muted [&_th]:border-b [&_th]:border-border ' +
-    '[&_td]:p-3 [&_td]:leading-[1.4] [&_td]:border-b [&_td]:border-border';
+export function Table({
+  children, className, align,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Positional: entry *i* aligns column *i + 1*. `left` is the default. */
+  align?: readonly ColumnAlign[];
+}) {
+  const base = tableClass(align);
   return <table className={className ? `${base} ${className}` : base}>{children}</table>;
 }
 
@@ -259,19 +361,26 @@ export function Empty({ children }: { children: ReactNode }) {
 
 /**
  * The standing warning card, which is what the 21 `.card border-warning` call
- * sites actually are. `warning` uses qm's dedicated `--warn-surface` /
- * `--warn-border` / `--warn-text` triple — a real third colour per theme, not a
- * tint of the text colour — because a warning has to stay legible against both
- * a white and a near-black page. Every other tone tints from its own colour,
- * the same mechanic as `Badge`.
+ * sites actually are.
+ *
+ * `layout="stack"` is the warning CARD the plan's Layer 2 table named
+ * `<Card tone="warning">`. It is a variant here rather than a prop on `Card`
+ * because both would paint the same surface out of the same three tokens, and
+ * two primitives painting one surface is how the two drift apart. The skin and
+ * the two layouts live in `noticeClass`, where a test can read them.
  */
-export function Notice({ tone = 'warning', children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
-  const shape = 'flex items-start gap-2.5 rounded-[var(--radius)] border px-4 py-3.5 text-[length:var(--control-font)] font-normal leading-[1.5]';
-  const skin =
-    tone === 'warning'
-      ? 'bg-warn-surface border-warn-border text-warn-text'
-      : `bg-current/7 border-current/14 ${toneClass(tone)}`;
-  return <div className={className ? `${shape} ${skin} ${className}` : `${shape} ${skin}`}>{children}</div>;
+export function Notice({
+  tone = 'warning', layout = 'row', children, className,
+}: {
+  tone?: Tone;
+  /** `row` is an icon beside one line; `stack` is a block of stacked lines,
+   *  which needs no `w-full` wrapper and no `flex-col` passed through. */
+  layout?: NoticeLayout;
+  children: ReactNode;
+  className?: string;
+}) {
+  const base = noticeClass(tone, layout);
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
 }
 
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {

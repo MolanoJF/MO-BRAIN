@@ -3,9 +3,19 @@
 
 /* The design tokens live in `styles/tokens.css`. What is left here is the set
    of genuine one-offs Tailwind cannot express as a utility — the CodeMirror
-   editor chrome, the GFM table widget, the shell layout, the settings modal —
-   plus five composite classes that are still load-bearing for the pages
-   Phases 2-4 have not reached yet. Every one of those five is marked.
+   editor chrome, the GFM table widget, the shell layout, the settings modal.
+
+   The five composite classes that carried the console through the migration
+   (`.card`, `.field`, `.btn-primary`, `.nav-item`, `.border-warning`) are gone:
+   each was a bundle of properties rather than one, each was marked `scheduled
+   for removal` while the pages that still used it were unmigrated, and the
+   consolidation pass that orphaned the last of them deleted all five. They are
+   `Card`, `Field`, `Button variant="primary"`, `NavItem` and `Notice` now.
+
+   `.icon-btn` stays, and is NOT one of those five. It is a deliberate shell
+   one-off — `AccountBox`'s 28px transparent controls, smaller than the 32px
+   control scale on purpose — documented where it is declared and never
+   scheduled for removal.
 
    `@import "tailwindcss"` stays in THIS file: Tailwind v4 anchors automatic
    source detection at the directory of the file that imports it, so moving it
@@ -17,44 +27,6 @@ body {
   color: var(--color-text);
   font-family: var(--font-sans);
 }
-
-/* ---- Composite classes scheduled for removal ------------------------------
-   These five predate the design system and cannot survive as Tailwind color
-   utilities, because each is a bundle of properties rather than one. They are
-   re-pointed at the new tokens and kept alive only until the phase that
-   orphans them: deleting them now would strip 137 live call sites across pages
-   nothing has migrated yet. The last phase to orphan a class deletes it.
-
-   Hairlines move from `--color-subtle` to `--color-border`: before the port
-   this console had no border token and borrowed the quiet-background one. In
-   qm's vocabulary `--subtle` is a background and `--border` is every hairline,
-   and now that both exist there is no reason to keep borrowing. */
-
-/* scheduled for removal — Phase 4 (33 call sites; becomes <Field>) */
-.field {
-  width: 100%; padding: 8px 12px; border-radius: var(--control-radius);
-  background: var(--color-surface); border: 1px solid var(--color-border); color: inherit;
-}
-/* scheduled for removal — Phase 4 (47 call sites; becomes <Card>) */
-.card {
-  padding: 12px; border-radius: var(--radius);
-  background: var(--color-surface); border: 1px solid var(--color-border);
-}
-/* scheduled for removal — Phase 4 (16 call sites; becomes <Button variant="primary">) */
-.btn-primary {
-  padding: 8px 16px; border-radius: var(--control-radius);
-  background: var(--color-cta); color: var(--color-cta-foreground); font-weight: 500;
-}
-.btn-primary:disabled { opacity: .5; }
-/* scheduled for removal — Phase 4 (41 call sites; becomes <Button> / <IconButton>) */
-.nav-item { display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 4px; }
-.nav-item:hover { background: var(--color-surface); }
-/* scheduled for removal — Phase 4 (21 call sites; becomes <Notice> / <Card tone="warning">).
-   A composite `border` shorthand, so Tailwind's generated `.border-warning`
-   colour utility cannot replace it. This rule is unlayered and therefore wins
-   over that utility, which is what keeps the warning cards intact until the
-   call sites genuinely become <Notice>. */
-.border-warning { border: 1px solid var(--color-warning); }
 
 /* ---- Markdown editor (src/console/editor) ---- */
 .markdown-editor {
@@ -112,14 +84,20 @@ body {
   flex: 1 1 auto;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0;
 }
+/* A shell one-off, not a design-system control: 28px and transparent, because
+   these sit inside the 48px account row and the 32px --control-height would
+   crowd it. Kept on purpose — it was never one of the five composite classes
+   the migration retired. */
 .icon-btn {
   width: 28px; height: 28px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   background: transparent; color: var(--color-muted); border-radius: 4px;
 }
 .icon-btn:hover { color: var(--color-text); background: var(--color-bg); }
+/* No `.source-switcher button { width: 100% }` here any more: the switcher is a
+   `Select`, and `fieldClass` already carries `w-full`. The rule was a second
+   authority on the same width, and the quieter one. */
 .source-switcher { border-bottom: 1px solid var(--color-border); padding: 8px 12px; }
-.source-switcher button { width: 100%; }
 .file-tree { flex: 1; overflow-y: auto; padding: 6px 0; }
 .main { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
 
@@ -145,10 +123,12 @@ body {
 /* ---- Settings modal (ported from upstream baalda's SettingsModal.tsx) ---- */
 .settings-backdrop {
   position: fixed; inset: 0; z-index: 100;
-  /* The one colour left outside the token blocks. A scrim has to dim BOTH
-     themes, so it cannot be mixed from --text (which inverts, and would paint
-     white over the page in dark mode); it becomes a --scrim token in Phase 2. */
-  background: rgba(0, 0, 0, .6); backdrop-filter: blur(2px);
+  /* --scrim, as Phase 1's comment promised: this used to be the one colour
+     literal left outside the theme blocks. The alpha stays here rather than in
+     the token so the token remains a colour something else could reuse at a
+     different strength. */
+  background: color-mix(in srgb, var(--scrim) 60%, transparent);
+  backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center;
 }
 /* No inset offset, no overflow: hidden here — the tab bodies (Sources.tsx, Runs.tsx) render
@@ -171,7 +151,8 @@ body {
   width: 200px; flex-shrink: 0; overflow-y: auto;
   border-right: 1px solid var(--color-border); padding: 8px;
 }
-.nav-item.active { background: var(--color-surface); color: var(--color-cta); }
+/* `.nav-item.active` lived here; the rail's rows are `NavItem` now, and
+   `navItemClass(true)` carries that surface/CTA pair. */
 .settings-content { flex: 1; overflow-y: auto; padding: var(--section-gap); }
 /* No transform here either, for the same containing-block reason as .settings-modal. */
 
@@ -180,10 +161,11 @@ body {
    to opt in is invisible to a keyboard user, and nobody finds out until
    somebody tries to drive the console without a mouse. */
 :focus-visible { outline: 2px solid var(--color-cta); outline-offset: 2px; }
-/* These four are full-bleed rows inside scrolling, overflow-hidden containers,
-   where an outset ring is clipped away by the very box it is meant to mark. */
+/* These are full-bleed rows inside scrolling, overflow-hidden containers, where
+   an outset ring is clipped away by the very box it is meant to mark. The
+   settings rail used to be in this list as `.nav-item`; it carries the same
+   offset as a `focus-visible:` utility from `navItemClass` now. */
 .tree-row:focus-visible,
-.nav-item:focus-visible,
 .icon-btn:focus-visible,
 .account-box button:focus-visible {
   outline-offset: -2px;

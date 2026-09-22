@@ -2,8 +2,10 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  badgeClass, buttonClass, fieldClass, toneClass,
-  type ButtonVariant, type Tone,
+  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, fieldClass, linkClass,
+  navItemClass, noticeClass, tableClass, toneClass, TABLE_MAX_COLUMNS,
+  type ButtonLayout, type ButtonVariant, type ColumnAlign, type LinkSurface,
+  type NoticeLayout, type Tone,
 } from '../../src/console/ui/classes.ts';
 import { resolveTheme, type ThemeChoice } from '../../src/console/theme.ts';
 
@@ -19,6 +21,9 @@ import { resolveTheme, type ThemeChoice } from '../../src/console/theme.ts';
 
 const TONES: readonly Tone[] = ['ok', 'warning', 'danger', 'muted', 'neutral'];
 const VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'danger', 'link'];
+const LAYOUTS: readonly ButtonLayout[] = ['center', 'between', 'start'];
+const SURFACES: readonly LinkSurface[] = ['page', 'notice'];
+const NOTICE_LAYOUTS: readonly NoticeLayout[] = ['row', 'stack'];
 
 describe('toneClass: the mapping that replaces three copies of TONE_CLASS', () => {
   test('every tone gets a class, and no two tones share one', () => {
@@ -94,6 +99,238 @@ describe('buttonClass: one control height, one filled variant', () => {
     const cls = buttonClass('primary', 'w-full');
     expect(cls).toContain('w-full');
     expect(cls).toContain('bg-cta');
+  });
+});
+
+describe('buttonClass layout: one justify-content, decided by a name', () => {
+  /** Every utility that sets `justify-content`, whatever the layout. */
+  const justifies = (cls: string): string[] => cls.split(/\s+/).filter((t) => t.startsWith('justify-'));
+
+  test('a button emits exactly one justify-content, in every variant and layout', () => {
+    // The collision this closes: the chrome hardcoded `justify-center`, so
+    // `Schema.tsx`'s disclosure row could not pass `justify-between` and rely
+    // on winning — the emitted CSS order decides, not the class attribute — and
+    // it worked around it with a flex `<span>` wrapped inside the button.
+    for (const v of VARIANTS) {
+      for (const l of LAYOUTS) {
+        expect(justifies(buttonClass(v, undefined, l))).toEqual([`justify-${l}`]);
+      }
+    }
+  });
+
+  test('center is the default, so no existing call site moved', () => {
+    for (const v of VARIANTS) expect(justifies(buttonClass(v))).toEqual(['justify-center']);
+  });
+
+  test('extra classes still land after the layout', () => {
+    const cls = buttonClass('secondary', 'w-full', 'between');
+    expect(cls).toContain('justify-between');
+    expect(cls).toContain('w-full');
+    expect(cls).not.toContain('justify-center');
+  });
+});
+
+describe('navItemClass: the shape buttonClass genuinely cannot take', () => {
+  test('a nav row is full-width and left-aligned, where a button is neither', () => {
+    // If these ever coincide, `NavItem` has stopped earning its existence and
+    // the settings rail should go back to being a `Button`.
+    for (const active of [true, false]) {
+      const cls = navItemClass(active);
+      expect(cls).toContain('w-full');
+      expect(cls).toContain('text-left');
+      expect(cls).not.toContain('justify-center');
+      // Borderless: `.nav-item` drew no border, and a bordered rail row reads
+      // as a stack of buttons rather than as a list.
+      expect(cls.split(/\s+/).filter((t) => /^border/.test(t))).toEqual([]);
+    }
+  });
+
+  test('active is the surface/CTA pair `.nav-item.active` painted, and inactive is neither', () => {
+    expect(navItemClass(true)).toContain('bg-surface');
+    expect(navItemClass(true)).toContain('text-cta');
+    expect(navItemClass(false)).not.toContain('text-cta');
+  });
+
+  test('active and inactive each set exactly one background and one text colour', () => {
+    // Same rule-2 reason as `buttonClass`: two backgrounds in one string is a
+    // coin flip decided by Tailwind's emit order.
+    for (const active of [true, false]) {
+      const bare = navItemClass(active).split(/\s+/).filter((t) => t.length > 0 && !t.includes(':'));
+      expect(bare.filter((t) => t.startsWith('bg-')).length).toBe(1);
+      expect(bare.filter((t) => /^text-(?!left|right|center)/.test(t)).length).toBe(1);
+    }
+  });
+
+  test('it carries its own inset focus ring, because styles.css no longer does', () => {
+    // `.nav-item:focus-visible { outline-offset: -2px }` was deleted with the
+    // class. These rows are full-bleed inside a scrolling, overflow-hidden
+    // rail, where an outset ring is clipped away by the box it marks — so
+    // losing this makes the settings rail invisible to a keyboard user.
+    expect(navItemClass(false)).toContain('focus-visible:outline-offset-[-2px]');
+  });
+
+  test('hover is scoped to enabled rows', () => {
+    for (const token of navItemClass(false).split(/\s+/).filter((t) => t.includes('hover:'))) {
+      expect(token.startsWith('enabled:hover:')).toBe(true);
+    }
+  });
+});
+
+describe('linkClass: an anchor is not a button, and text-cta is not safe everywhere', () => {
+  test('no surface uses the `enabled:` variant', () => {
+    // This is the whole bug `Link` exists to fix. `buttonClass('link')` hovers
+    // with `enabled:hover:underline`, and `:enabled` matches only form
+    // controls — on an `<a>` the underline never appears and the only
+    // affordance the link had is gone, silently.
+    for (const s of SURFACES) expect(linkClass(s)).not.toContain('enabled:');
+  });
+
+  test('a page link is CTA-coloured and underlines on hover', () => {
+    expect(linkClass('page')).toContain('text-cta');
+    expect(linkClass('page')).toContain('hover:underline');
+  });
+
+  test('a link on a notice never paints itself text-cta', () => {
+    // --cta is a dark navy; the dark theme's --warn-surface is an olive fill,
+    // and the two are all but the same value. A link nobody can see on a
+    // warning is worse than no link: the warning still implies there is one.
+    expect(linkClass('notice')).not.toContain('text-cta');
+    expect(linkClass('notice')).toContain('text-current');
+  });
+
+  test('a notice link is underlined unconditionally, not only on hover', () => {
+    // Colour cannot be the affordance on that surface, so the underline has to
+    // be there before the pointer is.
+    const bare = linkClass('notice').split(/\s+/).filter((t) => !t.includes(':'));
+    expect(bare).toContain('underline');
+  });
+
+  test('every surface sets exactly one text colour', () => {
+    for (const s of SURFACES) {
+      const bare = linkClass(s).split(/\s+/).filter((t) => t.length > 0 && !t.includes(':'));
+      expect(bare.filter((t) => /^text-/.test(t)).length).toBe(1);
+    }
+  });
+
+  test('extra classes are appended, not substituted', () => {
+    expect(linkClass('page', 'font-mono')).toContain('font-mono');
+    expect(linkClass('page', 'font-mono')).toContain('text-cta');
+  });
+});
+
+describe('noticeClass: two layouts, and only ever one flex-direction', () => {
+  test('a notice emits exactly one flex-direction', () => {
+    // The failure this closes: `layout` did not exist, so five call sites
+    // passed `className="flex-col"` alongside the built-in `items-start` row —
+    // `flex-row` and `flex-col` both set `flex-direction`, so which one won was
+    // Tailwind's emit order, not the call site's.
+    for (const t of TONES) {
+      for (const l of NOTICE_LAYOUTS) {
+        const dirs = noticeClass(t, l).split(/\s+/).filter((c) => c === 'flex-row' || c === 'flex-col');
+        expect(dirs).toEqual([l === 'row' ? 'flex-row' : 'flex-col']);
+      }
+    }
+  });
+
+  test('a stacked notice needs no w-full from its children', () => {
+    // The wrapper this variant deletes: about ten sites wrapped their contents
+    // in `<div className="w-full">` purely to escape the row shape.
+    expect(noticeClass('warning', 'stack')).toContain('flex-col');
+    expect(noticeClass('warning', 'row')).toContain('items-start');
+  });
+
+  test('warning is the only tone that uses the dedicated warn triple', () => {
+    // Every other tone tints from its own colour. Warning cannot: it has to
+    // stay legible against both a white and a near-black page, which a tint of
+    // the text colour does not.
+    const warnOnly = TONES.filter((t) => noticeClass(t).includes('bg-warn-surface'));
+    expect(warnOnly).toEqual(['warning']);
+    expect(noticeClass('warning')).toContain('border-warn-border');
+    expect(noticeClass('warning')).toContain('text-warn-text');
+  });
+
+  test('every non-warning tone still carries its own tone colour', () => {
+    for (const t of TONES.filter((x) => x !== 'warning')) {
+      expect(noticeClass(t)).toContain(toneClass(t));
+      expect(noticeClass(t)).toContain('bg-current/7');
+    }
+  });
+
+  test('the defaults are the shape Phase 1 shipped, so no existing site moved', () => {
+    expect(noticeClass()).toBe(noticeClass('warning', 'row'));
+  });
+});
+
+describe('tableClass: a numeric column can actually be right-aligned', () => {
+  test('with no alignment it is exactly the chrome every table had', () => {
+    expect(tableClass()).toBe(tableClass([]));
+    expect(tableClass()).toContain('[&_th]:text-left');
+  });
+
+  test('a right-aligned column out-specifies the header rule rather than racing it', () => {
+    // `.[&_th]:text-left th` is specificity (0,1,1) and beats a plain
+    // `.text-right` (0,1,0) written on the `th`. That is why `Spend`'s money
+    // column silently drifted left. Every override here carries an
+    // `:nth-child()`, so its compiled selector is (0,2,1) and the cascade — not
+    // the emit order — decides.
+    const cls = tableClass(['left', 'right', 'right']);
+    expect(cls).toContain('[&_th:nth-child(2)]:text-right');
+    expect(cls).toContain('[&_td:nth-child(2)]:text-right');
+    expect(cls).toContain('[&_th:nth-child(3)]:text-right');
+    expect(cls).not.toContain('[&_th:nth-child(1)]:text-right');
+  });
+
+  test('left costs nothing, so a table of labels is byte-identical to the default', () => {
+    expect(tableClass(['left', 'left', 'left'])).toBe(tableClass());
+  });
+
+  test('centre is available and never collides with right on the same column', () => {
+    const cls = tableClass(['center', 'right']);
+    expect(cls).toContain('[&_th:nth-child(1)]:text-center');
+    expect(cls).not.toContain('[&_th:nth-child(1)]:text-right');
+    expect(cls).toContain('[&_th:nth-child(2)]:text-right');
+    expect(cls).not.toContain('[&_th:nth-child(2)]:text-center');
+  });
+
+  test('alignment is positional, and column N gets column N\'s literal', () => {
+    for (let i = 0; i < TABLE_MAX_COLUMNS; i++) {
+      const align: ColumnAlign[] = Array(i + 1).fill('left');
+      align[i] = 'right';
+      expect(tableClass(align)).toContain(`[&_th:nth-child(${i + 1})]:text-right`);
+    }
+  });
+
+  test('a column past the last literal throws instead of quietly misaligning', () => {
+    // Silently ignoring it is the exact failure this function removes: a column
+    // that reads left while the author asked for right, and nothing anywhere
+    // saying so.
+    const tooMany: ColumnAlign[] = Array(TABLE_MAX_COLUMNS + 1).fill('right');
+    expect(() => tableClass(tooMany)).toThrow(RangeError);
+  });
+
+  test('no class name is spliced, so Tailwind can still find every one', () => {
+    for (let i = 0; i < TABLE_MAX_COLUMNS; i++) {
+      const align: ColumnAlign[] = Array(i + 1).fill('right');
+      expect(tableClass(align)).not.toContain('${');
+    }
+  });
+});
+
+describe('the two-click confirm: the first press never deletes anything', () => {
+  test('an unarmed press arms, and an armed press confirms', () => {
+    expect(confirmPress(false)).toBe('arm');
+    expect(confirmPress(true)).toBe('confirm');
+  });
+
+  test('blur disarms only while nothing else owns the armed state', () => {
+    // Uncontrolled, blur-to-disarm is the safety net: an armed destructive
+    // button left sitting in the page is a trap for whoever clicks there next.
+    expect(confirmDisarmsOnBlur(false)).toBe(true);
+    // Controlled, it is the opposite. The caller renders the visible way out
+    // ("Keep it") beside the button, and reaching for that button blurs this
+    // one — disarming there would pull the escape hatch out from under the
+    // pointer. `Schedules.tsx` is that caller.
+    expect(confirmDisarmsOnBlur(true)).toBe(false);
   });
 });
 
