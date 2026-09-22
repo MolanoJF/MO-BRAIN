@@ -488,6 +488,26 @@ describe('RBAC', () => {
     expect(body.slotMinute).toBe(10);
   });
 
+  test('the autopilot tripwire is admin-gated like any brain-wide preset', async () => {
+    const refused = await hit('POST', '/api/schedules', adminCookie, {
+      name: uniqueName('autopilot-tripwire'), preset: 'autopilot-tripwire', connectionId: memberConn,
+    });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ scope: 'brain-wide' });
+
+    const allowed = await hit('POST', '/api/schedules', adminCookie, {
+      name: uniqueName('autopilot-tripwire'), preset: 'autopilot-tripwire', connectionId: ownerConn,
+    });
+    expect(allowed.status).toBe(201);
+    const body = await allowed.json() as {
+      operation: string; calendarHour: number; slotMinute: number; reportPolicy: string; timeoutSeconds: number;
+    };
+    expect(body).toMatchObject({
+      operation: 'autopilot-status', calendarHour: 7, slotMinute: 5,
+      reportPolicy: 'on_change_or_failure', timeoutSeconds: 900,
+    });
+  });
+
   test('a member asking for a brain-wide command on their own Connection is still refused', async () => {
     const res = await hit('POST', '/api/schedules', memberCookie, {
       name: uniqueName('weekly-health'), operation: 'doctor', connectionId: memberConn,
@@ -1192,7 +1212,7 @@ describe('run-now and history', () => {
       system: string[];
     };
     expect(body.presets.filter((p) => !p.system).map((p) => p.id).sort())
-      .toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
+      .toEqual(['autopilot-tripwire', 'live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
     expect(body.presets.map((p) => p.id)).toContain('morning-briefing');
     expect(body.system).toEqual([]);
     // One agent preset, and it is the only one: "don't over-cron" is the guide's
