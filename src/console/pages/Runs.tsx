@@ -3,7 +3,10 @@ import {
   ApiError, runApi, sessionApi, type AgentRunDetail, type AgentRunEventRow, type AgentRunRow,
   type AgentRunUsageRow, type RevertSuccess, type RunnerStatusRow, type SessionUser,
 } from '../api.ts';
-import { runStateLabel, runStateTone, slotClocks, type Tone } from './Schedules.tsx';
+import { runStateLabel, runStateTone, slotClocks } from './Schedules.tsx';
+import {
+  Badge, Button, Card, Empty, Notice, Table, TableWrap, Toolbar, toneClass, type Tone,
+} from '../ui/index.tsx';
 import type { DiffSummary, RangeCommit } from '../../agent/types.ts';
 
 /**
@@ -17,11 +20,13 @@ import type { DiffSummary, RangeCommit } from '../../agent/types.ts';
  * `schedule_runs.state`, the diagnosis from `agent_runs.failure_class`, the diff
  * from `agent_runs.diff_summary`, and the transcript is shown, never used as
  * evidence of success (honesty rule 1).
+ *
+ * `Tone` and its colour mapping used to be declared here, verbatim alongside two
+ * more copies in `Schedules.tsx` and `Health.tsx`. Three copies of one mapping is
+ * three chances for a failed run to end up the same colour as a healthy one, so
+ * the type and `toneClass` now come from `ui/classes.ts` — the tones this page
+ * uses, and what each one means, are unchanged.
  */
-
-const TONE_CLASS: Record<Tone, string> = {
-  ok: 'text-ok', warning: 'text-warning', danger: 'text-danger', muted: 'text-muted',
-};
 
 const num = (n: number): string => n.toLocaleString('en-US');
 
@@ -722,6 +727,23 @@ export function Runs() {
   const tokens = detail === null ? '' : tokensText(detail.usage);
   const cost = detail === null ? '' : costText(detail, detail.usage);
 
+  /**
+   * The runner banner's contents, lifted out because the surface around them
+   * changes with the tone and the contents do not. `Notice` lays its children out
+   * in a row, so this is one box rather than two siblings — written once so the
+   * two surfaces cannot drift into saying different things about the runner.
+   */
+  const runnerBox = (
+    <div className="space-y-2">
+      <div>
+        <Badge tone={tone}>
+          {runner === null ? 'Checking the runner…' : runnerStateLabel(runner.state)}
+        </Badge>
+      </div>
+      <p className="text-sm">{runnerBanner(runner)}</p>
+    </div>
+  );
+
   return (
     <div className="max-w-3xl space-y-6">
       <header>
@@ -735,82 +757,80 @@ export function Runs() {
       {error && <div className="text-danger text-sm">{error}</div>}
 
       {/* Honesty rule 8, above the ledger: what a reader needs to know before
-          reading "why did no run happen". */}
-      <section className={`card space-y-1 ${tone === 'ok' ? '' : 'border-warning'}`}>
-        <div className={TONE_CLASS[tone]}>
-          {runner === null ? 'Checking the runner…' : runnerStateLabel(runner.state)}
-        </div>
-        <p className="text-sm">{runnerBanner(runner)}</p>
-      </section>
+          reading "why did no run happen". The surface is the warning Notice for
+          every tone but `ok` — `muted` (the runner not yet checked) included,
+          exactly as the `border-warning` it replaces did. A runner this page has
+          not heard from is not a runner that is connected. */}
+      {tone === 'ok' ? <Card>{runnerBox}</Card> : <Notice>{runnerBox}</Notice>}
 
-      <section className="card space-y-2">
-        <h2 className="text-lg font-semibold">Run ledger</h2>
+      <Card title="Run ledger">
         {runs.length === 0 ? (
-          <p className="text-sm text-muted">
+          <Empty>
             No agent run yet. An <span className="font-mono">agent_prompt</span> schedule only runs once a runner is
             connected ({runnerStateLabel(runner?.state ?? 'unreported').toLowerCase()}).
-          </p>
+          </Empty>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-subtle text-left">
-                <th className="py-2 pr-3">schedule</th>
-                <th className="py-2 pr-3">slot</th>
-                <th className="py-2 pr-3">state</th>
-                <th className="py-2 pr-3">turns</th>
-                <th className="py-2">cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => {
-                const clocks = slotClocks(run.slot, run.fireAt);
-                return (
-                <tr
-                  key={run.runId}
-                  className={`border-b border-subtle cursor-pointer ${
-                    detail?.runId === run.runId ? 'text-ok' : ''
-                  }`}
-                  onClick={() => void open(run.runId)()}
-                >
-                  <td className="py-2 pr-3">
-                    <div>{run.scheduleName ?? run.scheduleId}</div>
-                    <div className="text-xs text-muted font-mono">
-                      {run.runId}
-                      {run.attempt > 1 ? ` · attempt ${run.attempt}` : ''}
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 font-mono text-xs">
-                    {clocks.org}
-                    <div className="text-muted">{clocks.viewer}</div>
-                  </td>
-                  <td className={`py-2 pr-3 ${TONE_CLASS[runStateTone(run.state)]}`}>{runStateLabel(run.state)}</td>
-                  <td className="py-2 pr-3">{num(run.numTurns)}</td>
-                  {/* A NULL cost is words, never $0.00 (honesty rule 3). */}
-                  <td className="py-2 text-xs">
-                    {run.costUsd === null ? 'not priced' : money(run.costUsd)}
-                  </td>
+          <TableWrap>
+            <Table>
+              <thead>
+                <tr>
+                  <th>schedule</th>
+                  <th>slot</th>
+                  <th>state</th>
+                  <th>turns</th>
+                  <th>cost</th>
                 </tr>
-                );
-              })}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((run) => {
+                  const clocks = slotClocks(run.slot, run.fireAt);
+                  return (
+                  <tr
+                    key={run.runId}
+                    className={`cursor-pointer ${detail?.runId === run.runId ? 'text-ok' : ''}`}
+                    onClick={() => void open(run.runId)()}
+                  >
+                    <td>
+                      <div>{run.scheduleName ?? run.scheduleId}</div>
+                      <div className="text-xs text-muted font-mono">
+                        {run.runId}
+                        {run.attempt > 1 ? ` · attempt ${run.attempt}` : ''}
+                      </div>
+                    </td>
+                    <td className="font-mono text-xs">
+                      {clocks.org}
+                      <div className="text-muted">{clocks.viewer}</div>
+                    </td>
+                    <td><Badge tone={runStateTone(run.state)}>{runStateLabel(run.state)}</Badge></td>
+                    <td>{num(run.numTurns)}</td>
+                    {/* A NULL cost is words, never $0.00 (honesty rule 3). */}
+                    <td className="text-xs">
+                      {run.costUsd === null ? 'not priced' : money(run.costUsd)}
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
-      </section>
+      </Card>
 
       {detail !== null && (
         <section className="space-y-4">
           {/* Honesty rule 10: the finding comes before anything that could read
               as routine. */}
           {moved !== null && (
-            <div className="card border-danger space-y-2">
-              <h2 className="text-lg font-semibold text-danger">Read isolation broke</h2>
+            <Notice tone="danger" className="flex-col">
+              <h2 className="text-lg font-semibold">Read isolation broke</h2>
               <p className="text-sm">{moved}</p>
-            </div>
+            </Notice>
           )}
 
-          <div className="card space-y-2">
-            <h2 className="text-lg font-semibold">{detail.scheduleName ?? detail.scheduleId}</h2>
-            <div className={`text-sm ${TONE_CLASS[runStateTone(detail.state)]}`}>{runStatusLine(detail)}</div>
+          <Card title={detail.scheduleName ?? detail.scheduleId} className="space-y-2">
+            {/* Prose, not a chip: `runStatusLine` is the state plus the whole
+                failure-class sentence, so it is toned text rather than a Badge. */}
+            <div className={`text-sm ${toneClass(runStateTone(detail.state))}`}>{runStatusLine(detail)}</div>
             <div className="text-xs text-muted font-mono">
               {detail.runId} · {detailClocks!.org}
               {' · '}{detailClocks!.viewer}
@@ -832,44 +852,49 @@ export function Runs() {
             {revertedLine(detail, actor) && (
               <div className="text-sm text-warning">{revertedLine(detail, actor)}</div>
             )}
-          </div>
+          </Card>
 
-          {/* D10: nothing auto-reverts, and a refusal is a choice with its context. */}
-          <div className="card space-y-2">
-            <h2 className="text-lg font-semibold">Revert</h2>
+          {/* D10: nothing auto-reverts, and a refusal is a choice with its context.
+              These two buttons are deliberately NOT a `ConfirmButton`. The second
+              step here is the SERVER's, not this component's: the first click is a
+              real POST that reverts outright when the range is this run's own work
+              alone, and only a 409 `revert_concurrent_writers` puts the second
+              button on screen. Arming locally instead would make every ordinary
+              revert cost two clicks and would move the concurrent-writers
+              confirmation off the control plane and into the browser, where it is
+              not a contract. */}
+          <Card title="Revert" className="space-y-2">
             <p className="text-sm text-muted">{REVERT_DISCLOSURE}</p>
-            <div className="flex flex-wrap gap-2">
-              <button className="nav-item" disabled={busy} onClick={revert()}>Revert this run</button>
-            </div>
+            <Toolbar>
+              <Button disabled={busy} onClick={revert()}>Revert this run</Button>
+            </Toolbar>
             {reverted !== null && <div className="text-sm text-ok">{reverted}</div>}
             {refusal !== null && (
-              <div className="card border-warning space-y-2">
+              <Notice className="flex-col">
                 <p className="text-sm text-warning">{refusal.headline}</p>
                 {refusal.context.map((line) => (
                   <p key={line} className="text-xs text-muted">{line}</p>
                 ))}
                 {refusal.confirmConcurrent && (
-                  <div className="flex flex-wrap gap-2">
-                    <button className="nav-item" disabled={busy} onClick={revert('concurrent')}>
+                  <Toolbar>
+                    <Button disabled={busy} onClick={revert('concurrent')}>
                       Revert anyway — I understand it undoes their commits too
-                    </button>
-                  </div>
+                    </Button>
+                  </Toolbar>
                 )}
-              </div>
+              </Notice>
             )}
-          </div>
+          </Card>
 
-          <div className="card space-y-2">
-            <h2 className="text-lg font-semibold">Prompt</h2>
+          <Card title="Prompt">
             <pre className="text-xs whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">
               {detail.prompt ?? 'This run has no prompt recorded.'}
             </pre>
-          </div>
+          </Card>
 
-          <div className="card space-y-2">
-            <h2 className="text-lg font-semibold">Tool calls</h2>
+          <Card title="Tool calls" className="space-y-2">
             {calls.length === 0 ? (
-              <p className="text-sm text-muted">No tool call was recorded in this run's event stream.</p>
+              <Empty>No tool call was recorded in this run's event stream.</Empty>
             ) : (
               <div className="space-y-2">
                 {calls.map((call) => {
@@ -935,10 +960,9 @@ export function Runs() {
                 <pre className="text-xs whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{selfSummary}</pre>
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="card space-y-1">
-            <h2 className="text-lg font-semibold">Tokens, cost and budget</h2>
+          <Card title="Tokens, cost and budget" className="space-y-1">
             <div className="text-sm">{tokens}</div>
             {/* D4: with nothing metered the cost line is the token line word for
                 word, so it is said once rather than twice. */}
@@ -946,33 +970,35 @@ export function Runs() {
             {note !== null && <div className="text-sm text-warning">{note}</div>}
             <div className="text-xs text-muted">{budgetText(detail)}</div>
             {detail.usage.length > 0 && (
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr className="border-b border-subtle text-left">
-                    <th className="py-1 pr-3">call</th>
-                    <th className="py-1 pr-3">model</th>
-                    <th className="py-1 pr-3">in / out</th>
-                    <th className="py-1 pr-3">cache r / w</th>
-                    <th className="py-1">cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.usage.map((row) => (
-                    <tr key={row.seq} className="border-b border-subtle">
-                      <td className="py-1 pr-3">{row.seq}</td>
-                      <td className="py-1 pr-3">{row.model}</td>
-                      <td className="py-1 pr-3">{num(row.inputTokens)} / {num(row.outputTokens)}</td>
-                      <td className="py-1 pr-3">{num(row.cacheReadTokens)} / {num(row.cacheWriteTokens)}</td>
-                      <td className="py-1">{row.costUsd === null ? 'not priced' : money(row.costUsd)}</td>
+              <TableWrap>
+                <Table className="font-mono">
+                  <thead>
+                    <tr>
+                      <th>call</th>
+                      <th>model</th>
+                      <th>in / out</th>
+                      <th>cache r / w</th>
+                      <th>cost</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {detail.usage.map((row) => (
+                      <tr key={row.seq}>
+                        <td>{row.seq}</td>
+                        <td>{row.model}</td>
+                        <td>{num(row.inputTokens)} / {num(row.outputTokens)}</td>
+                        <td>{num(row.cacheReadTokens)} / {num(row.cacheWriteTokens)}</td>
+                        {/* A per-call NULL is words here too (honesty rule 3). */}
+                        <td>{row.costUsd === null ? 'not priced' : money(row.costUsd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </TableWrap>
             )}
-          </div>
+          </Card>
 
-          <div className="card space-y-2">
-            <h2 className="text-lg font-semibold">Brain diff</h2>
+          <Card title="Brain diff" className="space-y-2">
             <p className="text-sm">{diffText(detail.diff)}</p>
             {detail.diff !== null && detail.diff.write.files.length > 0 && (
               <div className="space-y-1">
@@ -991,34 +1017,36 @@ export function Runs() {
                   (one commit per invocation, no global config), so the author is the member this
                   Connection runs as.
                 </p>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-subtle text-left">
-                      <th className="py-1 pr-3">commit</th>
-                      <th className="py-1 pr-3">author</th>
-                      <th className="py-1">subject</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.diff.write.commits.map((commit) => {
-                      const foreign = isForeignCommit(commit, detail.diff!.write.foreignAuthors);
-                      const note = commitAuthorNote(commit, detail.diff!.write.foreignAuthors);
-                      return (
-                        <tr key={commit.sha} className="border-b border-subtle">
-                          <td className="py-1 pr-3 font-mono">{short(commit.sha)}</td>
-                          <td className="py-1 pr-3 font-mono">
-                            {commit.author} &lt;{commit.email}&gt;
-                            <span className={foreign ? 'text-warning' : 'text-muted'}> · {note}</span>
-                          </td>
-                          <td className="py-1">{commit.subject}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <TableWrap>
+                  <Table>
+                    <thead>
+                      <tr>
+                        <th>commit</th>
+                        <th>author</th>
+                        <th>subject</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.diff.write.commits.map((commit) => {
+                        const foreign = isForeignCommit(commit, detail.diff!.write.foreignAuthors);
+                        const note = commitAuthorNote(commit, detail.diff!.write.foreignAuthors);
+                        return (
+                          <tr key={commit.sha}>
+                            <td className="font-mono">{short(commit.sha)}</td>
+                            <td className="font-mono">
+                              {commit.author} &lt;{commit.email}&gt;
+                              <span className={foreign ? 'text-warning' : 'text-muted'}> · {note}</span>
+                            </td>
+                            <td>{commit.subject}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </Table>
+                </TableWrap>
               </>
             )}
-          </div>
+          </Card>
         </section>
       )}
     </div>

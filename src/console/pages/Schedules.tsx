@@ -7,18 +7,22 @@ import {
 import { SCHEDULER_COMMANDS } from '../../scheduler/commands.ts';
 import { snapToSlot, footprintsCollide } from '../../scheduler/stagger.ts';
 import { MODEL_PRICING, PRICED_AT, rateFor } from '../../gateway/pricing.ts';
+import {
+  Badge, Button, Card, ConfirmButton, Empty, Field, Input, Notice, Select, Textarea, Toolbar,
+  toneClass, type Tone,
+} from '../ui/index.tsx';
 
 /* -------------------------------------------------------------------------
  * Pure helpers. Exported so test/unit/console-schedules.test.ts can assert the
  * copy and the invariants without a DOM server — the honesty rules are strings
  * the operator reads, so they are testable state, not decoration.
+ *
+ * `Tone` and its colour map were declared here, and verbatim again in
+ * `Runs.tsx` and `Health.tsx`. One mapping in three places is three chances for
+ * a failed run to end up the colour of a healthy one, so both now come from
+ * `ui/classes.ts`. `runStateTone` and `alertTone` return the same words they
+ * always did; only where the word is turned into a class has moved.
  * ---------------------------------------------------------------------- */
-
-export type Tone = 'ok' | 'warning' | 'danger' | 'muted';
-
-const TONE_CLASS: Record<Tone, string> = {
-  ok: 'text-ok', warning: 'text-warning', danger: 'text-danger', muted: 'text-muted',
-};
 
 /**
  * Mirrors ROLE_RANK in src/control/rbac.ts. The console must not import that
@@ -749,7 +753,6 @@ export function Schedules() {
 
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [runsFor, setRunsFor] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [presetId, setPresetId] = useState('live-sync');
@@ -935,7 +938,6 @@ export function Schedules() {
 
   const removeSchedule = (schedule: ScheduleRow) => step(async () => {
     await scheduleApi.remove(schedule.id);
-    setConfirmDelete(null);
     if (runsFor === schedule.id) setRunsFor(null);
     setNotice(`Deleted ${schedule.name}. Its run history went with it.`);
     await load();
@@ -986,6 +988,17 @@ export function Schedules() {
     ? laneHolderId(schedules, createRefusal.body.holder)
     : null;
 
+  /** One box rather than two siblings: `Notice` lays its children out in a row,
+   *  so the disclosure and the blocked reason stay stacked on both surfaces. */
+  const laneDisclosure = (
+    <div>
+      <p className="text-sm">{bannerFor({ scope, writeSpace: chosen?.writeSpace ?? null })}</p>
+      {scope === 'brain-wide' && blocked && blockedReason && (
+        <p className="text-sm text-warning mt-2">{blockedReason}</p>
+      )}
+    </div>
+  );
+
   return (
     <div className="max-w-3xl space-y-8">
       <header>
@@ -1017,9 +1030,9 @@ export function Schedules() {
 
       <section className="space-y-3">
         <h2 className="font-medium">Schedules</h2>
-        {schedules.length === 0 && <p className="text-sm text-muted">No schedules yet.</p>}
+        {schedules.length === 0 && <Empty>No schedules yet.</Empty>}
         {schedules.map((schedule) => (
-          <div key={schedule.id} className="card space-y-2">
+          <Card key={schedule.id} className="space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-medium">
@@ -1038,18 +1051,20 @@ export function Schedules() {
             </div>
 
             {commandScope(schedule.operation) === 'brain-wide' && (
-              <div className="card border-warning text-sm">
+              <Notice>
                 {bannerFor({
                   scope: 'brain-wide',
                   writeSpace: schedule.connection?.writeSpace ?? null,
                 })}
-              </div>
+              </Notice>
             )}
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className={schedule.enabled ? 'text-ok' : 'text-warning'}>
+              {/* A status chip: the one word that says whether this schedule can
+                  fire at all. The disabled reason beside it stays prose. */}
+              <Badge tone={schedule.enabled ? 'ok' : 'warning'}>
                 {schedule.enabled ? 'enabled' : 'disabled'}
-              </span>
+              </Badge>
               {schedule.disabledReason && (
                 <span className="text-warning font-mono">{schedule.disabledReason}</span>
               )}
@@ -1063,54 +1078,54 @@ export function Schedules() {
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button className="nav-item" disabled={busy || !schedule.enabled}
+            <Toolbar>
+              <Button disabled={busy || !schedule.enabled}
                       onClick={() => void runNow(schedule)}>
                 Run now
-              </button>
-              <button className="nav-item" disabled={busy}
-                      onClick={() => void toggleEnabled(schedule)}>
+              </Button>
+              <Button disabled={busy} onClick={() => void toggleEnabled(schedule)}>
                 {schedule.enabled ? 'Pause' : 'Enable'}
-              </button>
-              <button className="nav-item" disabled={busy}
-                      onClick={() => void toggleRuns(schedule)}>
+              </Button>
+              <Button disabled={busy} onClick={() => void toggleRuns(schedule)}>
                 {runsFor === schedule.id ? 'Hide runs' : 'Run history'}
-              </button>
-              {confirmDelete === schedule.id ? (
-                <>
-                  <button className="nav-item text-danger" disabled={busy}
-                          onClick={() => void removeSchedule(schedule)}>
-                    Confirm delete
-                  </button>
-                  <button className="nav-item" onClick={() => setConfirmDelete(null)}>
-                    Keep it
-                  </button>
-                </>
-              ) : (
-                <button className="nav-item text-danger" disabled={busy}
-                        onClick={() => setConfirmDelete(schedule.id)}>
-                  Delete
-                </button>
-              )}
-            </div>
+              </Button>
+              {/* Still two clicks, and the second still says "Confirm delete":
+                  deleting a schedule takes its whole run history with it, so the
+                  press-twice gate is the behaviour, not the styling. What moves
+                  is where the armed state lives — `ConfirmButton` keeps it, and
+                  disarms on blur rather than behind a "Keep it" button, so an
+                  armed delete cannot be left sitting in the page for whoever
+                  clicks there next. */}
+              <ConfirmButton
+                label="Delete"
+                confirmLabel="Confirm delete"
+                variant="danger"
+                disabled={busy}
+                onConfirm={() => void removeSchedule(schedule)}
+              />
+            </Toolbar>
 
             {runsFor === schedule.id && (
               <RunHistory runs={runs} schedule={schedule} settings={settings} />
             )}
-          </div>
+          </Card>
         ))}
       </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">New schedule</h2>
 
-        <label className="text-sm">What it does
-          <select className="field mt-1" value={presetId} onChange={(e) => pickPreset(e.target.value)}>
+        {/* The `<label>` used to WRAP its control, which is what associated the
+            two. `Field` renders the label as a sibling, so every control below
+            carries an `id` and its `Field` the matching `id` — without them the
+            association is lost and a screen reader reads an unlabelled select. */}
+        <Field label="What it does" id="schedule-preset">
+          <Select id="schedule-preset" value={presetId} onChange={(e) => pickPreset(e.target.value)}>
             {presets.map((p) => (
               <option key={p.id} value={p.id}>{p.title} ({p.id})</option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
         {preset && <p className="text-sm text-muted">{preset.description}</p>}
         {preset && preset.defaults && (
           <p className="text-xs text-muted font-mono">
@@ -1125,15 +1140,15 @@ export function Schedules() {
             harness pin stays derived at creation, and an unpriced model is
             refused here in the server's own words rather than by a run at 3am. */}
         {draft !== null && agentPayload !== null && (
-          <div className="card space-y-3">
+          <Card className="space-y-3">
             <p className="text-sm font-medium">What this run will do</p>
-            <label className="text-sm block">Prompt
-              <textarea className="field mt-1 font-mono h-40" value={draft.prompt}
+            <Field label="Prompt" id="agent-prompt">
+              <Textarea id="agent-prompt" className="font-mono h-40" value={draft.prompt}
                         onChange={(e) => editAgent({ prompt: e.target.value })} />
-            </label>
+            </Field>
             <div className="grid grid-cols-3 gap-3">
-              <label className="text-sm">Model (priced on {PRICED_AT})
-                <select className="field mt-1 font-mono" value={draft.model}
+              <Field label={`Model (priced on ${PRICED_AT})`} id="agent-model">
+                <Select id="agent-model" className="font-mono" value={draft.model}
                         onChange={(e) => editAgent({ model: e.target.value })}>
                   {/* The preset's own model first: a one-click create sends it. */}
                   {(PRICED_MODELS.includes(draft.model) ? PRICED_MODELS : [draft.model, ...PRICED_MODELS])
@@ -1142,17 +1157,17 @@ export function Schedules() {
                         {rateFor(model) === null ? `${model} — not priced` : model}
                       </option>
                     ))}
-                </select>
-              </label>
-              <label className="text-sm">Output cap (tokens)
-                <input className="field mt-1 font-mono" type="number"
+                </Select>
+              </Field>
+              <Field label="Output cap (tokens)" id="agent-max-tokens">
+                <Input id="agent-max-tokens" className="font-mono" type="number"
                        value={draft.maxTokens}
                        onChange={(e) => editAgent({ maxTokens: e.target.value })} />
-              </label>
-              <label className="text-sm">Budget per run (USD)
-                <input className="field mt-1 font-mono" value={draft.budgetUsd}
+              </Field>
+              <Field label="Budget per run (USD)" id="agent-budget">
+                <Input id="agent-budget" className="font-mono" value={draft.budgetUsd}
                        onChange={(e) => editAgent({ budgetUsd: e.target.value })} />
-              </label>
+              </Field>
             </div>
             <p className="text-xs text-muted">
               These four are the run's payload: the runner hands the prompt to the pinned Claude
@@ -1163,7 +1178,7 @@ export function Schedules() {
               absent from it is refused here in the same words the server uses.
             </p>
             {refusals.length > 0 && (
-              <div className="card border-warning space-y-1">
+              <Notice className="flex-col">
                 <p className="text-sm text-warning">
                   This payload would be refused at creation, so Create is off:
                 </p>
@@ -1172,18 +1187,18 @@ export function Schedules() {
                     {r.field}: {r.detail}
                   </p>
                 ))}
-              </div>
+              </Notice>
             )}
-          </div>
+          </Card>
         )}
 
-        <label className="text-sm">Name (becomes reports/&lt;name&gt;/)
-          <input className="field mt-1 font-mono" value={name} placeholder="live-sync"
+        <Field label="Name (becomes reports/<name>/)" id="schedule-name">
+          <Input id="schedule-name" className="font-mono" value={name} placeholder="live-sync"
                  onChange={(e) => { setName(e.target.value); setCreateRefusal(null); }} />
-        </label>
+        </Field>
 
-        <label className="text-sm">Connection
-          <select className="field mt-1" value={connectionId}
+        <Field label="Connection" id="schedule-connection">
+          <Select id="schedule-connection" value={connectionId}
                   onChange={(e) => { setConnectionId(e.target.value); setCreateRefusal(null); }}>
             <option value="">Select a Connection…</option>
             {connections.map((c) => (
@@ -1191,8 +1206,8 @@ export function Schedules() {
                 {c.clientName} · {c.writeSpace ?? 'no Source'} · {c.memberRole ?? 'unknown role'} ({c.state})
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
         {chosen ? (
           <p className="text-sm text-muted font-mono">
             {connectionLine(chosen)} — {memberRoleLine(chosen.memberRole)}
@@ -1206,32 +1221,32 @@ export function Schedules() {
         )}
 
         {preset?.kind === 'interval' && (
-          <label className="text-sm">Interval
-            <select className="field mt-1" value={intervalSeconds}
+          <Field label="Interval" id="schedule-interval">
+            <Select id="schedule-interval" value={intervalSeconds}
                     onChange={(e) => { setIntervalSeconds(Number(e.target.value)); setCreateRefusal(null); }}>
               {intervalChoices(preset).map((secs) => (
                 <option key={secs} value={secs}>{secs / 60} minutes</option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
         )}
 
         {preset?.kind === 'calendar' && (
           <div className="grid grid-cols-3 gap-3">
-            <label className="text-sm">Hour
-              <input className="field mt-1 font-mono" type="number" min={0} max={23}
+            <Field label="Hour" id="schedule-hour">
+              <Input id="schedule-hour" className="font-mono" type="number" min={0} max={23}
                      value={calendarHour}
                      onChange={(e) => { setCalendarHour(Number(e.target.value)); setCreateRefusal(null); }} />
-            </label>
-            <label className="text-sm">Minute (snaps to the :05…:50 grid)
-              <input className="field mt-1 font-mono" type="number" min={0} max={59}
+            </Field>
+            <Field label="Minute (snaps to the :05…:50 grid)" id="schedule-minute">
+              <Input id="schedule-minute" className="font-mono" type="number" min={0} max={59}
                      value={calendarMinute}
                      onChange={(e) => { setCalendarMinute(Number(e.target.value)); setCreateRefusal(null); }} />
-            </label>
-            <label className="text-sm">Days (0=Sun, empty = daily)
-              <input className="field mt-1 font-mono" value={days} placeholder="1,3"
+            </Field>
+            <Field label="Days (0=Sun, empty = daily)" id="schedule-days">
+              <Input id="schedule-days" className="font-mono" value={days} placeholder="1,3"
                      onChange={(e) => { setDays(e.target.value); setCreateRefusal(null); }} />
-            </label>
+            </Field>
           </div>
         )}
 
@@ -1256,25 +1271,23 @@ export function Schedules() {
           />
         )}
 
-        {/* Requirements 2 and 3: the disclosure, above the confirm button. */}
-        <div className={scope === 'brain-wide' ? 'card border-warning' : 'card'}>
-          <p className="text-sm">{bannerFor({ scope, writeSpace: chosen?.writeSpace ?? null })}</p>
-          {scope === 'brain-wide' && blocked && blockedReason && (
-            <p className="text-sm text-warning mt-2">{blockedReason}</p>
-          )}
-        </div>
+        {/* Requirements 2 and 3: the disclosure, above the confirm button. The
+            words are identical on both surfaces and only the surface changes
+            with the scope, so they are written once — a brain-wide disclosure
+            that drifted from the fenced one would be the failure this says. */}
+        {scope === 'brain-wide' ? <Notice>{laneDisclosure}</Notice> : <Card>{laneDisclosure}</Card>}
 
-        <button className="btn-primary"
+        <Button variant="primary"
                 disabled={busy || !name || !connectionId || blocked || connections.length === 0
                   || refusals.length > 0}
                 onClick={() => void submit()}>
           {busy ? 'Creating…' : 'Create schedule'}
-        </button>
+        </Button>
       </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">Alerts</h2>
-        {open.length === 0 && <p className="text-sm text-muted">No open alerts.</p>}
+        {open.length === 0 && <Empty>No open alerts.</Empty>}
         {open.filter((a) => !pinnedIds.includes(a.id)).map((alert) => (
           <AlertCard
             key={alert.id}
@@ -1285,10 +1298,10 @@ export function Schedules() {
           />
         ))}
         {acknowledged.length > 0 && (
-          <button className="nav-item" onClick={() => setShowAcked((v) => !v)}>
+          <Button onClick={() => setShowAcked((v) => !v)}>
             {showAcked ? 'Hide' : 'Show'} {acknowledged.length} acknowledged alert
             {acknowledged.length === 1 ? '' : 's'}
-          </button>
+          </Button>
         )}
         {showAcked && acknowledged.map((alert) => (
           <div key={alert.id} className="text-xs text-muted font-mono">
@@ -1313,32 +1326,32 @@ export function Schedules() {
         </p>
         {editingWindow ? (
           <div className="space-y-2">
-            <label className="text-sm">IANA timezone
-              <input className="field mt-1 font-mono" value={tzDraft} placeholder="America/New_York"
+            <Field label="IANA timezone" id="quiet-timezone">
+              <Input id="quiet-timezone" className="font-mono" value={tzDraft} placeholder="America/New_York"
                      onChange={(e) => setTzDraft(e.target.value)} />
-            </label>
+            </Field>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm">Held from (hour)
-                <input className="field mt-1 font-mono" type="number" min={0} max={23}
+              <Field label="Held from (hour)" id="quiet-start">
+                <Input id="quiet-start" className="font-mono" type="number" min={0} max={23}
                        value={quietStart} onChange={(e) => setQuietStart(Number(e.target.value))} />
-              </label>
-              <label className="text-sm">Held until (hour)
-                <input className="field mt-1 font-mono" type="number" min={0} max={23}
+              </Field>
+              <Field label="Held until (hour)" id="quiet-end">
+                <Input id="quiet-end" className="font-mono" type="number" min={0} max={23}
                        value={quietEnd} onChange={(e) => setQuietEnd(Number(e.target.value))} />
-              </label>
+              </Field>
             </div>
-            <div className="flex gap-2">
-              <button className="btn-primary" disabled={busy || !tzDraft}
+            <Toolbar>
+              <Button variant="primary" disabled={busy || !tzDraft}
                       onClick={() => void saveWindow()}>
                 {busy ? 'Saving…' : 'Save window'}
-              </button>
-              <button className="nav-item" onClick={() => setEditingWindow(false)}>Cancel</button>
-            </div>
+              </Button>
+              <Button onClick={() => setEditingWindow(false)}>Cancel</Button>
+            </Toolbar>
           </div>
         ) : (
-          <button className="nav-item" onClick={() => setEditingWindow(true)}>
+          <Button onClick={() => setEditingWindow(true)}>
             Change timezone or quiet hours
-          </button>
+          </Button>
         )}
       </section>
     </div>
@@ -1365,7 +1378,7 @@ function RunHistory({
         Last {runs.length} occurrence{runs.length === 1 ? '' : 's'} — the run row is the record,
         never a log tail.
       </div>
-      {runs.length === 0 && <p className="text-sm text-muted">Nothing has fired yet.</p>}
+      {runs.length === 0 && <Empty>Nothing has fired yet.</Empty>}
       {runs.map((run) => {
         const reason = runReason(run, context);
         const summary = summaryLine(run);
@@ -1373,7 +1386,7 @@ function RunHistory({
         return (
           <div key={run.id} className="border-b border-subtle pb-2 text-sm">
             <div className="flex items-baseline justify-between gap-3">
-              <span className={TONE_CLASS[runStateTone(run.state)]}>{runStateLabel(run.state)}</span>
+              <Badge tone={runStateTone(run.state)}>{runStateLabel(run.state)}</Badge>
               <span className="font-mono text-xs text-muted">
                 {clocks.org} · {clocks.viewer}
                 {run.exitCode === null || run.exitCode === undefined
@@ -1402,10 +1415,13 @@ function AlertCard({
   onAcknowledge: () => void;
 }) {
   return (
-    <div className="card space-y-1">
+    <Card className="space-y-1">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className={TONE_CLASS[alertTone(alert.kind)]}>{alertLabel(alert.kind)}</div>
+          {/* `alertLabel` is a whole sentence ("Push rejected — the remote
+              refused this Source's update"), so it stays toned prose rather than
+              becoming a chip. */}
+          <div className={toneClass(alertTone(alert.kind))}>{alertLabel(alert.kind)}</div>
           <div className="text-xs text-muted font-mono">
             {scheduleName ?? alert.scheduleId ?? 'org-wide'} · {new Date(alert.at).toLocaleString()}
           </div>
@@ -1413,11 +1429,11 @@ function AlertCard({
             <div className="text-xs text-muted">{detailLine(alert.detail)}</div>
           )}
         </div>
-        <button className="nav-item shrink-0" disabled={busy} onClick={onAcknowledge}>
+        <Button className="shrink-0" disabled={busy} onClick={onAcknowledge}>
           Acknowledge
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -1446,16 +1462,16 @@ function RefusalCard({
       ? conflictMessage({ nextFree, requested }, holder)
       : `That slot is taken. Next free: ${nextFree === null ? 'none this hour' : hhmm(requested.hour, nextFree)}`;
     return (
-      <div className="card border-warning space-y-2">
+      <Notice className="flex-col">
         <p className="text-sm text-warning">{message}</p>
-        <div className="flex flex-wrap gap-2">
-          <button className="nav-item" disabled={busy || nextFree === null}
+        <Toolbar>
+          <Button disabled={busy || nextFree === null}
                   onClick={() => onUseNextSlot(nextFree ?? requested.minute)}>
             {nextFree === null ? 'No free slot this hour' : `Use ${hhmm(requested.hour, nextFree)}`}
-          </button>
-          <button className="nav-item" onClick={onDismiss}>Choose another time</button>
-        </div>
-      </div>
+          </Button>
+          <Button onClick={onDismiss}>Choose another time</Button>
+        </Toolbar>
+      </Notice>
     );
   }
 
@@ -1463,25 +1479,26 @@ function RefusalCard({
     const holderName = typeof body.holder === 'string' ? body.holder : null;
     const detail = typeof body.detail === 'string' ? body.detail : null;
     return (
-      <div className="card border-warning space-y-2">
+      <Notice className="flex-col">
         <p className="text-sm text-warning">{subHourlyMessage({ holder: holderName, detail })}</p>
-        <div className="flex flex-wrap gap-2">
+        <Toolbar>
           {holderId && (
-            <button className="nav-item" disabled={busy}
-                    onClick={() => onDisableHolder(holderId)}>
+            <Button disabled={busy} onClick={() => onDisableHolder(holderId)}>
               Disable {holderName} and create this one
-            </button>
+            </Button>
           )}
-          <button className="nav-item" onClick={onDismiss}>Keep it as it is</button>
-        </div>
-      </div>
+          <Button onClick={onDismiss}>Keep it as it is</Button>
+        </Toolbar>
+      </Notice>
     );
   }
 
   return (
-    <div className="card border-warning space-y-2">
+    <Notice className="flex-col">
       <p className="text-sm text-warning">{refusalMessage(body)}</p>
-      <button className="nav-item" onClick={onDismiss}>Dismiss</button>
-    </div>
+      <Toolbar>
+        <Button onClick={onDismiss}>Dismiss</Button>
+      </Toolbar>
+    </Notice>
   );
 }
