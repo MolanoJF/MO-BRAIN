@@ -179,4 +179,4 @@ The divergence is the over-reporting case only.
 **Not fixed in this repo.** Decision: document it here and file it upstream so
 gbrain exposes a supported way to read the effective gate value.
 
-Upstream issue: _PENDING_STEP_4_
+Upstream issue: https://github.com/garrytan/gbrain/issues/5358
