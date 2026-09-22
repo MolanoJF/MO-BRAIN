@@ -14,7 +14,8 @@ import { type SettingsTab, isSettingsTab } from './settings/tabs.ts';
 export type Route =
   | { kind: 'editor'; sourceId: string | null; path: string | null }
   | { kind: 'settings'; tab: SettingsTab }
-  | { kind: 'claim'; token: string };
+  | { kind: 'claim'; token: string }
+  | { kind: 'design' };
 
 /** A trailing slash (or several) is the same route as without one. */
 function normalize(pathname: string): string {
@@ -43,6 +44,12 @@ function decodePath(encoded: string): string {
  */
 export function parseRoute(pathname: string = window.location.pathname): Route {
   const path = normalize(pathname);
+
+  // The living style guide (`pages/DesignSystem.tsx`), at qm's own path. It
+  // is a real route rather than a dev-only toggle because it is how visual
+  // parity gets reviewed at all: this repo has no DOM test harness, so the
+  // only way to see every primitive in both themes is to render them.
+  if (path === '/design-system') return { kind: 'design' };
 
   const claim = path.match(/^\/claim\/([^/]+)$/);
   if (claim) return { kind: 'claim', token: decodeURIComponent(claim[1]!) };
@@ -79,6 +86,7 @@ export function parseRoute(pathname: string = window.location.pathname): Route {
  * URL fragment by the browser.
  */
 export function routeToPath(route: Route): string {
+  if (route.kind === 'design') return '/design-system';
   if (route.kind === 'claim') return `/claim/${encodeURIComponent(route.token)}`;
   if (route.kind === 'settings') return `/settings/${route.tab}`;
   if (route.sourceId === null) return '/';

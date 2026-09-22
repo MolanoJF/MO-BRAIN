@@ -10,13 +10,15 @@ import {
  * blank panel.
  */
 
-describe('the registry: nine tabs, in the deliberate menu order', () => {
-  test('all nine ids appear, in the order the product owner asked for', () => {
+describe('the registry: ten tabs, in the deliberate menu order', () => {
+  test('all ten ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
+    // appearance sits LAST for a mechanical reason, asserted below: the first
+    // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
       'sources', 'schema', 'members', 'access', 'schedules',
-      'health', 'spend', 'runs', 'upgrades',
+      'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
   });
 
@@ -25,18 +27,37 @@ describe('the registry: nine tabs, in the deliberate menu order', () => {
     expect(roles).toEqual({
       sources: 'admin', schema: 'admin', members: 'admin', access: 'admin',
       schedules: 'viewer', health: 'viewer', spend: 'admin', runs: 'viewer',
-      upgrades: 'viewer',
+      upgrades: 'viewer', appearance: 'viewer',
     });
   });
 });
 
 describe('visibleTabs: role-gated menu contents', () => {
-  test('an admin sees all nine tabs, in registry order', () => {
+  test('an admin sees all ten tabs, in registry order', () => {
     expect(visibleTabs(true).map((t) => t.id)).toEqual(SETTINGS_TABS.map((t) => t.id));
   });
 
-  test('a non-admin sees exactly the four viewer tabs, in order', () => {
-    expect(visibleTabs(false).map((t) => t.id)).toEqual(['schedules', 'health', 'runs', 'upgrades']);
+  test('a non-admin sees exactly the five viewer tabs, in order', () => {
+    expect(visibleTabs(false).map((t) => t.id)).toEqual(['schedules', 'health', 'runs', 'upgrades', 'appearance']);
+  });
+
+  test('appearance is visible to EVERY role — the theme is not a permission', () => {
+    // The one tab that is about the person looking at the screen rather than
+    // about what they are allowed to do. An admin-gated dark mode is a member
+    // stuck staring at the wrong one.
+    expect(visibleTabs(false).map((t) => t.id)).toContain('appearance');
+    expect(visibleTabs(true).map((t) => t.id)).toContain('appearance');
+  });
+
+  test('appearance is last, so it never becomes the default settings landing', () => {
+    // resolveTab(null, …) returns the FIRST visible tab, which is what opening
+    // settings lands on. Moving a preferences tab to the top of the registry
+    // would silently move every admin off Sources and every member off
+    // Schedules — a product change disguised as a reordering.
+    expect(visibleTabs(true).at(-1)!.id).toBe('appearance');
+    expect(visibleTabs(false).at(-1)!.id).toBe('appearance');
+    expect(resolveTab(null, true)).not.toBe('appearance');
+    expect(resolveTab(null, false)).not.toBe('appearance');
   });
 
   test('a non-admin never sees spend or members — the two tabs closest to billing and headcount', () => {

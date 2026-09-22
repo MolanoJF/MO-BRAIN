@@ -19,11 +19,13 @@ const PAGES: Record<SettingsTab, ComponentType> = {
   spend: lazy(() => import('../pages/Spend.tsx').then((m) => ({ default: m.Spend }))),
   runs: lazy(() => import('../pages/Runs.tsx').then((m) => ({ default: m.Runs }))),
   upgrades: lazy(() => import('../pages/Upgrades.tsx').then((m) => ({ default: m.Upgrades }))),
+  appearance: lazy(() => import('../pages/Appearance.tsx').then((m) => ({ default: m.Appearance }))),
 };
 
 const LABEL: Record<SettingsTab, string> = {
   sources: 'Sources', schema: 'Schema', members: 'Members', access: 'Access',
   schedules: 'Schedules', health: 'Health', spend: 'Spend', runs: 'Runs', upgrades: 'Upgrades',
+  appearance: 'Appearance',
 };
 
 /**

@@ -21,7 +21,7 @@
 
 export type SettingsTab =
   | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
-  | 'health' | 'spend' | 'runs' | 'upgrades';
+  | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
 
@@ -34,6 +34,12 @@ export interface SettingsTabEntry {
 /**
  * Registry order = menu order, and it is deliberate: `schedules` sits right
  * after `access`, not at the end, per the product owner's requested layout.
+ *
+ * `appearance` goes LAST, and that position is load-bearing rather than
+ * aesthetic: `resolveTab(null, isAdmin)` returns the first visible tab, so
+ * whatever sits at the top of this list is what opening settings lands on.
+ * Putting a per-operator preference there would move every admin off Sources
+ * and every member off Schedules on the way to a tab most people open once.
  */
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'sources', label: 'Sources', minRole: 'admin' },
@@ -45,15 +51,20 @@ export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'spend', label: 'Spend', minRole: 'admin' },
   { id: 'runs', label: 'Runs', minRole: 'viewer' },
   { id: 'upgrades', label: 'Upgrades', minRole: 'viewer' },
+  { id: 'appearance', label: 'Appearance', minRole: 'viewer' },
 ];
 
 const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t.id));
 
 /**
- * The tabs a caller may see. An admin sees all nine; a non-admin sees only
+ * The tabs a caller may see. An admin sees all ten; a non-admin sees only
  * the `minRole === 'viewer'` tabs, hidden rather than shown-and-disabled —
  * there is no locked/greyed state to design for, because a member never
  * sees the tab exists.
+ *
+ * `appearance` is `viewer`, which is to say everybody: the theme is a
+ * property of the person looking at the screen, not of their permissions, and
+ * an admin-gated dark mode would be a member staring at the wrong one.
  */
 export function visibleTabs(isAdmin: boolean): SettingsTabEntry[] {
   return SETTINGS_TABS.filter((t) => isAdmin || t.minRole === 'viewer');

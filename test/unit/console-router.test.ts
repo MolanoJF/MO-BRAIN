@@ -32,6 +32,13 @@ describe('parseRoute: every row of the URL table', () => {
     expect(parseRoute('/claim/abc123')).toEqual({ kind: 'claim', token: 'abc123' });
   });
 
+  test('the living style guide', () => {
+    // A real route, not a dev-only flag: with no DOM test harness in this repo,
+    // rendering every primitive in both themes is the only way visual parity
+    // gets reviewed at all.
+    expect(parseRoute('/design-system')).toEqual({ kind: 'design' });
+  });
+
   test('an unrecognised settings tab falls back to the editor root rather than throwing', () => {
     // A stray URL must never turn into a white screen. `isSettingsTab` is
     // what draws this line, not a hand-rolled check against SETTINGS_TABS.
@@ -94,6 +101,7 @@ describe('routeToPath is parseRoute\'s exact inverse', () => {
       { kind: 'settings', tab: 'members' },
       { kind: 'settings', tab: 'sources' },
       { kind: 'claim', token: 'abc123' },
+      { kind: 'design' },
     ];
     for (const r of routes) expect(parseRoute(routeToPath(r))).toEqual(r);
   });
@@ -134,6 +142,7 @@ describe('legacyRedirect: bookmarked cold-load routes survive', () => {
   });
 
   test('a route that needs no redirect answers null', () => {
+    expect(legacyRedirect('/design-system')).toBeNull();
     expect(legacyRedirect('/s/my-brain')).toBeNull();
     expect(legacyRedirect('/settings/members')).toBeNull();
     expect(legacyRedirect('/')).toBeNull();

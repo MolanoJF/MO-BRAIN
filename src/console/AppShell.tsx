@@ -8,6 +8,7 @@ import { AccountBox } from './shell/AccountBox.tsx';
 import { SourceSwitcher } from './shell/SourceSwitcher.tsx';
 import { FileTree } from './shell/FileTree.tsx';
 import { Editor } from './pages/Editor.tsx';
+import { DesignSystem } from './pages/DesignSystem.tsx';
 
 /**
  * The console's chrome, once a session is `ready`: the sidebar (account box,
@@ -47,7 +48,8 @@ export type SourceNav =
  * arguments it always returns the same action.
  *
  *  - Loading: nothing is resolved yet, so nothing navigates.
- *  - Not yet reflected, and the route isn't `editor` (settings, claim):
+ *  - Not yet reflected, and the route isn't `editor` (settings, claim,
+ *    design):
  *    the Source resolving is not this route's business — no navigation,
  *    whatever the resolved id is. (This is the branch the original bug
  *    got wrong: it skipped navigating here but did not also skip updating
@@ -64,7 +66,7 @@ export type SourceNav =
  */
 export function sourceNavigation(args: {
   loading: boolean;
-  routeKind: 'editor' | 'settings' | 'claim';
+  routeKind: 'editor' | 'settings' | 'claim' | 'design';
   routeSourceId: string | null;
   resolvedSourceId: string | null;
   reflectedInitial: boolean;
@@ -161,7 +163,12 @@ function ShellBody({
         <FileTree sourceId={sourceIdForTree} selectedPath={selectedPath} onSelect={selectFile} />
       </aside>
       <main className="main">
-        {spaces.length === 0 && !loading ? (
+        {route.kind === 'design' ? (
+          // The style guide replaces the editor rather than opening as a modal:
+          // it is a full page of specimens, and it has to be reviewable beside
+          // the real sidebar to show the primitives at their actual widths.
+          <DesignSystem />
+        ) : spaces.length === 0 && !loading ? (
           <p className="text-sm text-muted">
             {noSourcesMessage()}
             {isAdmin ? noSourcesAdminHint() : noSourcesMemberHint()}
