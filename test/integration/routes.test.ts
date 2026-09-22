@@ -620,7 +620,11 @@ describe('DELETE /api/members/:id offboard', () => {
     const email = `rt-offboard-${randomUUID().slice(0, 8)}@example.test`;
     const created = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
     expect(created.status).toBe(200);
-    const member = await created.json() as { id: string };
+    const member = await created.json() as { id: string; privateSpace: { ok: boolean; spaceId?: string } };
+    // Invite-time provisioning gives the member a private space + an ACTIVE
+    // private connection, so offboard has TWO non-revoked connections to revoke.
+    expect(member.privateSpace.ok).toBe(true);
+    const privateSpaceId = member.privateSpace.spaceId!;
 
     const spaceId = randomUUID();
     await getDb().insert(schema.spaces).values({
@@ -644,21 +648,28 @@ describe('DELETE /api/members/:id offboard', () => {
     const res = await hit('DELETE', `/api/members/${member.id}`, adminCookie);
     expect(res.status).toBe(200);
     const body = await res.json() as { revoked: number; spaces: string };
-    expect(body.revoked).toBe(1);
+    // The private connection AND the explicit desk connection are both live.
+    expect(body.revoked).toBe(2);
     expect(body.spaces).toBe('orphaned');
 
     const [space] = await getDb().select().from(schema.spaces).where(eq(schema.spaces.id, spaceId));
     expect(space).toBeDefined();
     expect(space?.sourceId).toMatch(/^desk-/);
 
+    // The private space outlives the member: the FK's `set null` reclaims it as
+    // an ordinary orphaned shared space.
+    const [privateSpace] = await getDb().select().from(schema.spaces)
+      .where(eq(schema.spaces.id, privateSpaceId));
+    expect(privateSpace).toBeDefined();
+    expect(privateSpace?.ownerMembershipId).toBeNull();
+
     const [gone] = await getDb().select().from(schema.memberships)
       .where(eq(schema.memberships.id, member.id));
     expect(gone).toBeUndefined();
 
-    const revoke = calls.find((c) => c.op === 'auth.revokeClient');
-    expect(revoke).toBeDefined();
-    expect(revoke!.opts?.json).not.toBe(true);
-    expect(revoke!.params?.clientId).toBe('gbrain_cl_live');
+    const revokes = calls.filter((c) => c.op === 'auth.revokeClient');
+    expect(revokes.every((c) => c.opts?.json !== true)).toBe(true);
+    expect(revokes.map((c) => c.params?.clientId)).toContain('gbrain_cl_live');
   });
 });
 

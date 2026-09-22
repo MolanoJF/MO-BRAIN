@@ -19,11 +19,19 @@ export const AGENT_RUNNER_WARNING =
   + '(COMPOSE_PROFILES=runner in .env, alongside RUNNER_TOKEN). A deployment that only connects members\' own '
   + 'agents loses nothing by leaving it off, and nothing on this page can switch it on.';
 
+const privateSpaceError = (error: string): string =>
+  error === 'already_provisioned' ? 'You already have a private space.'
+    : error === 'private_spaces_disabled' ? 'Private spaces are turned off for this organization.'
+      : error;
+
 export function Access() {
   const [members, setMembers] = useState<Member[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [cells, setCells] = useState<Cell[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [privateSpacesEnabled, setPrivateSpacesEnabled] = useState<boolean | null>(null);
+  const [spaceMsg, setSpaceMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spaceBusy, setSpaceBusy] = useState(false);
 
   useEffect(() => {
     void api.get<{ members: Member[]; spaces: Space[]; cells: Cell[] }>('/access-overview')
@@ -33,7 +41,20 @@ export function Access() {
         setCells(r.cells);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
+    void api.get<{ enabled: boolean }>('/org/private-spaces')
+      .then((r) => setPrivateSpacesEnabled(r.enabled))
+      .catch(() => setPrivateSpacesEnabled(false));
   }, []);
+
+  const createMySpace = async () => {
+    setSpaceBusy(true); setSpaceMsg(null);
+    try {
+      const r = await api.post<{ ok: true; spaceId: string; sourceId: string; connectionId: string }>('/private-space');
+      setSpaceMsg({ ok: true, text: `Private space ready (${r.sourceId}).` });
+    } catch (e) {
+      setSpaceMsg({ ok: false, text: privateSpaceError(e instanceof Error ? e.message : 'Request failed') });
+    } finally { setSpaceBusy(false); }
+  };
 
   const access = (membershipId: string, spaceId: string) =>
     cells.find((c) => c.membershipId === membershipId && c.spaceId === spaceId)?.access;
@@ -91,6 +112,24 @@ export function Access() {
           </table>
         </div>
       )}
+
+      <section className="card space-y-2">
+        <h2 className="text-sm font-semibold">My private space</h2>
+        {privateSpacesEnabled === false ? (
+          <p className="text-sm text-muted">
+            Private spaces are turned off for this organization.
+          </p>
+        ) : (
+          <button className="btn-primary"
+                  disabled={spaceBusy || privateSpacesEnabled === null}
+                  onClick={() => void createMySpace()}>
+            {spaceBusy ? 'Creating…' : 'Create my private space'}
+          </button>
+        )}
+        {spaceMsg && (
+          <p className={`text-sm ${spaceMsg.ok ? 'text-muted' : 'text-danger'}`}>{spaceMsg.text}</p>
+        )}
+      </section>
     </div>
   );
 }

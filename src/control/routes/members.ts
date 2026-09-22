@@ -6,6 +6,7 @@ import { requireRole, type Role } from '../rbac.ts';
 import { auth } from '../auth.ts';
 import { mintClaimLink } from '../claim.ts';
 import { revokeConnection } from '../connections.ts';
+import { provisionPrivateSpace } from '../privateSpaces.ts';
 import { accessFromConnections } from '../spaceAccess.ts';
 
 export const members = new Hono();
@@ -28,6 +29,12 @@ const guard = (min: Role, handler: (c: any, ctx: { userId: string; orgId: string
 
 function isAssignableRole(value: unknown): value is Role {
   return typeof value === 'string' && (ASSIGNABLE as string[]).includes(value);
+}
+
+async function callerMembershipId(userId: string, orgId: string): Promise<string | null> {
+  const [row] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.organizationId, orgId)));
+  return row?.id ?? null;
 }
 
 members.get('/members', guard('admin', async (c, { orgId }) => {
@@ -76,7 +83,74 @@ members.post('/members', guard('admin', async (c, { userId, orgId }) => {
     id: membershipId, userId: targetUserId, organizationId: orgId, role,
   });
   await audit(orgId, userId, 'member.create', membershipId, { role });
-  return c.json({ id: membershipId, userId: targetUserId, email, role });
+
+  const [org] = await getDb()
+    .select({ privateSpacesEnabled: schema.organizations.privateSpacesEnabled })
+    .from(schema.organizations).where(eq(schema.organizations.id, orgId));
+  let privateSpace: { ok: boolean; spaceId?: string; connectionId?: string; error?: string };
+  if (!org || !org.privateSpacesEnabled) {
+    privateSpace = { ok: false, error: 'private_spaces_disabled' };
+  } else {
+    try {
+      const result = await provisionPrivateSpace(orgId, membershipId, userId);
+      privateSpace = result.ok
+        ? { ok: true, spaceId: result.spaceId, connectionId: result.connectionId }
+        : { ok: false, error: result.error };
+    } catch (e: any) {
+      // The invite succeeded; provisioning is retryable, so never fail it here.
+      privateSpace = { ok: false, error: e?.message ?? 'private_space_provision_failed' };
+    }
+  }
+  return c.json({ id: membershipId, userId: targetUserId, email, role, privateSpace });
+}));
+
+members.post('/members/:id/private-space', guard('admin', async (c, { userId, orgId }) => {
+  const id = c.req.param('id');
+  const [membership] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .where(and(eq(schema.memberships.id, id), eq(schema.memberships.organizationId, orgId)));
+  if (!membership) return c.json({ error: 'member not found' }, 404);
+
+  const result = await provisionPrivateSpace(orgId, id, userId);
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  return c.json({ ok: true, spaceId: result.spaceId, sourceId: result.sourceId, connectionId: result.connectionId });
+}));
+
+members.post('/private-space', guard('viewer', async (c, { userId, orgId }) => {
+  const membershipId = await callerMembershipId(userId, orgId);
+  if (!membershipId) return c.json({ error: 'not a member' }, 403);
+
+  const [owned] = await getDb().select({ id: schema.spaces.id }).from(schema.spaces).where(and(
+    eq(schema.spaces.organizationId, orgId),
+    eq(schema.spaces.ownerMembershipId, membershipId),
+  ));
+  if (owned) return c.json({ error: 'already_provisioned' }, 409);
+
+  const result = await provisionPrivateSpace(orgId, membershipId, userId);
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  return c.json({ ok: true, spaceId: result.spaceId, sourceId: result.sourceId, connectionId: result.connectionId });
+}));
+
+members.get('/org/private-spaces', guard('viewer', async (c, { orgId }) => {
+  const [org] = await getDb()
+    .select({ privateSpacesEnabled: schema.organizations.privateSpacesEnabled })
+    .from(schema.organizations).where(eq(schema.organizations.id, orgId));
+  if (!org) return c.json({ error: 'organization_not_found' }, 404);
+  return c.json({ enabled: org.privateSpacesEnabled });
+}));
+
+members.patch('/org/private-spaces', guard('admin', async (c, { userId, orgId }) => {
+  const body = await c.req.json().catch(() => ({}));
+  const enabled = (body as { enabled?: unknown })?.enabled;
+  if (typeof enabled !== 'boolean') return c.json({ error: 'invalid_enabled' }, 400);
+
+  const [org] = await getDb().update(schema.organizations)
+    .set({ privateSpacesEnabled: enabled })
+    .where(eq(schema.organizations.id, orgId))
+    .returning({ id: schema.organizations.id });
+  if (!org) return c.json({ error: 'organization_not_found' }, 404);
+
+  await audit(orgId, userId, 'org.private_spaces', orgId, { enabled });
+  return c.json({ enabled });
 }));
 
 members.delete('/members/:id', guard('admin', async (c, { userId, orgId }) => {
@@ -126,7 +200,11 @@ members.post('/members/:id/claim-link', guard('admin', async (c, { userId, orgId
   return c.json({ token: minted.token, expiresAt: minted.expiresAt.toISOString() });
 }));
 
-members.get('/access-overview', guard('viewer', async (c, { orgId }) => {
+members.get('/access-overview', guard('viewer', async (c, { userId, orgId }) => {
+  const [caller] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.organizationId, orgId)));
+  const callerMembershipId = caller?.id ?? '';
+
   const memberRows = await getDb()
     .select({
       membershipId: schema.memberships.id,
@@ -137,11 +215,16 @@ members.get('/access-overview', guard('viewer', async (c, { orgId }) => {
     .innerJoin(schema.users, eq(schema.memberships.userId, schema.users.id))
     .where(eq(schema.memberships.organizationId, orgId));
 
-  const spaces = await getDb().select({
+  const allSpaces = await getDb().select({
     id: schema.spaces.id,
     sourceId: schema.spaces.sourceId,
     name: schema.spaces.name,
+    ownerMembershipId: schema.spaces.ownerMembershipId,
   }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId));
+
+  const spaces = allSpaces.filter(
+    (s) => s.ownerMembershipId === null || s.ownerMembershipId === callerMembershipId,
+  );
 
   const conns = await getDb().select().from(schema.connections)
     .where(and(
@@ -163,7 +246,9 @@ members.get('/access-overview', guard('viewer', async (c, { orgId }) => {
   for (const member of memberRows) {
     const memberConns = connsByMembership.get(member.membershipId) ?? [];
     for (const space of spaces) {
-      const access = accessFromConnections(member.role as Role, memberConns, space.id);
+      const access = accessFromConnections(
+        member.role as Role, memberConns, space.id, space.ownerMembershipId, member.membershipId,
+      );
       if (access !== null) cells.push({ membershipId: member.membershipId, spaceId: space.id, access });
     }
   }

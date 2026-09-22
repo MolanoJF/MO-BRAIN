@@ -13,6 +13,13 @@ type Member = {
   createdAt: string;
 };
 
+type PrivateSpaceOutcome = { ok: true; spaceId: string; sourceId: string; connectionId: string };
+type InviteResponse = {
+  id: string;
+  privateSpace?: { ok: boolean; spaceId?: string; connectionId?: string; error?: string };
+};
+type SpaceNotice = { memberId: string; ok: boolean; message: string };
+
 export function Members() {
   const [members, setMembers] = useState<Member[]>([]);
   const [email, setEmail] = useState('');
@@ -21,12 +28,22 @@ export function Members() {
   const [claimUntil, setClaimUntil] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [privateSpacesEnabled, setPrivateSpacesEnabled] = useState<boolean | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [inviteWarning, setInviteWarning] =
+    useState<{ memberId: string; email: string; error: string } | null>(null);
+  const [spaceNotice, setSpaceNotice] = useState<SpaceNotice | null>(null);
 
   const load = async () => {
     const r = await api.get<{ members: Member[] }>('/members');
     setMembers(r.members);
   };
-  useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed')); }, []);
+  useEffect(() => {
+    void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
+    void api.get<{ enabled: boolean }>('/org/private-spaces')
+      .then((r) => setPrivateSpacesEnabled(r.enabled))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
+  }, []);
 
   const step = async (fn: () => Promise<void>) => {
     setBusy(true); setError(null);
@@ -36,15 +53,45 @@ export function Members() {
   };
 
   const invite = () => step(async () => {
-    const created = await api.post<{ id: string }>('/members', { email, role });
+    const created = await api.post<InviteResponse>('/members', { email, role });
     const minted = await api.post<{ token: string; expiresAt: string }>(
       `/members/${created.id}/claim-link`,
       { email },
     );
     setClaimUrl(`${window.location.origin}/claim/${minted.token}`);
     setClaimUntil(minted.expiresAt);
+    setInviteWarning(
+      created.privateSpace && created.privateSpace.ok === false
+        ? { memberId: created.id, email, error: created.privateSpace.error ?? 'unknown' }
+        : null,
+    );
+    setSpaceNotice(null);
     setEmail('');
   });
+
+  const provision = async (memberId: string) => {
+    setBusy(true); setError(null); setSpaceNotice(null);
+    try {
+      const r = await api.post<PrivateSpaceOutcome>(
+        `/members/${encodeURIComponent(memberId)}/private-space`,
+      );
+      setSpaceNotice({ memberId, ok: true, message: `Private space ready (${r.sourceId})` });
+      setInviteWarning((w) => (w && w.memberId === memberId ? null : w));
+      await load();
+    } catch (e) {
+      setSpaceNotice({ memberId, ok: false, message: e instanceof Error ? e.message : 'Provision failed' });
+    } finally { setBusy(false); }
+  };
+
+  const togglePrivateSpaces = async (enabled: boolean) => {
+    setSettingsBusy(true); setError(null);
+    try {
+      const r = await api.patch<{ enabled: boolean }>('/org/private-spaces', { enabled });
+      setPrivateSpacesEnabled(r.enabled);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Update failed');
+    } finally { setSettingsBusy(false); }
+  };
 
   const remint = (m: Member) => step(async () => {
     const minted = await api.post<{ token: string; expiresAt: string }>(
@@ -67,6 +114,18 @@ export function Members() {
       </header>
 
       {error && <div className="text-danger text-sm">{error}</div>}
+
+      <section className="space-y-3">
+        <h2 className="font-medium">Org settings</h2>
+        <label className="flex items-center gap-2">
+          <input type="checkbox"
+                 checked={privateSpacesEnabled === true}
+                 disabled={settingsBusy || privateSpacesEnabled === null}
+                 onChange={(e) => void togglePrivateSpaces(e.target.checked)} />
+          <span>Give each member a private space</span>
+        </label>
+        {settingsBusy && <p className="text-xs text-muted">Saving…</p>}
+      </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">Invite</h2>
@@ -94,6 +153,22 @@ export function Members() {
         </div>
       )}
 
+      {inviteWarning && (
+        <div className="card border-warning space-y-2">
+          <p className="text-sm font-medium text-warning">Private space not provisioned</p>
+          <p className="text-sm">
+            {inviteWarning.email} was invited, but their private space failed: {inviteWarning.error}
+          </p>
+          {spaceNotice?.memberId === inviteWarning.memberId && !spaceNotice.ok && (
+            <p className="text-sm text-danger">{spaceNotice.message}</p>
+          )}
+          <button className="nav-item" disabled={busy}
+                  onClick={() => void provision(inviteWarning.memberId)}>
+            Provision private space
+          </button>
+        </div>
+      )}
+
       <section className="space-y-3">
         <h2 className="font-medium">Roster</h2>
         {members.length === 0 && <p className="text-sm text-muted">No members yet.</p>}
@@ -102,8 +177,16 @@ export function Members() {
             <div>
               <div>{m.email}</div>
               <div className="text-sm text-muted font-mono">{m.role}</div>
+              {spaceNotice?.memberId === m.id && (
+                <div className={`text-xs ${spaceNotice.ok ? 'text-muted' : 'text-danger'}`}>
+                  {spaceNotice.message}
+                </div>
+              )}
             </div>
             <div className="flex gap-2 shrink-0">
+              <button className="nav-item" disabled={busy} onClick={() => void provision(m.id)}>
+                Private space
+              </button>
               <button className="nav-item" disabled={busy} onClick={() => void remint(m)}>
                 Claim link
               </button>
