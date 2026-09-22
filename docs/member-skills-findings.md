@@ -121,3 +121,62 @@ absent from the plan and must be designed before member skill delivery can
 work.~~ **Resolved:** Task 0 ships repo `skills/` mounted read-only at
 `/opt/mobrain-skills` and exports `GBRAIN_SKILLS_DIR=/opt/mobrain-skills` in the
 services that resolve skills. Tasks 2–6 may proceed.
+
+## Live dev-stack check and the publish-gate readback divergence (2026-09-22)
+
+### What passed
+
+Measured on the live dev stack after redeploy and sign-in:
+
+- A live claim with publishing on returned `skillsPublished: true`.
+- Both minted clients (`bs-…-shared` and `bs-…-shared-server`) showed
+  `surface: "full"`.
+- A member MCP `list_skills` call returned HTTP 200 with
+  `skills_dir_source: env_explicit`, and the member fetched skill `query`.
+
+### What failed: the off-gate readback
+
+With the DB plane set to off, the admissibility check still reports publishing
+on:
+
+```
+gbrain config set mcp.publish_skills false
+# then a fresh claim returned skillsPublished: true  (wrong)
+```
+
+The MCP tools are genuinely hidden by the gate at that point, so
+`skillsPublished` and the claim's wiring snippet over-report for a
+DB-overridden install. State was restored (`true`) after measuring.
+
+### Root cause
+
+The feature reads `mcp.publish_skills` on claim via `readConfigValue`
+(`src/control/configValue.ts`), which runs `gbrain config get <key>` through
+`callOps`. That path resolves the **file/env plane first**
+(`~/.gbrain/config.json`, written by `gbrain init`):
+
+- gbrain `src/commands/config.ts:448-450` — the `dbAuthoritative` false branch;
+  `mcp.publish_skills` is not in the dual-plane set.
+
+gbrain's actual publish gate for `list_skills`/`get_skill` resolves the **DB
+plane first, then the file plane, absent/failed = false**:
+
+- gbrain `src/mcp/publish-gates.ts:12-14,26` (`readPublishGate`).
+- gbrain `src/core/skill-catalog.ts` `readMcpPublishSkills`.
+
+So `gbrain config set mcp.publish_skills false` writes the DB plane, the gate
+honors it, but `config get` keeps printing the file plane's `true` (with the
+"DB-plane value ... shadowed" note) and this readback follows it.
+
+### Consequence
+
+When an operator overrides the gate in the DB plane, `ClaimResult.skillsPublished`
+still reports `true` and the claim snippet still advertises skills, even though
+the MCP tools are hidden. The default state is correct, because only `gbrain
+init` writes the file plane, and fail-closed on an unreadable value still holds.
+The divergence is the over-reporting case only.
+
+**Not fixed in this repo.** Decision: document it here and file it upstream so
+gbrain exposes a supported way to read the effective gate value.
+
+Upstream issue: _PENDING_STEP_4_
