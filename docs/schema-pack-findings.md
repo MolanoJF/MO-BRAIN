@@ -606,6 +606,407 @@ deleted.
 
 ---
 
+## S7 — Task 0 probe log (custom-pack authoring)
+
+Task 0 of the *Custom Schema Packs* plan (`docs/superpowers/plans/2026-09-22-custom-schema-packs.md`).
+All commands run **2026-09-22** against `brainstand-gbrain-ops-1` (`gbrain 0.50.5.0`) and
+`brainstand-postgres-1`. Format: command → exit code → observed output. The brain was returned to
+its exact baseline afterward (see “Cleanup” at the end of this section).
+
+> **Shell note (MEASURED).** The shell here is Windows PowerShell, which strips embedded `"` inside
+> single-quoted arguments before `docker exec` sees them, so the plan's literal
+> `gbrain call schema_apply_mutations '{"pack":...}'` reaches gbrain as invalid JSON
+> (`JSON Parse error: Expected '}'`, exit 1). Every `call` payload below was therefore written with
+> backslash-escaped quotes (`'{\"pack\":...}'`), which reaches the container verbatim. This is a
+> harness/quoting artifact of the probe environment, **not** gbrain behaviour — on a POSIX shell the
+> plan's command is correct. It does not change any measurement.
+
+Baseline before probing (MEASURED — note this is the S6-cleanup baseline **plus** a pre-existing
+`slice3-probe` source/page added by a later slice's probe, and a small `shared` repo page set):
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain schema active
+Active pack: gbrain-base-v2 v1.2.0
+Source: home-config
+Pack identity: gbrain-base-v2@1.2.0+1a2aee67
+Page types: 19
+Link verbs: 17
+Takes kinds: fact, take, bet, hunch
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 ls -la /srv/gbrain-home/.gbrain/schema-packs
+# empty (total 8, only . and ..)
+
+$ docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -c "select count(*) from config where key like 'schema_pack%'"
+0
+$ docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -c "select id from sources order by id"
+ customers | default | internal | shared | slice3-probe   # 5 rows
+$ docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -c "select source_id, count(*) from pages group by source_id"
+ customers|1 ; internal|1 ; shared|2 ; slice3-probe|1     # 5 pages
+```
+
+### Probe 1 — `gbrain call schema_apply_mutations` at the pin
+
+Fork first:
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain schema fork gbrain-base-v2 zz-probe --json
+{
+  "schema_version": 1,
+  "from": "gbrain-base-v2",
+  "to": "zz-probe",
+  "path": "/srv/gbrain-home/.gbrain/schema-packs/zz-probe",
+  "tier": "experimental"
+}
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 ls -la /srv/gbrain-home/.gbrain/schema-packs/zz-probe
+-rw-r--r-- 1 root root 17236 ... pack.json      # fork writes pack.json (not yaml)
+# exit 0
+```
+
+Success batch (2 mutations, one `add_type` + one `add_link_type`):
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain call schema_apply_mutations '{"pack":"zz-probe","mutations":[{"op":"add_type","name":"contract","primitive":"entity","prefix":"contracts/","extractable":true},{"op":"add_link_type","name":"signed","inference":{"page_type":"person","target_type":"contract"}}]}'
+{
+  "schema_version": 1,
+  "pack": "zz-probe",
+  "batch_id": "batch-1790098162715-53fq97",
+  "mutations_applied": 2,
+  "results": [
+    {
+      "index": 0,
+      "op": "add_type",
+      "pack": "zz-probe",
+      "path": "/srv/gbrain-home/.gbrain/schema-packs/zz-probe/pack.json",
+      "format": "json",
+      "prev_sha8": "fe8432b6",
+      "new_sha8": "869b6c98"
+    },
+    {
+      "index": 1,
+      "op": "add_link_type",
+      "pack": "zz-probe",
+      "path": "/srv/gbrain-home/.gbrain/schema-packs/zz-probe/pack.json",
+      "format": "json",
+      "prev_sha8": "869b6c98",
+      "new_sha8": "8dc3521f"
+    }
+  ]
+}
+# exit 0
+```
+
+Failure batch (valid `add_type` at index 0, invalid `remove_type` at index 1):
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain call schema_apply_mutations '{"pack":"zz-probe","mutations":[{"op":"add_type","name":"x","primitive":"entity","prefix":"x/"},{"op":"remove_type","name":"does-not-exist"}]}'
+{
+  "error": "mutation_failed",
+  "code": "TYPE_NOT_FOUND",
+  "message": "type 'does-not-exist' is not declared in pack 'zz-probe'",
+  "batch_id": "batch-1790098168446-im6vow",
+  "mutations_applied": 0,
+  "pack_unchanged": true,
+  "failed_at_index": 1
+}
+# exit 0        <<< THE EXIT CODE IS 0 ON A FAILED BATCH
+```
+
+**`call` exits 0 even when the handler fails.** The failure is reported *in the body*, never in the
+exit code. Callers MUST parse the JSON and inspect `error` / `code` / `pack_unchanged`.
+
+Readonly refusal (`gbrain-base-v2` is bundled):
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain call schema_apply_mutations '{"pack":"gbrain-base-v2","mutations":[{"op":"add_type","name":"y","primitive":"entity","prefix":"y/"}]}'
+{
+  "error": "mutation_failed",
+  "code": "PACK_READONLY",
+  "message": "pack 'gbrain-base-v2' is bundled and read-only. Use 'gbrain schema fork gbrain-base-v2 <new-name>' to create a writable copy.",
+  "batch_id": "batch-1790098175061-zia00l",
+  "mutations_applied": 0,
+  "pack_unchanged": true
+}
+# exit 0
+```
+
+Note the `PACK_READONLY` shape: **no `failed_at_index`** (the refusal is pre-batch, so index 0 is
+never reached), same `error`/`pack_unchanged` envelope. This is the same signal the plan expects the
+API to return for a bundled pack.
+
+Atomicity readback (the failed batch's `add_type x` must be absent, the success's `contract` present):
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain schema show zz-probe --json
+page_type_count=20   names=person,company,media,tweet,social-digest,analysis,atom,concept,source,deal,email,slack,meeting,conversation,writing,project,note,event,diary,contract
+has_x=False          has_contract=True
+link_names=...,attributed_to,signed
+# exit 0
+```
+
+**PROVEN: the batch is atomic.** 20 types = the fork's 19 raw types + the success batch's
+`contract`; the failure batch's `x` never landed. `call` also runs the op without an admin MCP grant
+(the trusted local lane), which is exactly what `schema.mutate` needs.
+
+> **Gate 1 verdict: YES.** `gbrain call schema_apply_mutations` is usable at the pin. Task 1's
+> `schema.mutate` entry is viable in its single-entry form; the plan's fallback (one registry entry
+> per CLI verb) is **not** needed. The registry entry must still inspect the body, because exit is
+> always 0 (this is already written into the Task 1/Task 5 code comments and the route's `!r.ok ||
+> !out || out.error` check).
+
+### Probe 2 — raw `schema show <pack> --json` and the `fork --json` shape
+
+`schema show zz-probe --json` (positional, raw) on the fork lists **only the pack's own
+declarations** — for a fork that happens to equal the effective set (a fork copies everything raw,
+`extends: null`). MEASURED: 20 raw page types, 18 raw link types, name `zz-probe`, `extends: null`.
+
+For a pack that *does* extend, raw lists only its own types (S4 table, unchanged): `gbrain-investor`
+positional = 2 page types.
+
+`fork --json` shape (MEASURED, above):
+`{ schema_version, from, to, path, tier }` — `tier` is `"experimental"`. The exit code is 0; the
+written file is `<path>/pack.json`. There is **no** content echo in the fork response (the manifest
+must be read back with `schema show`).
+
+### Probe 3 — no-`extends` vs `extends: gbrain-base-v2`
+
+3a — `zz-noext/pack.json` with one `page_types` entry and **no `extends` key**:
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain schema validate zz-noext
+✓ zz-noext v0.0.1: valid manifest
+  Path: /srv/gbrain-home/.gbrain/schema-packs/zz-noext/pack.json
+  Page types: 1
+  Link verbs: 0
+  Takes kinds: 4
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 gbrain schema lint zz-noext --json
+{ "schema_version": 1, "pack": "zz-noext", "ok": true, "errors": [], "warnings": [] }
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 env GBRAIN_SCHEMA_PACK=zz-noext gbrain schema show --json
+name=zz-noext  version=0.0.1  extends=gbrain-base
+page_type_count=28
+names=widget,writing,analysis,guide,hardware,architecture,concept,person,company,deal,yc,civic,project,source,media,email,slack,calendar-event,note,meeting,conversation,atom,event,diary,code,image,synthesis,extract_receipt
+link_type_count=12
+# exit 0
+```
+
+**FALSIFIED (the plan's expectation).** The plan expected an omitted `extends` to be a *standalone*
+ontology (effective count 1). It is not. `manifest-v1.ts:332` declares
+`extends: z.string().nullable().default('gbrain-base')`, so **omitting `extends` resolves to
+`gbrain-base`**, not to a standalone pack. `gbrain-base` leaks in: **28 effective page types**
+(27 gbrain-base + `widget`) and 12 link types. (Note `schema validate`'s own "Page types: 1" line is
+the *raw* count; the resolved count is 28.)
+
+3b — same pack, but explicit `"extends": "gbrain-base-v2"`:
+
+```
+$ docker exec brainstand-gbrain-ops-1 gbrain schema validate zz-noext
+✓ zz-noext v0.0.1: valid manifest   (Path .../zz-noext/pack.json)   Page types: 1
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 gbrain schema lint zz-noext --json
+{ "schema_version": 1, "pack": "zz-noext", "ok": true, "errors": [],
+  "warnings": [ 56 × { "rule": "alias_references_undeclared_type", ... } ] }
+# exit 0   (ok:true; the warnings are gbrain-base-v2's own aliases, inherited)
+
+$ docker exec brainstand-gbrain-ops-1 env GBRAIN_SCHEMA_PACK=zz-noext gbrain schema show --json
+name=zz-noext  version=0.0.1  extends=gbrain-base-v2
+page_type_count=20
+names=widget,person,company,media,tweet,social-digest,analysis,atom,concept,source,deal,email,slack,meeting,conversation,writing,project,note,event,diary
+link_type_count=17
+# exit 0
+```
+
+So an explicit `extends` works as expected (19 v2 types + `widget` = 20).
+
+> **Verdict: a pack with no `extends` is NOT standalone.** `validate`/`lint` accept it (legal), but
+> it silently *inherits `gbrain-base`*. A truly standalone ontology requires `"extends": null`
+> **explicitly** (that is what `schema fork` writes — Probe 1's fork has `"extends": null`). This is a
+> **plan defect** in Task 2's `draftToManifest`: it already does the right thing (it omits the key
+> only when `d.extends` is falsy, and `validateDraft` maps `null`/`''`/absent to `null`), so a draft
+> with `extends: null` will emit an explicit `"extends": null` and be standalone. But the plan's
+> **task-0 sentence** (“Write ... with one page_types entry and no `extends` ... We expect 1”)
+> is based on a wrong premise, and the Task 2 test `'omits extends entirely for a standalone
+> ontology'` should be read as “emits `extends: null`”, not “omits the key”. Keep the writer at
+> `"extends": null` for standalone, and never emit a manifest with the key simply missing unless the
+> intent is `gbrain-base`.
+
+### Probe 4 — loader precedence with both `pack.yaml` and `pack.json`
+
+`pack.yaml` (`version: 9.9.9`, type `yamltype`, `extends: gbrain-base-v2`) and `pack.json`
+(`version: 1.1.1`, type `jsontype`, `extends: null`) both present in `zz-noext/`:
+
+```
+$ docker exec brainstand-gbrain-ops-1 ls -la /srv/gbrain-home/.gbrain/schema-packs/zz-noext
+-rwxr-xr-x 1 root root 365 ... pack.json
+-rwxr-xr-x 1 root root 282 ... pack.yaml
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 gbrain schema show zz-noext --json
+{ "name": "zz-noext", "version": "9.9.9", "extends": "gbrain-base-v2",
+  "page_types": [ { "name": "yamltype", ... } ] }
+# exit 0
+```
+
+**`pack.yaml` wins.** The candidate order is `['pack.yaml', 'pack.yml', 'pack.json']`
+(`load-active.ts:116`, `commands/schema.ts:410`, `core/ops/schema-packs.ts:79`), first existing file
+taken. This confirms the writer must delete the sibling format after writing `pack.json` (Task 3),
+and the reason is now measured, not assumed.
+
+### Probe 5 — `README.md` is skipped by sync
+
+Committed `people/README.md` into the `shared` Space repo on a fresh commit, then synced:
+
+```
+$ docker exec brainstand-gbrain-ops-1 git -C /srv/brain-repos/shared commit -m zz-probe-people-readme
+[master 54e069b] zz-probe-people-readme    1 file changed, 3 insertions(+)
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 gbrain sync --source shared
+[sync.imports] 1/1 (100%) reports/live-sync/2026-09-17-0213.md
+Synced 4c632c12..54e069bf:
+  +1 added, ~0 modified, -0 soft-deleted (recoverable 72h), R0 renamed
+# exit 0
+
+$ docker exec brainstand-postgres-1 psql -U gbrain -d gbrain -t -c "select slug, source_path from pages where source_id='shared' order by slug"
+ gate-b-seed-mu54vuc2              | gate-b-seed-mu54vuc2.md
+ reports/live-sync/2026-09-17-0213 | reports/live-sync/2026-09-17-0213.md
+ widget-launch                     | widget-launch.md
+# exit 0
+```
+
+**`people/README.md` is skipped.** No `people/readme` or `people` page appeared (only the unrelated
+`reports/...` page was added by the same sync). `README.md` really is in `SYNC_SKIP_FILES` at the
+pin, so folder scaffolding never becomes a page.
+
+### Probe 6 — file mtime and shared-volume visibility
+
+After the Probe 1 success batch, `zz-probe/pack.json`'s mtime advanced to `2026-09-22 17:29:22`
+(18:28 fork → 17:29 mutation), and the same inode/mtime is visible from every service that mounts
+the `gbrain-home` volume:
+
+```
+$ docker exec brainstand-gbrain-ops-1  stat -c '%n mtime=%y size=%s' .../zz-probe/pack.json
+.../zz-probe/pack.json mtime=2026-09-22 17:29:22.737097531 +0000 size=17569
+$ docker exec brainstand-gbrain-serve-1 stat -c '%n mtime=%y size=%s' .../zz-probe/pack.json
+.../zz-probe/pack.json mtime=2026-09-22 17:29:22.737097531 +0000 size=17569
+$ docker exec brainstand-gbrain-worker-1 stat -c '%n mtime=%y size=%s' .../zz-probe/pack.json
+.../zz-probe/pack.json mtime=2026-09-22 17:29:22.737097531 +0000 size=17569
+# all exit 0
+```
+
+The file plane is genuinely shared across ops/serve/worker. (Whether *serve* re-reads it depends on
+its stat-mtime TTL in `loadActivePack`, and only when a pack is active — this probe records
+visibility, not hot-reload.)
+
+### Probe 7 — validate / lint / show before `init` (the wizard case) — **decides Task 9**
+
+Scratch `GBRAIN_HOME=/tmp/zz` containing **only** `.gbrain/schema-packs/zz-noext/pack.json` — no
+`config.json`, no `database_url`, no DB:
+
+```
+$ docker exec brainstand-gbrain-ops-1 ls -la /tmp/zz/.gbrain
+drwxr-xr-x ... schema-packs          # and nothing else; config.json absent
+
+$ docker exec -e GBRAIN_HOME=/tmp/zz -e GBRAIN_SCHEMA_PACK=zz-noext brainstand-gbrain-ops-1 gbrain schema validate zz-noext
+✓ zz-noext v0.0.1: valid manifest
+  Path: /tmp/zz/.gbrain/schema-packs/zz-noext/pack.json
+  Page types: 1   Link verbs: 0   Takes kinds: 4
+# exit 0
+
+$ docker exec -e GBRAIN_HOME=/tmp/zz -e GBRAIN_SCHEMA_PACK=zz-noext brainstand-gbrain-ops-1 gbrain schema lint zz-noext --json
+{ "schema_version": 1, "pack": "zz-noext", "ok": true, "errors": [], "warnings": [] }
+# exit 0
+
+$ docker exec -e GBRAIN_HOME=/tmp/zz -e GBRAIN_SCHEMA_PACK=zz-noext brainstand-gbrain-ops-1 gbrain schema show --json
+{ "name": "zz-noext", "extends": "gbrain-base", "page_types": [ ... 28 types ... ] }
+# exit 0
+```
+
+All three **work with no DB**. `schema validate` is pure file-plane (reads the named pack path);
+`schema lint --json` composes the 9 file-plane rules; `schema show --json` resolves `extends`
+against bundled YAML only. Confirmed by reading the installed source (`core/ops/schema-packs.ts:105`
+`schema_lint` has `scope: 'read'` and its own comment says “File-plane rules only over MCP — the
+with_db option is rejected for remote callers”; `commands/schema.ts` `runValidate` never opens a DB).
+Note `schema show --json` here has no positional, so `GBRAIN_SCHEMA_PACK` selects the pack — the
+positional form (`schema show <pack>`, which Task 1's `schema.showRaw` uses) intersects wholly with
+the same file-plane branch and is **also DB-free** (MEASURED: `schema show zz-noext --json` under
+`GBRAIN_HOME=/tmp/zz` returned exit 0). The `schema.mutate` lane is the one that needs a DB (it
+takes `ctx.engine` to write the audit row), but that is a *write*, not part of Task 9's pre-`init`
+read path.
+
+> **Task 9 branch: A.** `schema validate`, `schema lint --json` and `schema show --json` all answer
+> with **no DB** on a scratch `GBRAIN_HOME`. The wizard's schema step can validate and preview a
+> custom pack *before* `init` runs, so Task 9 implements **Branch A** (the “Design our own” option
+> embedding `NewPackPanel`). Branch B (“they need a DB”, a one-line copy change only) is **not**
+> selected. Task 1's `schema.showRaw` being `privilege: 'brain-db'` is over-conservative for the
+> pre-init read path; if Task 9 is to call it before `init`, that entry should be `read-only`
+> (a Task 1 refinement, not a blocker — `validate`/`lint`/`show` via the CLI need no DB).
+
+### Cleanup — brain returned to baseline
+
+MEASURED after all probes:
+
+```
+$ docker exec brainstand-gbrain-ops-1 rm -rf /srv/gbrain-home/.gbrain/schema-packs/zz-probe \
+      /srv/gbrain-home/.gbrain/schema-packs/zz-noext /tmp/zz
+# exit 0
+$ docker exec brainstand-gbrain-ops-1 ls -la /srv/gbrain-home/.gbrain/schema-packs
+# empty (total 8, only . and ..)          # .locks dir also removed
+$ docker exec brainstand-gbrain-ops-1 gbrain schema list
+...
+No user-installed packs (~/.gbrain/schema-packs/ empty or missing).
+# exit 0
+
+$ docker exec brainstand-gbrain-ops-1 git -C /srv/brain-repos/shared status --short
+# (empty)
+$ docker exec brainstand-gbrain-ops-1 git -C /srv/brain-repos/shared log --oneline -3
+20c2d6a Revert "zz-probe-people-readme"
+54e069b zz-probe-people-readme
+6325100 reports: live-sync 2026-09-17-0213
+$ docker exec brainstand-gbrain-ops-1 ls -la /srv/brain-repos/shared
+ README.md | gate-b-seed-mu54vuc2.md | reports/ | widget-launch.md   # people/ gone, baseline
+# exit 0
+
+$ docker exec brainstand-postgres-1 psql ... -c "select count(*) from config where key like 'schema_pack%'"
+0
+$ docker exec brainstand-postgres-1 psql ... -c "select key, value from config order by key"
+# the same 9 rows as baseline (version = 149)
+$ docker exec brainstand-postgres-1 psql ... -c "select source_id, count(*) from pages group by source_id"
+ customers|1 ; internal|1 ; shared|2 ; slice3-probe|1     # baseline
+$ docker exec brainstand-gbrain-ops-1 gbrain schema active
+Active pack: gbrain-base-v2 v1.2.0   Source: home-config   Page types: 19   Link verbs: 17
+# exit 0
+```
+
+No user packs, no `schema_pack.source.*` keys, no extra sources, no extra pages, no `people/`
+directory, no scratch home. One `zz-probe-people-readme` commit plus its `Revert` remain in the
+`shared` repo history (tree is baseline; the commit pair is harmless and revertable through the
+product, matching Task 10's stated policy).
+
+### Findings that change the plan (S7)
+
+- **`call` exits 0 on a failed batch** (Probe 1) — already assumed by Task 1/Task 5; now MEASURED.
+  No `okExitCodes` change is needed, but the body must be parsed (`error` present ⇒ failure).
+- **`PACK_READONLY` carries no `failed_at_index`** — the API's 409 body must tolerate
+  `failed_at_index: undefined` (Task 5 already reads `out?.failed_at_index ?? null`).
+- **A no-`extends` pack is NOT standalone** (Probe 3). Plan defect: standalone requires
+  `"extends": null` explicitly. Task 2's `draftToManifest` is safe (it keeps the key with a `null`
+  value), but its test name (“omits extends entirely”) misdescribes the desired output; and any prose
+  that says “omit `extends` for standalone” must say “set `extends: null`” instead.
+- **`pack.yaml` beats `pack.json`** (Probe 4) — justifies Task 3's sibling deletion, now measured.
+- **`README.md` skip + shared-volume visibility confirmed** (Probes 5, 6) — no change.
+- **Task 9 = Branch A** (Probe 7). `validate`/`lint`/`show` are DB-free and work before `init`.
+  Consider changing Task 1's `schema.showRaw` from `privilege: 'brain-db'` to `read-only` if the
+  wizard must call it pre-`init`.
+
+---
+
 ## Findings that change the plan
 
 - **Gate 2 (per-source readback) FAILS.** The Sources page (Task 8) cannot show a resolved pack
