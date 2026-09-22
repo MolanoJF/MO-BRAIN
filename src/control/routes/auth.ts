@@ -3,6 +3,8 @@ import type { Context } from 'hono';
 import { auth, googleConfigured } from '../auth.ts';
 import { isBootstrapped, bootstrapFirstAdmin, bootstrapFirstAdminForSession } from '../bootstrap.ts';
 import { requireRole } from '../rbac.ts';
+import { getDb, schema } from '../db/client.ts';
+import { eq } from 'drizzle-orm';
 
 export const authRoutes = new Hono();
 
@@ -11,6 +13,15 @@ authRoutes.on(['GET', 'POST'], '/auth/*', (c) => auth.handler(c.req.raw));
 // D4: registered OUTSIDE the /auth/* wildcard on purpose — Better Auth owns
 // everything under /auth, and this is ours, not a route it should ever see.
 authRoutes.get('/auth-config', (c) => c.json({ google: googleConfigured }));
+
+authRoutes.get('/me', async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const userId = session?.user?.id;
+  if (!userId) return c.json({ error: 'unauthorized' }, 401);
+  const [row] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .where(eq(schema.memberships.userId, userId));
+  return c.json({ email: session.user.email, hasMembership: !!row });
+});
 
 authRoutes.get('/bootstrap', async (c) => c.json({ bootstrapped: await isBootstrapped() }));
 

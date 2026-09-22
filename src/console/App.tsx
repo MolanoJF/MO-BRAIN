@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from './api.ts';
 import { Bootstrap } from './pages/Bootstrap.tsx';
 import { SignIn } from './pages/SignIn.tsx';
+import { NoAccess } from './pages/NoAccess.tsx';
 import { Wizard } from './pages/Wizard.tsx';
 import { Claim } from './pages/Claim.tsx';
 import { legacyRedirect } from './router.ts';
 import { AppShell } from './AppShell.tsx';
 
-type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
+type Phase = 'loading' | 'bootstrap' | 'signin' | 'noAccess' | 'wizard' | 'ready';
 
 /**
  * What `GET /api/wizard/state` answered, as the screen chooser sees it: an HTTP
@@ -32,11 +33,15 @@ export type WizardProbe = { status: number; lifecycle?: string | null } | { stat
  *   anything else (5xx, unreachable) -> the sign-in page: `bootstrapped` has
  *        already said this is not a fresh install, and the sign-in page surfaces
  *        its own failure instead of claiming the install is empty.
+ *   403 from /wizard/state + no membership at all -> 'noAccess' (D5): a
+ *     real session (Google or otherwise) that isn't a member of any org.
+ *     A 403 WITH a membership (wrong role for the admin-only wizard) still
+ *     reads as 'ready', exactly as before.
  */
-export function phaseFor(bootstrapped: boolean, probe: WizardProbe): Phase {
+export function phaseFor(bootstrapped: boolean, probe: WizardProbe, hasMembership: boolean): Phase {
   if (!bootstrapped) return 'bootstrap';
   if (probe.status === 'unreachable' || probe.status === 401) return 'signin';
-  if (probe.status === 403) return 'ready';
+  if (probe.status === 403) return hasMembership ? 'ready' : 'noAccess';
   if (probe.status >= 200 && probe.status < 300) {
     return probe.lifecycle === 'ready' ? 'ready' : 'wizard';
   }
@@ -84,6 +89,7 @@ export function App() {
   const token = claimTokenFromPath();
   const [phase, setPhase] = useState<Phase>('loading');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [noAccessEmail, setNoAccessEmail] = useState('');
 
   const refresh = async () => {
     const { bootstrapped } = await api.get<{ bootstrapped: boolean }>('/bootstrap');
@@ -97,7 +103,13 @@ export function App() {
     } catch (err) {
       probe = err instanceof ApiError ? { status: err.status } : { status: 'unreachable' };
     }
-    setPhase(phaseFor(bootstrapped, probe));
+    let hasMembership = false;
+    if (probe.status === 403) {
+      const me = await api.get<{ email: string; hasMembership: boolean }>('/me').catch(() => null);
+      hasMembership = me?.hasMembership ?? false;
+      setNoAccessEmail(me?.email ?? '');
+    }
+    setPhase(phaseFor(bootstrapped, probe, hasMembership));
     setIsAdmin(isAdminFrom(probe));
   };
 
@@ -111,6 +123,7 @@ export function App() {
     return <Bootstrap onDone={refresh} onSignIn={() => setPhase('signin')} />;
   }
   if (phase === 'signin') return <SignIn onDone={refresh} />;
+  if (phase === 'noAccess') return <NoAccess email={noAccessEmail} />;
   if (phase === 'wizard') {
     // A full-screen takeover, not a tab inside the shell: a brain that is
     // not `ready` has no Sources and no files, so the shell's editor would
