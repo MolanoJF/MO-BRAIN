@@ -10,6 +10,9 @@
 // `test/unit/console-tokens.test.ts` checks — it scans this file as well as the
 // CSS precisely because the `--color-accent` -> `--color-cta` rename broke 12
 // references here and a CSS-only scan would have missed every one of them.
+//
+// The one thing that does NOT come free is CodeMirror's own idea of the colour
+// scheme, which is why `consoleEditorTheme` takes a flag. See its doc comment.
 
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
@@ -17,114 +20,103 @@ import { EditorView } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { hashtagTag, highlightTag } from "./vendor/baalda/ofm/tags.ts";
 
-/**
- * Editor chrome. `dark: true` tells CodeMirror the base colour scheme so its
- * focus/selection defaults assume a dark background.
- */
-const chrome = EditorView.theme(
-  {
-    "&": {
-      backgroundColor: "var(--color-bg)",
-      color: "var(--color-text)",
-      fontFamily: "var(--font-sans)",
-      height: "100%",
-    },
-    "&.cm-focused": { outline: "none" },
-    ".cm-scroller": {
-      fontFamily: "var(--font-mono)",
-      fontSize: "var(--control-font)",
-      lineHeight: "1.65",
-    },
-    ".cm-content": {
-      padding: "var(--control-gap) calc(var(--control-gap) * 2)",
-      caretColor: "var(--color-cta)",
-    },
-    ".cm-line": { position: "relative" },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-cta)" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "color-mix(in srgb, var(--color-cta) 30%, transparent)",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "color-mix(in srgb, var(--color-subtle) 55%, transparent)",
-    },
-    ".cm-gutters": {
-      backgroundColor: "transparent",
-      color: "var(--color-muted)",
-      border: "none",
-    },
-    ".cm-activeLineGutter": { backgroundColor: "transparent" },
-
-    // ---- Live-preview widget classes (see vendor/baalda/livePreview.ts) ----
-    ".cm-md-link": {
-      color: "var(--color-cta)",
-      textDecoration: "underline",
-      textUnderlineOffset: "2px",
-      cursor: "pointer",
-    },
-    ".cm-bullet": { color: "var(--color-muted)" },
-    ".cm-hashtag": {
-      color: "var(--color-cta)",
-      background: "color-mix(in srgb, var(--color-cta) 15%, transparent)",
-      // Not --control-radius: this is a 2px-padded inline chip inside a line of
-      // prose, and the 6px control radius on a box that short reads as a pill.
-      borderRadius: "3px",
-      padding: "0 2px",
-    },
-    ".cm-task-checkbox": {
-      accentColor: "var(--color-cta)",
-      verticalAlign: "middle",
-      marginRight: "4px",
-    },
-    ".cm-fence-copy": {
-      position: "absolute",
-      top: "2px",
-      right: "0",
-      fontSize: "11px",
-      lineHeight: "1.4",
-      padding: "1px 6px",
-      color: "var(--color-muted)",
-      background: "var(--color-surface)",
-      border: "1px solid var(--color-subtle)",
-      borderRadius: "var(--control-radius)",
-      cursor: "pointer",
-      opacity: "0",
-      transition: "opacity .12s ease",
-    },
-    ".cm-line:hover .cm-fence-copy": { opacity: "1" },
-    ".cm-frontmatter": { color: "var(--color-muted)" },
-    ".cm-frontmatter-fence": {
-      color: "var(--color-subtle)",
-      fontFamily: "var(--font-mono)",
-    },
-    ".cm-block-inset": { paddingLeft: "16px" },
-
-    // ---- Callouts (see vendor/baalda/ofm/callout.ts) -----------------------
-    ".cm-callout": {
-      borderLeft: "3px solid var(--color-muted)",
-      paddingLeft: "10px",
-      backgroundColor: "color-mix(in srgb, var(--color-muted) 8%, transparent)",
-    },
-    '.cm-callout[data-callout="note"]': { borderLeftColor: "var(--color-cta)" },
-    '.cm-callout[data-callout="tip"]': { borderLeftColor: "var(--color-ok)" },
-    '.cm-callout[data-callout="warning"]': { borderLeftColor: "var(--color-warning)" },
-    '.cm-callout[data-callout="danger"]': { borderLeftColor: "var(--color-danger)" },
-    ".cm-callout-title": { fontWeight: "600" },
-    ".cm-callout-icon": {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "5px",
-      color: "inherit",
-      marginRight: "4px",
-    },
+/** Editor chrome. Identical in both themes — every colour is a token — which is
+ *  why the same object builds both variants below. */
+const chromeStyles = {
+  "&": {
+    backgroundColor: "var(--color-bg)",
+    color: "var(--color-text)",
+    fontFamily: "var(--font-sans)",
+    height: "100%",
   },
-  // Seeds CodeMirror's own selection and focus defaults for a dark background.
-  // It is a half-truth now that light mode exists, and knowingly left alone:
-  // every colour above already comes from a token and re-themes on its own, so
-  // this only affects CodeMirror's built-in fallbacks. Making it follow the
-  // theme means rebuilding the extension whenever the theme changes, which is
-  // an Editor-lifecycle change and belongs to Phase 2.
-  { dark: true }
-);
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "var(--control-font)",
+    lineHeight: "1.65",
+  },
+  ".cm-content": {
+    padding: "var(--control-gap) calc(var(--control-gap) * 2)",
+    caretColor: "var(--color-cta)",
+  },
+  ".cm-line": { position: "relative" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-cta)" },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+    backgroundColor: "color-mix(in srgb, var(--color-cta) 30%, transparent)",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "color-mix(in srgb, var(--color-subtle) 55%, transparent)",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    color: "var(--color-muted)",
+    border: "none",
+  },
+  ".cm-activeLineGutter": { backgroundColor: "transparent" },
+
+  // ---- Live-preview widget classes (see vendor/baalda/livePreview.ts) ----
+  ".cm-md-link": {
+    color: "var(--color-cta)",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
+    cursor: "pointer",
+  },
+  ".cm-bullet": { color: "var(--color-muted)" },
+  ".cm-hashtag": {
+    color: "var(--color-cta)",
+    background: "color-mix(in srgb, var(--color-cta) 15%, transparent)",
+    // Not --control-radius: this is a 2px-padded inline chip inside a line of
+    // prose, and the 6px control radius on a box that short reads as a pill.
+    borderRadius: "3px",
+    padding: "0 2px",
+  },
+  ".cm-task-checkbox": {
+    accentColor: "var(--color-cta)",
+    verticalAlign: "middle",
+    marginRight: "4px",
+  },
+  ".cm-fence-copy": {
+    position: "absolute",
+    top: "2px",
+    right: "0",
+    fontSize: "11px",
+    lineHeight: "1.4",
+    padding: "1px 6px",
+    color: "var(--color-muted)",
+    background: "var(--color-surface)",
+    border: "1px solid var(--color-subtle)",
+    borderRadius: "var(--control-radius)",
+    cursor: "pointer",
+    opacity: "0",
+    transition: "opacity .12s ease",
+  },
+  ".cm-line:hover .cm-fence-copy": { opacity: "1" },
+  ".cm-frontmatter": { color: "var(--color-muted)" },
+  ".cm-frontmatter-fence": {
+    color: "var(--color-subtle)",
+    fontFamily: "var(--font-mono)",
+  },
+  ".cm-block-inset": { paddingLeft: "16px" },
+
+  // ---- Callouts (see vendor/baalda/ofm/callout.ts) -----------------------
+  ".cm-callout": {
+    borderLeft: "3px solid var(--color-muted)",
+    paddingLeft: "10px",
+    backgroundColor: "color-mix(in srgb, var(--color-muted) 8%, transparent)",
+  },
+  '.cm-callout[data-callout="note"]': { borderLeftColor: "var(--color-cta)" },
+  '.cm-callout[data-callout="tip"]': { borderLeftColor: "var(--color-ok)" },
+  '.cm-callout[data-callout="warning"]': { borderLeftColor: "var(--color-warning)" },
+  '.cm-callout[data-callout="danger"]': { borderLeftColor: "var(--color-danger)" },
+  ".cm-callout-title": { fontWeight: "600" },
+  ".cm-callout-icon": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    color: "inherit",
+    marginRight: "4px",
+  },
+};
 
 /**
  * Syntax colours. One palette, sourced from the console tokens; `defaultHighlightStyle`
@@ -198,4 +190,29 @@ const highlight = HighlightStyle.define([
   { tag: hashtagTag, color: "var(--color-cta)" },
 ]);
 
-export const consoleEditorTheme: Extension = [chrome, syntaxHighlighting(highlight)];
+// Both variants are built once, at import. `EditorView.theme` only assembles a
+// StyleModule — nothing reaches the DOM until a view mounts one — and building
+// them eagerly keeps each extension's identity stable, so a view that flips
+// back to a theme it has already worn re-mounts nothing.
+const chromeDark = EditorView.theme(chromeStyles, { dark: true });
+const chromeLight = EditorView.theme(chromeStyles, { dark: false });
+const highlighting = syntaxHighlighting(highlight);
+
+/**
+ * The editor's theme, as a function of the app's.
+ *
+ * Every colour above is a `var()`, so the *paint* follows `:root.dark` with no
+ * help. The flag is the part that cannot: CodeMirror reads it to pick its own
+ * base theme (`&dark` vs `&light` rules), to seed the selection layer's
+ * compositing, and for the caret and drop-cursor defaults. Hardcoding
+ * `dark: true` — which is what this was until light mode existed — leaves the
+ * editor correctly painted and wrongly informed, which shows up exactly where
+ * CodeMirror's built-in fallbacks show through rather than ours.
+ *
+ * It is a function rather than a constant because the flag is baked into the
+ * extension at construction, so following the theme means handing the view a
+ * different extension. `mountMarkdownEditor` swaps it through a Compartment.
+ */
+export function consoleEditorTheme(dark: boolean): Extension {
+  return [dark ? chromeDark : chromeLight, highlighting];
+}

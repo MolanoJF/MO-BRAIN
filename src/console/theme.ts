@@ -67,6 +67,59 @@ export function setTheme(choice: ThemeChoice): void {
 }
 
 /**
+ * Dark iff the class attribute carries `dark`. Split on whitespace rather than
+ * a substring test, so a future `darkroom-banner` class cannot answer this.
+ *
+ * `.light` is deliberately not consulted. `applyTheme` always writes exactly
+ * one of the two, and when neither is there — the first paint, before any
+ * script has run — `tokens.css` is serving the bare `:root` block, which IS the
+ * light theme. "No class" and "light" are the same answer, so `dark` is the
+ * only class that changes it.
+ */
+export function isDarkClassName(className: string): boolean {
+  return className.split(/\s+/).includes('dark');
+}
+
+/** What the page is painting right now, read off the class `applyTheme` writes.
+ *  Safe to call before any choice has been applied. */
+export function isDarkNow(): boolean {
+  if (typeof document === 'undefined') return false;
+  return isDarkClassName(document.documentElement.className);
+}
+
+/**
+ * Subscribe to theme flips.
+ *
+ * `applyTheme` toggles a class imperatively, so a theme change is invisible to
+ * React — nothing re-renders for it, and nothing needs to, because every other
+ * surface in the console is painted by CSS that re-resolves on its own. The
+ * exception is a surface that has to be TOLD its colour scheme rather than
+ * shown it: the CodeMirror editor (see `editor/theme.ts`).
+ *
+ * This lives here, next to the code that writes the class, rather than in the
+ * page that needed it first: a page component is the wrong owner of a
+ * document-wide observer, and the second consumer would otherwise hand-roll a
+ * second one that observes the same attribute.
+ *
+ * It fires only on a real transition. `applyTheme` rewrites both classes on
+ * every call, including the many calls that change nothing (a `storage` event
+ * from another tab, an OS flip while an explicit choice is selected), and a
+ * subscriber that rebuilt itself on each of those would be paying for noise.
+ */
+export function watchTheme(onChange: (dark: boolean) => void): () => void {
+  const root = document.documentElement;
+  let last = isDarkClassName(root.className);
+  const observer = new MutationObserver(() => {
+    const next = isDarkClassName(root.className);
+    if (next === last) return;
+    last = next;
+    onChange(next);
+  });
+  observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+  return () => observer.disconnect();
+}
+
+/**
  * Keeps `system` honest. Two listeners, because there are two ways the right
  * answer changes without this tab doing anything:
  *

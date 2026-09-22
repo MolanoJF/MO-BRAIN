@@ -18,6 +18,7 @@ import {
   rowOf,
 } from '../../src/console/editor/vendor/baalda/table/parse.ts';
 import { markdownExtensions } from '../../src/console/editor/index.ts';
+import { isDarkClassName } from '../../src/console/theme.ts';
 
 describe('console editor — pure helpers', () => {
   test('fenceRenderKind keeps html and drops mermaid (degraded to code)', () => {
@@ -124,6 +125,26 @@ describe('console editor — extension assembly (DOM-free)', () => {
     expect(state.facet(EditorView.editable)).toBe(true);
   });
 
+  test('the colour scheme reaches CodeMirror, not just the CSS', () => {
+    // The point of threading `dark` at all. Every colour in `editor/theme.ts`
+    // is a `var()` and repaints on its own, so a test that only looked at the
+    // paint would pass with the flag stuck on `true` — which is exactly the
+    // bug this replaced. `EditorView.darkTheme` is the facet CodeMirror reads
+    // for its OWN defaults (base theme, selection compositing, caret), so it
+    // is the one thing worth asserting.
+    const light = EditorState.create({ doc: '# Hi', extensions: markdownExtensions('read', undefined, false) });
+    const dark = EditorState.create({ doc: '# Hi', extensions: markdownExtensions('read', undefined, true) });
+    expect(light.facet(EditorView.darkTheme)).toBe(false);
+    expect(dark.facet(EditorView.darkTheme)).toBe(true);
+  });
+
+  test('omitting the flag means light, which is what a classless <html> paints', () => {
+    // `tokens.css` puts the light palette in the bare `:root` block, so a
+    // caller that says nothing must not get the dark defaults.
+    const state = EditorState.create({ doc: '# Hi', extensions: markdownExtensions('read') });
+    expect(state.facet(EditorView.darkTheme)).toBe(false);
+  });
+
   test('a rich document assembles without a DOM and round-trips unchanged', () => {
     const source = [
       '---',
@@ -157,5 +178,35 @@ describe('console editor — extension assembly (DOM-free)', () => {
     });
     expect(state.doc.toString()).toBe(source);
     expect(state.readOnly).toBe(true);
+  });
+});
+
+/**
+ * `isDarkClassName` is the editor's theme INPUT: it is the one reading that
+ * turns the class `applyTheme` writes on `<html>` into the boolean
+ * `markdownExtensions` takes above, so it is asserted here, beside the flag it
+ * feeds, rather than with the rest of `theme.ts`.
+ */
+describe('console editor — reading the app theme off <html>', () => {
+  test('the dark class, and only a whole class named dark', () => {
+    expect(isDarkClassName('dark')).toBe(true);
+    expect(isDarkClassName('h-full dark antialiased')).toBe(true);
+    expect(isDarkClassName('light')).toBe(false);
+    // A substring test would call all three of these dark.
+    expect(isDarkClassName('darkroom-banner')).toBe(false);
+    expect(isDarkClassName('is-dark')).toBe(false);
+    expect(isDarkClassName('markdown-dark-preview')).toBe(false);
+  });
+
+  test('no class at all is light, because the bare :root block is light', () => {
+    expect(isDarkClassName('')).toBe(false);
+    expect(isDarkClassName('   ')).toBe(false);
+  });
+
+  test('dark wins when both are somehow present, as the cascade does', () => {
+    // `:root.dark` in tokens.css is written after `:root` and overrides it, so
+    // the reading has to agree with what the page would actually paint.
+    expect(isDarkClassName('light dark')).toBe(true);
+    expect(isDarkClassName('dark light')).toBe(true);
   });
 });

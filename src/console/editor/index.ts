@@ -32,6 +32,13 @@ export interface MarkdownEditorOptions {
   doc: string;
   /** Default `'read'`. */
   mode?: EditorMode;
+  /**
+   * The app's colour scheme. Required, unlike `mode`: a wrong `mode` is visible
+   * the moment anyone tries to type, whereas a wrong `dark` is invisible until
+   * someone squints at a selection highlight. A caller that has to name it
+   * cannot forget it.
+   */
+  dark: boolean;
   onChange?: (value: string) => void;
 }
 
@@ -39,6 +46,7 @@ export interface MarkdownEditorHandle {
   getValue(): string;
   setValue(next: string): void;
   setMode(mode: EditorMode): void;
+  setDark(dark: boolean): void;
   focus(): void;
   destroy(): void;
 }
@@ -57,8 +65,8 @@ function modeFacets(mode: EditorMode): Extension[] {
 }
 
 /**
- * Everything except the mode facets, so a live view can reconfigure its mode
- * through a Compartment without rebuilding the buffer.
+ * Everything except the mode facets and the theme, so a live view can
+ * reconfigure either one through a Compartment without rebuilding the buffer.
  */
 function baseExtensions(onChange?: (value: string) => void): Extension[] {
   return [
@@ -94,8 +102,6 @@ function baseExtensions(onChange?: (value: string) => void): Extension[] {
     codeFenceFlair,
     // Callout tinting + tag pills.
     ...ofmDecorations,
-    // The console's token-based theme + syntax highlighting.
-    consoleEditorTheme,
 
     ...(onChange
       ? [
@@ -109,12 +115,20 @@ function baseExtensions(onChange?: (value: string) => void): Extension[] {
   ];
 }
 
-/** The assembled extension set for a mode. Exported so it is inspectable/testable. */
+/**
+ * The assembled extension set for a mode. Exported so it is inspectable/testable.
+ *
+ * `dark` defaults to `false` because that is what the page itself defaults to:
+ * with neither class on `<html>`, `tokens.css` is serving the bare `:root`
+ * block, which is the light theme. A caller that says nothing therefore gets
+ * the same answer the browser would give it.
+ */
 export function markdownExtensions(
   mode: EditorMode,
   onChange?: (value: string) => void,
+  dark = false,
 ): Extension[] {
-  return [...baseExtensions(onChange), ...modeFacets(mode)];
+  return [...baseExtensions(onChange), consoleEditorTheme(dark), ...modeFacets(mode)];
 }
 
 /**
@@ -124,6 +138,12 @@ export function markdownExtensions(
 export function mountMarkdownEditor(options: MarkdownEditorOptions): MarkdownEditorHandle {
   const mode = options.mode ?? "read";
   const modeCompartment = new Compartment();
+  // The theme gets a Compartment of its own for the same reason the mode does,
+  // and one that matters more: the operator flips the app's theme mid-edit, and
+  // a live reconfigure keeps the buffer, the undo history, the caret and the
+  // scroll offset exactly where they were. Rebuilding the view instead would
+  // discard an unsaved draft — the flag is not worth a keystroke.
+  const themeCompartment = new Compartment();
   let destroyed = false;
   let lastValue = options.doc;
 
@@ -131,6 +151,7 @@ export function mountMarkdownEditor(options: MarkdownEditorOptions): MarkdownEdi
     doc: options.doc,
     extensions: [
       ...baseExtensions(options.onChange),
+      themeCompartment.of(consoleEditorTheme(options.dark)),
       modeCompartment.of(modeFacets(mode)),
     ],
   });
@@ -152,6 +173,10 @@ export function mountMarkdownEditor(options: MarkdownEditorOptions): MarkdownEdi
     setMode(next: EditorMode): void {
       if (destroyed) return;
       view.dispatch({ effects: modeCompartment.reconfigure(modeFacets(next)) });
+    },
+    setDark(next: boolean): void {
+      if (destroyed) return;
+      view.dispatch({ effects: themeCompartment.reconfigure(consoleEditorTheme(next)) });
     },
     focus(): void {
       if (!destroyed) view.focus();

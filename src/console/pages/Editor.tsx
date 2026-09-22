@@ -12,6 +12,7 @@ import {
   staleNotice, bypassVisible, isDirty, modeAfterSave, BYPASS_NOTICE, errorText,
   fileErrorMessage,
 } from '../files/tree.ts';
+import { isDarkNow, watchTheme } from '../theme.ts';
 
 /* -------------------------------------------------------------------------
  * The right-hand pane, carved out of the console's old Files page component
@@ -42,6 +43,13 @@ export function Editor(props: {
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
+
+  // The editor is the console's only surface that cannot follow the theme
+  // through CSS alone: CodeMirror has to be told its colour scheme, not just
+  // shown it (see `editor/theme.ts`). `applyTheme` toggles a class on <html>
+  // imperatively, which React never sees, so the flip has to be subscribed to.
+  const [dark, setDark] = useState(isDarkNow);
+  useEffect(() => watchTheme(setDark), []);
 
   useEffect(() => {
     if (sourceId === null || path === null) return;
@@ -84,17 +92,13 @@ export function Editor(props: {
   // the first handle is destroyed and the ref cleared before the second mount
   // creates its own.
   //
-  // Phase 1 left `{ dark: true }` hardcoded on the CodeMirror theme
-  // (`editor/theme.ts`) and deferred the fix here on the grounds that fixing
-  // it means remounting when the theme changes — an Editor-lifecycle concern.
-  // It is NOT fixed here, and deliberately so: remounting is only half of it,
-  // and it is the half that does nothing on its own. `consoleEditorTheme` is a
-  // module-level constant with the flag baked in, and `mountMarkdownEditor`
-  // takes no theme argument, so a theme-keyed remount today would tear down
-  // the operator's caret and scroll position and rebuild a byte-identical
-  // extension set. Adding the remount dep is one line once `editor/theme.ts`
-  // exposes the flag and `editor/index.ts` threads it through; both are
-  // outside this phase's fence, so the requirement is reported instead.
+  // `dark` is read here but is NOT a dependency, and that is the whole point.
+  // Keying this effect on the theme would remount the view on every flip,
+  // rebuilding it from `file.content` — which throws away whatever the operator
+  // has typed since the file loaded, along with the caret and the scroll
+  // offset. Losing an unsaved draft to a theme toggle is a worse bug than the
+  // one it would be fixing. The theme is reconfigured on the LIVE view instead,
+  // by the effect below.
   useEffect(() => {
     const parent = hostRef.current;
     if (path === null || parent === null) return;
@@ -102,6 +106,7 @@ export function Editor(props: {
       parent,
       doc: file?.content ?? '',
       mode,
+      dark,
       // Programmatic `setValue` never fires this, so loading a file does not
       // count as an edit — only the operator's typing does.
       onChange: (value) => setDraft(value),
@@ -111,7 +116,11 @@ export function Editor(props: {
       handle.destroy();
       if (editorRef.current === handle) editorRef.current = null;
     };
-    // The value/mode effect below owns updates; this effect owns lifetime.
+    // The value/mode and theme effects below own updates; this one owns
+    // lifetime. `dark` is read above for the initial mount only — see the note
+    // at the top of this effect for why it must not become a dependency. A
+    // remount for some OTHER reason still opens in the right theme, because an
+    // effect always closes over the render it runs in.
     //
     // `sourceId` is in this dep array even though nothing inside the effect
     // body reads it. The host div below only renders once `sourceId` is
@@ -130,6 +139,13 @@ export function Editor(props: {
     if (file !== null) handle.setValue(file.content);
     handle.setMode(mode);
   }, [file, mode]);
+
+  // A theme flip reconfigures the live view instead of replacing it, so the
+  // document, the undo history, the caret and the scroll offset all survive it
+  // untouched — the operator keeps typing through the transition. Nothing here
+  // changes the buffer, so `draft`, `baseline` and therefore `isDirty` are not
+  // even aware this ran.
+  useEffect(() => { editorRef.current?.setDark(dark); }, [dark]);
 
   const dirty = isDirty(baseline, draft);
 
