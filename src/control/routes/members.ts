@@ -71,6 +71,12 @@ members.post('/members', guard('admin', async (c, { userId, orgId }) => {
     const signed = await auth.api.signUpEmail({ body: { email, password, name: email } });
     const id = (signed as { user?: { id?: string } }).user?.id;
     if (!id) throw new Error('sign_up_failed');
+    // D3: the admin is vouching for this exact address. Without this, an
+    // invitee who later chooses "Continue with Google" would be refused —
+    // Better Auth's account-linking (node_modules/better-auth/dist/oauth2/
+    // link-account.mjs:76-85) requires the LOCAL row's emailVerified to
+    // already be true, no matter what Google itself reports.
+    await getDb().update(schema.users).set({ emailVerified: true }).where(eq(schema.users.id, id));
     targetUserId = id;
   }
 
