@@ -69,7 +69,9 @@ describe('draftToManifest', () => {
   test('omits extends entirely for a standalone ontology', () => {
     const r = validateDraft({ ...good, extends: null, linkVerbs: [] });
     if (!r.ok) throw new Error('fixture');
-    expect('extends' in draftToManifest(r.draft, '0.50.5.0')).toBe(false);
+    const m = draftToManifest(r.draft, '0.50.5.0');
+    expect('extends' in m).toBe(true);
+    expect(m.extends).toBeNull();
   });
 });
 

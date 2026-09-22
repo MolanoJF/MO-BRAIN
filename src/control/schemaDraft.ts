@@ -109,7 +109,11 @@ export function draftToManifest(d: PackDraft, gbrainMinVersion: string): Record<
     name: d.name,
     version: '0.1.0',
     gbrain_min_version: gbrainMinVersion.split('.').slice(0, 3).join('.'),
-    ...(d.extends ? { extends: d.extends } : {}),
+    // gbrain's manifest zod defaults a MISSING extends to 'gbrain-base'
+    // (z.string().nullable().default('gbrain-base')), so a standalone ontology
+    // must say `extends: null` explicitly. Omitting the key silently inherits
+    // the base pack (S7).
+    extends: d.extends,
     description: d.description,
     page_types: d.pageTypes.map((t) => ({
       name: t.name, primitive: t.primitive,
