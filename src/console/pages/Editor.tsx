@@ -82,7 +82,17 @@ export function Editor(props: {
       if (editorRef.current === handle) editorRef.current = null;
     };
     // The value/mode effect below owns updates; this effect owns lifetime.
-  }, [path]);
+    //
+    // `sourceId` is in this dep array even though nothing inside the effect
+    // body reads it. The host div below only renders once `sourceId` is
+    // non-null (see the early "No Sources you can reach." return above); on
+    // a deep link, the first render or two can have `path` already set while
+    // `sourceId` is still resolving, so `hostRef.current` is null and this
+    // effect bails out having mounted nothing. If `sourceId` is not a dep,
+    // the render that finally creates the host div is not one this effect
+    // re-runs for — `path` never changed, so nothing ever mounts, and the
+    // editor stays permanently blank. Do not drop this as "unused".
+  }, [sourceId, path]);
 
   useEffect(() => {
     const handle = editorRef.current;
