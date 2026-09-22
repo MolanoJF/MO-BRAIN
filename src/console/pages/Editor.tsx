@@ -43,6 +43,22 @@ export function Editor(props: {
 
   useEffect(() => {
     if (sourceId === null || path === null) return;
+    // Clear the previous file's state before fetching the new one. Without
+    // this, a save notice, a stale-save notice, or a read error from the
+    // FILE JUST LEFT stays on screen describing the file now open — a stale
+    // "This file changed elsewhere" or "You are editing this Source as an
+    // org admin" notice is not cosmetic, it is a false statement about the
+    // file on screen, and a stale `baseline` would let `isDirty` compare the
+    // new text against the old file's content. `file`/`baseline`/`draft`
+    // are cleared too so the previous file's content cannot flash in the
+    // editor, or be saved against the new path, while the fetch is in
+    // flight.
+    setFile(null);
+    setBaseline('');
+    setDraft('');
+    setSaveResult(null);
+    setSaveError(null);
+    setFileError(null);
     let cancelled = false;
     void filesApi.file(sourceId, path)
       .then((body) => {
