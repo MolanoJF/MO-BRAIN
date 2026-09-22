@@ -1,23 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from './api.ts';
-import { PRODUCT_NAME } from '../control/lifecycle.ts';
 import { Bootstrap } from './pages/Bootstrap.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { Wizard } from './pages/Wizard.tsx';
-import { Health } from './pages/Health.tsx';
-import { Members } from './pages/Members.tsx';
 import { Claim } from './pages/Claim.tsx';
-import { Access } from './pages/Access.tsx';
-import { Schedules } from './pages/Schedules.tsx';
-import { Runs } from './pages/Runs.tsx';
-import { Spend } from './pages/Spend.tsx';
-import { Upgrades } from './pages/Upgrades.tsx';
-import { Files } from './pages/Files.tsx';
-import { Schema } from './pages/Schema.tsx';
-import { Sources } from './pages/Sources.tsx';
+import { legacyRedirect } from './router.ts';
+import { AppShell } from './AppShell.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
-type Page = 'health' | 'setup' | 'members' | 'access' | 'schedules' | 'runs' | 'spend' | 'upgrades' | 'files' | 'schema' | 'sources';
 
 /**
  * What `GET /api/wizard/state` answered, as the screen chooser sees it: an HTTP
@@ -54,21 +44,18 @@ export function phaseFor(bootstrapped: boolean, probe: WizardProbe): Phase {
 }
 
 /**
- * The SPA's only real routes. Everything else is a page switch, but a schedule
- * alert (or an upgrade banner) arrives as a link, so `/schedules` and
- * `/upgrades` have to survive a cold load. `pathname` is injectable so the
- * mapping can be unit-tested without a DOM; production always takes the
- * default.
+ * A 403 from the admin-only wizard probe is a SESSION WITHOUT THE ADMIN ROLE —
+ * the console's only role signal. `phaseFor` already draws this exact line:
+ * a 403 reaches `ready` (a valid session, refused only by role) while
+ * everything else that is not a clean 2xx does not. `isAdminFrom` reads the
+ * same probe for the shell's `isAdmin` prop, which gates which settings tabs
+ * `resolveTab`/`visibleTabs` show. Only a clean 2xx (the probe succeeding,
+ * meaning the caller *is* allowed past the admin-only endpoint) counts;
+ * every refusal or failure — 403, 401, 5xx, unreachable — reads as "not
+ * admin", never as "admin, but we couldn't check."
  */
-export function pageFromPath(pathname: string = window.location.pathname): Page | null {
-  const path = pathname.replace(/\/+$/, '');
-  if (path === '/schedules') return 'schedules';
-  if (path === '/runs') return 'runs';
-  if (path === '/spend') return 'spend';
-  if (path === '/upgrades') return 'upgrades';
-  if (path === '/files') return 'files';
-  if (path === '/sources') return 'sources';
-  return null;
+export function isAdminFrom(probe: WizardProbe): boolean {
+  return probe.status !== 'unreachable' && probe.status >= 200 && probe.status < 300;
 }
 
 function claimTokenFromPath(): string | null {
@@ -77,11 +64,26 @@ function claimTokenFromPath(): string | null {
   return decodeURIComponent(m[1]);
 }
 
+// A live bookmark to a pre-shell URL (`/sources`, `/schedules`, `/runs`,
+// `/spend`, `/upgrades`, `/files`) has to survive this rewrite. This runs
+// once, before the first route is parsed anywhere downstream (`AppShell`'s
+// `useRoute()`), so the very first paint already sees the rewritten path
+// rather than a route that `parseRoute` would otherwise fall back to '/'.
+// Guarded on `window` existing: this module is imported by
+// `test/unit/console-app.test.ts`, which runs under bun's test runner with
+// no DOM (this repo has no happy-dom/jsdom), so top-level module code can
+// never assume `window` is present.
+if (typeof window !== 'undefined') {
+  const redirected = legacyRedirect(window.location.pathname);
+  if (redirected !== null) {
+    window.history.replaceState(null, '', redirected);
+  }
+}
+
 export function App() {
   const token = claimTokenFromPath();
-  const requested = pageFromPath();
   const [phase, setPhase] = useState<Phase>('loading');
-  const [page, setPage] = useState<Page>(requested ?? 'setup');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const refresh = async () => {
     const { bootstrapped } = await api.get<{ bootstrapped: boolean }>('/bootstrap');
@@ -95,12 +97,8 @@ export function App() {
     } catch (err) {
       probe = err instanceof ApiError ? { status: err.status } : { status: 'unreachable' };
     }
-    const next = phaseFor(bootstrapped, probe);
-    setPhase(next);
-    if (next === 'ready') {
-      // Never clobber a page the operator asked for by URL.
-      setPage((current) => (current === 'setup' ? (requested ?? 'health') : current));
-    }
+    setPhase(phaseFor(bootstrapped, probe));
+    setIsAdmin(isAdminFrom(probe));
   };
 
   useEffect(() => { if (!token) void refresh(); }, []);
@@ -113,40 +111,12 @@ export function App() {
     return <Bootstrap onDone={refresh} onSignIn={() => setPhase('signin')} />;
   }
   if (phase === 'signin') return <SignIn onDone={refresh} />;
+  if (phase === 'wizard') {
+    // A full-screen takeover, not a tab inside the shell: a brain that is
+    // not `ready` has no Sources and no files, so the shell's editor would
+    // just be an empty frame around a Source switcher with nothing to switch.
+    return <Wizard onReady={refresh} />;
+  }
 
-  return (
-    <div className="flex min-h-screen">
-      <nav className="w-[200px] shrink-0 border-r border-subtle p-4">
-        <div className="mb-6 font-semibold">{PRODUCT_NAME}</div>
-        <button className="nav-item" onClick={() => setPage('health')}>Health</button>
-        <button className="nav-item" onClick={() => setPage('setup')}>Setup</button>
-        {phase === 'ready' && (
-          <>
-            <button className="nav-item" onClick={() => setPage('files')}>Files</button>
-            <button className="nav-item" onClick={() => setPage('members')}>Members</button>
-            <button className="nav-item" onClick={() => setPage('schema')}>Schema</button>
-            <button className="nav-item" onClick={() => setPage('sources')}>Sources</button>
-            <button className="nav-item" onClick={() => setPage('schedules')}>Schedules</button>
-            <button className="nav-item" onClick={() => setPage('runs')}>Runs</button>
-            <button className="nav-item" onClick={() => setPage('spend')}>Spend</button>
-            <button className="nav-item" onClick={() => setPage('upgrades')}>Upgrades</button>
-            <button className="nav-item" onClick={() => setPage('access')}>Access</button>
-          </>
-        )}
-      </nav>
-      <main className="flex-1 p-6">
-        {page === 'health' && <Health />}
-        {page === 'setup' && <Wizard onReady={refresh} />}
-        {page === 'members' && <Members />}
-        {page === 'schema' && <Schema />}
-        {page === 'sources' && <Sources />}
-        {page === 'schedules' && <Schedules />}
-        {page === 'runs' && <Runs />}
-        {page === 'spend' && <Spend />}
-        {page === 'upgrades' && <Upgrades />}
-        {page === 'access' && <Access />}
-        {page === 'files' && <Files />}
-      </main>
-    </div>
-  );
+  return <AppShell isAdmin={isAdmin} />;
 }

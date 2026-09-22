@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { phaseFor, pageFromPath } from '../../src/console/App.tsx';
+import { phaseFor, isAdminFrom } from '../../src/console/App.tsx';
 import { signInError } from '../../src/console/pages/SignIn.tsx';
 import { ApiError } from '../../src/console/api.ts';
 
@@ -47,22 +47,37 @@ describe('the console door: the bootstrap form, the sign-in page, or the app (D1
   });
 });
 
-describe('cold-load routes survive a page load', () => {
-  test('/sources is a real route, so a bookmarked Sources page is not lost', () => {
-    expect(pageFromPath('/sources')).toBe('sources');
-    // A trailing slash is the same route.
-    expect(pageFromPath('/sources/')).toBe('sources');
+// `pageFromPath` and its cold-load-route tests were deleted along with the
+// nav-and-page-switch `App.tsx` replaced (Task 8). Its property — "a
+// bookmarked Sources page is not lost" — is not just preserved but
+// strengthened in `test/unit/console-router.test.ts`, which asserts both the
+// new `/settings/sources` route and the `/sources` -> `/settings/sources`
+// redirect (and the same for `/schedules`, `/runs`, `/spend`, `/upgrades`,
+// `/files`). See that file's `parseRoute`/`legacyRedirect` describe blocks.
+
+describe('isAdminFrom: the only role signal the console client has', () => {
+  // The regression to name: treating a non-admin as an admin would show them
+  // four admin-only settings tabs whose every call answers 403. `phaseFor`
+  // already draws this exact line for the phase gate; `isAdminFrom` draws it
+  // for the shell's `isAdmin` prop, from the same probe.
+  test('a 200 from the admin-only wizard probe is a session with the admin role', () => {
+    expect(isAdminFrom({ status: 200, lifecycle: 'ready' })).toBe(true);
   });
 
-  test('the sibling cold-load routes still resolve', () => {
-    expect(pageFromPath('/schedules')).toBe('schedules');
-    expect(pageFromPath('/upgrades')).toBe('upgrades');
-    expect(pageFromPath('/files')).toBe('files');
+  test('a 403 is a session without the admin role, not an error', () => {
+    expect(isAdminFrom({ status: 403 })).toBe(false);
   });
 
-  test('an unknown path is not silently mapped to a page', () => {
-    expect(pageFromPath('/nope')).toBeNull();
-    expect(pageFromPath('/')).toBeNull();
+  test('a 401 (no session at all) is never read as admin', () => {
+    expect(isAdminFrom({ status: 401 })).toBe(false);
+  });
+
+  test('a 500 does not default to admin', () => {
+    expect(isAdminFrom({ status: 500 })).toBe(false);
+  });
+
+  test('an unreachable probe does not default to admin', () => {
+    expect(isAdminFrom({ status: 'unreachable' })).toBe(false);
   });
 });
 

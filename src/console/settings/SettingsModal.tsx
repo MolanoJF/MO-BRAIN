@@ -74,11 +74,15 @@ export function SettingsModal({
 /**
  * Does this Esc keypress belong to us, or to a surface stacked above us?
  *
- * A confirm dialog opened from inside settings — `Sources.tsx`'s
- * archive/remove confirm, `Runs.tsx`'s revert confirm — renders its own
- * `.modal-backdrop` (or `.context-menu`) on top of this one. Esc has to
- * cancel THAT first; only once nothing is stacked above does it fall through
- * to closing settings itself.
+ * Nothing in this console currently renders a `.modal-backdrop` or
+ * `.context-menu` on top of this one — `Sources.tsx`'s archive/remove confirm
+ * and `Runs.tsx`'s revert confirm are both inline two-click confirmations
+ * (a first click that probes and gets `confirmation_required` back, a second
+ * that confirms), not a modal, a backdrop, or a `role="dialog"` surface. This
+ * guard is inert today. It stays anyway, at the cost of two lines, so that
+ * the first surface to actually stack above settings does not silently break
+ * Esc: without this check, that surface's Esc handler and this modal's would
+ * both fire on the same keypress, closing settings out from under it.
  */
 export function shouldCloseOnEscape(stackedSurfaceOpen: boolean): boolean {
   return !stackedSurfaceOpen;
