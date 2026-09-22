@@ -57,6 +57,7 @@ describe('the scope honesty banners', () => {
     expect(commandScope('doctor')).toBe('brain-wide');
     expect(commandScope('sync')).toBe('source');
     expect(commandScope('sources-push')).toBe('source');
+    expect(commandScope('autopilot-status')).toBe('brain-wide');
     expect(commandScope('not-a-command')).toBe(null);
     expect(commandScope(null)).toBe(null);
   });
@@ -393,7 +394,7 @@ describe('alerts are unmissable and acknowledgeable', () => {
   });
 
   test('every pinned kind is pinned for the right reason', () => {
-    for (const kind of ['push_blocked', 'lease_expired', 'connection_revoked']) {
+    for (const kind of ['push_blocked', 'lease_expired', 'connection_revoked', 'autopilot_installed']) {
       expect(pinnedAlerts([alert('x', kind, null)]).map((a) => a.id)).toEqual(['x']);
       expect(alertTone(kind)).toBe('danger');
     }
@@ -401,7 +402,8 @@ describe('alerts are unmissable and acknowledgeable', () => {
 
   test('the pinned predicate is the one the Health page filters by', () => {
     // The Health page reads kinds only — it never sees `acknowledgedAt`.
-    for (const kind of ['push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked']) {
+    for (const kind of ['push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked',
+      'autopilot_installed']) {
       expect(isPinnedAlert(kind)).toBe(true);
     }
     expect(isPinnedAlert('run_ok')).toBe(false);
@@ -411,6 +413,11 @@ describe('alerts are unmissable and acknowledgeable', () => {
   test('an unknown alert kind is still rendered as words, never as an enum', () => {
     expect(alertLabel('some_new_alert')).not.toContain('_');
     expect(alertTone('some_new_alert')).not.toBe('ok');
+  });
+
+  test('a rogue autopilot install reads as a reason, not an enum', () => {
+    expect(alertLabel('autopilot_installed')).not.toContain('_');
+    expect(alertLabel('autopilot_installed')).toMatch(/autopilot/i);
   });
 
   // Task 11's seam. `schedule_alerts.kind` is free text with no CHECK, so the
