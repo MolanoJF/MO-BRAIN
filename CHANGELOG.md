@@ -4,6 +4,23 @@ Notable changes to **Mobrain**. Versions are the product's `APP_VERSION`; images
 `ghcr.io/molanojf` (the only GHCR owner available; the product name is not a registry namespace). Full
 provenance — every `U*`, `P*` and `F*` — is in [`docs/slice-5-findings.md`](docs/slice-5-findings.md).
 
+## [Unreleased]
+
+Custom schema packs. An org admin can now define their brain's own ontology — page types, the folders
+they file into, and the link verbs between them — three ways that all share one `PackDraft` shape:
+design it in the console's Schema page, paste a draft into "Import draft", or have an agent draft it
+with the new `mobrain-schema-designer` skill, which only ever produces JSON for a human to import. The
+REST API is the only writer: it is admin-gated and audited (shape only, never a manifest body), it
+writes a created pack as `pack.json` through gbrain's file plane, and it edits an existing pack only
+through gbrain's atomic, lint-gated mutation batch. A pack is created but not activated; applying it
+ends with a gbrain `schema active` readback rather than a claim of success. gbrain never created
+directories from a pack, so Mobrain now does: on wizard finish, on apply, when a Space joins a ready
+brain, and when a mutation adds a type, every Space resolving the pack gets one `README.md` per page
+type — create-only, idempotent, one commit per Space, and never indexed because `README.md` is a
+gbrain metafile. `schema sync` stays additive: it fills blank types and never reclassifies. Bundled
+packs remain read-only; fork one to edit it. The S7 authoring probes that pinned this behaviour at
+gbrain 0.50.5.0 are in [`docs/schema-pack-findings.md`](docs/schema-pack-findings.md).
+
 ## [1.0.0] — 2026-09-19
 
 Mobrain 1.0.0 is the first **self-host GA** release: a team can install the product on a clean host with

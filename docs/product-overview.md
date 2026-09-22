@@ -293,6 +293,20 @@ version pin (and whether they match), the agent-runner's connection state, per-r
 status, and open schedule alerts. There's no time-series/metrics dashboard yet (Prometheus,
 queue-age percentiles, etc.) — that's an explicit, deferred backlog item, not a bug.
 
+### 5.10 Custom schema packs
+
+A schema pack is the brain's ontology: which page types exist, which folders they file into, and which link verbs connect them. Mobrain ships gbrain's seven bundled packs read-only and lets an org add its own. There are three ways in, and all of them start from the same **PackDraft** shape:
+
+- **Design it in the console.** *Settings → Schema → New pack* walks an admin through page types (name, primitive, folder, optional aliases and prefixes) and link verbs, runs gbrain's own `validate` and `lint` before anything is written, and saves a `pack.json` to the shared pack plane.
+- **Import a draft.** Paste a PackDraft JSON — the shape the skill produces — into the same panel; it goes through the identical validation gate.
+- **Design with your agent.** The `mobrain-schema-designer` skill (downloadable from the same page, e.g. into `~/.claude/skills/`) turns a team's requirements into a PackDraft JSON block. The agent only drafts: it never creates, applies or edits a pack.
+
+**Only an admin writes.** Every authoring route — create, fork, mutate, apply, delete, scaffold — sits behind the `admin` role, and the admin lane is deliberately never granted to an agent. A pack is *created* where it lands, not activated, and applying it is a separate admin action that ends with a gbrain readback (`schema active`) rather than a claim of success. Edits to an existing pack run through gbrain's atomic, lint-gated mutation batch, so a failed batch changes nothing and the console says so. Bundled packs can't be mutated; a fork is the way to edit one.
+
+**Folders are scaffolded automatically.** gbrain never creates directories from a pack, so Mobrain does: when a brain is finished in the wizard, when a pack is applied, when a Space joins a ready brain, and when a mutation adds a type, every Space that resolves the pack gets one `README.md` per page type — naming the type, its primitive, its prefixes and its link verbs. It is create-only and idempotent (an existing file is never overwritten), makes one commit per Space, and because `README.md` is a gbrain metafile the scaffold is never indexed as a page.
+
+**Sync is additive.** After a pack change, `schema sync` fills blank types only; it never reclassifies, deletes or unembeds an existing page. Existing pages keep the types they already have.
+
 ---
 
 ## 6. Trust boundaries and things it deliberately refuses to do
