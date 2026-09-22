@@ -41,9 +41,13 @@ services:
       # a provider secret). Slice 1 moves provider keys to the file plane under
       # an advisory lock (V11) — this passthrough is a Slice-0-only shortcut.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Task 0: remote MCP callers resolve a host skills catalog from the
+      # operator, never gbrain's bundled dev catalog. Mobrain owns repo skills/.
+      GBRAIN_SKILLS_DIR: /opt/mobrain-skills
     volumes:
       - gbrain-home:/srv/gbrain-home
       - brain-repos:/srv/brain-repos
+      - ../skills:/opt/mobrain-skills:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -107,6 +107,15 @@ mock.module('../../src/control/opsClient.ts', () => ({
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
+  // The remaining real exports, for the same reason as `brainUsage` above:
+  // under per-file isolation a partial mock REPLACES the module, so every
+  // export the app graph imports must exist here or the graph fails to load.
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
+  gitRange: async () => ({ commits: [], files: [] }),
+  gitPathExists: async () => ({ paths: [] }),
+  gitRevertRange: async () => ({ outcome: 'nothing_to_revert' }),
+  auditTail: async () => [],
   // S1: routes/files.ts imports these alongside the rest, so a mock that omits
   // them makes the whole app graph unloadable.
   gitTree: async (sourceId: string) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] }),
@@ -115,8 +124,10 @@ mock.module('../../src/control/opsClient.ts', () => ({
     ({ committed: true, sha: 'written-sha' }),
 }));
 
-const { previewConnection, provisionConnection, revokeConnection, createPendingConnection, retiredClientName } =
-  await import('../../src/control/connections.ts');
+const {
+  previewConnection, provisionConnection, revokeConnection, createPendingConnection,
+  retiredClientName, widenConnectionSurfaces,
+} = await import('../../src/control/connections.ts');
 const { serverClientSecretName, serverClientName } = await import('../../src/control/connections.ts');
 const { mintRunToken, revokeRunToken } = await import('../../src/agent/token.ts');
 const { readSecret } = await import('../../src/control/secrets.ts');
@@ -480,6 +491,93 @@ describe('provisionConnection', () => {
     expect(String(err)).toMatch(/already used|collision|duplicate/i);
     expect(calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
     expect(calls.some((c) => c.op === 'mcp.grant')).toBe(false);
+  });
+
+  test('a new mint applies the compiled full surface to BOTH clients', async () => {
+    await provisionConnection(input(), actor);
+
+    const rescopes = calls.filter((c) => c.op === 'auth.rescopeClient');
+    expect(rescopes.map((c) => c.params?.id).sort()).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
+    for (const r of rescopes) {
+      expect(r.params?.surface).toBe('full');
+      expect(r.opts?.dryRun).not.toBe(true);
+    }
+  });
+
+  test('a failed member surface rescope revokes both minted clients', async () => {
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'auth.rescopeClient' && params?.id === 'gbrain_cl_mock') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'auth', 'rescope-client'],
+          stdout: '', stderr: 'boom', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try { await provisionConnection(input(), actor); } catch (e) { err = e; }
+    expect(String(err)).toMatch(/surface/);
+
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked.sort()).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.organizationId, orgId));
+    expect(row?.state).toBe('pending');
+  });
+
+  test('a failed server surface rescope revokes the server client and the member client', async () => {
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'auth.rescopeClient' && params?.id === 'gbrain_cl_mock_1') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'auth', 'rescope-client'],
+          stdout: '', stderr: 'boom', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    let err: unknown;
+    try { await provisionConnection(input(), actor); } catch (e) { err = e; }
+    expect(String(err)).toMatch(/surface/);
+    const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
+    expect(revoked.sort()).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
+  });
+});
+
+describe('widenConnectionSurfaces', () => {
+  test('rescopes both clients of every active Connection to full and skips the rest', async () => {
+    const active = await insertConnection('active');
+    await getDb().update(schema.connections)
+      .set({ serverClientId: 'gbrain_cl_live_server' })
+      .where(eq(schema.connections.id, active.id));
+    await insertConnection('revoked', { clientName: 'bs-revoked-x', gbrainClientId: 'gbrain_cl_dead' });
+
+    const out = await widenConnectionSurfaces(actor);
+
+    expect(out.widened).toEqual([active.id]);
+    expect(out.failed).toEqual([]);
+    const rescopes = calls.filter((c) => c.op === 'auth.rescopeClient');
+    expect(rescopes.map((c) => c.params?.id)).toEqual(['gbrain_cl_live_server', 'gbrain_cl_live']);
+    expect(rescopes.every((c) => c.params?.surface === 'full')).toBe(true);
+    const audits = await getDb().select().from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'connection.widen_surface'));
+    expect(audits.map((a) => a.target)).toEqual([active.id]);
+  });
+
+  test('one failing Connection is reported and does not stop the rest', async () => {
+    const a = await insertConnection('active', { clientName: 'bs-a', gbrainClientId: 'gbrain_cl_a' });
+    const b = await insertConnection('active', { clientName: 'bs-b', gbrainClientId: 'gbrain_cl_b' });
+    callOpsHandler = async (op, params, opts) => {
+      if (op === 'auth.rescopeClient' && params?.id === 'gbrain_cl_a') {
+        return { ok: false, exitCode: 1, argv: [], stdout: '', stderr: 'gone', json: null };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const out = await widenConnectionSurfaces(actor);
+    expect(out.widened).toEqual([b.id]);
+    expect(out.failed.map((f) => f.connectionId)).toEqual([a.id]);
   });
 });
 

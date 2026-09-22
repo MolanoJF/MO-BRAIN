@@ -8,6 +8,7 @@ import {
   provisionConnection,
 } from './connections.ts';
 import { takeGrantCredentials } from './opsClient.ts';
+import { skillsPublished } from './configValue.ts';
 import type { Role } from './rbac.ts';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +21,7 @@ export type ClaimResult = {
     harness: string;
     mcp_url: string;
   }>;
+  skillsPublished: boolean;
 };
 
 /** Email is case-normalized to lowercase so a leaked link still needs the matching address. */
@@ -146,7 +148,7 @@ export async function claim(token: string, email: string): Promise<ClaimResult> 
       });
     }
 
-    return { membershipId, connections };
+    return { membershipId, connections, skillsPublished: await skillsPublished() };
   } catch (e) {
     for (const g of granted) {
       try {

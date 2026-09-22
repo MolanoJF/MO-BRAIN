@@ -209,6 +209,13 @@ On the dev port, the console's better-auth endpoints require an `Origin` header.
 `Origin: https://localhost` (or a header matching `PUBLIC_URL`) or better-auth answers
 `INVALID_ORIGIN`; this bites `curl` and scripted checks, not a browser on the dev host.
 
+### Member skills backfill (once, for the release that ships member skills)
+
+    docker compose -f compose/docker-compose.yml exec control-plane bun run scripts/widen-member-surfaces.ts
+
+Exit 0: every active Connection now serves `list_skills`/`get_skill`. Exit 1:
+the JSON lists each failed Connection. Re-run after fixing (idempotent).
+
 ## What NOT to do
 
 - **Never run `gbrain upgrade` or `gbrain self-upgrade` by hand, in a container or on the host.** The

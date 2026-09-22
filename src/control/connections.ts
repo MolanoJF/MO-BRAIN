@@ -168,6 +168,14 @@ export async function provisionConnection(
     }
     throw e;
   }
+  try {
+    await applySurface(gbrainClientId, compiled);
+  } catch (e) {
+    for (const id of [gbrainClientId, serverClientId]) {
+      try { await callOps('auth.revokeClient', { clientId: id }); } catch { /* operator signal is the throw */ }
+    }
+    throw e;
+  }
 
   await persistCompiled(connectionId, input, name, compiled, {
     gbrainClientId,
@@ -207,6 +215,17 @@ async function provisionServerClient(
   );
   if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode})`);
   const clientId = grantedClientId(r.json);
+
+  try {
+    await applySurface(clientId, compiled);
+  } catch (e) {
+    try {
+      await callOps('auth.revokeClient', { clientId });
+    } catch {
+      // Best-effort; the caller revokes the member client and rethrows.
+    }
+    throw e;
+  }
 
   const handoff = await takeGrantCredentials(credentialsOut);
   if (!handoff || typeof handoff !== 'object' || !('client_secret' in handoff)
@@ -495,6 +514,19 @@ function rescopeParams(clientId: string, compiled: CompiledConnection): Record<s
   return params;
 }
 
+/**
+ * `mcp grant` takes no --surface, so a fresh client comes out at its
+ * profile's default (`starter`). Apply the compiled surface right after the
+ * mint. MEASURED: the full re-statement is rejected (`read_source_inactive`);
+ * `{ id, surface }` alone works and leaves the mint-time scoping intact, so
+ * D8 holds (both clients were compiled identically at mint). See
+ * docs/member-skills-findings.md.
+ */
+async function applySurface(clientId: string, compiled: CompiledConnection): Promise<void> {
+  const r = await callOps('auth.rescopeClient', { id: clientId, surface: compiled.surface }, { json: true });
+  if (!r.ok) throw new Error(`auth.rescopeClient (surface) failed (exit ${r.exitCode})`);
+}
+
 export function mcpUrl(): string {
   const base = (process.env.PUBLIC_URL ?? 'http://127.0.0.1:3131').replace(/\/+$/, '');
   return base.endsWith('/mcp') ? base : `${base}/mcp`;
@@ -612,4 +644,37 @@ function isUniqueViolation(e: unknown): boolean {
   const err = e as { code?: string; errno?: string; cause?: { code?: string; errno?: string } };
   const code = err.errno ?? err.code ?? err.cause?.errno ?? err.cause?.code;
   return code === '23505';
+}
+
+/**
+ * One-shot backfill: Connections minted before member skills sit at
+ * `starter`. Re-derive each active Connection's compiled scoping and rescope
+ * both clients (server first, D8). Per-row failures are collected, not
+ * thrown, so one dead client never blocks the rest.
+ */
+export async function widenConnectionSurfaces(actor: string): Promise<{
+  widened: string[];
+  failed: Array<{ connectionId: string; error: string }>;
+}> {
+  const rows = await getDb().select().from(schema.connections)
+    .where(eq(schema.connections.state, 'active'));
+  const widened: string[] = [];
+  const failed: Array<{ connectionId: string; error: string }> = [];
+  for (const row of rows) {
+    try {
+      if (!row.gbrainClientId) throw new Error('active Connection has no gbrainClientId');
+      const role = isGrantProfileId(row.profile) ? PROFILE_TO_ROLE[row.profile] : undefined;
+      if (!role) throw new Error(`connection ${row.id} has profile ${row.profile}, which no role compiles to`);
+      const compiled = await compileStored(row, role);
+      if (row.serverClientId) await applySurface(row.serverClientId, compiled);
+      await applySurface(row.gbrainClientId, compiled);
+      await audit(row.organizationId, actor, 'connection.widen_surface', row.id, {
+        surface: compiled.surface, clientId: row.gbrainClientId, serverClientId: row.serverClientId,
+      });
+      widened.push(row.id);
+    } catch (e) {
+      failed.push({ connectionId: row.id, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { widened, failed };
 }

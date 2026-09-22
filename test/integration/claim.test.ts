@@ -75,6 +75,15 @@ mock.module('../../src/control/opsClient.ts', () => ({
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: false, sha: null }),
   inspectRepos: async () => [],
+  // The remaining real exports, for the same reason as `brainUsage` above:
+  // under per-file isolation a partial mock REPLACES the module, so every
+  // export the app graph imports must exist here or the graph fails to load.
+  writeReport: async () => ({ relPath: '', committed: false, sha: null }),
+  cancelRun: async () => ({ cancelled: false }),
+  gitRange: async () => ({ commits: [], files: [] }),
+  gitPathExists: async () => ({ paths: [] }),
+  gitRevertRange: async () => ({ outcome: 'nothing_to_revert' }),
+  auditTail: async () => [],
   // S1: routes/files.ts imports these alongside the rest, so a mock that omits
   // them makes the whole app graph unloadable.
   gitTree: async (sourceId: string) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] }),
@@ -117,6 +126,11 @@ async function insertPending(space: { id: string; sourceId: string }, harness = 
     state: 'pending',
   });
   return id;
+}
+
+async function claimFreshMember() {
+  const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
+  return claim(minted.token, EMAIL);
 }
 
 beforeAll(async () => {
@@ -354,6 +368,21 @@ describe('claim', () => {
     expect(JSON.stringify(connRows)).not.toContain(SECRET);
     expect(JSON.stringify(audits)).not.toContain(SECRET);
     expect(JSON.stringify(claimRows)).not.toContain(minted.token);
+  });
+
+  test('skillsPublished is true only when config.get reads back exactly "true"', async () => {
+    callOpsHandler = (op, params, opts) => op === 'config.get' && params?.key === 'mcp.publish_skills'
+      ? { ok: true, exitCode: 0, argv: [], stdout: 'true\n[config] source: db', stderr: '', json: null }
+      : defaultOk(op, opts);
+    const result = await claimFreshMember();
+    expect(result.skillsPublished).toBe(true);
+  });
+
+  test('skillsPublished is false when the key is off or unreadable (fail closed)', async () => {
+    callOpsHandler = (op, params, opts) => op === 'config.get'
+      ? { ok: false, exitCode: 1, argv: [], stdout: '', stderr: 'Config key not found', json: null }
+      : defaultOk(op, opts);
+    expect((await claimFreshMember()).skillsPublished).toBe(false);
   });
 
   test('grant failure after burn compensates pending and remint retries', async () => {
