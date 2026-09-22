@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
@@ -16,6 +18,25 @@ const PACK_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** gbrain's own manifest cap is generous; ours is a sanity bound, not policy. */
 const MAX_PACK_BYTES = 512 * 1024;
+
+/**
+ * The mobrain-schema-designer skill, served whole so an admin can hand it to
+ * their own agent. The bundle is read at module load from
+ * `skills/mobrain-schema-designer/`, resolved relative to THIS module
+ * (`src/control/routes` under `bun test`, `/app/src/control/routes` in the
+ * image) rather than `process.cwd()` — the control-plane image runs
+ * `/app/src/control/app.ts` with cwd `/app`, and the Dockerfile copies `skills/`
+ * beside `src/` so the same three-up math holds in both. A missing file fails
+ * loudly at import, never as a silently empty download.
+ */
+const SKILL_DIR = join(import.meta.dir, '../../../skills/mobrain-schema-designer');
+
+const SKILL_FILES: Record<string, string> = {
+  'SKILL.md': readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf8'),
+  'pack-draft.schema.json': readFileSync(join(SKILL_DIR, 'pack-draft.schema.json'), 'utf8'),
+  'examples/legal-ops.json': readFileSync(join(SKILL_DIR, 'examples/legal-ops.json'), 'utf8'),
+  'examples/research-lab.json': readFileSync(join(SKILL_DIR, 'examples/research-lab.json'), 'utf8'),
+};
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body, and never
@@ -310,6 +331,15 @@ schemaRoutes.get('/schema', guard('admin', async (c, { orgId }) => {
     // "diverged" just because init picked gbrain-base-v2.
     diverged: stored !== null && active.pack !== null && active.pack !== stored,
   });
+}));
+
+/**
+ * The schema-designer skill bundle. Admin-only: it is an authoring aid, and the
+ * files only ever inform a draft a human then imports. Read at module load, so
+ * this is a plain object copy, never a per-request disk read.
+ */
+schemaRoutes.get('/schema/skill', guard('admin', async (c) => {
+  return c.json({ files: SKILL_FILES });
 }));
 
 /**

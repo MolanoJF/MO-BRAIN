@@ -1,0 +1,52 @@
+{
+  "name": "research-lab",
+  "description": "A research group's people, experiments, papers and datasets.",
+  "extends": "gbrain-base-v2",
+  "pageTypes": [
+    {
+      "name": "researcher",
+      "primitive": "entity",
+      "folder": "researchers/",
+      "description": "A lab member or external collaborator.",
+      "extraPrefixes": [],
+      "aliases": [],
+      "extractable": false,
+      "expertRouting": true
+    },
+    {
+      "name": "experiment",
+      "primitive": "temporal",
+      "folder": "experiments/",
+      "description": "A run or trial of an experiment, anchored in time.",
+      "extraPrefixes": [],
+      "aliases": [],
+      "extractable": false,
+      "expertRouting": false
+    },
+    {
+      "name": "paper",
+      "primitive": "media",
+      "folder": "papers/",
+      "description": "A published or draft paper.",
+      "extraPrefixes": [],
+      "aliases": [],
+      "extractable": true,
+      "expertRouting": false
+    },
+    {
+      "name": "dataset",
+      "primitive": "media",
+      "folder": "datasets/",
+      "description": "A dataset used by or produced from an experiment.",
+      "extraPrefixes": [],
+      "aliases": [],
+      "extractable": false,
+      "expertRouting": false
+    }
+  ],
+  "linkVerbs": [
+    { "name": "authored", "inverse": "authored_by", "fromType": "researcher", "toType": "paper" },
+    { "name": "uses", "inverse": "used_by", "fromType": "experiment", "toType": "dataset" },
+    { "name": "cites", "inverse": "cited_by", "fromType": "paper", "toType": "paper" }
+  ]
+}

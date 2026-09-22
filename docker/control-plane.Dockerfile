@@ -14,6 +14,10 @@ RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY scripts ./scripts
 COPY contracts ./contracts
+# The mobrain-schema-designer skill, served by GET /api/schema/skill. It sits
+# beside src/ so the route's `import.meta.dir`-relative path resolves in the
+# image exactly as it does under `bun test`.
+COPY skills ./skills
 
 RUN test -s "contracts/v${GBRAIN_VERSION}/operations.json" \
  || (echo "operations.json missing for ${GBRAIN_VERSION} — run Slice 0 first" >&2; exit 1)

@@ -203,6 +203,7 @@ export function Schema() {
             onCreated={() => { setBuilder(null); void loadPacks(); }}
           />
         )}
+        {builder?.mode === 'new' && <AgentSkillCard />}
         {builder?.mode === 'edit' && (
           <PackEditor name={builder.name} onSaved={() => { void loadPacks(); }} />
         )}
@@ -310,6 +311,56 @@ export function PackTypesView({ detail }: { detail: PackDetail }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The agent-skill card. The console deliberately does not draft with a model
+ * itself — the admin grant that lane would need is kept out of agents' hands —
+ * so instead it hands the admin the same skill any agent can load, the two
+ * files it reads, and where to put them.
+ */
+function AgentSkillCard() {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { files } = await api.get<{ files: Record<string, string> }>('/schema/skill');
+      // One save per file: the skill reads its schema and examples as siblings,
+      // so an admin who only wants `SKILL.md` still gets a working bundle.
+      for (const [path, content] of Object.entries(files)) {
+        const name = path.split('/').pop() ?? path;
+        const url = URL.createObjectURL(new Blob([content], { type: 'application/octet-stream' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not download the skill');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card title="Design with your agent">
+      <p className="text-sm text-muted">
+        The schema-designer skill turns your domain description into a pack draft an agent can hand
+        back for you to import on the Import draft tab.
+      </p>
+      <p className="mt-1 text-[length:var(--control-font)] text-muted">
+        Put the downloaded files in <code>~/.claude/skills/mobrain-schema-designer/</code> (Claude
+        Code) or your agent's own skills directory.
+      </p>
+      {error && <div className="mt-2 text-[length:var(--control-font)] text-danger">{error}</div>}
+      <Button className="mt-3" disabled={busy} onClick={download}>
+        {busy ? 'Downloading…' : 'Download skill'}
+      </Button>
+    </Card>
   );
 }
 
