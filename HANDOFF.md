@@ -116,6 +116,27 @@ populated corpus before pricing, and that is the deferred slice's first job.
 - The `bs-fp-pg` scratch Postgres is still up on `localhost:5432` for host-run tests; `test/integration`
   needs `CONTROL_DATABASE_URL` exported. Pausing the scheduler is `docker compose stop scheduler`.
 
+### The console design system (branch `feat/console-shell-redesign`, HEAD `ffd64ca`)
+
+- **The console has a design system now**, ported from qm's admin kit (`C:\Users\juanp\Desktop\qm\plugins\admin`,
+  read-only). Tokens: `src/console/styles/tokens.css` — two tiers, and `@theme inline` (not `@theme`) is the
+  whole mechanism; plain `@theme` bakes literals into utilities and is why the console could never theme.
+  Primitives: `src/console/ui/classes.ts` (pure, tested) + `src/console/ui/index.tsx` (thin wrappers, 18
+  components). Theme runtime: `src/console/theme.ts`, light/dark/system, plus a pre-paint script in
+  `src/console/index.html`. The five composite classes (`.card`, `.field`, `.btn-primary`, `.nav-item`,
+  `.border-warning`) are gone; `styles.css` names zero colours.
+- **`/design-system` is the review surface** — every primitive, every tone, both themes, built from the real
+  exported components. This repo has no DOM harness, so it is the only way to eyeball the system.
+- **Verified in a browser** (dev stack, after `scripts/redeploy.sh`, via computed styles): the theme switch end
+  to end including `localStorage.theme` persistence, `Button` secondary/primary against qm's spec, `Badge`,
+  `th`/`td`, the control tokens, `--scrim` in both blocks, and `/design-system` in both themes.
+- **Still unverified in a browser:** the settings-modal mechanics (Esc, drag-select released past the card edge,
+  focus restore), the editor save / stale-save path, `ConfirmButton`'s controlled "Keep it" restoration, and the
+  nine settings tabs in light mode. Each has unit coverage for its decision and none for its rendering.
+- `test/unit/scheduler-main.test.ts` and `test/unit/seed-space.test.ts` fail here and are **environmental**:
+  `brainstand-postgres-1` publishes no host port (Caddy is the only service that does), so host-side
+  `localhost:5432` cannot connect by design. Neither touches the console.
+
 **Progress tracker:** [`docs/superpowers/plans/PROGRESS.md`](docs/superpowers/plans/PROGRESS.md)
 
 ---
@@ -161,6 +182,7 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 | [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) | Enable/disable, the three health states, revert, rotating the Anthropic key |
 | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) | Operator recovery over the ops sidecar |
 | [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, upgrade cadence, the drift tripwire, what is not promised |
+| [`docs/superpowers/specs/2026-09-22-console-design-system-design.md`](docs/superpowers/specs/2026-09-22-console-design-system-design.md) | The console design system — tokens, primitives, theming, what is and is not verified |
 | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) | U1–U3, P1–P9, F20–F32 — every status and every deferral |
 | [`docs/pending-tasks.md`](docs/pending-tasks.md) | The open backlog after 1.0.0, by owner slice and priority |
 | [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
@@ -213,7 +235,7 @@ non-promises.
 | | |
 |---|---|
 | Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
-| Branch | `main` only — Slices 0–5 all merged (Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag) |
+| Branch | `feat/console-shell-redesign` — the shell redesign plus the design system; Slices 0–5 are all merged to `main` (Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag) |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
 | Slice 5 plan | [`docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`](docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md) — D1–D13, Tasks 1–18 |
 | Slice 5 findings | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) — U1–U3, P1–P9, F20–F32, the deferrals |

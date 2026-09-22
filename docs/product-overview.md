@@ -132,12 +132,18 @@ of the nine (Schedules, Health, Runs, Upgrades); the other five are hidden outri
 shown-and-disabled — the console has no server-asserted role beyond "admin or not", so a
 403 from the admin-only wizard probe is the only signal it has to hide them on.
 
+A tenth tab, **Appearance**, sits last in that list and is visible to everyone: Light / Dark /
+System, remembered per browser. It goes last because opening settings lands on the *first*
+visible tab, and a preferences tab at the top would move admins off Sources and members off
+Schedules.
+
 | Route | What it's for |
 |---|---|
 | `/` | The editor, no Source selected |
 | `/s/:sourceId` | The editor, scoped to a Source |
 | `/s/:sourceId/:path` | The editor, a specific file open |
-| `/settings/:tab` | The settings modal, one of the nine admin pages |
+| `/settings/:tab` | The settings modal, one of the nine admin pages or Appearance |
+| `/design-system` | The living style guide — every primitive, every tone, both themes |
 | `/claim/:token` | Accepting an invite / pairing link |
 
 `/sources`, `/schedules`, `/runs`, `/spend` and `/upgrades` still work as bookmarks: each
