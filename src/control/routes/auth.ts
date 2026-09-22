@@ -16,11 +16,20 @@ authRoutes.get('/bootstrap', async (c) => c.json({ bootstrapped: await isBootstr
 
 authRoutes.post('/bootstrap', async (c) => {
   if (await isBootstrapped()) return c.json({ error: 'already_bootstrapped' }, 409);
-  const { email, password, orgName } = await c.req.json();
-  if (!email || !password || !orgName) return c.json({ error: 'email, password and orgName are required' }, 400);
+  const body = await c.req.json();
+  const orgName = body?.orgName;
+  if (!orgName) return c.json({ error: 'orgName is required' }, 400);
   try {
+    // Unchanged path: email+password in the body, exactly as before.
     // S3c: the request carries a password — nothing here logs the body.
-    return c.json(await bootstrapFirstAdmin(email, password, orgName));
+    if (typeof body.email === 'string' && typeof body.password === 'string') {
+      return c.json(await bootstrapFirstAdmin(body.email, body.password, orgName));
+    }
+    // New path: no password given, so the caller must already be signed in
+    // (they clicked "Continue with Google" first).
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session?.user?.id) return c.json({ error: 'sign_in_required' }, 401);
+    return c.json(await bootstrapFirstAdminForSession(session.user.id, orgName));
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'bootstrap_failed' }, 400);
   }
