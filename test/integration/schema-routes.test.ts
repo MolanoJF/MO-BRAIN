@@ -15,15 +15,24 @@ type CallOpts = { json?: boolean; dryRun?: boolean; timeoutMs?: number; packOver
 let opsHandler: (op: string, params: Record<string, unknown>, opts?: CallOpts) => OpsReply;
 const filePlanePatches: Record<string, unknown>[] = [];
 const packWrites: { name: string; yaml: string }[] = [];
+const jsonPackWrites: { name: string; manifest: any }[] = [];
+const packRemoves: string[] = [];
+const scaffolds: {
+  sourceId: string; entries: { dir: string; readme: string }[];
+  actor: { name: string; email: string }; message: string;
+}[] = [];
 
 mock.module('../../src/control/opsClient.ts', () => ({
   // --- the three this suite drives ---
   callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) => opsHandler(op, params, opts),
   patchFilePlaneConfig: async (patch: Record<string, unknown>) => { filePlanePatches.push(patch); },
   putSchemaPack: async (name: string, yaml: string) => { packWrites.push({ name, yaml }); },
-  putSchemaPackJson: async () => {},
-  gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
-  removeSchemaPack: async () => ({ removed: false }),
+  putSchemaPackJson: async (name: string, manifest: any) => { jsonPackWrites.push({ name, manifest }); },
+  gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[]; actor: { name: string; email: string }; message: string }) => {
+    scaffolds.push(req);
+    return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
+  },
+  removeSchemaPack: async (name: string) => { packRemoves.push(name); return { removed: true }; },
   // --- the rest of the module's real exports, required for the app graph to
   //     load at all under per-file isolation. Copy verbatim from
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---
@@ -157,6 +166,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   filePlanePatches.length = 0;
   packWrites.length = 0;
+  jsonPackWrites.length = 0;
+  packRemoves.length = 0;
+  scaffolds.length = 0;
   invalidateSchemaPackCache();
   await setStoredPack(null);
   await getDb().delete(schema.auditLog);
@@ -400,7 +412,7 @@ test('GET /schema/sources reads the stored intent and the inherited fallback', a
 
 test('POST /schema/sources writes the tier-3 override with force and reads it back', async () => {
   await insertSpace('customers');
-  opsHandler = (op, params) => {
+  opsHandler = (op, params, opts) => {
     if (op === 'schema.list') return ok(LIST);
     if (op === 'schema.validate') return ok('✓ hr-policies v1.0.0: valid manifest');
     if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
@@ -409,6 +421,10 @@ test('POST /schema/sources writes the tier-3 override with force and reads it ba
       return ok('Set schema_pack.source.customers = hr-policies');
     }
     if (op === 'config.get') return ok('hr-policies\n[config] source: db plane\n');
+    // The override lands, then this Space is scaffolded from the pack it now
+    // resolves: the readback path needs `schema active` and the resolved manifest.
+    if (op === 'schema.active') return ok(ACTIVE('hr-policies'));
+    if (op === 'schema.show') return ok('', showJson(1, 0, opts?.packOverride));
     throw new Error(`unexpected op ${op}`);
   };
   const res = await hit('POST', '/api/schema/sources/customers', ownerCookie, { pack: 'hr-policies' });
@@ -502,4 +518,193 @@ test('a non-admin cannot reach any schema route', async () => {
   opsHandler = () => { throw new Error('must not reach gbrain'); };
   expect((await hit('GET', '/api/schema', memberCookie)).status).toBe(403);
   expect((await hit('POST', '/api/schema/apply', memberCookie, { pack: 'gbrain-base' })).status).toBe(403);
+});
+
+// --- Task 5: custom-pack authoring (create / fork / mutate / delete / scaffold) ---
+
+const draft = {
+  name: 'legal-ops', description: 'Contracts', extends: 'gbrain-base-v2',
+  pageTypes: [{
+    name: 'contract', primitive: 'entity', folder: 'contracts/', description: 'Signed',
+    extraPrefixes: [], aliases: [], extractable: true, expertRouting: false,
+  }],
+  linkVerbs: [],
+};
+
+const INSTALLED_LEGAL_OPS =
+  'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  legal-ops\n';
+
+test('POST /schema/packs (draft) writes pack.json, then validates and lints', async () => {
+  opsHandler = (op) => {
+    if (op === 'schema.list') return ok(LIST);
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'draft', draft });
+  expect(res.status).toBe(200);
+  expect(jsonPackWrites.at(-1)!.name).toBe('legal-ops');
+  expect((jsonPackWrites.at(-1)!.manifest as any).page_types[0].path_prefixes).toEqual(['contracts/']);
+});
+
+test('POST /schema/packs refuses a name that already exists', async () => {
+  opsHandler = (op) => op === 'schema.list' ? ok(INSTALLED_LEGAL_OPS) : ok('');
+  const res = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'draft', draft });
+  expect(res.status).toBe(409);
+  expect(jsonPackWrites).toEqual([]);
+});
+
+test('POST /schema/packs rejects an invalid draft with every error', async () => {
+  opsHandler = (op) => op === 'schema.list' ? ok(LIST) : ok('');
+  const res = await hit('POST', '/api/schema/packs', ownerCookie,
+    { mode: 'draft', draft: { ...draft, name: 'Bad Name' } });
+  expect(res.status).toBe(400);
+  expect((await res.json()).errors.length).toBeGreaterThan(0);
+});
+
+test('POST /schema/packs/:name/mutations refuses a bundled pack before calling gbrain', async () => {
+  const calls: string[] = [];
+  opsHandler = (op) => { calls.push(op); return ok(''); };
+  const res = await hit('POST', '/api/schema/packs/gbrain-base-v2/mutations', ownerCookie,
+    { mutations: [{ op: 'add_type', name: 'x', primitive: 'entity', prefix: 'x/' }] });
+  expect(res.status).toBe(400);
+  expect((await res.json()).code).toBe('PACK_READONLY');
+  expect(calls).not.toContain('schema.mutate');
+});
+
+test("a failed batch answers 409 with gbrain's code and index, even though call exited 0", async () => {
+  opsHandler = (op) => {
+    if (op === 'schema.list') return ok(INSTALLED_LEGAL_OPS);
+    if (op === 'schema.mutate') return ok(JSON.stringify({
+      error: 'mutation_failed', code: 'TYPE_NOT_FOUND', message: 'no such type', failed_at_index: 1,
+      mutations_applied: 0, pack_unchanged: true }));
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/legal-ops/mutations', ownerCookie, { mutations: [
+    { op: 'add_type', name: 'memo', primitive: 'annotation', prefix: 'memos/' },
+    { op: 'remove_type', name: 'ghost' },
+  ] });
+  expect(res.status).toBe(409);
+  const body = await res.json();
+  expect(body.code).toBe('TYPE_NOT_FOUND');
+  expect(body.failedAtIndex).toBe(1);
+  expect(body.packUnchanged).toBe(true);
+  expect((await lastAudit())?.action).toBe('schema.pack.mutate.failed');
+});
+
+test('a successful batch on the ACTIVE pack scaffolds new folders into inheriting Spaces', async () => {
+  await insertSpace('team', 'Team');
+  const memoManifest = {
+    name: 'legal-ops', version: '1.0.0', description: 'Contracts', extends: 'gbrain-base-v2',
+    page_types: [{ name: 'memo', primitive: 'annotation', path_prefixes: ['memos/'], aliases: [], extractable: false }],
+    link_types: [], takes_kinds: ['fact'],
+  };
+  opsHandler = (op, params, opts) => {
+    if (op === 'schema.list') return ok(INSTALLED_LEGAL_OPS);
+    if (op === 'schema.active') return ok(ACTIVE('legal-ops'));
+    if (op === 'schema.mutate') return ok(JSON.stringify({
+      schema_version: 1, pack: 'legal-ops', batch_id: 'b1', mutations_applied: 1, results: [{}] }));
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'schema.show') return ok('', memoManifest);
+    if (op === 'config.get') return fail(1, 'Config key not found: schema_pack.source.team');
+    throw new Error(`unexpected op ${op}`);
+  };
+  const res = await hit('POST', '/api/schema/packs/legal-ops/mutations', ownerCookie,
+    { mutations: [{ op: 'add_type', name: 'memo', primitive: 'annotation', prefix: 'memos/' }] });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.applied).toBe(1);
+  expect(body.scaffolded.at(-1).sourceId).toBe('team');
+  expect(scaffolds.at(-1)!.entries.map((e) => e.dir)).toContain('memos/');
+});
+
+test('DELETE /schema/packs/:name refuses the active pack and any overridden Space', async () => {
+  opsHandler = (op) => {
+    if (op === 'schema.active') return ok(ACTIVE('legal-ops'));
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    return ok('');
+  };
+  const res = await hit('DELETE', '/api/schema/packs/legal-ops', ownerCookie);
+  expect(res.status).toBe(409);
+  expect((await res.json()).usedBy.brain).toBe(true);
+  expect(packRemoves).toEqual([]);
+});
+
+test('DELETE /schema/packs/:name removes an unused user pack', async () => {
+  opsHandler = (op) => {
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-base-v2'));
+    if (op === 'schema.list') return ok(INSTALLED_LEGAL_OPS);
+    return ok('');
+  };
+  const res = await hit('DELETE', '/api/schema/packs/legal-ops', ownerCookie);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, removed: true });
+  expect(packRemoves).toEqual(['legal-ops']);
+});
+
+test('POST /schema/scaffold scaffolds the named Space', async () => {
+  await insertSpace('team', 'Team');
+  const manifest = {
+    name: 'gbrain-base-v2', version: '1.0.0', description: null, extends: null,
+    page_types: [{ name: 'person', primitive: 'entity', path_prefixes: ['people/'], aliases: [], extractable: true }],
+    link_types: [], takes_kinds: ['fact'],
+  };
+  opsHandler = (op) => {
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-base-v2'));
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    if (op === 'schema.show') return ok('', manifest);
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/scaffold', ownerCookie, { source: 'team' });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.ok).toBe(true);
+  expect(body.results).toEqual([{ sourceId: 'team', pack: 'gbrain-base-v2', created: ['people/README.md'], skipped: [], error: null }]);
+  expect((await lastAudit())?.action).toBe('schema.scaffold');
+});
+
+test('POST /schema/scaffold rejects an unknown Space', async () => {
+  opsHandler = () => { throw new Error('must not reach gbrain'); };
+  expect((await hit('POST', '/api/schema/scaffold', ownerCookie, { source: 'ghost' })).status).toBe(400);
+});
+
+test('GET /schema/packs/:name reports own vs inherited and the usedBy edges', async () => {
+  await insertSpace('customers');
+  opsHandler = (op, params, opts) => {
+    if (op === 'schema.list') return ok(INSTALLED_LEGAL_OPS);
+    if (op === 'schema.active') return ok(ACTIVE('legal-ops'));
+    if (op === 'schema.show') return ok('', showJson(2, 1, 'legal-ops'));
+    if (op === 'schema.showRaw') {
+      expect(params).toEqual({ packName: 'legal-ops' });
+      return ok('', { name: 'legal-ops', page_types: [{ name: 'contract' }], link_types: [{ name: 'governs' }] });
+    }
+    if (op === 'config.get') return ok('legal-ops\n[config] source: db plane\n');
+    return ok('');
+  };
+  const res = await hit('GET', '/api/schema/packs/legal-ops', ownerCookie);
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.editable).toBe(true);
+  expect(body.own).toEqual({ pageTypes: ['contract'], linkVerbs: ['governs'] });
+  expect(body.usedBy).toEqual({ brain: true, sources: ['customers'] });
+  expect(body.effective.bundled).toBe(false);
+});
+
+test('GET /schema/packs/:name 404s an unknown pack and 400s a bad name', async () => {
+  opsHandler = (op) => op === 'schema.list' ? ok(LIST) : ok('');
+  expect((await hit('GET', '/api/schema/packs/nope', ownerCookie)).status).toBe(404);
+  expect((await hit('GET', '/api/schema/packs/Bad_Name', ownerCookie)).status).toBe(400);
+});
+
+test('member gets 403 on every authoring route', async () => {
+  for (const [m, p] of [['POST', '/api/schema/packs'], ['POST', '/api/schema/packs/x/mutations'],
+    ['DELETE', '/api/schema/packs/x'], ['POST', '/api/schema/scaffold']] as const) {
+    const res = await app.request(p, {
+      method: m,
+      headers: { cookie: memberCookie, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(403);
+  }
 });

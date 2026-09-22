@@ -122,6 +122,7 @@ const pageType = (name: string, over: Partial<PackPageType> = {}): PackPageType 
   pathPrefixes: [],
   aliases: [],
   extractable: true,
+  expertRouting: false,
   ...over,
 });
 
@@ -130,8 +131,11 @@ const detail = (over: Partial<PackDetail> = {}): PackDetail => ({
   version: '1.2.0',
   description: null,
   extends: null,
+  bundled: false,
   pageTypes: [],
   linkVerbs: [],
+  linkTypes: [],
+  filingRules: [],
   takesKinds: [],
   error: null,
   ...over,

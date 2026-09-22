@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
-import { callOps, patchFilePlaneConfig, putSchemaPack } from '../opsClient.ts';
-import { listSchemaPacks } from './wizard.ts';
+import { callOps, patchFilePlaneConfig, putSchemaPack, putSchemaPackJson, removeSchemaPack } from '../opsClient.ts';
+import { listSchemaPackSections, listSchemaPacks } from './wizard.ts';
 import { parseSchemaActiveProse, type SchemaActive } from '../../contracts/capability.ts';
+import { BUNDLED_PACKS, draftToManifest, validateDraft, validateMutations } from '../schemaDraft.ts';
+import { scaffoldSpaces } from '../scaffold.ts';
 
 export const schemaRoutes = new Hono();
 
@@ -86,6 +88,7 @@ export type PackPageType = {
   pathPrefixes: string[];
   aliases: string[];
   extractable: boolean;
+  expertRouting: boolean;
 };
 
 export type PackDetail = {
@@ -93,8 +96,11 @@ export type PackDetail = {
   version: string | null;
   description: string | null;
   extends: string | null;
+  bundled: boolean;
   pageTypes: PackPageType[];
   linkVerbs: string[];
+  linkTypes: { name: string; inverse: string | null; pageType: string | null; targetType: string | null }[];
+  filingRules: { kind: string; directory: string; description: string | null }[];
   takesKinds: string[];
   error: string | null;
 };
@@ -108,9 +114,13 @@ type RawManifest = {
   extends?: string | null;
   page_types?: Array<{
     name?: string; primitive?: string; path_prefixes?: string[];
-    aliases?: string[]; extractable?: boolean;
+    aliases?: string[]; extractable?: boolean; expert_routing?: boolean;
   }>;
-  link_types?: Array<{ name?: string }>;
+  link_types?: Array<{
+    name?: string; inverse?: string | null;
+    inference?: { page_type?: string | null; target_type?: string | null };
+  }>;
+  filing_rules?: Array<{ kind?: string; directory?: string; description?: string | null }>;
   takes_kinds?: string[];
 };
 
@@ -139,7 +149,7 @@ export function invalidateSchemaPackCache(): void {
  * Never reimplement the `extends` merge in TypeScript; it is child-wins
  * de-duplication, not a union.
  */
-async function packDetail(version: string, pack: string): Promise<PackDetail> {
+export async function effectivePack(version: string, pack: string): Promise<PackDetail> {
   const key = `${version}:${pack}`;
   const cached = packDetailCache.get(key);
   if (cached) return cached;
@@ -161,7 +171,8 @@ function toPackDetail(
     const text = `${r.stdout ?? ''}\n${r.stderr ?? ''}`.trim();
     return {
       name, version: null, description: null, extends: null,
-      pageTypes: [], linkVerbs: [], takesKinds: [],
+      bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
+      pageTypes: [], linkVerbs: [], linkTypes: [], filingRules: [], takesKinds: [],
       error: text || `schema show exited ${r.exitCode} with no manifest`,
     };
   }
@@ -171,16 +182,29 @@ function toPackDetail(
     version: m.version ?? null,
     description: m.description ?? null,
     extends: m.extends ?? null,
+    bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
     pageTypes: (m.page_types ?? []).map((p) => ({
       name: p.name ?? '',
       primitive: p.primitive ?? '',
       pathPrefixes: p.path_prefixes ?? [],
       aliases: p.aliases ?? [],
       extractable: p.extractable === true,
+      expertRouting: p.expert_routing === true,
     })),
     linkVerbs: (m.link_types ?? [])
       .map((l) => l.name)
       .filter((n): n is string => typeof n === 'string' && n !== ''),
+    linkTypes: (m.link_types ?? []).map((l) => ({
+      name: l.name ?? '',
+      inverse: l.inverse ?? null,
+      pageType: l.inference?.page_type ?? null,
+      targetType: l.inference?.target_type ?? null,
+    })),
+    filingRules: (m.filing_rules ?? []).map((f) => ({
+      kind: f.kind ?? '',
+      directory: f.directory ?? '',
+      description: f.description ?? null,
+    })),
     takesKinds: m.takes_kinds ?? [],
     error: null,
   };
@@ -248,7 +272,7 @@ export async function resolveSourcePacks(orgId: string): Promise<SourcePackResol
     let pageTypes: number | null = null;
     let linkVerbs: number | null = null;
     if (pack) {
-      const detail = await packDetail(version, pack);
+      const detail = await effectivePack(version, pack);
       if (!detail.error) {
         pageTypes = detail.pageTypes.length;
         linkVerbs = detail.linkVerbs.length;
@@ -300,7 +324,7 @@ schemaRoutes.get('/schema/packs', guard('admin', async (c, { orgId }) => {
   const brain = await loadBrain(orgId);
   const names = await listSchemaPacks();
   const version = brain.gbrainVersion ?? '';
-  const packs = await Promise.all(names.map((name) => packDetail(version, name)));
+  const packs = await Promise.all(names.map((name) => effectivePack(version, name)));
   return c.json({ packs });
 }));
 
@@ -362,8 +386,13 @@ schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, { userId
     }, 409);
   }
 
+  // The override just landed. Give this one Space its folders from the pack it
+  // now resolves, scoped to it alone.
+  const brain = await loadBrain(orgId);
+  const scaffolded = await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), [sourceId]);
+
   await audit(orgId, userId, 'schema.source.pack', sourceId, { pack, tier: 'per-source-db' });
-  return c.json({ ok: true, sourceId, pack, tier: 'per-source-db', inherited: false });
+  return c.json({ ok: true, sourceId, pack, tier: 'per-source-db', inherited: false, scaffolded });
 }));
 
 /**
@@ -486,6 +515,16 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
   await getDb().update(schema.brains)
     .set({ schemaPack: pack, updatedAt: new Date() })
     .where(eq(schema.brains.id, brain.id));
+
+  // Folder scaffolding for the Spaces that now inherit this brain-wide pack.
+  // README.md is a gbrain metafile, so sync never imports it (S7); a scaffold
+  // failure is reported per Space, never fatal to the apply.
+  const inherited = (await resolveSourcePacks(orgId))
+    .filter((s) => s.inherited).map((s) => s.sourceId);
+  const scaffolded = inherited.length
+    ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), inherited)
+    : [];
+
   await audit(orgId, userId, 'schema.apply', pack, {
     pack, source: active.source, warnings: report.warnings.length,
   });
@@ -494,6 +533,7 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
     ok: true,
     active: { pack: active.pack, version: active.version, source: active.source, identity: active.identity },
     lint: report,
+    scaffolded,
   });
 }));
 
@@ -563,4 +603,204 @@ schemaRoutes.put('/schema/pack', guard('admin', async (c, { userId, orgId }) => 
   invalidateSchemaPackCache();
 
   return c.json({ ok: invalid === null, name, error: invalid, lint: report });
+}));
+
+/**
+ * The custom-pack authoring surface. A created pack is a whole JSON document
+ * written once through the file plane; edits to an existing pack are gbrain's
+ * ATOMIC mutation batches; deletes are refused while any Space resolves the
+ * pack or another pack extends it. Every write ends with a readback, and the
+ * audit rows record shape, never a manifest body (S3c).
+ */
+const isBundled = (n: string) => (BUNDLED_PACKS as readonly string[]).includes(n);
+
+/** `scaffoldSpaces` resolves each Space's pack through gbrain's own resolver;
+ *  the two functions it needs live here, injected to keep imports one-way. */
+const deps = (version: string) => ({
+  resolveSourcePacks,
+  effectivePack: (pack: string) => effectivePack(version, pack),
+});
+
+/** After any write: gbrain's validate + lint are the authority, not ours. */
+async function checkPack(name: string) {
+  const invalid = await validationError(name);
+  return { invalid, lint: invalid ? null : await lint(name, false) };
+}
+
+/**
+ * One pack's effective detail, plus its OWN declarations (unresolved) so the
+ * editor can tell "own" from "inherited", and whether it is safe to edit or
+ * delete. `usedBy.brain` is the resolved active pack; `usedBy.sources` is the
+ * per-Space stored intent, never a resolved-looking guess (S6 Gate 2).
+ */
+schemaRoutes.get('/schema/packs/:name', guard('admin', async (c, { orgId }) => {
+  const name = c.req.param('name') ?? '';
+  if (!PACK_NAME.test(name)) return c.json({ error: 'invalid pack name' }, 400);
+  const brain = await loadBrain(orgId);
+  const { bundled, installed } = await listSchemaPackSections();
+  if (![...bundled, ...installed].includes(name)) return c.json({ error: `unknown schema pack ${name}` }, 404);
+  const effective = await effectivePack(brain.gbrainVersion ?? '', name);
+  const raw = await callOps<RawManifest>('schema.showRaw', { packName: name }, { json: true, timeoutMs: 60_000 });
+  const own = raw.json ? {
+    pageTypes: (raw.json.page_types ?? []).map((t) => t.name ?? '').filter(Boolean),
+    linkVerbs: (raw.json.link_types ?? []).map((l) => l.name ?? '').filter(Boolean),
+  } : null;
+  const active = await readActive();
+  const sources = (await resolveSourcePacks(orgId))
+    .filter((s) => !s.inherited && s.pack === name).map((s) => s.sourceId);
+  return c.json({
+    effective, own,
+    editable: !bundled.includes(name),
+    usedBy: { brain: active.pack === name, sources },
+  });
+}));
+
+/**
+ * Create a pack, either from a validated draft (a whole `pack.json`) or by
+ * forking an existing pack (`gbrain schema fork`). Creation is not activation:
+ * a pack that fails gbrain's gate stays on disk so the admin can fix it, and
+ * the response says so rather than claiming a clean pack.
+ */
+schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) => {
+  const body = await c.req.json().catch(() => ({}));
+  const brain = await loadBrain(orgId);
+  const { bundled, installed } = await listSchemaPackSections();
+  const known = [...bundled, ...installed];
+
+  let name: string;
+  if (body?.mode === 'fork') {
+    const from = String(body.from ?? ''); name = String(body.name ?? '');
+    if (!known.includes(from)) return c.json({ error: `unknown schema pack ${from}` }, 400);
+    if (!PACK_NAME.test(name) || isBundled(name)) return c.json({ error: 'invalid pack name' }, 400);
+    if (known.includes(name)) return c.json({ error: `${name} already exists` }, 409);
+    const r = await callOps('schema.fork', { from, to: name }, { json: true, timeoutMs: 60_000 });
+    if (!r.ok) return c.json({ error: `schema fork failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+  } else if (body?.mode === 'draft') {
+    const v = validateDraft(body.draft);
+    if (!v.ok) return c.json({ error: 'invalid draft', errors: v.errors }, 400);
+    name = v.draft.name;
+    if (known.includes(name)) return c.json({ error: `${name} already exists` }, 409);
+    if (v.draft.extends && !known.includes(v.draft.extends)) {
+      return c.json({ error: `unknown parent pack ${v.draft.extends}` }, 400);
+    }
+    await putSchemaPackJson(name, draftToManifest(v.draft, brain.gbrainVersion ?? '0.50.5.0'));
+  } else {
+    return c.json({ error: "mode must be 'draft' or 'fork'" }, 400);
+  }
+
+  invalidateSchemaPackCache();
+  const { invalid, lint: report } = await checkPack(name);
+  await audit(orgId, userId, 'schema.pack.create', name, {
+    name, mode: body.mode, valid: invalid === null,
+  });
+  // Created, not activated. A pack that fails gbrain's gate stays on disk so
+  // the admin can fix it in the editor; the response says so, never a green.
+  return c.json({ ok: invalid === null && (report?.ok ?? false), name, error: invalid, lint: report });
+}));
+
+/**
+ * Apply a batch of mutations to one user pack, atomically, through gbrain.
+ *
+ * `gbrain call` exits 0 even when the handler refuses, so the BODY decides
+ * success (S7 step 1). A refusal answers 409 with gbrain's own code and index,
+ * and a new type's folder is scaffolded into every Space that resolves the
+ * pack, create-only and idempotent.
+ */
+schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { userId, orgId }) => {
+  const name = c.req.param('name') ?? '';
+  if (!PACK_NAME.test(name)) return c.json({ error: 'invalid pack name' }, 400);
+  if (isBundled(name)) {
+    return c.json({ error: `${name} is bundled and read-only. Fork it first.`, code: 'PACK_READONLY' }, 400);
+  }
+  const { installed } = await listSchemaPackSections();
+  if (!installed.includes(name)) return c.json({ error: `unknown schema pack ${name}` }, 404);
+
+  const body = await c.req.json().catch(() => ({}));
+  const v = validateMutations(body?.mutations);
+  if (!v.ok) return c.json({ error: 'invalid mutations', errors: v.errors }, 400);
+
+  const r = await callOps<never>('schema.mutate',
+    { payload: JSON.stringify({ pack: name, mutations: v.mutations }) }, { timeoutMs: 120_000 });
+  let out: any = null;
+  try { out = JSON.parse(r.stdout ?? ''); } catch { /* prose or empty: handled below */ }
+  // `call` exits 0 on a handler-level failure (S7 step 1), so the BODY decides.
+  if (!r.ok || !out || out.error) {
+    await audit(orgId, userId, 'schema.pack.mutate.failed', name, {
+      count: v.mutations.length, code: out?.code ?? null, index: out?.failed_at_index ?? null,
+    });
+    return c.json({
+      ok: false,
+      error: out?.message ?? (`${r.stdout ?? ''}${r.stderr ?? ''}`.trim() || `exit ${r.exitCode}`),
+      code: out?.code ?? null,
+      failedAtIndex: out?.failed_at_index ?? null,
+      packUnchanged: out?.pack_unchanged ?? null,
+    }, 409);
+  }
+
+  invalidateSchemaPackCache();
+  const { invalid, lint: report } = await checkPack(name);
+  // New types need folders wherever this pack is in effect. Folders are
+  // create-only, so re-running for existing types is a no-op.
+  const brain = await loadBrain(orgId);
+  const using = (await resolveSourcePacks(orgId)).filter((s) => s.pack === name).map((s) => s.sourceId);
+  const scaffolded = using.length
+    ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), using)
+    : [];
+
+  await audit(orgId, userId, 'schema.pack.mutate', name, {
+    count: v.mutations.length, ops: [...new Set(v.mutations.map((m) => m.op))], batchId: out.batch_id,
+  });
+  return c.json({
+    ok: invalid === null, batchId: out.batch_id, applied: out.mutations_applied,
+    error: invalid, lint: report, scaffolded,
+  });
+}));
+
+/**
+ * Delete one user pack. Refused while the brain resolves it, while any Space
+ * overrides to it, or while another installed pack extends it — all three
+ * would leave gbrain unable to resolve a name it still honors.
+ */
+schemaRoutes.delete('/schema/packs/:name', guard('admin', async (c, { userId, orgId }) => {
+  const name = c.req.param('name') ?? '';
+  if (!PACK_NAME.test(name) || isBundled(name)) return c.json({ error: 'only user packs can be deleted' }, 400);
+  const active = await readActive();
+  const sources = (await resolveSourcePacks(orgId))
+    .filter((s) => !s.inherited && s.pack === name).map((s) => s.sourceId);
+  if (active.pack === name || sources.length) {
+    return c.json({ error: `${name} is in use`, usedBy: { brain: active.pack === name, sources } }, 409);
+  }
+  // Another pack may extend this one; gbrain would then fail to resolve it.
+  const brain = await loadBrain(orgId);
+  const { installed } = await listSchemaPackSections();
+  const children: string[] = [];
+  for (const other of installed.filter((n) => n !== name)) {
+    const d = await effectivePack(brain.gbrainVersion ?? '', other);
+    if (d.extends === name) children.push(other);
+  }
+  if (children.length) return c.json({ error: `${children.join(', ')} extend ${name}`, children }, 409);
+  const r = await removeSchemaPack(name);
+  invalidateSchemaPackCache();
+  await audit(orgId, userId, 'schema.pack.delete', name, { removed: r.removed });
+  return c.json({ ok: true, removed: r.removed });
+}));
+
+/**
+ * Create the folders for every Space (or one named Space) from the pack that
+ * Space resolves. Create-only and idempotent: an already-scaffolded Space
+ * answers an empty `created`. `ok` is true only when every Space succeeded —
+ * a per-Space error is reported, never rounded into a single green.
+ */
+schemaRoutes.post('/schema/scaffold', guard('admin', async (c, { userId, orgId }) => {
+  const body = await c.req.json().catch(() => ({}));
+  const source = typeof body?.source === 'string' ? body.source : undefined;
+  if (source !== undefined && !(await spaceExists(orgId, source))) {
+    return c.json({ error: `unknown source ${source}` }, 400);
+  }
+  const brain = await loadBrain(orgId);
+  const results = await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), source ? [source] : undefined);
+  await audit(orgId, userId, 'schema.scaffold', source ?? 'brain', {
+    spaces: results.length, created: results.reduce((n, r) => n + r.created.length, 0),
+  });
+  return c.json({ ok: results.every((r) => r.error === null), results });
 }));

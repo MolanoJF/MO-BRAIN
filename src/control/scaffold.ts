@@ -1,4 +1,6 @@
 import { isFolder } from './schemaDraft.ts';
+import { actorIdentity } from './actor.ts';
+import { gitScaffold } from './opsClient.ts';
 
 export type ScaffoldSource = {
   pack: string;
@@ -45,4 +47,62 @@ export function scaffoldEntries(src: ScaffoldSource): ScaffoldEntry[] {
     out.push({ dir, readme: lines.filter((l) => l !== '').join('\n') + '\n' });
   }
   return out;
+}
+
+export type ScaffoldResult = {
+  sourceId: string; pack: string | null; created: string[]; skipped: string[]; error: string | null;
+};
+
+/**
+ * `effectivePack` and `resolveSourcePacks` live in `routes/schema.ts`, which
+ * imports `scaffoldSpaces` from here. Passing them in keeps the import
+ * one-directional (no module cycle) while still resolving each Space's pack
+ * through gbrain's own resolver.
+ */
+type Deps = {
+  resolveSourcePacks: (orgId: string) => Promise<{ sourceId: string; pack: string | null }[]>;
+  effectivePack: (pack: string) => Promise<{ error: string | null } & Omit<ScaffoldSource, 'pack'>>;
+};
+
+/**
+ * Scaffold every (or the named) Space from the pack THAT Space resolves: its
+ * per-source stored intent, else the brain-wide pack (the same resolution the
+ * Sources page shows). A Space whose pack failed to resolve reports the error
+ * and is skipped, never scaffolded from a guess. Per-Space failures do not
+ * abort the others.
+ */
+export async function scaffoldSpaces(
+  orgId: string,
+  userId: string,
+  deps: Deps,
+  sourceIds?: string[],
+): Promise<ScaffoldResult[]> {
+  const actor = await actorIdentity(userId);
+  const spaces = (await deps.resolveSourcePacks(orgId))
+    .filter((s) => !sourceIds || sourceIds.includes(s.sourceId));
+  const results: ScaffoldResult[] = [];
+  for (const s of spaces) {
+    if (!s.pack) {
+      results.push({ sourceId: s.sourceId, pack: null, created: [], skipped: [], error: 'no resolved pack' });
+      continue;
+    }
+    const detail = await deps.effectivePack(s.pack);
+    if (detail.error) {
+      results.push({ sourceId: s.sourceId, pack: s.pack, created: [], skipped: [], error: detail.error });
+      continue;
+    }
+    try {
+      const r = await gitScaffold({
+        sourceId: s.sourceId, actor, message: `scaffold: ${s.pack} folders`,
+        entries: scaffoldEntries({ pack: s.pack, ...detail }),
+      });
+      results.push({ sourceId: s.sourceId, pack: s.pack, created: r.created, skipped: r.skipped, error: null });
+    } catch (e) {
+      results.push({
+        sourceId: s.sourceId, pack: s.pack, created: [], skipped: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return results;
 }

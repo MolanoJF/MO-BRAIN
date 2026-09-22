@@ -138,6 +138,7 @@ export type PackPageType = {
   pathPrefixes: string[];
   aliases: string[];
   extractable: boolean;
+  expertRouting: boolean;
 };
 
 export type PackDetail = {
@@ -145,8 +146,12 @@ export type PackDetail = {
   version: string | null;
   description: string | null;
   extends: string | null;
+  /** A bundled pack is read-only: gbrain refuses to mutate it (PACK_READONLY). */
+  bundled: boolean;
   pageTypes: PackPageType[];
   linkVerbs: string[];
+  linkTypes: { name: string; inverse: string | null; pageType: string | null; targetType: string | null }[];
+  filingRules: { kind: string; directory: string; description: string | null }[];
   takesKinds: string[];
   error: string | null;
 };

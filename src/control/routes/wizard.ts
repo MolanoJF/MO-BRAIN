@@ -152,9 +152,10 @@ wizard.post('/search-mode', guard(async (c, { userId, orgId }) => {
  * in buildArgv. Both the wizard step and the Schema admin page validate
  * against this, so an unknown name is refused before it reaches gbrain.
  */
-export async function listSchemaPacks(): Promise<string[]> {
+export async function listSchemaPackSections(): Promise<{ bundled: string[]; installed: string[] }> {
   const r = await callOps<never>('schema.list', {}, { timeoutMs: 60_000 });
-  const packs: string[] = [];
+  const bundled: string[] = [];
+  const installed: string[] = [];
   let section: 'none' | 'bundled' | 'installed' = 'none';
   for (const line of (r.stdout ?? '').split('\n')) {
     if (/^\s*Bundled packs:\s*$/.test(line)) { section = 'bundled'; continue; }
@@ -165,9 +166,16 @@ export async function listSchemaPacks(): Promise<string[]> {
     // prose, not a pack name.
     if (t === '') { section = 'none'; continue; }
     if (/^No user-installed packs/.test(t)) { section = 'none'; continue; }
-    packs.push(t);
+    (section === 'bundled' ? bundled : installed).push(t);
   }
-  return packs;
+  return { bundled, installed };
+}
+
+/** Every known pack, bundled first. Kept as the concatenation of the two
+ *  sections so existing callers are unchanged. */
+export async function listSchemaPacks(): Promise<string[]> {
+  const { bundled, installed } = await listSchemaPackSections();
+  return [...bundled, ...installed];
 }
 
 wizard.get('/schema-packs', guard(async (c) => {
