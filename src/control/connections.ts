@@ -328,6 +328,7 @@ function compileFrom(input: ConnectionInput, write: SpaceRow, reads: SpaceRow[])
       boundSlugPrefixes: input.boundSlugPrefixes,
       tokenTtl: input.tokenTtl,
       budgetUsdPerDay: input.budgetUsdPerDay,
+      privateSpace: write.ownerMembershipId != null,
     },
   );
 }
@@ -348,6 +349,7 @@ async function compileStored(
       boundSlugPrefixes: prefixes,
       tokenTtl: tokenTtl ?? row.tokenTtl,
       budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
+      privateSpace: write.ownerMembershipId != null,
     },
   );
 }

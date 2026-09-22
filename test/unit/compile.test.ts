@@ -50,7 +50,12 @@ const TOKEN_TTL_DEFAULT = 3600;
 function compile(
   role: Role = 'member',
   readSpaces: { sourceId: string }[] = READS,
-  opts?: { boundSlugPrefixes?: string[]; tokenTtl?: number; budgetUsdPerDay?: number },
+  opts?: {
+    boundSlugPrefixes?: string[];
+    tokenTtl?: number;
+    budgetUsdPerDay?: number;
+    privateSpace?: boolean;
+  },
   writeSpace: { sourceId: string; slug: string } = WRITE,
 ): CompiledConnection {
   return compileConnection({ role }, writeSpace, readSpaces, opts);
@@ -252,6 +257,29 @@ describe('honesty-rule warnings', () => {
 
   test('compile is deterministic: same inputs, same warnings', () => {
     expect(compile()).toEqual(compile());
+  });
+});
+
+describe('compileConnection private-space profile', () => {
+  test('a viewer compiling a private space gets memory-writer', () => {
+    expect(compile('viewer', READS, { privateSpace: true }).profile).toBe('memory-writer');
+  });
+
+  test('a viewer without the flag still gets memory-reader', () => {
+    expect(compile('viewer', READS, { privateSpace: false }).profile).toBe('memory-reader');
+    expect(compile('viewer').profile).toBe('memory-reader');
+  });
+
+  test('writer-or-better roles are not downgraded by the flag', () => {
+    expect(compile('member', READS, { privateSpace: true }).profile).toBe('memory-writer');
+    expect(compile('admin', READS, { privateSpace: true }).profile).toBe('coding-agent');
+    expect(compile('owner', READS, { privateSpace: true }).profile).toBe('coding-agent');
+  });
+
+  test('a private space never yields memory-reader for any role', () => {
+    for (const role of ROLES) {
+      expect(compile(role, READS, { privateSpace: true }).profile).not.toBe('memory-reader');
+    }
   });
 });
 

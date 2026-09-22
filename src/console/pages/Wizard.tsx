@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, TriangleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { api, type PackCreateResult } from '../api.ts';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
@@ -107,8 +107,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
       )}
 
       {state.nextStep === 'sources-added' && (
-        <SpaceStep busy={busy} notice={state.isolationNotice}
-                   onSubmit={(b) => step('/wizard/space', b)} />
+        <SpaceStep busy={busy} onSubmit={() => step('/wizard/private-space', {})} />
       )}
 
       {state.nextStep === 'ready' && (
@@ -190,41 +189,19 @@ function SchemaStep({ busy, onSubmit, onDone }: {
 }
 
 /**
- * The first Space of a brand-new brain needs no naming decision to be useful:
- * it is the org's own corpus and nothing else exists to tell it apart from.
- * Exported so the tests can assert the exact payload without a DOM.
+ * A brand-new brain starts with exactly one source: the signed-in member's own
+ * private space. There is no naming decision to make and nothing to consent to
+ * beyond what a private space already means.
  */
-export const FIRST_SPACE = { sourceId: 'my-brain', name: 'My Brain' } as const;
-
-function SpaceStep(
-  { busy, notice, onSubmit }: { busy: boolean; notice: string; onSubmit: (b: unknown) => void },
-) {
-  const [acknowledged, setAcknowledged] = useState(false);
+function SpaceStep({ busy, onSubmit }: { busy: boolean; onSubmit: () => void }) {
   return (
     <section className="space-y-3">
-      <h2 className="font-medium">Create your first Source</h2>
+      <h2 className="font-medium">Create your private space</h2>
       <p className="text-sm text-muted">
-        Your brain starts with one Source, <span className="font-mono">{FIRST_SPACE.sourceId}</span>.
-        You can add more later.
+        This is your private space — only you can access it. You can add shared Spaces
+        and invite members later.
       </p>
-      {/* S4b: a blocking choice, not a tooltip. Naming went away; consent did not.
-          The checkbox stays INSIDE the notice, where it has always been — a
-          consent control that drifts out of the warning it consents to is a
-          checkbox about nothing. `Notice` is a flex row, so the two lines get
-          their own column beside the glyph. */}
-      <Notice tone="warning">
-        <Icon glyph={TriangleAlert} size={16} />
-        <div className="flex flex-col">
-          <p className="m-0">{notice}</p>
-          <label className="mt-2 flex items-center gap-2">
-            <input type="checkbox" checked={acknowledged}
-                   onChange={(e) => setAcknowledged(e.target.checked)} />
-            I understand folders inside a Source are not access boundaries.
-          </label>
-        </div>
-      </Notice>
-      <Button variant="primary" disabled={busy || !acknowledged}
-              onClick={() => onSubmit({ ...FIRST_SPACE })}>
+      <Button variant="primary" disabled={busy} onClick={() => onSubmit()}>
         {busy ? 'Creating…' : 'Continue'}
       </Button>
     </section>

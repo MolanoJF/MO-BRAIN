@@ -17,6 +17,8 @@ const callOpsCalls: {
   op: string; opts?: { json?: boolean; timeoutMs?: number }; params?: Record<string, unknown>;
 }[] = [];
 let resetBrainSchemaCalls = 0;
+let grantSeq = 0;
+const seedSpaceCalls: string[] = [];
 // Task 9: the JSON pack writes the wizard's schema step makes through the file
 // plane, recorded so the draft branch's manifest can be asserted.
 const jsonPackWrites: { name: string; manifest: object }[] = [];
@@ -29,10 +31,10 @@ let scaffoldAt = -1;
 mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async (
     op: string,
-    _params?: Record<string, unknown>,
+    params?: Record<string, unknown>,
     opts?: { json?: boolean; timeoutMs?: number; packOverride?: string },
   ) => {
-    callOpsCalls.push({ op, opts, params: _params });
+    callOpsCalls.push({ op, opts, params });
     opsOrder.push(op);
     // The wizard's schema step calls gbrain's own validate + lint on a written
     // draft; both are DB-free at the pin (S7 probe 7). A clean envelope is what
@@ -68,6 +70,20 @@ mock.module('../../src/control/opsClient.ts', () => ({
         },
       };
     }
+    // Private-space provisioning grants a Connection through mcp.grant; the
+    // envelope below is what provisionConnection reads back to record the grant.
+    const json = op === 'mcp.grant'
+      ? {
+          client_id: `gbrain_cl_mock_${grantSeq++}`,
+          mcp_url: 'http://127.0.0.1:3131/mcp',
+          profile: 'memory-writer',
+          harness: 'generic',
+          source_id: params?.source,
+          expires_at: null,
+          renewable: true,
+          credentials: 'private-file',
+        }
+      : null;
     return {
       ok: true,
       exitCode: 0,
@@ -78,7 +94,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
           ? 'Active pack: gbrain-base-v2 v2.0.0\nSource: home-config\n'
           : 'ok',
       stderr: '',
-      json: null,
+      json,
     };
   },
   brainUsage: async () => { throw new Error('ops unreachable'); },
@@ -93,9 +109,14 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
   },
   removeSchemaPack: async () => ({ removed: false }),
-  seedSpace: async () => {},
+  seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
-  takeGrantCredentials: async () => ({}),
+  takeGrantCredentials: async () => ({
+    version: 1,
+    mcp_url: 'http://127.0.0.1:3131/mcp',
+    client_id: 'gbrain_cl_mock_handoff',
+    client_secret: 'not-a-real-secret-not-a-real-secret-not-a-real',
+  }),
   deleteCredentialJournal: async () => ({ deleted: true }),
   auditTail: async () => [],
   opsHealthy: async () => true,
@@ -115,13 +136,14 @@ mock.module('../../src/control/opsClient.ts', () => ({
 const { default: app } = await import('../../src/control/app.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
-const { eq } = await import('drizzle-orm');
+const { eq, and } = await import('drizzle-orm');
 
 // Pin at module load so a sibling file cannot close the pool before our beforeAll.
 pinDb();
 
 let cookie = '';
 let orgId = '';
+let adminMembershipId = '';
 
 beforeAll(async () => {
   await runMigrations();
@@ -205,6 +227,45 @@ describe('wizard', () => {
     expect((await call('/api/wizard/search-mode', { mode: 'turbo' })).status).toBe(400);
   });
 
+  // A fresh install's wizard creates exactly ONE source: the signed-in
+  // member's own private Space. Shared Spaces come later from the Sources page.
+  test('the private-space step creates the admin\'s own private source', async () => {
+    expect((await call('/api/wizard/schema', { pack: 'gbrain-base-v2' })).status).toBe(200);
+    const res = await call('/api/wizard/private-space', {});
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; lifecycle: string; sourceId: string };
+    expect(body.ok).toBe(true);
+    expect(body.lifecycle).toBe('sources-added');
+    expect(body.sourceId).toMatch(/^my-space-/);
+
+    const [admin] = await getDb().select().from(schema.users)
+      .where(eq(schema.users.email, 'admin@example.test'));
+    const [membership] = await getDb().select().from(schema.memberships).where(and(
+      eq(schema.memberships.userId, admin!.id),
+      eq(schema.memberships.organizationId, orgId),
+    ));
+    adminMembershipId = membership!.id;
+
+    const [space] = await getDb().select().from(schema.spaces).where(and(
+      eq(schema.spaces.organizationId, orgId),
+      eq(schema.spaces.sourceId, body.sourceId),
+    ));
+    expect(space?.ownerMembershipId).toBe(adminMembershipId);
+  });
+
+  test('a second private-space POST is idempotent and creates no second space', async () => {
+    const res = await call('/api/wizard/private-space', {});
+    expect(res.status).toBe(200);
+    const body = await res.json() as { lifecycle: string; sourceId: string };
+    expect(body.lifecycle).toBe('sources-added');
+
+    const owned = await getDb().select().from(schema.spaces).where(and(
+      eq(schema.spaces.organizationId, orgId),
+      eq(schema.spaces.ownerMembershipId, adminMembershipId),
+    ));
+    expect(owned.length).toBe(1);
+  });
+
   // S4b: Space = source is a HARD RULE, surfaced as a blocking choice.
   test('the space step refuses a duplicate source id', async () => {
     await call('/api/wizard/schema', { pack: 'gbrain-base-v2' });
@@ -243,6 +304,41 @@ describe('wizard', () => {
     expect(callOpsCalls.some((c) => c.op === 'sources.add')).toBe(true);
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.lifecycle).toBe('ready');
+  });
+
+  // The follow-up: once the brain is ready, finishing the wizard also gives the
+  // bootstrapped admin/owner their private "My Space" — source seeded and
+  // registered, one active writer Connection pointing at it.
+  test('finish gives the bootstrapped owner a private source and connection', async () => {
+    const [admin] = await getDb().select().from(schema.users)
+      .where(eq(schema.users.email, 'admin@example.test'));
+    const [membership] = await getDb().select().from(schema.memberships).where(and(
+      eq(schema.memberships.userId, admin!.id),
+      eq(schema.memberships.organizationId, orgId),
+    ));
+    expect(membership).toBeDefined();
+
+    const owned = await getDb().select().from(schema.spaces).where(and(
+      eq(schema.spaces.organizationId, orgId),
+      eq(schema.spaces.ownerMembershipId, membership!.id),
+    ));
+    expect(owned.length).toBe(1);
+    expect(owned[0]!.sourceId).toMatch(/^my-space-/);
+    const space = owned[0]!;
+
+    const [conn] = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.organizationId, orgId),
+      eq(schema.connections.membershipId, membership!.id),
+      eq(schema.connections.writeSpaceId, space.id),
+      eq(schema.connections.state, 'active'),
+    ));
+    expect(conn).toBeDefined();
+    // The bootstrapped admin is role `owner`; a private Space is always
+    // writer-or-better, and owner compiles to coding-agent.
+    expect(['memory-writer', 'coding-agent']).toContain(conn?.profile ?? '');
+
+    expect(seedSpaceCalls).toContain(space.sourceId);
+    expect(callOpsCalls.some((c) => c.op === 'sources.add' && c.params?.id === space.sourceId)).toBe(true);
   });
 
   // Task 6 — a new brain's Spaces are scaffolded from the pack each resolves,

@@ -44,7 +44,7 @@ const guard = (
     catch (e) { return errorResponse(e, 'files_error'); }
   };
 
-type SpaceRow = { id: string; sourceId: string; name: string };
+type SpaceRow = { id: string; sourceId: string; name: string; ownerMembershipId: string | null };
 
 /** The `(organizationId, sourceId)` pair is uniquely indexed, so this is at
  *  most one row — and a Space from another org can never be resolved here. */
@@ -53,6 +53,7 @@ async function spaceFor(orgId: string, sourceId: string): Promise<SpaceRow | nul
     id: schema.spaces.id,
     sourceId: schema.spaces.sourceId,
     name: schema.spaces.name,
+    ownerMembershipId: schema.spaces.ownerMembershipId,
   }).from(schema.spaces).where(and(
     eq(schema.spaces.organizationId, orgId),
     eq(schema.spaces.sourceId, sourceId),
@@ -106,6 +107,7 @@ fileRoutes.get('/spaces', guard('viewer', async (c, ctx) => {
     id: schema.spaces.id,
     sourceId: schema.spaces.sourceId,
     name: schema.spaces.name,
+    ownerMembershipId: schema.spaces.ownerMembershipId,
   }).from(schema.spaces).where(eq(schema.spaces.organizationId, ctx.orgId));
 
   const membershipId = await membershipIdFor(ctx.userId, ctx.orgId);
@@ -113,7 +115,7 @@ fileRoutes.get('/spaces', guard('viewer', async (c, ctx) => {
   const conns = await memberConnsFor(ctx.orgId, membershipId);
 
   const visible = spaces.flatMap((space) => {
-    const access = accessFromConnections(ctx.role, conns, space.id);
+    const access = accessFromConnections(ctx.role, conns, space.id, space.ownerMembershipId, membershipId);
     return access === null ? [] : [{ ...space, access }];
   });
   return c.json({ spaces: visible });
@@ -174,7 +176,9 @@ fileRoutes.put('/spaces/:sourceId/files/:path{.*}', guard('member', async (c, ct
   //    (a viewer never gets the role-based write), so `!connWrite` means the
   //    role alone opened the door — the explicit bypass, not a silent one.
   const conns = await memberConnsFor(ctx.orgId, membershipId);
-  const connWrite = accessFromConnections('viewer', conns, space.id) === 'write';
+  const connWrite = accessFromConnections(
+    'viewer', conns, space.id, space.ownerMembershipId, membershipId,
+  ) === 'write';
   const bypass = (ctx.role === 'admin' || ctx.role === 'owner') && !connWrite;
 
   // 3. The commit identity is the session's user, never a request body.

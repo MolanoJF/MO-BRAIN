@@ -57,10 +57,18 @@ export function compileConnection(
   member: { role: Role },
   writeSpace: { sourceId: string; slug: string },
   readSpaces: { sourceId: string }[],
-  opts?: { boundSlugPrefixes?: string[]; tokenTtl?: number; budgetUsdPerDay?: number },
+  opts?: {
+    boundSlugPrefixes?: string[];
+    tokenTtl?: number;
+    budgetUsdPerDay?: number;
+    privateSpace?: boolean;
+  },
 ): CompiledConnection {
-  const profile = ROLE_TO_PROFILE[member.role];
-  if (!profile) throw new Error(`unknown role ${String(member.role)}`);
+  const base = ROLE_TO_PROFILE[member.role];
+  if (!base) throw new Error(`unknown role ${String(member.role)}`);
+  const profile: GrantProfileId = opts?.privateSpace === true && base === 'memory-reader'
+    ? 'memory-writer'
+    : base;
 
   const boundSlugPrefixes = opts?.boundSlugPrefixes !== undefined
     ? [...opts.boundSlugPrefixes]

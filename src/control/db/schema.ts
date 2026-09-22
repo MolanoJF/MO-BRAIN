@@ -64,6 +64,7 @@ export const organizations = pgTable('organizations', {
   // Personal and company are the same deployment with a flag: one org, one
   // membership, one compiled grant, so promoting is a settings change.
   brainMode: text('brain_mode').notNull().default('company'),
+  privateSpacesEnabled: boolean('private_spaces_enabled').notNull().default(true),
   timezone: text('timezone').notNull().default('UTC'),
   // Quiet hours, org-local, wrapping midnight. Upstream's default gate is
   // 23:00-08:00 (docs/guides/quiet-hours.md). Notification jobs HOLD their
@@ -125,10 +126,13 @@ export const spaces = pgTable('spaces', {
   localPath: text('local_path'),
   gitRemote: text('git_remote'),
   deployKeySecretId: text('deploy_key_secret_id'),
+  ownerMembershipId: text('owner_membership_id').references(() => memberships.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('spaces_org_source_id_uq').on(t.organizationId, t.sourceId),
   check('kind_valid', sql`${t.kind} in ('local-git','remote-git','db-only','github','google')`),
+  uniqueIndex('spaces_owner_membership_uq').on(t.organizationId, t.ownerMembershipId)
+    .where(sql`${t.ownerMembershipId} is not null`),
 ]);
 
 /** Envelope-encrypted. A pg_dump of this table is not a credential dump (S3b). */

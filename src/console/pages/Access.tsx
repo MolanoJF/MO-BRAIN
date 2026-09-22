@@ -93,6 +93,11 @@ function previewExitCode(serverPreview: unknown): number | null {
   return typeof rec.exitCode === 'number' ? rec.exitCode : null;
 }
 
+const privateSpaceError = (error: string): string =>
+  error === 'already_provisioned' ? 'You already have a private space.'
+    : error === 'private_spaces_disabled' ? 'Private spaces are turned off for this organization.'
+      : error;
+
 export function Access() {
   const [members, setMembers] = useState<Member[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -102,6 +107,9 @@ export function Access() {
   const [notice, setNotice] = useState(ISOLATION_NOTICE);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [privateSpacesEnabled, setPrivateSpacesEnabled] = useState<boolean | null>(null);
+  const [spaceMsg, setSpaceMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spaceBusy, setSpaceBusy] = useState(false);
 
   const [membershipId, setMembershipId] = useState('');
   const [writeSpaceIds, setWriteSpaceIds] = useState<string[]>([]);
@@ -128,7 +136,22 @@ export function Access() {
     if (!harness && harnesses.adapters[0]) setHarness(harnesses.adapters[0].id);
   };
 
-  useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed')); }, []);
+  useEffect(() => {
+    void load().catch((e) => setError(e instanceof Error ? e.message : 'Load failed'));
+    void api.get<{ enabled: boolean }>('/org/private-spaces')
+      .then((r) => setPrivateSpacesEnabled(r.enabled))
+      .catch(() => setPrivateSpacesEnabled(false));
+  }, []);
+
+  const createMySpace = async () => {
+    setSpaceBusy(true); setSpaceMsg(null);
+    try {
+      const r = await api.post<{ ok: true; spaceId: string; sourceId: string; connectionId: string }>('/private-space');
+      setSpaceMsg({ ok: true, text: `Private space ready (${r.sourceId}).` });
+    } catch (e) {
+      setSpaceMsg({ ok: false, text: privateSpaceError(e instanceof Error ? e.message : 'Request failed') });
+    } finally { setSpaceBusy(false); }
+  };
 
   const access = (mId: string, spaceId: string) =>
     cells.find((c) => c.membershipId === mId && c.spaceId === spaceId)?.access;
@@ -414,6 +437,26 @@ export function Access() {
           onSubmit={() => void submit()}
         />
       )}
+
+      <section className="space-y-3">
+        <h2 className="font-medium">My private space</h2>
+        <Card className="space-y-2">
+          {privateSpacesEnabled === false ? (
+            <p className="text-sm text-muted">
+              Private spaces are turned off for this organization.
+            </p>
+          ) : (
+            <Button variant="primary"
+                    disabled={spaceBusy || privateSpacesEnabled === null}
+                    onClick={() => void createMySpace()}>
+              {spaceBusy ? 'Creating…' : 'Create my private space'}
+            </Button>
+          )}
+          {spaceMsg && (
+            <p className={`text-sm ${spaceMsg.ok ? 'text-muted' : 'text-danger'}`}>{spaceMsg.text}</p>
+          )}
+        </Card>
+      </section>
     </div>
   );
 }

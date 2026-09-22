@@ -5,6 +5,7 @@ import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
 import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson } from '../opsClient.ts';
+import { provisionPrivateSpace, privateSpaceSourceId } from '../privateSpaces.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
@@ -278,7 +279,8 @@ export type AddSpaceResult =
  */
 export async function addSpaceSource(
   { userId, orgId }: { userId: string; orgId: string },
-  { sourceId, name, description }: { sourceId?: string; name?: string; description?: string },
+  { sourceId, name, description, ownerMembershipId }:
+    { sourceId?: string; name?: string; description?: string; ownerMembershipId?: string },
   auditAction = 'wizard.space',
 ): Promise<AddSpaceResult> {
   if (!sourceId || !SOURCE_ID.test(sourceId)) {
@@ -304,6 +306,7 @@ export async function addSpaceSource(
     id: randomUUID(), organizationId: orgId, sourceId,
     name: name ?? sourceId, description: description ?? null,
     kind: 'local-git', localPath,
+    ...(ownerMembershipId ? { ownerMembershipId } : {}),
   });
   // The wizard advances from `schema-selected`. The Sources admin page adds to
   // an already-`ready` brain, where `sources-added` is a STEP BACKWARD that
@@ -313,7 +316,10 @@ export async function addSpaceSource(
   if (canAdvance(brain.lifecycle as Lifecycle, 'sources-added')) {
     await advance(brain.id, brain.lifecycle as Lifecycle, 'sources-added');
   }
-  await audit(orgId, userId, auditAction, sourceId, { sourceId, kind: 'local-git' });
+  await audit(orgId, userId, auditAction, sourceId, {
+    sourceId, kind: 'local-git',
+    ...(ownerMembershipId ? { ownerMembershipId } : {}),
+  });
 
   // A Space added to an already-ready brain gets its folders right away, from
   // the pack THAT Space resolves. During the wizard the brain is not ready yet
@@ -335,6 +341,43 @@ wizard.post('/space', guard(async (c, { userId, orgId }) => {
   if (!result.ok) return c.json(result.body, result.status);
 
   return c.json({ ok: true, lifecycle: 'sources-added', sourceId: result.sourceId, isolationNotice: ISOLATION_NOTICE });
+}));
+
+/**
+ * Step 4 (fresh install) — the signed-in member's own private Space. A new
+ * brain starts with exactly one source, and it is this one; shared Spaces are
+ * added later from the Sources page. No Connection is created here — `/finish`
+ * provisions it, once the brain is real.
+ */
+wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
+  const [membership] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.organizationId, orgId)));
+  if (!membership) return c.json({ error: 'not a member' }, 403);
+
+  const sourceId = privateSpaceSourceId(membership.id);
+  const [space] = await getDb().select().from(schema.spaces).where(and(
+    eq(schema.spaces.organizationId, orgId),
+    eq(schema.spaces.sourceId, sourceId),
+  ));
+
+  if (space) {
+    if (space.ownerMembershipId !== membership.id) {
+      return c.json({ error: `${sourceId} is already a Space owned by another member` }, 409);
+    }
+    const brain = await loadBrain(orgId);
+    if (canAdvance(brain.lifecycle as Lifecycle, 'sources-added')) {
+      await advance(brain.id, brain.lifecycle as Lifecycle, 'sources-added');
+    }
+    return c.json({ ok: true, lifecycle: 'sources-added', sourceId });
+  }
+
+  const result = await addSpaceSource(
+    { userId, orgId },
+    { sourceId, name: 'My Space', ownerMembershipId: membership.id },
+    'wizard.privateSpace',
+  );
+  if (!result.ok) return c.json(result.body, result.status);
+  return c.json({ ok: true, lifecycle: 'sources-added', sourceId: result.sourceId });
 }));
 
 /** Step 5 — init, config, sync, doctor. The brain becomes real here. */
@@ -405,6 +448,20 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     schemaPackResolved: active.pack,
     schemaPackSource: active.source,
   });
+
+  if (ok) {
+    try {
+      const [membership] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+        .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.organizationId, orgId)));
+      if (membership) {
+        const [owned] = await getDb().select({ id: schema.spaces.id }).from(schema.spaces).where(and(
+          eq(schema.spaces.organizationId, orgId),
+          eq(schema.spaces.ownerMembershipId, membership.id),
+        ));
+        if (owned) await provisionPrivateSpace(orgId, membership.id, userId);
+      }
+    } catch { /* never let this change ok or the response */ }
+  }
 
   return c.json({
     ok, lifecycle: ok ? 'ready' : brain.lifecycle, steps,
