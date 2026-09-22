@@ -367,6 +367,15 @@ export function Files() {
         <p className="text-sm text-muted">
           {spaces.length === 0 ? emptyStateText : accessNotice(access)}
         </p>
+        {sourceId !== '' && (
+          <a
+            className="nav-item inline-block text-sm"
+            href={filesApi.exportUrl(sourceId)}
+            download
+          >
+            Export as .bundle
+          </a>
+        )}
       </section>
 
       <div className="flex gap-6">

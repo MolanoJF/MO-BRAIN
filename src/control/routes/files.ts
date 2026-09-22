@@ -19,7 +19,7 @@ import { getDb, schema } from '../db/client.ts';
 import { actorIdentity } from '../actor.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { accessFromConnections, spaceAccess } from '../spaceAccess.ts';
-import { callOps, gitReadFile, gitTree, gitWriteFile } from '../opsClient.ts';
+import { callOps, gitExportBundle, gitReadFile, gitTree, gitWriteFile } from '../opsClient.ts';
 
 export const fileRoutes = new Hono();
 
@@ -124,6 +124,33 @@ fileRoutes.get('/spaces/:sourceId/files', guard('viewer', async (c, ctx) => {
   const gate = await readGate(c, ctx, sourceId);
   if ('denied' in gate) return gate.denied;
   return c.json(await gitTree(gate.space.sourceId));
+}));
+
+// The export — the full git repo (every ref, every commit) as a `.bundle` a
+// member can `git clone` locally and later push to a remote of their own.
+// `admin`, not `viewer`: a bundle hands over the whole history at once,
+// including anything a since-deleted page's commits still carry, so this is
+// stricter than the read-only browse above rather than reusing `readGate`.
+// `spaceFor` alone resolves the Space — `admin`/`owner` already reach every
+// Space in the org (`spaceAccess.ts:37`), so there is no grant left to check.
+fileRoutes.get('/spaces/:sourceId/export', guard('admin', async (c, ctx) => {
+  const sourceId = c.req.param('sourceId') ?? '';
+  const space = await spaceFor(ctx.orgId, sourceId);
+  if (!space) return c.json({ error: 'space_not_found' }, 404);
+
+  const upstream = await gitExportBundle(space.sourceId);
+  if (!upstream.ok) {
+    const payload = await upstream.json().catch(() => ({})) as { error?: string };
+    return c.json({ error: payload.error ?? 'export_failed' }, 400);
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  return new Response(upstream.body, {
+    headers: {
+      'content-type': 'application/octet-stream',
+      'content-disposition': `attachment; filename="${space.sourceId}-${stamp}.bundle"`,
+    },
+  });
 }));
 
 // Hono 4.13.8 does NOT expose a bare `*` segment through `c.req.param('*')` — a

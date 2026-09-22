@@ -17,7 +17,8 @@ import {
 import { resetBrainSchema } from './brainSchema.ts';
 import { readBrainUsage } from './usage.ts';
 import {
-  commitAs, diffRange, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths, revertRange,
+  commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
+  revertRange,
 } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
@@ -250,6 +251,17 @@ Bun.serve({
         const { sourceId } = body as { sourceId?: unknown };
         if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
         return json(await gitTree(sourceId, { sql }));
+      }
+
+      // Full history, every ref: the git bundle a member clones locally and
+      // later pushes to a remote of their own. Binary, so it bypasses `json()`
+      // and streams straight through — the ONE route here that is not JSON in,
+      // JSON out.
+      if (url.pathname === '/git/export') {
+        const { sourceId } = body as { sourceId?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        const stream = await exportRepoBundle(sourceId);
+        return new Response(stream, { headers: { 'content-type': 'application/octet-stream' } });
       }
 
       if (url.pathname === '/git/read-file') {
