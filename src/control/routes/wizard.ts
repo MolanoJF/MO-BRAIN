@@ -4,13 +4,14 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
-import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema } from '../opsClient.ts';
+import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson } from '../opsClient.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
 import { parseSchemaActiveProse } from '../../contracts/capability.ts';
-import { resolveSourcePacks, effectivePack } from './schema.ts';
+import { resolveSourcePacks, effectivePack, validationError, lint } from './schema.ts';
 import { scaffoldSpaces, type ScaffoldResult } from '../scaffold.ts';
+import { validateDraft, draftToManifest } from '../schemaDraft.ts';
 
 /**
  * Json flag for wizard `/finish` callOps. Only request --json when the
@@ -198,7 +199,46 @@ wizard.get('/schema-packs', guard(async (c) => {
  * user-installed pack is selectable the moment it is on disk.
  */
 wizard.post('/schema', guard(async (c, { userId, orgId }) => {
-  const { pack } = await c.req.json();
+  const body = await c.req.json().catch(() => ({}));
+
+  // Branch A (gated on S7 probe 7): a brand-new brain can start on a pack the
+  // admin designs right here, because gbrain's validate / lint / show are all
+  // DB-free and answer before `init` runs. The draft is front-gated by our own
+  // `validateDraft`, written once as `pack.json` through the file plane, then
+  // gbrain's own validate + lint are the authority — the same gate every other
+  // write path runs. Only a clean pack is stored and allowed to advance.
+  if (body?.draft !== undefined) {
+    const v = validateDraft(body.draft);
+    if (!v.ok) return c.json({ error: 'invalid draft', errors: v.errors }, 400);
+    const name = v.draft.name;
+
+    const known = await listSchemaPacks();
+    if (known.includes(name)) return c.json({ error: `${name} already exists`, packs: known }, 409);
+    if (v.draft.extends && !known.includes(v.draft.extends)) {
+      return c.json({ error: `unknown parent pack ${v.draft.extends}`, packs: known }, 400);
+    }
+
+    const brain = await loadBrain(orgId);
+    await putSchemaPackJson(name, draftToManifest(v.draft, brain.gbrainVersion ?? '0.50.5.0'));
+
+    const invalid = await validationError(name);
+    const report = invalid ? null : await lint(name, false);
+    if (invalid || !report?.ok) {
+      // Created, not activated. The pack stays on disk so the admin can fix it,
+      // but the wizard does NOT advance and nothing is stored — /finish can
+      // never be handed a pack gbrain refused. Never a green.
+      await audit(orgId, userId, 'wizard.schema.draft', name, {
+        name, valid: invalid === null, lint: report?.ok ?? false,
+      });
+      return c.json({ ok: false, name, error: invalid ?? 'pack lint failed', lint: report });
+    }
+
+    await advance(brain.id, brain.lifecycle as Lifecycle, 'schema-selected', { schemaPack: name });
+    await audit(orgId, userId, 'wizard.schema', name, { pack: name, mode: 'draft' });
+    return c.json({ ok: true, lifecycle: 'schema-selected', pack: name, name, error: null, lint: report });
+  }
+
+  const { pack } = body;
   if (!pack || typeof pack !== 'string') return c.json({ error: 'pack is required' }, 400);
 
   const known = await listSchemaPacks();

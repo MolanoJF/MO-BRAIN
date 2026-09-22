@@ -13,8 +13,13 @@ process.env.CONTROL_DATABASE_URL ??=
 // import graph links routes whose modules name every export, and a partial
 // `mock.module` factory makes this file fail to load when it runs alone (the
 // Slice 4 `mock.module` hazard). Mirrors test/integration/spend.test.ts.
-const callOpsCalls: { op: string; opts?: { json?: boolean; timeoutMs?: number } }[] = [];
+const callOpsCalls: {
+  op: string; opts?: { json?: boolean; timeoutMs?: number }; params?: Record<string, unknown>;
+}[] = [];
 let resetBrainSchemaCalls = 0;
+// Task 9: the JSON pack writes the wizard's schema step makes through the file
+// plane, recorded so the draft branch's manifest can be asserted.
+const jsonPackWrites: { name: string; manifest: object }[] = [];
 // Task 6: op ids in call order, and where the scaffold landed inside that order.
 // `scaffoldAt` is stamped by the gitScaffold mock, which is not a callOps call.
 const opsOrder: string[] = [];
@@ -27,8 +32,23 @@ mock.module('../../src/control/opsClient.ts', () => ({
     _params?: Record<string, unknown>,
     opts?: { json?: boolean; timeoutMs?: number; packOverride?: string },
   ) => {
-    callOpsCalls.push({ op, opts });
+    callOpsCalls.push({ op, opts, params: _params });
     opsOrder.push(op);
+    // The wizard's schema step calls gbrain's own validate + lint on a written
+    // draft; both are DB-free at the pin (S7 probe 7). A clean envelope is what
+    // lets the draft advance the lifecycle.
+    if (op === 'schema.validate') {
+      return {
+        ok: true, exitCode: 0, argv: ['gbrain', 'schema', 'validate'],
+        stdout: '✓ valid', stderr: '', json: null,
+      };
+    }
+    if (op === 'schema.lint') {
+      return {
+        ok: true, exitCode: 0, argv: ['gbrain', 'schema', 'lint'],
+        stdout: '', stderr: '', json: { ok: true, errors: [], warnings: [] },
+      };
+    }
     // A Space resolves its pack through the brain-wide active pack when no
     // per-source override is stored, so `config.get` must read back absent.
     if (op === 'config.get') {
@@ -66,7 +86,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   cancelRun: async () => ({ cancelled: false }),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
-  putSchemaPackJson: async () => {},
+  putSchemaPackJson: async (name: string, manifest: object) => { jsonPackWrites.push({ name, manifest }); },
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[] }) => {
     scaffoldAt = opsOrder.length;
     scaffolds.push({ sourceId: req.sourceId, entries: req.entries });
@@ -261,5 +281,44 @@ describe('wizard', () => {
     expect(res.status).toBe(200);
     expect(scaffolds.map((s) => s.sourceId)).toEqual(['legal']);
     expect(scaffolds[0]!.entries.map((e) => e.dir)).toContain('people/');
+  });
+
+  // Task 9 (Branch A, gated on S7 probe 7): the schema step can start a brain
+  // on a pack the admin designs. gbrain's validate / lint / show are DB-free, so
+  // the draft is written as pack.json and linted BEFORE `init` ever runs, then
+  // stored as the brain's choice. A later /finish hands it to
+  // `gbrain init --schema-pack`, exactly like a template pick.
+  test('the schema step accepts a custom draft, writes pack.json and stores it', async () => {
+    const draft = {
+      name: 'legal-ops', description: 'Contracts', extends: 'gbrain-base-v2',
+      pageTypes: [{
+        name: 'contract', primitive: 'entity', folder: 'contracts/', description: 'Signed',
+        extraPrefixes: [], aliases: [], extractable: true, expertRouting: false,
+      }],
+      linkVerbs: [],
+    };
+    await getDb().update(schema.brains).set({ lifecycle: 'schema-selected' });
+    jsonPackWrites.length = 0;
+
+    const res = await call('/api/wizard/schema', { draft });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; pack: string; name: string };
+    expect(body.ok).toBe(true);
+    expect(body.pack).toBe('legal-ops');
+
+    expect(jsonPackWrites.at(-1)!.name).toBe('legal-ops');
+    expect((jsonPackWrites.at(-1)!.manifest as any).page_types[0].path_prefixes).toEqual(['contracts/']);
+
+    const [stored] = await getDb().select().from(schema.brains);
+    expect(stored?.schemaPack).toBe('legal-ops');
+    expect(stored?.lifecycle).toBe('schema-selected');
+
+    // A later /finish passes schemaPack: draft.name to init.
+    await getDb().update(schema.brains).set({ lifecycle: 'sources-added' });
+    callOpsCalls.length = 0;
+    const fin = await call('/api/wizard/finish', {});
+    expect(fin.status).toBe(200);
+    const init = callOpsCalls.find((c) => c.op === 'init');
+    expect(init?.params?.schemaPack).toBe('legal-ops');
   });
 });

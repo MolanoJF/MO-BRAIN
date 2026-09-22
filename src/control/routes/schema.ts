@@ -72,7 +72,7 @@ async function readActive(): Promise<SchemaActive> {
  * parse, while `validate` gives the real diagnosis (MEASURED; see
  * docs/schema-pack-findings.md S5). Returns null when the pack is fine.
  */
-async function validationError(pack: string): Promise<string | null> {
+export async function validationError(pack: string): Promise<string | null> {
   const r = await callOps<never>('schema.validate', { packName: pack }, { timeoutMs: 60_000 });
   if (r.ok) return null;
   const text = `${r.stdout ?? ''}\n${r.stderr ?? ''}`.trim();
@@ -85,7 +85,7 @@ type LintReport = {
   warnings: { rule: string; message: string; hint?: string }[];
 };
 
-async function lint(pack: string | undefined, withDb: boolean): Promise<LintReport> {
+export async function lint(pack: string | undefined, withDb: boolean): Promise<LintReport> {
   // packName MUST precede --with-db: a bare `--with-db` is swallowed as the
   // positional pack name and answers `Pack not found: --with-db` (Work Item S).
   // buildArgv emits params in array order, so this is handled by the registry

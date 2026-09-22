@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
-import { api } from '../api.ts';
+import { api, type PackCreateResult } from '../api.ts';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
+import { NewPackPanel } from './SchemaBuilder.tsx';
 
 /**
  * The two pickers on this page (search mode, schema pack) are `<button>`s that
@@ -102,7 +103,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
       )}
 
       {state.nextStep === 'schema-selected' && (
-        <SchemaStep busy={busy} onSubmit={(pack) => step('/wizard/schema', { pack })} />
+        <SchemaStep busy={busy} onSubmit={(pack) => step('/wizard/schema', { pack })} onDone={load} />
       )}
 
       {state.nextStep === 'sources-added' && (
@@ -148,12 +149,15 @@ function ProviderStep({ busy, onSubmit }: { busy: boolean; onSubmit: (b: unknown
   );
 }
 
-function SchemaStep({ busy, onSubmit }: { busy: boolean; onSubmit: (pack: string) => void }) {
-  const [packs, setPacks] = useState<{ id?: string; name?: string }[]>([]);
+function SchemaStep({ busy, onSubmit, onDone }: {
+  busy: boolean; onSubmit: (pack: string) => void; onDone: () => void;
+}) {
+  const [packs, setPacks] = useState<string[]>([]);
+  const [custom, setCustom] = useState(false);
   useEffect(() => {
-    void api.get<{ packs: { id?: string; name?: string }[] }>('/wizard/schema-packs')
+    void api.get<{ packs: string[] }>('/wizard/schema-packs')
       .then((r) => setPacks(r.packs ?? []))
-      .catch(() => setPacks([{ id: 'gbrain-base-v2', name: 'gbrain-base-v2' }]));
+      .catch(() => setPacks(['gbrain-base-v2']));
   }, []);
   return (
     <section className="space-y-3">
@@ -162,15 +166,25 @@ function SchemaStep({ busy, onSubmit }: { busy: boolean; onSubmit: (pack: string
         A schema pack decides what kinds of pages your brain recognizes. Start with the default —
         under 20 pages of a kind, don't codify it.
       </p>
-      {packs.map((p) => {
-        const id = p.id ?? p.name ?? 'gbrain-base-v2';
-        return (
-          <button key={id} type="button" className={PICKER_CARD} disabled={busy}
-                  onClick={() => onSubmit(id)}>
-            <span className="font-mono">{id}</span>
-          </button>
-        );
-      })}
+      {packs.map((id) => (
+        <button key={id} type="button" className={PICKER_CARD} disabled={busy}
+                onClick={() => onSubmit(id)}>
+          <span className="font-mono">{id}</span>
+        </button>
+      ))}
+      {/* Branch A (S7 probe 7): gbrain's validate / lint / show all answer with
+          no DB, so a pack the admin designs can be written and linted BEFORE
+          `init`, then stored and applied by /finish like any template pick. */}
+      {!custom ? (
+        <Button disabled={busy} onClick={() => setCustom(true)}>Design our own</Button>
+      ) : (
+        <NewPackPanel
+          parent="gbrain-base-v2"
+          packs={packs.map((name) => ({ name }))}
+          onCreated={onDone}
+          createDraft={(draft) => api.post<PackCreateResult>('/wizard/schema', { draft })}
+        />
+      )}
     </section>
   );
 }

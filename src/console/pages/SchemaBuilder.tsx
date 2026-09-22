@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ApiError, schemaPacksApi,
-  type PackDetail, type PackDetailResponse, type PackMutateResult,
+  type PackCreateResult, type PackDetailResponse, type PackMutateResult,
   type SchemaLint, type ScaffoldResult,
 } from '../api.ts';
 import type { PackDraft, PackMutation } from '../../control/schemaDraft.ts';
@@ -150,10 +150,17 @@ export function ScaffoldResults({ results }: { results: ScaffoldResult[] }) {
  * template" forks a bundled pack, and "Import draft" only parses an agent's
  * draft into the Design tab so the admin reviews it before anything is written.
  */
-export function NewPackPanel({ parent, packs, onCreated }: {
+export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
   parent: string | null;
-  packs: PackDetail[];
+  packs: { name: string }[];
   onCreated: () => void;
+  /**
+   * Optional submit override. The Schema page leaves it undefined and creates
+   * through the authoring API; the wizard's schema step passes a function that
+   * posts the same draft to `/wizard/schema`, so a first-run brain can start on
+   * a custom pack and have it stored as the brain's choice in one step.
+   */
+  createDraft?: (draft: PackDraft) => Promise<PackCreateResult>;
 }) {
   const [tab, setTab] = useState<'design' | 'template' | 'import'>('design');
   const [name, setName] = useState('');
@@ -210,7 +217,7 @@ export function NewPackPanel({ parent, packs, onCreated }: {
         fromType: v.fromType.trim() || undefined, toType: v.toType.trim() || undefined,
       })),
     };
-    const r = await schemaPacksApi.create({ mode: 'draft', draft });
+    const r = createDraft ? await createDraft(draft) : await schemaPacksApi.create({ mode: 'draft', draft });
     setGbrainError(r.error); setLint(r.lint);
     if (r.ok) { setCreated(r.name); onCreated(); }
   });
