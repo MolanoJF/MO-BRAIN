@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
+import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
 
 type Role = 'owner' | 'admin' | 'member' | 'viewer';
 const INVITE_ROLES: Array<'admin' | 'member' | 'viewer'> = ['admin', 'member', 'viewer'];
@@ -66,53 +67,54 @@ export function Members() {
         <p className="text-sm text-muted">Invite by email. The claim URL is shown once.</p>
       </header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
       <section className="space-y-3">
         <h2 className="font-medium">Invite</h2>
-        <input className="field" type="email" placeholder="Email"
+        <Input type="email" placeholder="Email"
                value={email} onChange={(e) => setEmail(e.target.value)} />
-        <select className="field" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+        <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
           {INVITE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <button className="btn-primary" disabled={busy || !email}
-                onClick={() => void invite()}>
+        </Select>
+        <Button variant="primary" disabled={busy || !email} onClick={() => void invite()}>
           {busy ? 'Working…' : 'Invite'}
-        </button>
+        </Button>
       </section>
 
       {claimUrl && (
-        <div className="card border-warning space-y-2">
-          <p className="text-sm font-medium">Claim URL — shown once, not recoverable</p>
-          <p className="font-mono text-sm break-all">{claimUrl}</p>
-          {claimUntil && (
-            <p className="text-xs text-muted">Expires {new Date(claimUntil).toLocaleString()}</p>
-          )}
-          <p className="text-sm text-muted">
-            Save it now. We cannot show this link again.
-          </p>
-        </div>
+        <Notice>
+          <div className="w-full space-y-2">
+            <p className="font-medium">Claim URL — shown once, not recoverable</p>
+            <p className="font-mono break-all">{claimUrl}</p>
+            {claimUntil && (
+              <p className="text-xs">Expires {new Date(claimUntil).toLocaleString()}</p>
+            )}
+            {/* Not `text-muted`: a Notice paints its own copy colour per theme,
+                and muting one line inside it drops that line out of the warning
+                palette — the "save it now" line is the one that must not fade. */}
+            <p>Save it now. We cannot show this link again.</p>
+          </div>
+        </Notice>
       )}
 
       <section className="space-y-3">
         <h2 className="font-medium">Roster</h2>
-        {members.length === 0 && <p className="text-sm text-muted">No members yet.</p>}
+        {members.length === 0 && <Empty>No members yet.</Empty>}
         {members.map((m) => (
-          <div key={m.id} className="card flex items-center justify-between gap-3">
+          <Card key={m.id} className="flex items-center justify-between gap-3">
             <div>
               <div>{m.email}</div>
-              <div className="text-sm text-muted font-mono">{m.role}</div>
+              <div className="text-[length:var(--control-font)] text-muted font-mono">{m.role}</div>
             </div>
             <div className="flex gap-2 shrink-0">
-              <button className="nav-item" disabled={busy} onClick={() => void remint(m)}>
+              <Button disabled={busy} onClick={() => void remint(m)}>
                 Claim link
-              </button>
-              <button className="nav-item text-danger" disabled={busy}
-                      onClick={() => void offboard(m)}>
+              </Button>
+              <Button variant="danger" disabled={busy} onClick={() => void offboard(m)}>
                 Offboard
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         ))}
       </section>
     </div>

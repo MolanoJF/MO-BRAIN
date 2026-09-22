@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
+import { Badge, Card, Empty, Notice, Table, TableWrap, toneClass } from '../ui/index.tsx';
 import { alertLabel, alertTone, isPinnedAlert } from './Schedules.tsx';
 
 type RepoStatus = {
@@ -20,10 +21,6 @@ type Health = {
   at: string;
 };
 
-const TONE_CLASS: Record<string, string> = {
-  ok: 'text-ok', warning: 'text-warning', danger: 'text-danger', muted: 'text-muted',
-};
-
 export function Health() {
   const [health, setHealth] = useState<Health | null>(null);
 
@@ -34,7 +31,7 @@ export function Health() {
     return () => clearInterval(t);
   }, []);
 
-  if (!health) return <div className="text-muted">Checking…</div>;
+  if (!health) return <Empty>Checking…</Empty>;
 
   const repos = health.repos ?? [];
   const alerts = health.scheduleAlerts ?? [];
@@ -45,8 +42,10 @@ export function Health() {
   return (
     <div className="max-w-2xl space-y-4">
       <h1 className="text-xl font-semibold">Health</h1>
-      <div className={health.ok ? 'text-ok' : 'text-danger'}>
-        {health.ok ? 'All components healthy' : 'Degraded'}
+      <div>
+        <Badge tone={health.ok ? 'ok' : 'danger'}>
+          {health.ok ? 'All components healthy' : 'Degraded'}
+        </Badge>
       </div>
 
       {/* Requirement 7: a schedule alert is pinned here too, above the probes.
@@ -55,71 +54,102 @@ export function Health() {
           acknowledging happens on the Schedules page, where the alert is
           authenticated. */}
       {alerts.length > 0 && (
-        <section className="card border-warning space-y-2">
-          <div className="font-medium text-warning">
-            {alerts.length} open schedule alert{alerts.length === 1 ? '' : 's'}
-          </div>
-          {pinned.map((alert) => (
-            <div key={alert.id} className="text-sm">
-              <span className={TONE_CLASS[alertTone(alert.kind)] ?? 'text-warning'}>
-                {alertLabel(alert.kind)}
-              </span>
-              <span className="text-xs text-muted font-mono">
-                {' '}· {new Date(alert.at).toLocaleString()}
-              </span>
+        <Notice>
+          <div className="w-full space-y-2">
+            <div className="font-medium">
+              {alerts.length} open schedule alert{alerts.length === 1 ? '' : 's'}
             </div>
-          ))}
-          {alerts.length > pinned.length && (
-            <div className="text-sm text-muted">
-              {alerts.length - pinned.length} more, listed on the Schedules page.
-            </div>
-          )}
-          <a className="text-sm" href="/schedules">Open Schedules to acknowledge →</a>
-        </section>
-      )}
-      <table className="w-full text-sm">
-        <tbody>
-          {Object.entries(health.components).map(([k, v]) => (
-            <tr key={k} className="border-b border-subtle">
-              <td className="py-2 font-mono">{k}</td>
-              <td className={v === 'ok' ? 'text-ok' : 'text-danger'}>{v}</td>
-            </tr>
-          ))}
-          <tr><td className="py-2 font-mono">gbrain</td>
-              <td className="font-mono">{health.gbrainVersion ?? 'unknown'}</td></tr>
-        </tbody>
-      </table>
-      <h2 className="text-lg font-semibold">Source repos</h2>
-      {repos.length === 0 ? (
-        <p className="text-sm text-muted">No Source repos reported.</p>
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-subtle text-left">
-              <th className="py-2 pr-3">source</th>
-              <th className="py-2 pr-3">branch</th>
-              <th className="py-2 pr-3">lock</th>
-              <th className="py-2 pr-3">uncommitted</th>
-              <th className="py-2">unpushed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {repos.map((r) => (
-              <tr key={r.sourceId} className="border-b border-subtle">
-                <td className="py-2 pr-3 font-mono">{r.sourceId}</td>
-                <td className="py-2 pr-3 font-mono">{r.branch ?? '—'}</td>
-                <td className={`py-2 pr-3 ${r.staleLock ? 'text-danger' : 'text-ok'}`}>
-                  {r.staleLock ? `stale (${r.lockAgeSeconds ?? '?'}s)` : 'ok'}
-                </td>
-                <td className={`py-2 pr-3 ${r.uncommittedFiles > 0 ? 'text-warning' : ''}`}>
-                  {r.uncommittedFiles}
-                </td>
-                <td className={r.unpushedCommits > 0 ? 'text-warning' : ''}>{r.unpushedCommits}</td>
-              </tr>
+            {pinned.map((alert) => (
+              <div key={alert.id}>
+                {/* An alert label is a whole sentence, not a chip, so it stays
+                    toned text rather than becoming a Badge. */}
+                <span className={toneClass(alertTone(alert.kind))}>
+                  {alertLabel(alert.kind)}
+                </span>
+                <span className="text-xs text-muted font-mono">
+                  {' '}· {new Date(alert.at).toLocaleString()}
+                </span>
+              </div>
             ))}
-          </tbody>
-        </table>
+            {alerts.length > pinned.length && (
+              <div className="text-muted">
+                {alerts.length - pinned.length} more, listed on the Schedules page.
+              </div>
+            )}
+            {/* Underlined rather than tinted: this link sits on `--warn-surface`,
+                and `--cta` is a dark navy that all but disappears against the
+                dark theme's olive warning fill. The underline is the affordance
+                that survives both themes. */}
+            <a className="underline underline-offset-2" href="/schedules">
+              Open Schedules to acknowledge →
+            </a>
+          </div>
+        </Notice>
       )}
+
+      {/* No heading: the probe table is the page's opening statement and naming
+          it would be new copy, which this restyle does not add. */}
+      <Card>
+        <TableWrap>
+          <Table>
+            <tbody>
+              {Object.entries(health.components).map(([k, v]) => (
+                <tr key={k}>
+                  <td className="font-mono">{k}</td>
+                  <td><Badge tone={v === 'ok' ? 'ok' : 'danger'}>{v}</Badge></td>
+                </tr>
+              ))}
+              <tr>
+                <td className="font-mono">gbrain</td>
+                <td className="font-mono">{health.gbrainVersion ?? 'unknown'}</td>
+              </tr>
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
+
+      <Card title="Source repos">
+        {repos.length === 0 ? (
+          <Empty>No Source repos reported.</Empty>
+        ) : (
+          <TableWrap>
+            <Table>
+              <thead>
+                <tr>
+                  <th>source</th>
+                  <th>branch</th>
+                  <th>lock</th>
+                  <th>uncommitted</th>
+                  <th>unpushed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repos.map((r) => (
+                  <tr key={r.sourceId}>
+                    <td className="font-mono">{r.sourceId}</td>
+                    <td className="font-mono">{r.branch ?? '—'}</td>
+                    <td>
+                      <Badge tone={r.staleLock ? 'danger' : 'ok'}>
+                        {r.staleLock ? `stale (${r.lockAgeSeconds ?? '?'}s)` : 'ok'}
+                      </Badge>
+                    </td>
+                    {/* Counts stay plain numbers with a tone: a zero is not a
+                        status worth a chip, and a chip around every cell would
+                        make the one that matters harder to find, not easier. */}
+                    <td className={r.uncommittedFiles > 0 ? 'text-warning' : ''}>
+                      {r.uncommittedFiles}
+                    </td>
+                    <td className={r.unpushedCommits > 0 ? 'text-warning' : ''}>
+                      {r.unpushedCommits}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
+        )}
+      </Card>
+
       <p className="text-xs text-muted">Checked {new Date(health.at).toLocaleString()}</p>
     </div>
   );

@@ -1,7 +1,8 @@
 import { test, expect, describe, afterEach } from 'bun:test';
 import {
-  bannerFor, stepStatus, failedStep, rolledBack, runDuration, driftText,
+  bannerFor, stepStatus, stepTone, failedStep, rolledBack, runDuration, driftText,
   pendingChecklist, planCommand, runCommand, stepLabel, UPGRADE_STEPS,
+  type StepStatus,
 } from '../../src/console/pages/Upgrades.tsx';
 import { api, upgradeApi } from '../../src/console/api.ts';
 
@@ -60,6 +61,17 @@ describe('the run timeline', () => {
 
   test('a failed step reads as failed even if it also started', () => {
     expect(stepStatus([ev('step_started', 'migrate'), ev('step_failed', 'migrate')], 'migrate')).toBe('failed');
+  });
+
+  test('the four step statuses map onto four distinct tones', () => {
+    // The chips are the only place an operator reads a step's outcome at a
+    // glance, so two statuses that share a tone would render a failed migration
+    // in the same colour as a finished one.
+    const statuses: StepStatus[] = ['pending', 'active', 'done', 'failed'];
+    const tones = statuses.map(stepTone);
+    expect(new Set(tones).size).toBe(statuses.length);
+    expect(stepTone('failed')).toBe('danger');
+    expect(stepTone('done')).toBe('ok');
   });
 
   test('failedStep names which of the eight steps died', () => {

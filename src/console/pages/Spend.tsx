@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { spendApi, type SpendReport, type SpendRow } from '../api.ts';
+import { Card, Empty, Table, TableWrap } from '../ui/index.tsx';
 
 /**
  * The cost page (D8, D9). The ORDER of the four sections is the argument:
@@ -63,48 +64,51 @@ function SpendTable({ title, unitLabel, emptyText, rows }: {
   rows: SpendRow[];
 }) {
   return (
-    <div className="card space-y-2">
-      <h3 className="text-lg font-semibold">{title}</h3>
+    <Card title={title}>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted">{emptyText}</p>
+        <Empty>{emptyText}</Empty>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-subtle text-left">
-              <th className="py-2 pr-3">key</th>
-              <th className="py-2 pr-3 text-right">{unitLabel}</th>
-              <th className="py-2 text-right">cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const unattributed = isUnattributed(row);
-              return (
-                <tr
-                  key={row.key}
-                  className={`border-b border-subtle ${unattributed ? 'text-warning' : ''}`}
-                >
-                  <td className="py-2 pr-3">
-                    {row.label}
-                    {unattributed && (
-                      <span className="text-xs"> · its Connection was deleted, so it is not a member</span>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3 text-right font-mono">{num(row.runs)}</td>
-                  {/* A NULL cost is words, never $0.00 (honesty rule 3). */}
-                  <td className="py-2 text-right font-mono">
-                    {row.costUsd === null ? 'not priced' : money(row.costUsd)}
-                    {row.unpricedRuns > 0 && (
-                      <span className="text-xs text-muted"> ({num(row.unpricedRuns)} unpriced)</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <TableWrap>
+          {/* The numeric columns are right-aligned through a descendant variant
+              rather than a `text-right` class on each cell: `Table` bakes in
+              `[&_th]:text-left`, whose compiled selector outranks a bare
+              utility on the `th` itself, so a per-cell class would silently
+              lose and the money column would drift back to the left. */}
+          <Table className="[&_th:not(:first-child)]:text-right [&_td:not(:first-child)]:text-right">
+            <thead>
+              <tr>
+                <th>key</th>
+                <th>{unitLabel}</th>
+                <th>cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const unattributed = isUnattributed(row);
+                return (
+                  <tr key={row.key} className={unattributed ? 'text-warning' : ''}>
+                    <td>
+                      {row.label}
+                      {unattributed && (
+                        <span className="text-xs"> · its Connection was deleted, so it is not a member</span>
+                      )}
+                    </td>
+                    <td className="font-mono">{num(row.runs)}</td>
+                    {/* A NULL cost is words, never $0.00 (honesty rule 3). */}
+                    <td className="font-mono">
+                      {row.costUsd === null ? 'not priced' : money(row.costUsd)}
+                      {row.unpricedRuns > 0 && (
+                        <span className="text-xs text-muted"> ({num(row.unpricedRuns)} unpriced)</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -125,8 +129,8 @@ export function Spend() {
 
   if (report === null) {
     return error === null
-      ? <div className="text-muted">Loading…</div>
-      : <div className="text-danger text-sm">{error}</div>;
+      ? <Empty>Loading…</Empty>
+      : <div className="text-[length:var(--control-font)] text-danger">{error}</div>;
   }
 
   const { ours, brain, coverage } = report;
@@ -142,16 +146,15 @@ export function Spend() {
         </p>
       </header>
 
-      {error !== null && <div className="text-danger text-sm">{error}</div>}
+      {error !== null && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
       {/* Section 1 — FIRST, not last: the argument is that coverage precedes the
           number. Ours and gbrain's are two different ledgers. */}
-      <section className="card space-y-3">
-        <h2 className="text-lg font-semibold">What this page can and cannot see</h2>
-        <p className="text-sm text-muted">
-          Two meters, two different questions, and no attempt to reconcile them.
-        </p>
-
+      <Card
+        title="What this page can and cannot see"
+        subtitle="Two meters, two different questions, and no attempt to reconcile them."
+        className="space-y-3"
+      >
         <div className="space-y-1">
           <div className="text-sm font-medium">Ours</div>
           <ul className="list-disc pl-5 text-sm space-y-1">
@@ -182,22 +185,20 @@ export function Spend() {
             </p>
           )}
         </div>
-      </section>
+      </Card>
 
       {/* Section 2 — TWO figures. No code path here adds them. */}
-      <section className="card space-y-3">
-        <h2 className="text-lg font-semibold">Totals</h2>
-        <p className="text-sm text-muted">
-          Two separate figures, never added together. They meter different things; summing them would invent a
-          number.
-        </p>
+      <Card
+        title="Totals"
+        subtitle="Two separate figures, never added together. They meter different things; summing them would invent a number."
+      >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="card space-y-1">
+          <Card className="space-y-1">
             <div className="text-sm text-muted">Ours — agent-runner model calls through our gateway</div>
             <div className="text-2xl font-semibold">{usdText(ours.totalUsd)}</div>
             <div className="text-xs text-muted">over the last {num(report.windowDays)} day(s)</div>
-          </div>
-          <div className="card space-y-1">
+          </Card>
+          <Card className="space-y-1">
             <div className="text-sm text-muted">
               gbrain's ledger — <span className="font-mono">gateway.chat</span> calls
             </div>
@@ -211,9 +212,9 @@ export function Spend() {
             ) : (
               <div className="text-warning">Not read — the brain ledger could not be reached.</div>
             )}
-          </div>
+          </Card>
         </div>
-      </section>
+      </Card>
 
       {/* Section 3 — three tables. `unattributed` is its own row (D9). */}
       <section className="space-y-4">
@@ -239,8 +240,7 @@ export function Spend() {
       </section>
 
       {/* Section 4 — shown even at zero. */}
-      <section className="card space-y-2">
-        <h2 className="text-lg font-semibold">Unpriced calls</h2>
+      <Card title="Unpriced calls" className="space-y-2">
         <div className="text-2xl font-semibold">{num(ours.unpricedRuns)}</div>
         <p className="text-sm">
           A metered call we could not price adds no dollar amount to any total and is counted here instead —
@@ -254,7 +254,7 @@ export function Spend() {
             is not added to ours.
           </p>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

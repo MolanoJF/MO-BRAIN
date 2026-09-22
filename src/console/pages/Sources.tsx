@@ -3,6 +3,7 @@ import {
   ApiError, schemaPacksApi, sourcesApi,
   type PackDetail, type SchemaSync, type SourceSummary,
 } from '../api.ts';
+import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
 import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
 
 /* -------------------------------------------------------------------------
@@ -216,56 +217,57 @@ export function Sources() {
         </p>
       </header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
       {!listOk && (
-        <div className="text-warning text-sm">
+        <div className="text-[length:var(--control-font)] text-warning">
           gbrain's source list could not be read, so live page counts and sync times are unavailable.
         </div>
       )}
 
       <section className="space-y-3">
         <h2 className="font-medium">Sources</h2>
-        {rows.length === 0 && <p className="text-sm text-muted">No Sources yet.</p>}
+        {rows.length === 0 && <Empty>No Sources yet.</Empty>}
         {rows.map((src) => {
           const detail = detailFor(src.pack);
           const isOpen = expanded === src.sourceId;
           const clicked = removeTarget === src.sourceId;
           const options = src.pack && !packs.includes(src.pack) ? [src.pack, ...packs] : packs;
           return (
-            <div key={src.sourceId} className="card space-y-3">
+            <Card key={src.sourceId} className="space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div>{src.name}</div>
-                  <div className="text-sm text-muted font-mono">{src.sourceId} · {src.kind}</div>
-                  <div className="text-sm text-muted">
+                  <div className="text-[length:var(--control-font)] text-muted font-mono">
+                    {src.sourceId} · {src.kind}
+                  </div>
+                  <div className="text-[length:var(--control-font)] text-muted">
                     {pageCountText(src, listOk)} · {lastSyncText(src, listOk)}
                     {src.federated === null ? '' : ` · federated ${src.federated ? 'yes' : 'no'}`}
                   </div>
                 </div>
-                <button className="nav-item shrink-0" disabled={busy !== null}
+                <Button className="shrink-0" disabled={busy !== null}
                         onClick={() => setExpanded(isOpen ? null : src.sourceId)}>
                   {isOpen ? 'Hide types' : 'View types'}
-                </button>
+                </Button>
               </div>
 
               <div className="space-y-1">
-                <div className="text-sm">{sourcePackLabel(src)}</div>
+                <div className="text-[length:var(--control-font)]">{sourcePackLabel(src)}</div>
                 {!src.inherited && <p className="text-xs text-muted">{NO_SOURCE_READBACK_NOTICE}</p>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    className="field max-w-xs"
+                  <Select
+                    className="max-w-xs"
                     value={src.pack ?? ''}
                     disabled={busy !== null}
                     onChange={(e) => void setPack(src, e.currentTarget.value)}
                   >
                     {options.length === 0 && <option value="">(no packs available)</option>}
                     {options.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                  </Select>
                   {!src.inherited && (
-                    <button className="nav-item w-auto" disabled={busy !== null}
-                            onClick={() => void resetPack(src)}>
+                    <Button disabled={busy !== null} onClick={() => void resetPack(src)}>
                       Reset to brain default
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -273,46 +275,63 @@ export function Sources() {
               {isOpen && (
                 detail
                   ? <PackTypesView detail={detail} />
-                  : <p className="text-sm text-muted">
-                      No resolved details for {src.pack ?? 'this pack'}.
-                    </p>
+                  : <Empty>No resolved details for {src.pack ?? 'this pack'}.</Empty>
               )}
 
               <div className="flex flex-wrap gap-2">
-                <button className="nav-item w-auto" disabled={busy !== null} onClick={() => void backfill(src)}>
+                <Button disabled={busy !== null} onClick={() => void backfill(src)}>
                   Backfill blank types
-                </button>
-                <button className="nav-item w-auto" disabled={busy !== null} onClick={() => void archive(src)}>
+                </Button>
+                <Button disabled={busy !== null} onClick={() => void archive(src)}>
                   Archive
-                </button>
+                </Button>
+                {/*
+                  Deliberately NOT `ui`'s `ConfirmButton`, and this is the one
+                  place in Phase 3 where the primitive is the wrong shape rather
+                  than merely unused.
+
+                  `ConfirmButton` arms itself from a local boolean: click once to
+                  arm, click again to fire. This gate is not that. The first click
+                  is a REQUEST to the server (`mode: 'remove'` with no `confirm`),
+                  which answers 409 `confirmation_required` and hands back
+                  gbrain's own `--dry-run` impact preview; only a preview that
+                  actually arrived unlocks the destructive second call
+                  (`canConfirmRemove`). Three things would be lost by swapping it:
+                  the probe would never be sent, the second click could fire
+                  without the operator having been shown what it destroys, and
+                  `ConfirmButton`'s disarm-on-blur would silently throw away a
+                  preview the server had already produced. The two-click shape
+                  here is an API contract, not an affordance.
+                */}
                 {clicked ? (
                   <>
-                    <button
-                      className="nav-item w-auto text-danger"
+                    <Button
+                      variant="danger"
                       disabled={busy !== null || !canConfirmRemove(clicked, removePreview)}
                       onClick={() => void confirmRemove(src)}
                     >
                       Confirm remove
-                    </button>
-                    <button className="nav-item w-auto"
-                            onClick={() => { setRemoveTarget(null); setRemovePreview(null); }}>
+                    </Button>
+                    <Button onClick={() => { setRemoveTarget(null); setRemovePreview(null); }}>
                       Keep it
-                    </button>
+                    </Button>
                   </>
                 ) : (
-                  <button className="nav-item w-auto text-danger" disabled={busy !== null}
+                  <Button variant="danger" disabled={busy !== null}
                           onClick={() => void requestRemove(src)}>
                     Remove
-                  </button>
+                  </Button>
                 )}
               </div>
               <p className="text-xs text-muted">{BACKFILL_NOTICE}</p>
 
               {clicked && removePreview !== null && (
-                <div className="card border-warning space-y-1">
-                  <p className="text-sm font-medium">Remove — impact preview</p>
-                  <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
-                </div>
+                <Notice>
+                  <div className="w-full space-y-1">
+                    <p className="font-medium">Remove — impact preview</p>
+                    <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
+                  </div>
+                </Notice>
               )}
 
               {sync?.sourceId === src.sourceId && (
@@ -321,21 +340,21 @@ export function Sources() {
                   <SyncTable title={`Backfilled — ${sync.applied.total_applied} page(s) typed`} report={sync.applied} />
                 </div>
               )}
-            </div>
+            </Card>
           );
         })}
       </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">Add source</h2>
-        <input className="field" placeholder="source-id" value={newId}
+        <Input placeholder="source-id" value={newId}
                onChange={(e) => setNewId(e.target.value)} />
-        <input className="field" placeholder="Name" value={newName}
+        <Input placeholder="Name" value={newName}
                onChange={(e) => setNewName(e.target.value)} />
-        <button className="btn-primary" disabled={busy !== null || !canAddSource(newId, newName)}
+        <Button variant="primary" disabled={busy !== null || !canAddSource(newId, newName)}
                 onClick={() => void add()}>
           {busy === 'add' ? 'Adding…' : 'Add source'}
-        </button>
+        </Button>
         <p className="text-sm text-muted">{notice ?? ISOLATION_NOTICE}</p>
       </section>
 

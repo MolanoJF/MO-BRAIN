@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, schemaPacksApi, type PackDetail, type PackPageType, type SchemaSync } from '../api.ts';
+import { Badge, Button, Card, Empty, Table, TableWrap } from '../ui/index.tsx';
 
 type Active = {
   pack: string | null; version: string | null; source: string | null;
@@ -145,7 +146,7 @@ export function Schema() {
   });
   const runSync = () => step(async () => { setApplied(await api.post<Sync>('/schema/sync', {})); await load(); });
 
-  if (!state) return <div className="text-muted">Loading…</div>;
+  if (!state) return <Empty>Loading…</Empty>;
 
   const changing = pack !== state.active.pack;
   // Preview before apply. A pack change is cheap to reverse but expensive to
@@ -162,7 +163,7 @@ export function Schema() {
         </p>
       </header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Active</h2>
@@ -176,44 +177,47 @@ export function Schema() {
         {warning && (
           // Never round this up to a checkmark: the brain is running a pack
           // nobody here chose, because a higher-priority tier outranks ours.
-          <div className="text-danger text-sm">{warning}</div>
+          <div className="text-[length:var(--control-font)] text-danger">{warning}</div>
         )}
       </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Schema packs</h2>
         <p className="text-sm text-muted">{ADDITIVE_NOTICE}</p>
-        {packsError && <div className="text-danger text-sm">{packsError}</div>}
-        {!packsError && details.length === 0 && <p className="text-sm text-muted">Loading packs…</p>}
+        {packsError && <div className="text-[length:var(--control-font)] text-danger">{packsError}</div>}
+        {!packsError && details.length === 0 && <Empty>Loading packs…</Empty>}
         {details.map((d) => {
           const isActive = d.name === state.active.pack;
           const isOpen = expanded === d.name;
           return (
-            <div key={d.name} className="card space-y-2">
-              <button
-                className="nav-item flex items-center justify-between gap-2"
-                disabled={busy}
-                onClick={() => toggle(d.name)}
-              >
-                <span className="font-mono">{isOpen ? '▾' : '▸'} {d.name}</span>
-                {isActive && (
-                  <span className="text-ok text-xs shrink-0">
-                    {state.active.source ? `ACTIVE (${state.active.source})` : 'ACTIVE'}
-                  </span>
-                )}
-              </button>
+            <Card key={d.name} className="space-y-2">
+              {/* The row's layout sits on a span INSIDE the button rather than on
+                  the button: `Button` centres its own content, and a
+                  `justify-between` passed alongside would leave two
+                  justify-content utilities fighting over an emit order the class
+                  attribute does not control. */}
+              <Button className="w-full" disabled={busy} onClick={() => toggle(d.name)}>
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="font-mono">{isOpen ? '▾' : '▸'} {d.name}</span>
+                  {isActive && (
+                    <Badge tone="ok">
+                      {state.active.source ? `ACTIVE (${state.active.source})` : 'ACTIVE'}
+                    </Badge>
+                  )}
+                </span>
+              </Button>
               {d.error
-                ? <div className="text-danger text-sm">{d.error}</div>
-                : <div className="text-sm text-muted">{packSummary(d)}</div>}
+                ? <div className="text-[length:var(--control-font)] text-danger">{d.error}</div>
+                : <div className="text-[length:var(--control-font)] text-muted">{packSummary(d)}</div>}
               {isOpen && d.error === null && (
                 <div className="space-y-3 pt-2">
                   <PackTypesView detail={d} />
                   <div className="flex flex-wrap gap-2">
-                    <button className="nav-item" disabled={busy || pack === ''} onClick={runLint}>Lint</button>
-                    <button className="nav-item" disabled={busy} onClick={runPreview}>Preview sync</button>
-                    <button className="btn-primary" disabled={!applyEnabled} onClick={runApply}>
+                    <Button disabled={busy || pack === ''} onClick={runLint}>Lint</Button>
+                    <Button disabled={busy} onClick={runPreview}>Preview sync</Button>
+                    <Button variant="primary" disabled={!applyEnabled} onClick={runApply}>
                       {changing ? `Apply ${pack}` : 'Apply'}
-                    </button>
+                    </Button>
                   </div>
                   {!applyEnabled && pack !== '' && (
                     <p className="text-xs text-muted">Lint clean and a sync preview are both required before applying.</p>
@@ -222,7 +226,7 @@ export function Schema() {
                   {preview && <SyncTable title="Preview — nothing written" report={preview} />}
                 </div>
               )}
-            </div>
+            </Card>
           );
         })}
       </section>
@@ -232,7 +236,7 @@ export function Schema() {
         <p className="text-sm text-muted">
           Fills in pages that have no type yet, using the active pack's path prefixes. {ADDITIVE_NOTICE}
         </p>
-        <button className="nav-item" disabled={busy} onClick={runSync}>Run sync</button>
+        <Button disabled={busy} onClick={runSync}>Run sync</Button>
         {applied && <SyncTable title={`Applied — ${applied.total_applied} page(s) typed`} report={applied} />}
       </section>
     </div>
@@ -248,14 +252,14 @@ export function Schema() {
  * implementation, not two.
  */
 export function PackTypesView({ detail }: { detail: PackDetail }) {
-  if (detail.error !== null) return <div className="text-danger text-sm">{detail.error}</div>;
+  if (detail.error !== null) return <div className="text-[length:var(--control-font)] text-danger">{detail.error}</div>;
   return (
     <div className="space-y-3">
       {detail.description && <p className="text-sm text-muted">{detail.description}</p>}
       <div>
         <h3 className="text-xs font-semibold text-muted">Page types</h3>
         {detail.pageTypes.length === 0 ? (
-          <p className="text-sm text-muted">This pack declares no page types.</p>
+          <Empty>This pack declares no page types.</Empty>
         ) : (
           <ul className="text-sm">
             {detail.pageTypes.map((p) => (
@@ -267,7 +271,7 @@ export function PackTypesView({ detail }: { detail: PackDetail }) {
       <div>
         <h3 className="text-xs font-semibold text-muted">Link verbs</h3>
         {detail.linkVerbs.length === 0 ? (
-          <p className="text-sm text-muted">This pack declares no link verbs.</p>
+          <Empty>This pack declares no link verbs.</Empty>
         ) : (
           <p className="text-sm">{detail.linkVerbs.join(' · ')}</p>
         )}
@@ -281,16 +285,16 @@ function LintReport({ lint }: { lint: Lint }) {
     <section className="space-y-2">
       <h2 className="text-sm font-semibold">Lint — {lint.ok ? 'clean' : 'errors'}</h2>
       {lint.errors.map((e, i) => (
-        <div key={`e${i}`} className="text-danger text-sm">
+        <div key={`e${i}`} className="text-[length:var(--control-font)] text-danger">
           <code>{e.rule}</code>: {e.message}{e.hint ? ` — ${e.hint}` : ''}
         </div>
       ))}
       {lint.warnings.map((w, i) => (
-        <div key={`w${i}`} className="text-muted text-sm">
+        <div key={`w${i}`} className="text-[length:var(--control-font)] text-muted">
           <code>{w.rule}</code>: {w.message}{w.hint ? ` — ${w.hint}` : ''}
         </div>
       ))}
-      {lint.ok && lint.warnings.length === 0 && <div className="text-sm text-muted">No findings.</div>}
+      {lint.ok && lint.warnings.length === 0 && <Empty>No findings.</Empty>}
     </section>
   );
 }
@@ -301,24 +305,36 @@ export function SyncTable({ title, report }: { title: string; report: Sync }) {
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="text-sm text-muted">
+      <div className="text-[length:var(--control-font)] text-muted">
         {syncSummary(report)}
         {report.pack_identity ? ` · ${report.pack_identity}` : ''}
       </div>
       {live.length > 0 && (
-        <table className="w-full text-sm">
-          <thead><tr><th className="text-left">Type</th><th className="text-left">Prefix</th><th className="text-right">Would apply</th><th className="text-right">Applied</th></tr></thead>
-          <tbody>
-            {live.map((p) => (
-              <tr key={`${p.type}:${p.prefix}`}>
-                <td><code>{p.type}</code></td>
-                <td><code>{p.prefix}</code></td>
-                <td className="text-right">{p.would_apply}</td>
-                <td className="text-right">{p.applied}</td>
+        <TableWrap>
+          {/* The two count columns are right-aligned from the table, not from
+              each cell: `Table`'s `[&_th]:text-left` compiles to a selector that
+              outranks a `text-right` class sitting on the `th` itself. */}
+          <Table className="[&_th:nth-child(n+3)]:text-right [&_td:nth-child(n+3)]:text-right">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Prefix</th>
+                <th>Would apply</th>
+                <th>Applied</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {live.map((p) => (
+                <tr key={`${p.type}:${p.prefix}`}>
+                  <td><code>{p.type}</code></td>
+                  <td><code>{p.prefix}</code></td>
+                  <td>{p.would_apply}</td>
+                  <td>{p.applied}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
       )}
     </section>
   );

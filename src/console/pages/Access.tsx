@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.ts';
 import { autoInstall, connectionClass, wiringSnippet } from '../../control/harness.ts';
+import { Button, Card, Empty, Field, Input, Notice, Select, Table, TableWrap } from '../ui/index.tsx';
 
 /**
  * Access = a member's link to Sources (the row) plus the permissions that
@@ -206,13 +207,15 @@ export function Access() {
         </p>
       </header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
       {/* D12: what enabling the runner means, before anyone reads the matrix. */}
-      <section className="card border-warning">
-        <h2 className="text-sm font-semibold text-warning">The agent runner</h2>
-        <p className="text-sm">{AGENT_RUNNER_WARNING}</p>
-      </section>
+      <Notice>
+        <div className="w-full space-y-1">
+          <h2 className="m-0 text-[length:var(--section-font)] font-medium">The agent runner</h2>
+          <p>{AGENT_RUNNER_WARNING}</p>
+        </div>
+      </Notice>
 
       <section className="space-y-3">
         <h2 className="font-medium">Who has access</h2>
@@ -220,70 +223,78 @@ export function Access() {
           Who can read or write which Source. W = write (one Connection per write Source). R = read.
         </p>
         {spaces.length === 0 ? (
-          <p className="text-sm text-muted">No Sources yet.</p>
+          <Empty>No Sources yet.</Empty>
         ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-subtle text-left">
-                  <th className="py-2 pr-3">Member</th>
-                  {spaces.map((s) => (
-                    <th key={s.id} className="py-2 px-2 font-mono">{s.name || s.sourceId}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((m) => (
-                  <tr key={m.id} className="border-b border-subtle">
-                    <td className="py-2 pr-3">
-                      <div>{m.email}</div>
-                      <div className="text-xs text-muted font-mono">{m.role}</div>
-                    </td>
-                    {spaces.map((s) => {
-                      const a = access(m.id, s.id);
-                      return (
-                        <td key={s.id} className="py-2 px-2">
-                          {a === 'write' && <span className="font-semibold" title="write">W</span>}
-                          {a === 'read' && <span className="text-muted" title="read">R</span>}
-                          {!a && <span className="text-muted">—</span>}
-                        </td>
-                      );
-                    })}
+          <Card>
+            <TableWrap>
+              <Table>
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    {spaces.map((s) => (
+                      <th key={s.id} className="font-mono">{s.name || s.sourceId}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {members.map((m) => (
+                    <tr key={m.id}>
+                      <td>
+                        <div>{m.email}</div>
+                        <div className="text-xs text-muted font-mono">{m.role}</div>
+                      </td>
+                      {spaces.map((s) => {
+                        const a = access(m.id, s.id);
+                        // Single letters, not Badges: W and R are a legend the
+                        // sentence above defines, and a grid of pills would read
+                        // as a dozen competing statuses instead of one matrix.
+                        return (
+                          <td key={s.id}>
+                            {a === 'write' && <span className="font-semibold" title="write">W</span>}
+                            {a === 'read' && <span className="text-muted" title="read">R</span>}
+                            {!a && <span className="text-muted">—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </Card>
         )}
       </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">Existing connections</h2>
-        {connections.length === 0 && <p className="text-sm text-muted">No connections yet.</p>}
+        {connections.length === 0 && <Empty>No connections yet.</Empty>}
         {[...grouped.entries()].map(([mid, rows]) => {
           const m = members.find((x) => x.id === mid);
           return (
             <div key={mid} className="space-y-2">
               <h3 className="text-sm font-medium">{m?.email ?? mid}</h3>
               {rows.map((row) => (
-                <div key={row.id} className="card space-y-1">
+                <Card key={row.id} className="space-y-1">
                   <div className="flex justify-between gap-2 items-start">
                     <span className="font-medium">Write: {spaceLabel(spaces, row.writeSpaceId)}</span>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-sm text-muted">{row.state}</span>
+                      {/* The raw connection state, unchanged: this console maps
+                          no tone onto it, and a Badge would have to invent one. */}
+                      <span className="font-mono text-[length:var(--control-font)] text-muted">{row.state}</span>
                       {row.state !== 'revoked' && (
-                        <button className="nav-item text-danger" disabled={busy}
-                                onClick={() => void revoke(row.id)}>
+                        <Button variant="danger" disabled={busy} onClick={() => void revoke(row.id)}>
                           Revoke
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <div className="text-sm text-muted">
+                  <div className="text-[length:var(--control-font)] text-muted">
                     Read: {asStringArray(row.readSpaceIds).map((id) => spaceLabel(spaces, id)).join(', ') || 'none'}
                   </div>
-                  <div className="text-sm font-mono text-muted">{row.harness} · {row.clientName}</div>
-                </div>
+                  <div className="text-[length:var(--control-font)] font-mono text-muted">
+                    {row.harness} · {row.clientName}
+                  </div>
+                </Card>
               ))}
             </div>
           );
@@ -292,25 +303,30 @@ export function Access() {
 
       <section className="space-y-3">
         <h2 className="font-medium">Grant access</h2>
-        <label className="text-sm">Member
-          <select className="field mt-1" value={membershipId}
+        {/* `Field` labels by `htmlFor`, where the old markup wrapped the control
+            in its label. The ids below are what keeps that association — a
+            `Field` with no id renders a label pointing at nothing. */}
+        <Field label="Member" id="access-member">
+          <Select id="access-member" value={membershipId}
                   onChange={(e) => { setMembershipId(e.target.value); setPreviews(null); }}>
             <option value="">Select member…</option>
             {members.map((m) => (
               <option key={m.id} value={m.id}>{m.email} ({m.role})</option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
 
         {/* S4b: a blocking choice, not a tooltip. */}
-        <div className="card border-warning">
-          <p className="text-sm">{notice}</p>
-          <label className="mt-2 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={acknowledged}
-                   onChange={(e) => setAcknowledged(e.target.checked)} />
-            I understand folders inside a Source are not access boundaries.
-          </label>
-        </div>
+        <Notice>
+          <div className="w-full">
+            <p>{notice}</p>
+            <label className="mt-2 flex items-center gap-2">
+              <input type="checkbox" checked={acknowledged}
+                     onChange={(e) => setAcknowledged(e.target.checked)} />
+              I understand folders inside a Source are not access boundaries.
+            </label>
+          </div>
+        </Notice>
 
         <div>
           <div className="text-sm font-medium mb-2">Write Sources</div>
@@ -329,13 +345,13 @@ export function Access() {
             <p className="text-sm text-muted">Pick write Sources. Each write Source is its own Connection row.</p>
           )}
           {writeSpaceIds.map((id) => (
-            <div key={id} className="card space-y-1">
+            <Card key={id} className="space-y-1">
               <div className="font-medium">Write: {spaceLabel(spaces, id)}</div>
-              <div className="text-sm text-muted">
+              <div className="text-[length:var(--control-font)] text-muted">
                 Read: {readSpaceIds.map((rid) => spaceLabel(spaces, rid)).join(', ') || 'none'}
               </div>
-              <div className="text-sm font-mono text-muted">{harness || 'no harness'}</div>
-            </div>
+              <div className="text-[length:var(--control-font)] font-mono text-muted">{harness || 'no harness'}</div>
+            </Card>
           ))}
         </div>
 
@@ -350,8 +366,8 @@ export function Access() {
           ))}
         </div>
 
-        <label className="text-sm">Harness
-          <select className="field mt-1" value={harness}
+        <Field label="Harness" id="access-harness">
+          <Select id="access-harness" value={harness}
                   onChange={(e) => { setHarness(e.target.value); setPreviews(null); }}>
             {adapters.map((a) => {
               let klass = a.connectionClass;
@@ -363,23 +379,32 @@ export function Access() {
                 </option>
               );
             })}
-          </select>
-        </label>
-        {snippet && <pre className="field font-mono text-xs whitespace-pre-wrap">{snippet}</pre>}
-
-        <label className="text-sm">Write fence prefixes (optional)
-          <input className="field mt-1 font-mono" placeholder="agents/alice/, drafts/"
-                 value={fence} onChange={(e) => { setFence(e.target.value); setPreviews(null); }} />
-        </label>
-        {prefixes.length > 0 && (
-          <div className="card border-warning text-sm">
-            A write fence also kills fact extraction and ingestion. Preview to see the full affects list inline.
-          </div>
+          </Select>
+        </Field>
+        {/* The snippet carried `.field` — an input class on a read-only block.
+            It keeps the control's surface, border and radius (that is what made
+            it read as one) but spells them out rather than borrowing the input
+            shape, since `fieldClass`'s font size would fight the mono `text-xs`
+            this block wants. */}
+        {snippet && (
+          <pre className="rounded-[var(--control-radius)] border border-border bg-surface px-2.5 py-1.5 font-mono text-xs whitespace-pre-wrap">
+            {snippet}
+          </pre>
         )}
 
-        <button className="btn-primary" disabled={busy || !canGo} onClick={() => void preview()}>
+        <Field label="Write fence prefixes (optional)" id="access-fence">
+          <Input id="access-fence" className="font-mono" placeholder="agents/alice/, drafts/"
+                 value={fence} onChange={(e) => { setFence(e.target.value); setPreviews(null); }} />
+        </Field>
+        {prefixes.length > 0 && (
+          <Notice>
+            A write fence also kills fact extraction and ingestion. Preview to see the full affects list inline.
+          </Notice>
+        )}
+
+        <Button variant="primary" disabled={busy || !canGo} onClick={() => void preview()}>
           {busy ? 'Working…' : 'Preview'}
-        </button>
+        </Button>
       </section>
 
       {previews && (
@@ -419,9 +444,9 @@ function ConfirmScreen({
           writeLabel={spaceLabel(spaces, writeSpaceIds[i] ?? '')}
         />
       ))}
-      <button className="btn-primary" disabled={busy || !acknowledged} onClick={onSubmit}>
+      <Button variant="primary" disabled={busy || !acknowledged} onClick={onSubmit}>
         {busy ? 'Creating…' : `Create ${previews.length} Connection${previews.length === 1 ? '' : 's'}`}
-      </button>
+      </Button>
     </section>
   );
 }
@@ -439,14 +464,14 @@ function PreviewCard({
     || preview.compiled.warnings.some((w) => w.id === 'verify-partial-is-not-green');
 
   return (
-    <div className="card space-y-3">
+    <Card className="space-y-3">
       <div className="font-medium">Write: {writeLabel}</div>
-      <div className="text-sm text-muted font-mono">
+      <div className="text-[length:var(--control-font)] text-muted font-mono">
         profile {preview.compiled.profile} · source {preview.compiled.sourceId}
       </div>
 
       {preview.previewSource === 'computed' && (
-        <p className="text-sm text-warning">
+        <p className="text-[length:var(--control-font)] text-warning">
           This is our computed diff, not a server preview.
         </p>
       )}
@@ -464,9 +489,9 @@ function PreviewCard({
             ? <span className="text-muted">—</span>
             : preview.diff.additions.map((a) => <div key={a} className="font-mono">{a}</div>)}
           {preview.diff.requiresNewToken && (
-            <div className="border-warning text-warning text-xs mt-2 p-2">
+            <Notice className="mt-2">
               requires a new token — {memberEmail} must re-run the wiring on their laptop
-            </div>
+            </Notice>
           )}
           {preview.compiled.boundSlugPrefixes !== null && (
             <div className="mt-2">
@@ -494,28 +519,35 @@ function PreviewCard({
         {preview.compiled.warnings.map((w) => {
           const verify = w.id === 'verify-partial-is-not-green';
           const copy = WARNING_COPY[w.id] ?? w.id;
-          return (
-            <div key={w.id} className={verify ? 'card border-warning' : 'text-sm'}>
-              <span className={verify ? 'text-warning' : w.severity === 'info' ? 'text-muted' : 'text-warning'}>
+          // `verify-partial-is-not-green` is the one warning that gets a Notice:
+          // it is the amber that must not be mistaken for a pass. The rest stay
+          // as toned lines, and a Notice around each of them would flatten that
+          // difference back out.
+          const body = (
+            <div className="w-full">
+              <span className={verify ? '' : w.severity === 'info' ? 'text-muted' : 'text-warning'}>
                 {w.id}
               </span>
-              <p className={`text-sm ${verify ? 'text-warning' : 'text-muted'}`}>{copy}</p>
+              <p className={verify ? '' : 'text-[length:var(--control-font)] text-muted'}>{copy}</p>
               {w.id === 'write-fence-disables-extraction' && w.affects.length > 0 && (
                 <p className="text-xs font-mono text-muted">{w.affects.join(', ')}</p>
               )}
             </div>
           );
+          return verify
+            ? <Notice key={w.id}>{body}</Notice>
+            : <div key={w.id} className="text-[length:var(--control-font)]">{body}</div>;
         })}
       </div>
 
       {verifyAmber && (
-        <div className="card border-warning">
-          <div className="text-warning font-medium">
-            mcp verify{exitCode === 2 ? ' exit 2' : ''}
+        <Notice>
+          <div className="w-full">
+            <div className="font-medium">mcp verify{exitCode === 2 ? ' exit 2' : ''}</div>
+            <p>server checks passed, harness evidence missing.</p>
           </div>
-          <p className="text-sm text-warning">server checks passed, harness evidence missing.</p>
-        </div>
+        </Notice>
       )}
-    </div>
+    </Card>
   );
 }

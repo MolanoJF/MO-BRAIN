@@ -3,6 +3,7 @@ import {
   api, upgradeApi, type DetectResult, type UpgradeRunRow, type UpgradeEventRow,
   type ChecklistItemRow, type DriftResult, type UpgradeRunDetail,
 } from '../api.ts';
+import { Badge, Button, Card, Empty, Notice, Table, TableWrap, type Tone } from '../ui/index.tsx';
 
 /**
  * The eight steps every run passes through, in order (Task 10's run state
@@ -37,12 +38,34 @@ export function bannerFor(detect: DetectResult | null): string {
   return `${detect.latest_version} is available (currently ${detect.current_version}).`;
 }
 
-export function stepStatus(events: UpgradeEventRow[], step: string): 'pending' | 'active' | 'done' | 'failed' {
+export type StepStatus = 'pending' | 'active' | 'done' | 'failed';
+
+export function stepStatus(events: UpgradeEventRow[], step: string): StepStatus {
   const has = (type: string) => events.some((e) => e.type === type && (e.data as { step?: string } | null)?.step === step);
   if (has('step_failed')) return 'failed';
   if (has('step_finished')) return 'done';
   if (has('step_started')) return 'active';
   return 'pending';
+}
+
+/**
+ * The colour each step chip carries. This lived inline in the step row until
+ * the chips became `Badge`s; it is exported because it is an operator-observable
+ * decision — a failed step that renders in the same colour as a finished one is
+ * a lie an operator would act on — and this console tests such decisions as
+ * pure functions rather than through a DOM harness it does not have.
+ *
+ * `active` is `warning` rather than something calmer for the same reason qm
+ * ambers an in-flight step: a swap or a migration that is still running is the
+ * one state where interrupting the host actually breaks something.
+ */
+export function stepTone(status: StepStatus): Tone {
+  switch (status) {
+    case 'failed': return 'danger';
+    case 'done': return 'ok';
+    case 'active': return 'warning';
+    case 'pending': return 'muted';
+  }
 }
 
 /** The step a failed run died on, or null for a run that never failed. */
@@ -156,101 +179,110 @@ export function Upgrades() {
     <div className="max-w-3xl space-y-6">
       <header><h1 className="text-xl font-semibold">Upgrades</h1></header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 
-      <section className="card space-y-2">
-        <div className={detect?.error ? 'text-warning' : 'text-sm'}>{bannerFor(detect)}</div>
+      <Card>
+        <div className={`text-[length:var(--control-font)] ${detect?.error ? 'text-warning' : ''}`}>
+          {bannerFor(detect)}
+        </div>
         {detect && !detect.error && detect.update_available && detect.changelog_diff && (
-          <pre className="text-xs text-muted whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
+          <pre className="mt-2 text-xs text-muted whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
             {detect.changelog_diff}
           </pre>
         )}
-      </section>
+      </Card>
 
-      <section className="card space-y-2">
-        <h2 className="text-lg font-semibold">Runs</h2>
-        {runs.length === 0 ? <p className="text-sm text-muted">No upgrade has run yet.</p> : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-subtle text-left">
-                <th className="py-2 pr-3">version</th>
-                <th className="py-2 pr-3">state</th>
-                <th className="py-2 pr-3">duration</th>
-                <th className="py-2">snapshot</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id} className="border-b border-subtle">
-                  <td className="py-2 pr-3 font-mono">{r.fromVersion} → {r.toVersion}</td>
-                  <td className="py-2 pr-3">{r.state}{rolledBack(r) ? ' (rolled back)' : ''}</td>
-                  <td className="py-2 pr-3">{runDuration(r)}</td>
-                  <td className="py-2 font-mono text-xs">{r.snapshotId ?? '—'}</td>
+      <Card title="Runs">
+        {runs.length === 0 ? <Empty>No upgrade has run yet.</Empty> : (
+          <TableWrap>
+            <Table>
+              <thead>
+                <tr>
+                  <th>version</th>
+                  <th>state</th>
+                  <th>duration</th>
+                  <th>snapshot</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id}>
+                    <td className="font-mono">{r.fromVersion} → {r.toVersion}</td>
+                    {/* Deliberately not a Badge: a run state carries no tone in
+                        this console, and inventing one here would colour
+                        `rolled_back` as either a success or a failure when the
+                        page's whole position is that it is neither. */}
+                    <td>{r.state}{rolledBack(r) ? ' (rolled back)' : ''}</td>
+                    <td>{runDuration(r)}</td>
+                    <td className="font-mono text-xs">{r.snapshotId ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
         )}
 
         {openRun && (
-          <div className="pt-2 space-y-1">
-            <div className="text-sm text-muted">
+          <div className="pt-4 space-y-2">
+            <div className="text-[length:var(--control-font)] text-muted">
               Steps for {openRun.run.fromVersion} → {openRun.run.toVersion}
             </div>
             <div className="flex gap-2 flex-wrap">
-              {UPGRADE_STEPS.map((step) => {
-                const status = stepStatus(openRun.events, step);
-                const tone = status === 'failed' ? 'text-danger'
-                  : status === 'done' ? 'text-ok'
-                  : status === 'active' ? 'text-warning' : 'text-muted';
-                return <span key={step} className={`text-xs ${tone}`}>{stepLabel(step)}</span>;
-              })}
+              {UPGRADE_STEPS.map((step) => (
+                <Badge key={step} tone={stepTone(stepStatus(openRun.events, step))}>
+                  {stepLabel(step)}
+                </Badge>
+              ))}
             </div>
             {failedStep(openRun.events) && (
-              <div className="text-sm text-danger">
+              <div className="text-[length:var(--control-font)] text-danger">
                 Failed at: {stepLabel(failedStep(openRun.events)!)}
                 {rolledBack(openRun.run) ? ' — rolled back.' : ' — not rolled back.'}
               </div>
             )}
           </div>
         )}
-      </section>
+      </Card>
 
       {openRun && pendingChecklist(openRun.checklist).length > 0 && (
-        <section className="card border-warning space-y-3">
-          <h2 className="text-lg font-semibold text-warning">Awaiting your decision</h2>
-          <p className="text-xs text-muted">
-            These persist until acknowledged or declined and block nothing else while they wait.
-          </p>
-          {pendingChecklist(openRun.checklist).map((item) => (
-            <div key={item.id} className="border-b border-subtle pb-2 space-y-1">
-              <div className="font-medium">{item.prompt}</div>
-              <div className="text-sm text-muted">{item.why}</div>
-              <div className="flex gap-2">
-                <button disabled={busy} className="nav-item" onClick={decide(item.id, 'ack')}>Acknowledge</button>
-                <button disabled={busy} className="nav-item" onClick={decide(item.id, 'decline')}>Decline</button>
+        <Notice>
+          <div className="w-full space-y-3">
+            <h2 className="m-0 text-[length:var(--section-font)] font-medium">Awaiting your decision</h2>
+            <p className="text-xs">
+              These persist until acknowledged or declined and block nothing else while they wait.
+            </p>
+            {pendingChecklist(openRun.checklist).map((item) => (
+              <div key={item.id} className="border-b border-warn-border pb-2 space-y-1">
+                <div className="font-medium">{item.prompt}</div>
+                <div>{item.why}</div>
+                <div className="flex gap-2">
+                  <Button disabled={busy} onClick={decide(item.id, 'ack')}>Acknowledge</Button>
+                  <Button disabled={busy} onClick={decide(item.id, 'decline')}>Decline</Button>
+                </div>
               </div>
-            </div>
-          ))}
-        </section>
+            ))}
+          </div>
+        </Notice>
       )}
 
-      <section className="card space-y-1">
-        <h2 className="text-lg font-semibold">Capability drift</h2>
-        <div className="text-sm">{driftText(drift)}</div>
-      </section>
+      <Card title="Capability drift">
+        <div className="text-[length:var(--control-font)]">{driftText(drift)}</div>
+      </Card>
 
-      <section className="card space-y-2">
-        <h2 className="text-lg font-semibold">Starting an upgrade</h2>
-        <p className="text-sm text-muted">
-          Upgrades run on the Docker host, not from this console — the control plane holds no Docker
-          socket and cannot swap images or quiesce services. That is a privilege boundary, not a
-          missing feature. Run it from the host:
-        </p>
-        <pre className="text-xs font-mono bg-subtle p-2 rounded">
+      <Card
+        title="Starting an upgrade"
+        subtitle={
+          <>
+            Upgrades run on the Docker host, not from this console — the control plane holds no Docker
+            socket and cannot swap images or quiesce services. That is a privilege boundary, not a
+            missing feature. Run it from the host:
+          </>
+        }
+      >
+        <pre className="text-xs font-mono bg-subtle p-2 rounded-[var(--control-radius)]">
           {planCommand(target)}{'\n'}{runCommand(target)}
         </pre>
-      </section>
+      </Card>
     </div>
   );
 }
