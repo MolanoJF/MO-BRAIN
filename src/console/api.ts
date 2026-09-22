@@ -67,6 +67,16 @@ export const sessionApi = {
     if (typeof user?.email !== 'string' || user.email === '') return null;
     return { email: user.email, name: typeof user.name === 'string' ? user.name : null };
   },
+  /**
+   * Better Auth's own sign-out route. The console has had no sign-out until
+   * now — an account box that names the signed-in email with no way to
+   * leave it is a conspicuous hole. Callers do a full page reload after
+   * this resolves rather than unwinding React state: the session cookie is
+   * gone, every cached page is stale, and a reload is the honest response.
+   */
+  signOut: async (): Promise<void> => {
+    await api.post('/auth/sign-out', {});
+  },
 };
 
 /**
