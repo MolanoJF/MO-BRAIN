@@ -113,6 +113,32 @@ export const PRESETS: Record<string, Preset> = {
   },
 
   /**
+   * docs/guides/cron-schedule.md recommends `autopilot --status` daily at 7 AM
+   * as a health gate. In Mobrain it is a TRIPWIRE instead: autopilot is never
+   * installed here, so a healthy run is always "not installed" and writes no
+   * report, and any install at all raises a pinned autopilot_installed alert
+   * (docs/autopilot-status-findings.md). Filesystem-only, so the timeout is
+   * the DB floor's neighbourhood, not doctor's hour.
+   */
+  'autopilot-tripwire': {
+    id: 'autopilot-tripwire',
+    title: 'Competing-scheduler tripwire',
+    description:
+      "Checks daily that gbrain's own autopilot scheduler was never installed on this brain. "
+      + 'Mobrain schedules everything itself, so an install means two schedulers are running '
+      + 'the same jobs — that raises an alert. Silent when all is well. Needs an admin Connection.',
+    kind: 'calendar',
+    operation: 'autopilot-status',
+    params: {},
+    defaults: {
+      calendarHour: 7, calendarMinute: 5, calendarDaysOfWeek: null, slotMinute: 5,
+      catchupPolicy: 'skip', overlapPolicy: 'skip', reportPolicy: 'on_change_or_failure',
+      timeoutSeconds: 60,
+    },
+    requiresRole: 'admin',
+  },
+
+  /**
    * The push reconcile deferred from Slice 1. Roadmap: "push as a scheduled
    * reconcile job, not inline — with a rejected non-fast-forward surfaced as an
    * alert, never silently swallowed."

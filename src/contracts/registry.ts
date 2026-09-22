@@ -414,6 +414,32 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     okExitCodes: [0],
   },
 
+  /**
+   * The tripwire probe (docs/autopilot-status-findings.md). OBSERVED at
+   * 0.50.5.0: `--status --json` prints one AutopilotStatusReport,
+   * { installed, install_target, state, disabled_reason, paused_reason,
+   *   heartbeat_age_seconds, stale_after_seconds, last_log },
+   * and never opens the engine: it reads only the filesystem, so it answers
+   * during a DB outage. `--source` is silently ignored — no source scope.
+   *
+   * okExitCodes [0, 1, 2]: upstream's autopilotStatusExitCode maps
+   * disabled→2, stale/never_run/paused→1, else 0. Each is a verdict, not a
+   * crash. But 1 and 2 are ALSO usage-error exits that print no JSON, so the
+   * scheduler never classifies on the exit code alone (classifyExit).
+   *
+   * Only the status verb is allowlisted. The install verb is lint-forbidden
+   * and deliberately absent: the scheduler service replaces it.
+   */
+  'autopilot.status': {
+    id: 'autopilot.status',
+    argv: ['autopilot', '--status'],
+    params: [],
+    supportsJson: true,
+    supportsDryRun: false,
+    privilege: 'brain-db',
+    okExitCodes: [0, 1, 2],
+  },
+
   applyMigrations: {
     id: 'applyMigrations',
     argv: ['apply-migrations'],

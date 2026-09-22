@@ -45,6 +45,7 @@ Presets, from the catalogue the console offers:
 | `live-sync` | interval, 900s | `sync` | Imports new commits and embeds stale pages. Catch-up `skip`, overlap `skip`. |
 | `nightly-dream` | daily 02:05 | `dream` | Makes model calls and costs money (`maxUsd` 10). Timeout 7200s. |
 | `weekly-health` | Mondays 06:10 | `doctor --remediate` | Reads the WHOLE brain (`maxUsd` 5), so it needs an admin Connection. |
+| `autopilot-tripwire` | daily 07:05 | `autopilot --status` | Tripwire, not a health gate: healthy is always "not installed" and writes no report. Any install raises the pinned `autopilot_installed` alert. Brain-wide, so it needs an admin Connection. Timeout 60s. |
 | `push-reconcile` | daily 04:15 | `sources push` | System preset. Installs only when the org has a Space with a git remote. |
 | `morning-briefing` | daily 08:05 | none | System preset. Releases everything quiet hours held. Installs only when some schedule sets `notifies`. |
 | `nightly-agent-briefing` | daily 03:05 | none — `agent_prompt` | Slice 4. The runner runs the pinned harness on this prompt; the run spends the org's API budget, capped at USD 2 per run, on `claude-haiku-4-5`. Needs a connected runner. |
@@ -170,6 +171,7 @@ with `schedule_disabled` if the schedule is off.
 | Kind | Meaning | What to do |
 |---|---|---|
 | `push_rejected` | `sources push` hit a non-fast-forward or the remote refused the update (`conflict`: exit 1 with `push_failed` or `pull_conflict`). | Resolve by hand — see the next section. |
+| `autopilot_installed` | The tripwire read `installed: true` — gbrain's own autopilot is running beside this scheduler (`conflict`, any exit 0/1/2 with a report). Pinned. | Remove it — see the next section. |
 | `push_blocked` | The push was refused before it left: secrets scan, tracked deny-glob, or an unverifiable remote (exit 5, `blocked`; `refused` for `refused_visibility`). | Remove or untrack the offending file, or fix the Space's remote, then let the next `push-reconcile` run. |
 | `lease_expired` | A worker died mid-run; the run is reclaimed and not retried. | Read the run and decide whether to re-run manually. |
 | `connection_revoked` | Every enabled schedule on that Connection was disabled. | Re-grant the Connection, then re-enable each schedule. |
@@ -221,6 +223,19 @@ becomes a `push_rejected` alert so a human sees the divergence.
 If the repo shows `staleLock: true` with `lockAgeSeconds` over 120, the writer
 crashed rather than racing you — clear that `index.lock` explicitly and say so
 in the incident notes.
+
+## Remove a rogue autopilot install
+
+gbrain's own autopilot is installed somewhere that shares `gbrain-home`, so a second scheduler is running
+sync/embed/dream beside this one. Confirm and find the target:
+
+```bash
+docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml exec gbrain-ops gbrain autopilot --status --json
+```
+
+`install_target` says where it came from (in these containers it can only be `ephemeral-container`, i.e.
+`$GBRAIN_HOME/start-autopilot.sh`). Remove it with `gbrain autopilot --uninstall` in the same container,
+re-run the status probe until it reads `not_installed`, then acknowledge the alert.
 
 ## Reading a `lease_expired`
 

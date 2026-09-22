@@ -32,10 +32,10 @@ describe('the allowlist', () => {
     }
   });
 
-  test('doctor is the only brain-wide command, and it is marked as such', () => {
+  test('doctor and the autopilot probe are the only brain-wide commands', () => {
     const brainWide = Object.values(SCHEDULER_COMMANDS)
-      .filter((c) => c.scope === 'brain-wide').map((c) => c.id);
-    expect(brainWide).toEqual(['doctor']);
+      .filter((c) => c.scope === 'brain-wide').map((c) => c.id).sort();
+    expect(brainWide).toEqual(['autopilot-status', 'doctor']);
   });
 
   test('check-update is NOT schedulable — it belongs to Slice 3.5', () => {
@@ -206,5 +206,50 @@ describe('dream change counting, against the observed CycleReport', () => {
     expect(SCHEDULER_COMMANDS.dream!.changeCount({
       ...envelope, totals: { ...totals, pages_synced: 'lots' },
     })).toBeNull();
+  });
+});
+
+describe('autopilot-status', () => {
+  // OBSERVED at 0.50.5.0 on a Mobrain stack.
+  const NOT_INSTALLED = {
+    installed: false, install_target: null, state: 'not_installed', disabled_reason: null,
+    paused_reason: null, heartbeat_age_seconds: null, stale_after_seconds: 1800, last_log: '',
+  };
+  const cmd = SCHEDULER_COMMANDS['autopilot-status']!;
+
+  test('is brain-wide, unfenced, untunable and JSON', () => {
+    expect(cmd).toMatchObject({
+      operation: 'autopilot.status', scope: 'brain-wide', fenced: [], tunable: {}, json: true,
+    });
+    expect(buildArgv(OPERATIONS[cmd.operation]!, {}, { json: true }))
+      .toEqual(['autopilot', '--status', '--json']);
+  });
+
+  test('no install is no change', () => {
+    expect(cmd.changeCount(NOT_INSTALLED)).toBe(0);
+  });
+
+  test('ANY install is a change — including a fresh one that exits 0', () => {
+    for (const state of ['fresh', 'stale', 'never_run', 'paused', 'disabled']) {
+      expect(cmd.changeCount({ ...NOT_INSTALLED, installed: true, install_target: 'ephemeral-container', state }))
+        .toBe(1);
+    }
+  });
+
+  test('an unreadable report is UNKNOWN, never "not installed"', () => {
+    expect(cmd.changeCount(null)).toBeNull();
+    expect(cmd.changeCount({})).toBeNull();
+    expect(cmd.changeCount({ installed: 'no', state: 'not_installed' })).toBeNull();
+    expect(cmd.changeCount({ installed: false, state: 'mystery' })).toBeNull();
+    // A key-set drift at a version bump is unknown too.
+    expect(cmd.changeCount({ installed: false, state: 'not_installed' })).toBeNull();
+  });
+
+  test('installed:false is only believed alongside state not_installed', () => {
+    expect(cmd.changeCount({ ...NOT_INSTALLED, state: 'fresh' })).toBeNull();
+  });
+
+  test('a caller cannot pass anything to it', () => {
+    expect(() => validateParams(cmd, { source: 'x' })).toThrow(/unknown param/);
   });
 });

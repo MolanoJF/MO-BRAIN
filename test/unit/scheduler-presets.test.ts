@@ -4,9 +4,11 @@ import { SCHEDULER_COMMANDS, validateParams } from '../../src/scheduler/commands
 import { ASSIGNABLE_SLOTS, isSubHourly } from '../../src/scheduler/stagger.ts';
 
 describe('the preset catalog', () => {
-  test('ships four user presets: three commands and one agent run', () => {
+  test('ships five user presets: four commands and one agent run', () => {
     const user = Object.values(PRESETS).filter((p) => !p.system).map((p) => p.id).sort();
-    expect(user).toEqual(['live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health']);
+    expect(user).toEqual([
+      'autopilot-tripwire', 'live-sync', 'nightly-agent-briefing', 'nightly-dream', 'weekly-health',
+    ]);
   });
 
   test('and exactly two conditional system schedules', () => {
@@ -63,6 +65,23 @@ describe('the preset catalog', () => {
     expect(PRESETS['weekly-health']!.params).toEqual({ remediate: true, yes: true, maxUsd: 5 });
   });
 
+  test('autopilot-tripwire: daily 07:05, admin-gated, short, and quiet when healthy', () => {
+    const p = PRESETS['autopilot-tripwire']!;
+    expect(p.operation).toBe('autopilot-status');
+    expect(p.kind).toBe('calendar');
+    expect(p.params).toEqual({});
+    expect(p.requiresRole).toBe('admin');
+    expect(p.system).toBeUndefined();
+    expect(p.defaults).toMatchObject({
+      calendarHour: 7, calendarMinute: 5, slotMinute: 5, calendarDaysOfWeek: null,
+      catchupPolicy: 'skip', overlapPolicy: 'skip',
+      // A healthy day has nothing to say; an install or an unreadable probe
+      // always reports (changeCount 1 or null).
+      reportPolicy: 'on_change_or_failure',
+      timeoutSeconds: 60,
+    });
+  });
+
   test('every calendar preset lands on an assignable slot, never :00', () => {
     for (const p of Object.values(PRESETS)) {
       if (p.kind !== 'calendar') continue;
@@ -80,6 +99,13 @@ describe('the preset catalog', () => {
   test('weekly-health is brain-wide and therefore admin-gated', () => {
     expect(SCHEDULER_COMMANDS[PRESETS['weekly-health']!.operation!]!.scope).toBe('brain-wide');
     expect(PRESETS['weekly-health']!.requiresRole).toBe('admin');
+  });
+
+  test('every brain-wide preset is admin-gated', () => {
+    for (const p of Object.values(PRESETS)) {
+      if (!p.operation || SCHEDULER_COMMANDS[p.operation]?.scope !== 'brain-wide') continue;
+      expect(p.requiresRole).toBe('admin');
+    }
   });
 
   test('no preset schedules check-update — that is Slice 3.5', () => {

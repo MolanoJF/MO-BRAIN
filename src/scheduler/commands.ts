@@ -42,6 +42,34 @@ const obj = (v: unknown): Record<string, unknown> | null =>
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
+ * `autopilot --status --json`'s AutopilotStatusReport, OBSERVED from the
+ * pinned gbrain (docs/autopilot-status-findings.md): exactly these keys, and
+ * on a Mobrain stack `installed:false, state:'not_installed'`.
+ */
+const AUTOPILOT_STATUS_KEYS = [
+  'installed', 'install_target', 'state', 'disabled_reason', 'paused_reason',
+  'heartbeat_age_seconds', 'stale_after_seconds', 'last_log',
+];
+const AUTOPILOT_STATES = ['not_installed', 'disabled', 'paused', 'never_run', 'stale', 'fresh'];
+
+/**
+ * The tripwire's evidence, or null when it cannot be read. "Not installed" is
+ * believed only when the whole report agrees with itself: a key-set drift or
+ * an `installed:false` next to a live state is unknown, never a pass — a gate
+ * that cannot read its evidence must not pass vacuously (Slice 0 V6).
+ */
+export function readAutopilotReport(payload: unknown): { installed: boolean; state: string } | null {
+  const o = obj(payload);
+  if (!o) return null;
+  if (Object.keys(o).length !== AUTOPILOT_STATUS_KEYS.length) return null;
+  if (!AUTOPILOT_STATUS_KEYS.every((k) => k in o)) return null;
+  if (typeof o.installed !== 'boolean' || typeof o.state !== 'string') return null;
+  if (!AUTOPILOT_STATES.includes(o.state)) return null;
+  if (!o.installed && o.state !== 'not_installed') return null;
+  return { installed: o.installed, state: o.state };
+}
+
+/**
  * `dream --json`'s CycleReport tally, OBSERVED from the pinned gbrain (Task 5
  * Step 5): `gbrain dream --source <id> --dry-run --json` exits 0, prints one
  * prose line, then
@@ -155,6 +183,23 @@ export const SCHEDULER_COMMANDS: Record<string, SchedulerCommand> = {
       const checks = o.checks;
       if (!Array.isArray(checks)) return null;
       return checks.filter((c) => obj(c)?.status !== 'ok').length;
+    },
+  },
+
+  /**
+   * A TRIPWIRE, not a health gate. Mobrain never installs gbrain's autopilot
+   * (this scheduler replaces it), so the only healthy answer is
+   * not_installed, and ANY install — even a `fresh` one that exits 0 — is a
+   * second scheduler on this brain. Brain-wide because the probe reads the
+   * shared GBRAIN_HOME, which no Space fences.
+   */
+  'autopilot-status': {
+    id: 'autopilot-status', operation: 'autopilot.status', scope: 'brain-wide',
+    fenced: [], tunable: {}, json: true,
+    changeCount(payload) {
+      const r = readAutopilotReport(payload);
+      if (!r) return null;
+      return r.installed ? 1 : 0;
     },
   },
 

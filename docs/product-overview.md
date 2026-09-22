@@ -198,6 +198,7 @@ replicas are safe) runs jobs every 15 seconds of tick time. Presets:
 | `live-sync` | every 15 min | Import new commits, embed stale pages |
 | `nightly-dream` | daily 02:05 | Model-assisted synthesis (costs money, capped at $10) |
 | `weekly-health` | Mondays 06:10 | Full-brain `doctor --remediate` (needs an admin Connection) |
+| `autopilot-tripwire` | daily 07:05 | Alerts if gbrain's own autopilot scheduler is ever installed — a second scheduler on the brain (needs an admin Connection; silent when healthy) |
 | `push-reconcile` | daily 04:15 | Push local changes back to the Space's git remote |
 | `morning-briefing` | daily 08:05 | Releases anything held over quiet hours |
 | `nightly-agent-briefing` | daily 03:05 | Runs a Claude Code prompt against the brain — **only if the agent runner is on** |

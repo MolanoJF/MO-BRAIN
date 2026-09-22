@@ -306,9 +306,11 @@ describe('Slice 3.5 seam gate A', () => {
     // carried (41). Custom schema packs then added `schema.fork`,
     // `schema.showRaw` and `schema.mutate` to the registry and re-emitted the
     // artifact with them (commit da8db9e, the custom-schema-packs Task 1), so
-    // the fence moves to 44. Nothing about checkUpdate/postUpgrade — the two
-    // assertions below — changed.
-    expect(doc.operations.length).toBe(44);
+    // the fence moved to 44. The autopilot tripwire then added the read-only
+    // `autopilot.status` probe (`autopilot --status`, docs/autopilot-status-
+    // findings.md), so the fence moves to 45. Nothing about
+    // checkUpdate/postUpgrade — the two assertions below — changed.
+    expect(doc.operations.length).toBe(45);
     // U1/U3: neither declares a dry run, and only checkUpdate has --json.
     expect(byId['checkUpdate'].supportsJson).toBe(true);
     expect(byId['postUpgrade'].supportsJson).toBe(false);

@@ -39,6 +39,17 @@ describe('scheduler operation shapes (no container needed)', () => {
   test('doctor still declares okExitCodes [0] — a blocker IS a failure for our gate', () => {
     expect([...OPERATIONS.doctor!.okExitCodes]).toEqual([0]);
   });
+
+  test('autopilot.status is the engine-free status probe, JSON on, no source scope', () => {
+    // OBSERVED at 0.50.5.0: `gbrain autopilot --status --json` prints one JSON
+    // object; `--source` is silently ignored (there is no source scope at all).
+    const spec = OPERATIONS['autopilot.status']!;
+    expect(buildArgv(spec, {}, { json: true })).toEqual(['autopilot', '--status', '--json']);
+    expect(spec.params).toEqual([]);
+    expect(spec.supportsDryRun).toBe(false);
+    // 0 fresh/not-installed, 1 stale/never_run/paused, 2 disabled: verdicts, not crashes.
+    expect([...spec.okExitCodes]).toEqual([0, 1, 2]);
+  });
 });
 
 describe('scheduler operations against the pinned container', () => {
@@ -356,4 +367,26 @@ describe('Slice 3 seam gate A', () => {
     expect(r.json).toHaveProperty('checks');
     expect(r.json).toHaveProperty('status');
   }, 900_000);
+
+  test('A3b. the install verb is never reachable through the RPC', async () => {
+    // Mobrain's scheduler replaces gbrain's autopilot; only the read-only
+    // status probe is allowlisted.
+    const r = await opsRpc('autopilot.install', {}, {});
+    expect(r.error).toMatch(/unknown operation/);
+  });
+
+  test('A10. autopilot --status --json reports not_installed on a Mobrain stack', async () => {
+    // The tripwire's baseline. OBSERVED 2026-09-22 against 0.50.5.0. If this
+    // ever reads installed:true, a second scheduler is running on this brain.
+    const r = await opsRpc('autopilot.status', {}, { json: true, timeoutMs: 60_000 });
+    expect(r.error).toBeUndefined();
+    expect(r.exitCode).toBe(0);
+    const body = r.json as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      'disabled_reason', 'heartbeat_age_seconds', 'install_target', 'installed',
+      'last_log', 'paused_reason', 'stale_after_seconds', 'state',
+    ]);
+    expect(body.installed).toBe(false);
+    expect(body.state).toBe('not_installed');
+  }, 120_000);
 });

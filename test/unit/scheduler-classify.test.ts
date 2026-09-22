@@ -42,3 +42,43 @@ describe('exit classification', () => {
     expect(classifyExit('sync', 2, null)).toBe('failed');
   });
 });
+
+describe('the autopilot tripwire', () => {
+  const report = (installed: boolean, state: string) => ({
+    installed, install_target: installed ? 'ephemeral-container' : null, state,
+    disabled_reason: null, paused_reason: null, heartbeat_age_seconds: null,
+    stale_after_seconds: 1800, last_log: '',
+  });
+
+  test('not installed, exit 0, is the only ok', () => {
+    expect(classifyExit('autopilot-status', 0, report(false, 'not_installed'))).toBe('ok');
+  });
+
+  test('a FRESH install is a conflict even though upstream exits 0', () => {
+    expect(classifyExit('autopilot-status', 0, report(true, 'fresh'))).toBe('conflict');
+  });
+
+  test('stale / never_run / paused (exit 1) and disabled (exit 2) are conflicts', () => {
+    for (const s of ['stale', 'never_run', 'paused']) {
+      expect(classifyExit('autopilot-status', 1, report(true, s))).toBe('conflict');
+    }
+    expect(classifyExit('autopilot-status', 2, report(true, 'disabled'))).toBe('conflict');
+  });
+
+  test('exit 1 or 2 with NO JSON is a usage error, not a verdict', () => {
+    // OBSERVED: an unknown flag exits 1, an unknown positional exits 2, and
+    // neither prints a report.
+    expect(classifyExit('autopilot-status', 1, null)).toBe('failed');
+    expect(classifyExit('autopilot-status', 2, null)).toBe('failed');
+  });
+
+  test('exit 0 with an unreadable report never passes vacuously', () => {
+    expect(classifyExit('autopilot-status', 0, null)).toBe('failed');
+    expect(classifyExit('autopilot-status', 0, { installed: false })).toBe('failed');
+  });
+
+  test('the shared exit rules still come first', () => {
+    expect(classifyExit('autopilot-status', 143, null)).toBe('timeout');
+    expect(classifyExit('autopilot-status', 4, null)).toBe('lock_lost');
+  });
+});

@@ -521,9 +521,13 @@ export function holdBadge(
  * `agent_run_failed` carry the danger tone below instead, and D12's
  * runner-less deployment (a supported configuration) must not have a banner
  * pinned at the top of every schedule page.
+ *
+ * `autopilot_installed` is pinned for the mirror-image reason: a second
+ * scheduler means work is silently DOUBLED — two writers on one brain — which
+ * is exactly as invisible from the run history as work that stopped.
  */
 const PINNED_ALERT_KINDS = [
-  'push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked',
+  'push_rejected', 'push_blocked', 'lease_expired', 'connection_revoked', 'autopilot_installed',
 ];
 
 export function isPinnedAlert(kind: string): boolean {
@@ -535,6 +539,8 @@ const ALERT_LABEL: Record<string, string> = {
   push_blocked: 'Push blocked — a scan or a conflict stopped the push',
   lease_expired: 'Lease expired — the run was abandoned and is not retried',
   connection_revoked: 'Connection revoked — its schedules were disabled',
+  autopilot_installed:
+    "gbrain's own autopilot is installed — a second scheduler is running jobs on this brain",
   overlap_queue_full: 'Overlap queue full — queued runs were dropped',
   overlap_killed_previous: 'Overlapping run cancelled (kill_previous)',
   report_write_failed: 'Report write failed — the run has no report',
@@ -566,6 +572,7 @@ const ALERT_TONE: Record<string, Tone> = {
   push_blocked: 'danger',
   lease_expired: 'danger',
   connection_revoked: 'danger',
+  autopilot_installed: 'danger',
   report_write_failed: 'danger',
   // Slice 4, Task 11: the two agent kinds that mean work stopped — the money
   // ran out, or the run failed. A `warning` here would be a shrug at a run the

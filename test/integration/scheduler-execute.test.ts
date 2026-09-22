@@ -301,6 +301,60 @@ describe('executing a claimed run', () => {
     expect(writes[0]!.reportBody).not.toContain('sk-livekeyvalue1234');
     expect(writes[0]!.reportBody).toContain('***REDACTED***');
   });
+
+  const AUTOPILOT = (installed: boolean, state: string) => ({
+    installed, install_target: installed ? 'ephemeral-container' : null, state,
+    disabled_reason: null, paused_reason: null, heartbeat_age_seconds: installed ? 12 : null,
+    stale_after_seconds: 1800, last_log: '',
+  });
+
+  test('the autopilot tripwire is silent when nothing is installed', async () => {
+    const scheduleId = await schedule({
+      operation: 'autopilot-status', preset: 'autopilot-tripwire', reportPolicy: 'on_change_or_failure',
+    });
+    const claimed = await occurrence(scheduleId, { slot: 's-ap-ok', fireAtMs: AWAKE_MS, nowMs: AWAKE_MS });
+    const { deps, captured, writes } = harness(() => ({ exitCode: 0, json: AUTOPILOT(false, 'not_installed') }), AWAKE_MS);
+
+    const result = await executeRun(claimed, deps);
+
+    expect(result.classification).toBe('ok');
+    expect(captured[0]!.op).toBe('autopilot.status');
+    expect(captured[0]!.params).toEqual({});          // brain-wide: no fence injected
+    expect(writes.length).toBe(0);                    // changeCount 0 -> no report
+    expect(await alertKinds(scheduleId)).toEqual([]);
+    expect((await rowOf(claimed.run.id)).state).toBe('succeeded');
+  });
+
+  test('a FRESH autopilot install trips the wire even though gbrain exited 0', async () => {
+    const scheduleId = await schedule({
+      operation: 'autopilot-status', preset: 'autopilot-tripwire', reportPolicy: 'on_change_or_failure',
+    });
+    const claimed = await occurrence(scheduleId, { slot: 's-ap-fresh', fireAtMs: AWAKE_MS, nowMs: AWAKE_MS });
+    const { deps, writes } = harness(() => ({ exitCode: 0, json: AUTOPILOT(true, 'fresh') }), AWAKE_MS);
+
+    const result = await executeRun(claimed, deps);
+
+    expect(result.classification).toBe('conflict');
+    expect(writes.length).toBe(1);
+    expect(await alertKinds(scheduleId)).toEqual(['autopilot_installed']);
+    expect((await rowOf(claimed.run.id)).state).toBe('failed');
+  });
+
+  test('an unreadable autopilot probe is a failure with a report, never a pass', async () => {
+    const scheduleId = await schedule({
+      operation: 'autopilot-status', preset: 'autopilot-tripwire', reportPolicy: 'on_change_or_failure',
+    });
+    const claimed = await occurrence(scheduleId, { slot: 's-ap-junk', fireAtMs: AWAKE_MS, nowMs: AWAKE_MS });
+    const { deps, writes } = harness(() => ({
+      exitCode: 2, stderr: "Unknown autopilot argument 'x'.\n",
+    }), AWAKE_MS);
+
+    const result = await executeRun(claimed, deps);
+
+    expect(result.classification).toBe('failed');
+    expect(writes.length).toBe(1);
+    expect(await alertKinds(scheduleId)).toEqual(['run_failed']);
+  });
 });
 
 describe('live-sync two-step', () => {
