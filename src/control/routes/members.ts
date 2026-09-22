@@ -123,7 +123,15 @@ members.post('/private-space', guard('viewer', async (c, { userId, orgId }) => {
     eq(schema.spaces.organizationId, orgId),
     eq(schema.spaces.ownerMembershipId, membershipId),
   ));
-  if (owned) return c.json({ error: 'already_provisioned' }, 409);
+  if (owned) {
+    const [active] = await getDb().select({ id: schema.connections.id }).from(schema.connections).where(and(
+      eq(schema.connections.organizationId, orgId),
+      eq(schema.connections.membershipId, membershipId),
+      eq(schema.connections.writeSpaceId, owned.id),
+      eq(schema.connections.state, 'active'),
+    ));
+    if (active) return c.json({ error: 'already_provisioned' }, 409);
+  }
 
   const result = await provisionPrivateSpace(orgId, membershipId, userId);
   if (!result.ok) return c.json({ error: result.error }, result.status);

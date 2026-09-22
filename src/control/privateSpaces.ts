@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
 import { provisionConnection } from './connections.ts';
+import { callOps, seedSpace } from './opsClient.ts';
 import type { Role } from './rbac.ts';
 
 /** Deterministic, collision-free per membership. Mirrors `clientName`'s bs-<memberId8>-<slug>. */
@@ -43,6 +44,7 @@ export async function provisionPrivateSpace(
     eq(schema.spaces.ownerMembershipId, membershipId),
   ));
 
+  let created = false;
   if (!space) {
     const sourceId = privateSpaceSourceId(membershipId);
     try {
@@ -55,6 +57,7 @@ export async function provisionPrivateSpace(
         localPath: `/srv/brain-repos/${sourceId}`,
         ownerMembershipId: membershipId,
       });
+      created = true;
     } catch (e) {
       // A concurrent invite/retry raced us to the partial unique index; the row
       // it created is the one we want.
@@ -83,6 +86,18 @@ export async function provisionPrivateSpace(
     eq(schema.connections.writeSpaceId, space.id),
     eq(schema.connections.state, 'pending'),
   ));
+
+  if (created) {
+    try {
+      await seedSpace(space.sourceId);
+      await callOps('sources.add', {
+        id: space.sourceId,
+        path: space.localPath ?? `/srv/brain-repos/${space.sourceId}`,
+        name: space.name,
+        federated: true,
+      }, { timeoutMs: 300_000 });
+    } catch { /* best-effort: the Space row is the durable record; provisioning still proceeds */ }
+  }
 
   // `privateSpace: true` is derived inside connections.ts from the write Space's
   // ownerMembershipId; never passed here.

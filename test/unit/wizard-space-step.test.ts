@@ -1,30 +1,24 @@
 import { test, expect, describe } from 'bun:test';
-import { FIRST_SPACE } from '../../src/console/pages/Wizard.tsx';
 import { SOURCE_ID } from '../../src/control/routes/wizard.ts';
+import { privateSpaceSourceId } from '../../src/control/privateSpaces.ts';
 import { readFileSync } from 'node:fs';
 
 /**
- * Every org's first Space is just "mine" — there is no naming decision in it
- * worth a form. What IS worth a gate is the isolation notice: folders inside a
- * Space are not access boundaries, and that is informed consent, not naming.
- * So the defaults get filled in and the checkbox stays.
+ * A fresh install's wizard creates exactly ONE source: the signed-in admin's
+ * own private space. There is no naming decision in it worth a form, and no
+ * shared-space isolation consent to collect here — shared Spaces are added
+ * later from the Sources page, where that notice belongs.
  */
-describe('the wizard\'s first Space needs no name (S4b)', () => {
-  test('the defaults are exactly what the spec fixes them at', () => {
-    expect(FIRST_SPACE.sourceId).toBe('my-brain');
-    expect(FIRST_SPACE.name).toBe('My Brain');
-  });
-
-  test('the default sourceId satisfies the server\'s own validator', () => {
-    // POST /wizard/space answers 400 for anything this regex rejects. A default
-    // the server refuses would make the step impossible to complete at all.
-    expect(SOURCE_ID.test(FIRST_SPACE.sourceId)).toBe(true);
-  });
-
+describe('the wizard\'s first Space is the member\'s own private space', () => {
   const source = readFileSync(
     new URL('../../src/console/pages/Wizard.tsx', import.meta.url), 'utf8',
   );
   const spaceStep = source.slice(source.indexOf('function SpaceStep'));
+
+  test('the step posts to the private-space route, not the shared one', () => {
+    expect(source).toMatch(/\/wizard\/private-space/);
+    expect(source).not.toMatch(/FIRST_SPACE/);
+  });
 
   test('SpaceStep renders no text inputs', () => {
     // The regression this guards: re-adding a "source id" field, which is the
@@ -33,14 +27,18 @@ describe('the wizard\'s first Space needs no name (S4b)', () => {
     expect(spaceStep).not.toMatch(/type="text"/);
   });
 
-  test('the isolation checkbox survives, and still gates the button', () => {
-    expect(spaceStep).toMatch(/type="checkbox"/);
-    expect(spaceStep).toMatch(/disabled=\{busy \|\| !acknowledged\}/);
-    // and nothing else gates it — no leftover `|| !sourceId`
-    expect(spaceStep).not.toMatch(/!sourceId/);
+  test('SpaceStep has no source-id field and no isolation checkbox', () => {
+    expect(spaceStep).not.toMatch(/sourceId/);
+    expect(spaceStep).not.toMatch(/type="checkbox"/);
   });
 
-  test('the button submits the fixed defaults', () => {
-    expect(spaceStep).toMatch(/FIRST_SPACE/);
+  test('the copy frames it as a private space', () => {
+    expect(spaceStep).toMatch(/private/i);
+  });
+
+  test('the generated sourceId satisfies the server\'s own validator', () => {
+    // POST /wizard/private-space derives `my-space-<memberId8>` and
+    // addSpaceSource rejects anything this regex refuses.
+    expect(SOURCE_ID.test(privateSpaceSourceId('12345678-0000-0000-0000-000000000000'))).toBe(true);
   });
 });

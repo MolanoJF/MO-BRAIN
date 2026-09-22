@@ -15,6 +15,7 @@ type OpsResult = {
 };
 
 const calls: Call[] = [];
+const seedSpaceCalls: string[] = [];
 let grantSeq = 0;
 
 function grantReceipt(clientId: string): unknown {
@@ -84,7 +85,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   },
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
-  seedSpace: async () => {},
+  seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
   resetBrainSchema: async () => {},
   takeGrantCredentials: async () => HANDOFF,
   deleteCredentialJournal: async () => ({ deleted: true }),
@@ -183,6 +184,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   calls.length = 0;
+  seedSpaceCalls.length = 0;
   grantSeq = 0;
   treeHandler = (sourceId) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] });
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
@@ -216,6 +218,10 @@ describe('invite-time provisioning', () => {
     expect(conn?.writeSpaceId).toBe(space!.id);
     expect(conn?.membershipId).toBe(body.id);
     expect(conn?.state).toBe('active');
+
+    // A NEWLY created private Space is seeded and registered as a gbrain source.
+    expect(seedSpaceCalls).toContain(space!.sourceId);
+    expect(calls.some((c) => c.op === 'sources.add' && c.params?.id === space!.sourceId)).toBe(true);
   });
 
   test('a failed grant leaves the membership intact and the pending space+connection retryable', async () => {
@@ -334,6 +340,39 @@ describe('self-service POST /api/private-space', () => {
     const owned = await getDb().select().from(schema.spaces)
       .where(eq(schema.spaces.ownerMembershipId, membershipId));
     expect(owned.length).toBe(1);
+  });
+
+  test('repairs an owned but inactive space instead of returning already_provisioned', async () => {
+    const { cookie, membershipId } = await signUpAndMember(
+      `ps-repair-${randomUUID().slice(0, 8)}@example.test`, 'member',
+    );
+    const sourceId = `my-space-${membershipId.slice(0, 8).toLowerCase()}`;
+    const spaceId = randomUUID();
+    await getDb().insert(schema.spaces).values({
+      id: spaceId,
+      organizationId: orgId,
+      sourceId,
+      name: 'My Space',
+      kind: 'local-git',
+      localPath: `/srv/brain-repos/${sourceId}`,
+      ownerMembershipId: membershipId,
+    });
+
+    const repaired = await hit('POST', '/api/private-space', cookie);
+    expect(repaired.status).toBe(200);
+    const body = await repaired.json() as { ok: boolean; spaceId: string; connectionId: string };
+    expect(body.ok).toBe(true);
+    expect(body.spaceId).toBe(spaceId);
+
+    const [conn] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, body.connectionId));
+    expect(conn?.state).toBe('active');
+    expect(conn?.writeSpaceId).toBe(spaceId);
+    expect(conn?.membershipId).toBe(membershipId);
+
+    const second = await hit('POST', '/api/private-space', cookie);
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: 'already_provisioned' });
   });
 });
 
