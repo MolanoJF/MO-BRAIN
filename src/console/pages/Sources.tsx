@@ -334,11 +334,9 @@ export function Sources() {
               <p className="text-xs text-muted">{BACKFILL_NOTICE}</p>
 
               {clicked && removePreview !== null && (
-                <Notice>
-                  <div className="w-full space-y-1">
-                    <p className="font-medium">Remove — impact preview</p>
-                    <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
-                  </div>
+                <Notice layout="stack">
+                  <p className="font-medium">Remove — impact preview</p>
+                  <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
                 </Notice>
               )}
 

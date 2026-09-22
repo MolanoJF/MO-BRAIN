@@ -245,23 +245,29 @@ export function Upgrades() {
       </Card>
 
       {openRun && pendingChecklist(openRun.checklist).length > 0 && (
-        <Notice>
-          <div className="w-full space-y-3">
-            <h2 className="m-0 text-[length:var(--section-font)] font-medium">Awaiting your decision</h2>
-            <p className="text-xs">
-              These persist until acknowledged or declined and block nothing else while they wait.
-            </p>
-            {pendingChecklist(openRun.checklist).map((item) => (
-              <div key={item.id} className="border-b border-warn-border pb-2 space-y-1">
-                <div className="font-medium">{item.prompt}</div>
-                <div>{item.why}</div>
-                <div className="flex gap-2">
-                  <Button disabled={busy} onClick={decide(item.id, 'ack')}>Acknowledge</Button>
-                  <Button disabled={busy} onClick={decide(item.id, 'decline')}>Decline</Button>
-                </div>
+        <Notice layout="stack">
+          <h2 className="m-0 text-[length:var(--section-font)] font-medium">Awaiting your decision</h2>
+          <p className="text-xs">
+            These persist until acknowledged or declined and block nothing else while they wait.
+          </p>
+          {/* `w-full` on the row, not on a wrapper around the whole list. The
+              stack gives each child `fit-content`, which is the full width for a
+              paragraph but only the longest line for a box — and this box draws
+              a rule under itself. A divider that stops where the shortest item's
+              text stops reads as a ragged edge rather than as a separator, so
+              the row asks for the width it needs. It is not a click target, so
+              the blockifying that `items-stretch` is avoided for costs nothing
+              here. */}
+          {pendingChecklist(openRun.checklist).map((item) => (
+            <div key={item.id} className="w-full border-b border-warn-border pb-2 space-y-1">
+              <div className="font-medium">{item.prompt}</div>
+              <div>{item.why}</div>
+              <div className="flex gap-2">
+                <Button disabled={busy} onClick={decide(item.id, 'ack')}>Acknowledge</Button>
+                <Button disabled={busy} onClick={decide(item.id, 'decline')}>Decline</Button>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </Notice>
       )}
 

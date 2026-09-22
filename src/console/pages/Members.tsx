@@ -82,18 +82,16 @@ export function Members() {
       </section>
 
       {claimUrl && (
-        <Notice>
-          <div className="w-full space-y-2">
-            <p className="font-medium">Claim URL — shown once, not recoverable</p>
-            <p className="font-mono break-all">{claimUrl}</p>
-            {claimUntil && (
-              <p className="text-xs">Expires {new Date(claimUntil).toLocaleString()}</p>
-            )}
-            {/* Not `text-muted`: a Notice paints its own copy colour per theme,
-                and muting one line inside it drops that line out of the warning
-                palette — the "save it now" line is the one that must not fade. */}
-            <p>Save it now. We cannot show this link again.</p>
-          </div>
+        <Notice layout="stack">
+          <p className="font-medium">Claim URL — shown once, not recoverable</p>
+          <p className="font-mono break-all">{claimUrl}</p>
+          {claimUntil && (
+            <p className="text-xs">Expires {new Date(claimUntil).toLocaleString()}</p>
+          )}
+          {/* Not `text-muted`: a Notice paints its own copy colour per theme,
+              and muting one line inside it drops that line out of the warning
+              palette — the "save it now" line is the one that must not fade. */}
+          <p>Save it now. We cannot show this link again.</p>
         </Notice>
       )}
 
