@@ -23,6 +23,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   },
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
+  putSchemaPackJson: async () => {},
+  removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedCalls.push(sourceId); },
   // --- the rest of the module's real exports, required for the app graph to
   //     load at all under per-file isolation. Copy verbatim from

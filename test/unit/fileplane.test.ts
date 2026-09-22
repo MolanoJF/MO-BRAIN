@@ -1,8 +1,45 @@
-import { test, expect, describe, afterEach } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { test, expect, describe, afterEach, afterAll } from 'bun:test';
+import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mergeConfigJson, takeGrantCredentialsFile, packPath, SCHEMA_PACK_DIR } from '../../src/ops/fileplane.ts';
+import type { SQL } from 'bun';
+
+/**
+ * fileplane.ts binds GBRAIN_HOME / SCHEMA_PACK_DIR at module load (Ruling 14),
+ * so the temp home must exist BEFORE the import. test/integration/fileplane.ts
+ * can set it in `beforeAll` only because nothing there reads the module-level
+ * const before the first test; the schema-pack-json tests below assert on
+ * SCHEMA_PACK_DIR itself, so the home is bound here at collection time.
+ */
+const ORIGINAL_HOME = process.env.GBRAIN_HOME;
+const MODULE_HOME = await mkdtemp(join(tmpdir(), 'bs-fileplane-unit-'));
+process.env.GBRAIN_HOME = MODULE_HOME;
+
+const {
+  mergeConfigJson, takeGrantCredentialsFile, packPath, SCHEMA_PACK_DIR,
+  writeSchemaPackJson, removeSchemaPack,
+} = await import('../../src/ops/fileplane.ts');
+
+afterAll(async () => {
+  if (ORIGINAL_HOME === undefined) delete process.env.GBRAIN_HOME;
+  else process.env.GBRAIN_HOME = ORIGINAL_HOME;
+  await rm(MODULE_HOME, { recursive: true, force: true });
+});
+
+/**
+ * withAdvisoryLock only needs `sql.reserve()` → a tagged-template connection
+ * that resolves to a row array and exposes `release()`. These tests exercise
+ * the writer's own logic, not Postgres (that is test/integration/fileplane.ts),
+ * so a Postgres-free handle is the right isolation.
+ */
+const fakeSql = {
+  reserve: async () => {
+    const conn = (() => Promise.resolve([{ got: true }])) as unknown as { release: () => void };
+    conn.release = () => {};
+    return conn;
+  },
+} as unknown as SQL;
 
 describe('mergeConfigJson', () => {
   test('creates a document when none exists', () => {
@@ -77,4 +114,25 @@ test('a user pack is written as <name>/pack.yaml, the only shape gbrain discover
   // the pinned container; see docs/schema-pack-findings.md S1.
   expect(packPath('hr-policies')).toBe(join(SCHEMA_PACK_DIR, 'hr-policies', 'pack.yaml'));
   expect(packPath('hr-policies')).not.toBe(join(SCHEMA_PACK_DIR, 'hr-policies.yaml'));
+});
+
+describe('schema pack json', () => {
+  test('writes pack.json and removes a stale pack.yaml sibling', async () => {
+    const dir = join(SCHEMA_PACK_DIR, 'legal-ops');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'pack.yaml'), 'stale: true\n');
+    await writeSchemaPackJson('legal-ops', { name: 'legal-ops' }, { sql: fakeSql });
+    expect(JSON.parse(await readFile(join(dir, 'pack.json'), 'utf8')).name).toBe('legal-ops');
+    expect(existsSync(join(dir, 'pack.yaml'))).toBe(false);
+  });
+  test('refuses a bundled name and a traversing name', async () => {
+    await expect(writeSchemaPackJson('gbrain-base-v2', {}, { sql: fakeSql })).rejects.toThrow();
+    await expect(writeSchemaPackJson('../x', {}, { sql: fakeSql })).rejects.toThrow();
+  });
+  test('removeSchemaPack deletes only the named pack directory', async () => {
+    await writeSchemaPackJson('zz-gone', { name: 'zz-gone' }, { sql: fakeSql });
+    expect((await removeSchemaPack('zz-gone', { sql: fakeSql })).removed).toBe(true);
+    expect(existsSync(join(SCHEMA_PACK_DIR, 'zz-gone'))).toBe(false);
+    expect((await removeSchemaPack('zz-gone', { sql: fakeSql })).removed).toBe(false);
+  });
 });

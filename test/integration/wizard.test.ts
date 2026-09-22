@@ -37,6 +37,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   cancelRun: async () => ({ cancelled: false }),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
+  putSchemaPackJson: async () => {},
+  removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
   takeGrantCredentials: async () => ({}),

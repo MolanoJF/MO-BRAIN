@@ -143,6 +143,14 @@ export async function putSchemaPack(name: string, yaml: string): Promise<void> {
   await post('/fileplane/schema-pack', { name, yaml }, 60_000);
 }
 
+export async function putSchemaPackJson(name: string, manifest: object): Promise<void> {
+  await post('/fileplane/schema-pack-json', { name, manifest }, 60_000);
+}
+
+export async function removeSchemaPack(name: string): Promise<{ removed: boolean }> {
+  return post('/fileplane/schema-pack-remove', { name }, 60_000);
+}
+
 export async function seedSpace(sourceId: string): Promise<void> {
   await post('/fileplane/seed-space', { sourceId }, 60_000);
 }

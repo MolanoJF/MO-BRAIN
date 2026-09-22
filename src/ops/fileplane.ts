@@ -1,4 +1,4 @@
-import { rename, writeFile, readFile, mkdir, chmod, unlink } from 'node:fs/promises';
+import { rename, writeFile, readFile, mkdir, chmod, unlink, rm, readdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SQL } from 'bun';
@@ -206,6 +206,47 @@ export function packPath(name: string): string {
 export async function writeSchemaPack(name: string, yaml: string, opts: { sql: SQL }): Promise<void> {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error(`invalid schema pack name: ${name}`);
   await writeFilePlane(packPath(name), () => yaml, { ...opts, mode: 0o644 });
+  // The loader takes the first existing of pack.yaml / pack.yml / pack.json
+  // (load-active.ts; MEASURED docs/schema-pack-findings.md S7 step 4), so a
+  // stale pack.json would shadow this YAML write. Delete the sibling.
+  await unlink(join(SCHEMA_PACK_DIR, name, 'pack.json'))
+    .catch((e) => { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; });
+}
+
+const BUNDLED = new Set(['gbrain-base', 'gbrain-base-v2', 'gbrain-recommended',
+  'gbrain-creator', 'gbrain-investor', 'gbrain-engineer', 'gbrain-everything']);
+const PACK_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function assertUserPackName(name: string): void {
+  if (!PACK_NAME_RE.test(name)) throw new Error(`invalid schema pack name: ${name}`);
+  if (BUNDLED.has(name)) throw new Error(`${name} is a bundled pack and cannot be written`);
+}
+
+/**
+ * A created pack is written as pack.json: gbrain's `schema fork` writes the
+ * same format, gbrain's mutations preserve it, and the control plane has no
+ * YAML serializer at runtime. Any pack.yaml / pack.yml sibling is removed,
+ * because the loader's precedence between two formats is exactly the kind of
+ * silent ambiguity S7 step 4 measured.
+ */
+export async function writeSchemaPackJson(name: string, manifest: unknown, opts: { sql: SQL }): Promise<void> {
+  assertUserPackName(name);
+  const dir = join(SCHEMA_PACK_DIR, name);
+  await writeFilePlane(join(dir, 'pack.json'), () => JSON.stringify(manifest, null, 2) + '\n', { ...opts, mode: 0o644 });
+  for (const sibling of ['pack.yaml', 'pack.yml']) {
+    await unlink(join(dir, sibling)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+  }
+}
+
+/** Delete one user pack's directory. The path is computed, never accepted. */
+export async function removeSchemaPack(name: string, opts: { sql: SQL }): Promise<{ removed: boolean }> {
+  assertUserPackName(name);
+  const dir = join(SCHEMA_PACK_DIR, name);
+  return withAdvisoryLock(opts.sql, `fileplane:${dir}`, async () => {
+    const existed = await readdir(dir).then(() => true, () => false);
+    await rm(dir, { recursive: true, force: true });
+    return { removed: existed };
+  });
 }
 
 /**

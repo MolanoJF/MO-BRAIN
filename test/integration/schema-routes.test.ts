@@ -21,6 +21,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) => opsHandler(op, params, opts),
   patchFilePlaneConfig: async (patch: Record<string, unknown>) => { filePlanePatches.push(patch); },
   putSchemaPack: async (name: string, yaml: string) => { packWrites.push({ name, yaml }); },
+  putSchemaPackJson: async () => {},
+  removeSchemaPack: async () => ({ removed: false }),
   // --- the rest of the module's real exports, required for the app graph to
   //     load at all under per-file isolation. Copy verbatim from
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---

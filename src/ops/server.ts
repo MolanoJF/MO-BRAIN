@@ -11,8 +11,8 @@ import { loadOperations, validateRequest } from './dispatch.ts';
 import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import {
-  patchConfig, writeSchemaPack, seedSpaceRepo, takeGrantCredentialsFile, readSupervisorAuditTail,
-  deleteCredentialDelivery,
+  patchConfig, writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedSpaceRepo,
+  takeGrantCredentialsFile, readSupervisorAuditTail, deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { readBrainUsage } from './usage.ts';
@@ -142,6 +142,19 @@ Bun.serve({
         if (!name || !yaml) return json({ error: 'name and yaml required' }, 400);
         await writeSchemaPack(name, yaml, { sql });
         return json({ ok: true, name });
+      }
+
+      if (url.pathname === '/fileplane/schema-pack-json') {
+        const { name, manifest } = body as { name?: string; manifest?: unknown };
+        if (!name || typeof manifest !== 'object' || manifest === null) return json({ error: 'name and manifest required' }, 400);
+        await writeSchemaPackJson(name, manifest, { sql });
+        return json({ ok: true, name });
+      }
+
+      if (url.pathname === '/fileplane/schema-pack-remove') {
+        const { name } = body as { name?: string };
+        if (!name) return json({ error: 'name required' }, 400);
+        return json(await removeSchemaPack(name, { sql }));
       }
 
       if (url.pathname === '/fileplane/seed-space') {
