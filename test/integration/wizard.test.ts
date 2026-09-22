@@ -15,10 +15,39 @@ process.env.CONTROL_DATABASE_URL ??=
 // Slice 4 `mock.module` hazard). Mirrors test/integration/spend.test.ts.
 const callOpsCalls: { op: string; opts?: { json?: boolean; timeoutMs?: number } }[] = [];
 let resetBrainSchemaCalls = 0;
+// Task 6: op ids in call order, and where the scaffold landed inside that order.
+// `scaffoldAt` is stamped by the gitScaffold mock, which is not a callOps call.
+const opsOrder: string[] = [];
+const scaffolds: { sourceId: string; entries: { dir: string; readme: string }[] }[] = [];
+let scaffoldAt = -1;
 
 mock.module('../../src/control/opsClient.ts', () => ({
-  callOps: async (op: string, _params?: Record<string, unknown>, opts?: { json?: boolean; timeoutMs?: number }) => {
+  callOps: async (
+    op: string,
+    _params?: Record<string, unknown>,
+    opts?: { json?: boolean; timeoutMs?: number; packOverride?: string },
+  ) => {
     callOpsCalls.push({ op, opts });
+    opsOrder.push(op);
+    // A Space resolves its pack through the brain-wide active pack when no
+    // per-source override is stored, so `config.get` must read back absent.
+    if (op === 'config.get') {
+      return {
+        ok: false, exitCode: 1, argv: ['gbrain', 'config', 'get'],
+        stdout: '', stderr: 'Config key not found', json: null,
+      };
+    }
+    // effectivePack resolves through `schema show` with the packOverride seam.
+    if (op === 'schema.show') {
+      return {
+        ok: true, exitCode: 0, argv: ['gbrain', 'schema', 'show'],
+        stdout: '', stderr: '',
+        json: {
+          name: opts?.packOverride ?? 'gbrain-base-v2',
+          page_types: [{ name: 'person', primitive: 'entity', path_prefixes: ['people/'] }],
+        },
+      };
+    }
     return {
       ok: true,
       exitCode: 0,
@@ -38,7 +67,11 @@ mock.module('../../src/control/opsClient.ts', () => ({
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
-  gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
+  gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[] }) => {
+    scaffoldAt = opsOrder.length;
+    scaffolds.push({ sourceId: req.sourceId, entries: req.entries });
+    return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
+  },
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
@@ -190,5 +223,43 @@ describe('wizard', () => {
     expect(callOpsCalls.some((c) => c.op === 'sources.add')).toBe(true);
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.lifecycle).toBe('ready');
+  });
+
+  // Task 6 — a new brain's Spaces are scaffolded from the pack each resolves,
+  // after every source is registered and before the first sync.
+  test('finish scaffolds every Space from its pack, after sources.add and before sync', async () => {
+    await getDb().update(schema.brains).set({ lifecycle: 'sources-added' });
+    const spaceIds = (await getDb().select().from(schema.spaces)).map((s) => s.sourceId);
+    opsOrder.length = 0;
+    scaffolds.length = 0;
+    scaffoldAt = -1;
+
+    const res = await call('/api/wizard/finish', {});
+    const body = await res.json() as { scaffold: { sourceId: string; error: string | null }[] };
+    expect(res.status).toBe(200);
+
+    expect(scaffolds.map((s) => s.sourceId)).toEqual(spaceIds); // every Space
+    expect(scaffolds[0]!.entries.map((e) => e.dir)).toContain('people/');
+    // Ordering: scaffold happens after every sources.add and BEFORE sync.
+    expect(opsOrder.indexOf('sync')).toBeGreaterThan(opsOrder.lastIndexOf('sources.add'));
+    expect(scaffoldAt).toBeGreaterThan(opsOrder.lastIndexOf('sources.add'));
+    expect(scaffoldAt).toBeLessThan(opsOrder.indexOf('sync'));
+    expect(body.scaffold.every((r) => r.error === null)).toBe(true);
+
+    const [brain] = await getDb().select().from(schema.brains);
+    expect(brain?.lifecycle).toBe('ready');
+  });
+
+  // A Space added to a ready brain (the Sources page, not the wizard) gets its
+  // folders immediately, scoped to that Space alone.
+  test('POST /api/sources on a ready brain scaffolds the new source once', async () => {
+    opsOrder.length = 0;
+    scaffolds.length = 0;
+    scaffoldAt = -1;
+
+    const res = await call('/api/sources', { sourceId: 'legal', name: 'Legal' });
+    expect(res.status).toBe(200);
+    expect(scaffolds.map((s) => s.sourceId)).toEqual(['legal']);
+    expect(scaffolds[0]!.entries.map((e) => e.dir)).toContain('people/');
   });
 });

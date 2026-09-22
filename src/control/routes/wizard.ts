@@ -9,6 +9,8 @@ import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycl
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
 import { parseSchemaActiveProse } from '../../contracts/capability.ts';
+import { resolveSourcePacks, effectivePack } from './schema.ts';
+import { scaffoldSpaces, type ScaffoldResult } from '../scaffold.ts';
 
 /**
  * Json flag for wizard `/finish` callOps. Only request --json when the
@@ -213,7 +215,7 @@ wizard.post('/schema', guard(async (c, { userId, orgId }) => {
 /** The shared Space-creation result. `body` is the exact refusal shape the
  *  wizard has always returned, so both callers render the same conflict. */
 export type AddSpaceResult =
-  | { ok: true; sourceId: string }
+  | { ok: true; sourceId: string; scaffold?: ScaffoldResult[] }
   | { ok: false; status: 400 | 409; body: Record<string, unknown> };
 
 /**
@@ -273,7 +275,17 @@ export async function addSpaceSource(
   }
   await audit(orgId, userId, auditAction, sourceId, { sourceId, kind: 'local-git' });
 
-  return { ok: true, sourceId };
+  // A Space added to an already-ready brain gets its folders right away, from
+  // the pack THAT Space resolves. During the wizard the brain is not ready yet
+  // and `/finish` scaffolds once, after every sources.add, so doing it here
+  // would be premature and duplicate.
+  const scaffold = brain.lifecycle === 'ready'
+    ? await scaffoldSpaces(orgId, userId, {
+        resolveSourcePacks, effectivePack: (p) => effectivePack(brain.gbrainVersion ?? '', p),
+      }, [sourceId])
+    : undefined;
+
+  return { ok: true, sourceId, ...(scaffold ? { scaffold } : {}) };
 }
 
 /** Step 4 — the first Space. One gbrain source, git-backed, created via the CLI lane. */
@@ -325,6 +337,13 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
       federated: true,
     }, 300_000);
   }
+  // The chosen pack's folders, one README per page type, before the first
+  // sync so a teammate's first page lands in a folder that already explains
+  // itself. README.md is a gbrain metafile, so sync never imports it (S7).
+  // A scaffold failure is reported, never fatal: the brain is still usable.
+  const scaffold = await scaffoldSpaces(orgId, userId, {
+    resolveSourcePacks, effectivePack: (p) => effectivePack(brain.gbrainVersion ?? '', p),
+  }).catch((e) => [{ sourceId: '*', pack: null, created: [], skipped: [], error: String(e?.message ?? e) }]);
   if (brain.searchMode) await run('search-mode', 'config.set', { key: 'search.mode', value: brain.searchMode });
   await run('sync', 'sync', { all: true });
   await run('embed', 'embed', { stale: true });
@@ -350,5 +369,6 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   return c.json({
     ok, lifecycle: ok ? 'ready' : brain.lifecycle, steps,
     schemaPack: { requested: brain.schemaPack ?? null, resolved: active.pack, source: active.source },
+    scaffold,
   }, ok ? 200 : 500);
 }));
