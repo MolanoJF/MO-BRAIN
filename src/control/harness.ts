@@ -50,7 +50,7 @@ export function autoInstall(id: string): boolean {
   return connectionClass(id) !== 'manual';
 }
 
-export function wiringSnippet(id: string, credentials: WiringCredentials): string {
+function baseSnippet(id: string, credentials: WiringCredentials): string {
   const klass = connectionClass(id);
   if (klass === 'manual') {
     const clientId = credentials.client_id ?? '<client_id>';
@@ -74,6 +74,29 @@ export function wiringSnippet(id: string, credentials: WiringCredentials): strin
     ].join('\n');
   }
   return `gbrain mcp grant already wrote this adapter's config (${klass}).`;
+}
+
+/**
+ * Appended only when the claim read `mcp.publish_skills` back as true.
+ * MCP-native: the member's agent pulls skills over its own Connection, so
+ * nothing is installed and nothing can go stale. Nothing here promises a skill
+ * is callable — `unavailable_tools` is gbrain's per-caller answer to that.
+ */
+export const SKILLS_NOTE = [
+  '',
+  'Skills: this Connection serves gbrain skills over MCP, so there is nothing to install.',
+  'Ask your agent to call `list_skills`, then `get_skill` with a skill name, and follow what it returns.',
+  "A skill whose tools show up under `unavailable_tools` is outside your role. Skip it.",
+  'In Mobrain, new agents are connected from the Connection page, not `gbrain connect`.',
+].join('\n');
+
+export function wiringSnippet(
+  id: string,
+  credentials: WiringCredentials,
+  opts: { skills?: boolean } = {},
+): string {
+  const base = baseSnippet(id, credentials);
+  return opts.skills ? `${base}\n${SKILLS_NOTE}` : base;
 }
 
 /** Attach connectionClass + autoInstall for GET /api/harnesses. */

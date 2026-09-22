@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   HARVEST_MAP,
+  SKILLS_NOTE,
   annotateAdapters,
   autoInstall,
   connectionClass,
@@ -101,6 +102,29 @@ describe('wiringSnippet', () => {
       expect(snip.toLowerCase()).toContain('we have not runtime-tested this adapter');
       expect(snip).not.toContain('already wrote this adapter\'s config');
     }
+  });
+
+  test('skills omitted or false is byte-identical to the plain snippet', () => {
+    for (const id of Object.keys(EXPECTED)) {
+      const plain = wiringSnippet(id, creds);
+      expect(wiringSnippet(id, creds, { skills: false })).toBe(plain);
+      expect(plain).not.toContain('list_skills');
+    }
+  });
+
+  test('skills true appends the MCP-native skills note for every class', () => {
+    for (const id of Object.keys(EXPECTED)) {
+      const snip = wiringSnippet(id, creds, { skills: true });
+      expect(snip.startsWith(wiringSnippet(id, creds))).toBe(true);
+      expect(snip.endsWith(SKILLS_NOTE)).toBe(true);
+    }
+  });
+
+  test('the skills note names the tools and installs nothing', () => {
+    expect(SKILLS_NOTE).toContain('list_skills');
+    expect(SKILLS_NOTE).toContain('get_skill');
+    expect(SKILLS_NOTE).toContain('unavailable_tools');
+    expect(SKILLS_NOTE).not.toMatch(/skillpack scaffold|--stub/);
   });
 });
 

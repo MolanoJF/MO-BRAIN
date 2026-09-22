@@ -23,12 +23,12 @@ export function Claim({ token }: { token: string }) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[] } | null>(null);
+  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean } | null>(null);
 
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api.post<{ membershipId: string; connections: ClaimConnection[] }>(
+      const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean }>(
         `/claim/${token}`,
         { email },
       );
@@ -56,7 +56,7 @@ export function Claim({ token }: { token: string }) {
           <p className="text-sm text-muted">No pending connections were provisioned for this member.</p>
         )}
         {result.connections.map((conn) => (
-          <ClaimedConnection key={conn.connectionId} conn={conn} />
+          <ClaimedConnection key={conn.connectionId} conn={conn} skills={result.skillsPublished} />
         ))}
       </div>
     );
@@ -84,15 +84,15 @@ export function Claim({ token }: { token: string }) {
   );
 }
 
-function ClaimedConnection({ conn }: { conn: ClaimConnection }) {
+function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: boolean }) {
   const creds = asCreds(conn.credentials);
   const snippet = useMemo(() => {
     try {
-      return wiringSnippet(conn.harness, { client_id: creds.client_id, mcp_url: conn.mcp_url });
+      return wiringSnippet(conn.harness, { client_id: creds.client_id, mcp_url: conn.mcp_url }, { skills });
     } catch (e) {
       return e instanceof Error ? e.message : 'unknown harness';
     }
-  }, [conn.harness, conn.mcp_url, creds.client_id]);
+  }, [conn.harness, conn.mcp_url, creds.client_id, skills]);
 
   return (
     <section className="card space-y-3">
