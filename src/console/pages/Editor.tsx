@@ -133,12 +133,29 @@ export function Editor(props: {
     // editor stays permanently blank. Do not drop this as "unused".
   }, [sourceId, path]);
 
+  // These two were ONE effect, keyed on `[file, mode]`, whose body re-seeded the
+  // buffer from `file.content` every time it ran. That made the Edit / Done
+  // editing toggle destructive: flipping the mode re-ran the seed, and because
+  // `setValue` is annotated `programmatic` (see editor/index.ts) no `onChange`
+  // fired, so React's `draft` still held the text the operator had typed. The
+  // result was a split brain — the editor showing the loaded content while
+  // `isDirty(baseline, draft)` still read dirty — and `save()` sends
+  // `editorRef.current?.getValue()`, so a save the operator believed was theirs
+  // wrote the REVERTED text back over their edit. Seeding the document is a
+  // fact about the FILE; the mode is a fact about the MODE. They are two
+  // effects so that neither can ever be the other's trigger again. Do not
+  // recombine them.
   useEffect(() => {
-    const handle = editorRef.current;
-    if (handle === null) return;
-    if (file !== null) handle.setValue(file.content);
-    handle.setMode(mode);
-  }, [file, mode]);
+    // A null `file` is a fetch in flight, not an empty file: leave the buffer
+    // alone rather than seeding it with ''.
+    if (file === null) return;
+    editorRef.current?.setValue(file.content);
+  }, [file]);
+
+  // `setMode` reconfigures the live view through a Compartment, exactly as the
+  // theme flip below does, so the document, the undo history, the caret and the
+  // scroll offset are untouched by it. That is what makes it safe on its own.
+  useEffect(() => { editorRef.current?.setMode(mode); }, [mode]);
 
   // A theme flip reconfigures the live view instead of replacing it, so the
   // document, the undo history, the caret and the scroll offset all survive it
