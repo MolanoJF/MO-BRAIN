@@ -102,6 +102,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitRevertRange: async () => ({ outcome: 'nothing_to_revert' }),
   auditTail: async () => [],
   gitTree: async (sourceId: string) => treeHandler(sourceId),
+  gitExportBundle: async () => new Response(null),
   gitReadFile: async () => ({ content: '', sha: '', size: 0 }),
   gitWriteFile: async () => ({ committed: true, sha: 'written-sha' }),
 }));

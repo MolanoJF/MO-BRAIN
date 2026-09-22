@@ -116,6 +116,10 @@ export const filesApi = {
     api.get<FileContent>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`),
   save: (sourceId: string, path: string, body: { content: string; expectedSha: string; message?: string }) =>
     api.put<FileSaveResult>(`/spaces/${encodeURIComponent(sourceId)}/files/${encodePath(path)}`, body),
+  /** The full-history `.bundle` download URL — a plain `<a href>`, not a
+   *  `fetch()`: the browser streams the download and carries the session
+   *  cookie itself, so this is a link the page renders, not a call it makes. */
+  exportUrl: (sourceId: string) => `/api/spaces/${encodeURIComponent(sourceId)}/export`,
 };
 
 /**

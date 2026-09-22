@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'bun:test';
 import {
-  classifyLock, commitArgs, diffRange, gitReadFile, gitTree, gitWriteFile, revertRange,
+  classifyLock, commitArgs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, revertRange,
 } from '../../src/ops/git.ts';
 import type { GitRange, RangeCommit, RevertRequest, TreeProbe } from '../../src/ops/git.ts';
 import { attributeCommits, captureHeads, diffForRun } from '../../src/agent/diff.ts';
@@ -230,6 +230,12 @@ describe('diffRange sourceId', () => {
 describe('gitTree sourceId', () => {
   test('refuses a traversing sourceId before spawning git', async () => {
     await expect(gitTree('../etc', { sql: {} as never })).rejects.toThrow(/invalid sourceId/);
+  });
+});
+
+describe('exportRepoBundle sourceId', () => {
+  test('refuses a traversing sourceId before spawning git', async () => {
+    await expect(exportRepoBundle('../etc')).rejects.toThrow(/invalid sourceId/);
   });
 });
 

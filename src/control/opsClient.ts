@@ -38,6 +38,20 @@ async function post<T>(path: string, body: unknown, timeoutMs = 600_000): Promis
 }
 
 /**
+ * The ONE non-JSON call: `/git/export` answers a binary stream on success and
+ * JSON on refusal, so this hands the raw `Response` back rather than parsing
+ * it — the route decides ok/not-ok and pipes the body through itself.
+ */
+async function postStream(path: string, body: unknown, timeoutMs = 600_000): Promise<Response> {
+  return fetch(`${opsUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${opsToken()}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+/**
  * The ONLY way the control plane reaches gbrain. It holds no brain
  * DATABASE_URL and mounts GBRAIN_HOME read-only (S2), so every privileged
  * action crosses this boundary.
@@ -114,6 +128,16 @@ export async function gitPathExists(sourceId: string, paths: readonly string[]):
 /** S1 — the Space repo's working tree, for the Files browser. Read-only. */
 export async function gitTree(sourceId: string): Promise<RepoTree> {
   return post('/git/tree', { sourceId }, 30_000);
+}
+
+/**
+ * S1 — the Space repo's full git history as a `git bundle`, for
+ * `GET /api/spaces/:id/export`. The caller inspects `.ok` itself: a bundle can
+ * be gigabytes, and buffering it here to throw a typed error would defeat the
+ * whole point of streaming it straight through to the browser.
+ */
+export async function gitExportBundle(sourceId: string): Promise<Response> {
+  return postStream('/git/export', { sourceId }, 120_000);
 }
 
 /** S1 — one file's text plus the git blob sha the editor must send back on save. */

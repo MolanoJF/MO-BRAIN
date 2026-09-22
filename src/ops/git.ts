@@ -391,6 +391,32 @@ export async function gitTree(
   return { sourceId, root, entries };
 }
 
+/**
+ * READ-ONLY. A Space's full git repo (every ref, every commit) as a
+ * `git bundle` stream — the export a member can `git clone` locally and later
+ * push to a remote of their own choosing, history intact.
+ *
+ * No lock: a bundle reads refs and objects, both append-only from a reader's
+ * view, the same reasoning `gitTree`/`gitReadFile` rely on. `rev-parse HEAD`
+ * runs first and THROWS by name when the Space has no commits yet — `git
+ * bundle create` refuses an empty bundle with its own exit code, and that
+ * refusal must reach the caller before any bytes are written, not mid-stream.
+ */
+export async function exportRepoBundle(
+  sourceId: string,
+  opts: { root?: string } = {},
+): Promise<ReadableStream<Uint8Array>> {
+  if (!SOURCE_ID_RE.test(sourceId)) throw new Error(`invalid sourceId: ${sourceId}`);
+  const cwd = join(opts.root ?? REPOS_ROOT, sourceId);
+
+  const head = await git(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (head.exitCode !== 0) throw new Error(`${sourceId} has no commits to export`);
+
+  const proc = Bun.spawn(['git', 'bundle', 'create', '-', '--all'], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  if (proc.stdout === null) throw new Error(`${sourceId} bundle produced no stdout`);
+  return proc.stdout;
+}
+
 /** One file's content, its git blob sha and its byte length. */
 export type ReadFileResult = { content: string; sha: string; size: number };
 

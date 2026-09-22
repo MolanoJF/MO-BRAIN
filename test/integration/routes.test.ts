@@ -119,6 +119,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   // S1: `routes/files.ts` imports these alongside the rest, so omitting them
   // makes the whole app graph unloadable; these are controllable per test.
   gitTree: async (sourceId: string) => treeHandler(sourceId),
+  gitExportBundle: async () => new Response(null),
   gitReadFile: async (sourceId: string, path: string) => readFileHandler(sourceId, path),
   gitWriteFile: async (req: WriteRequest) => {
     writeRequests.push(req);
