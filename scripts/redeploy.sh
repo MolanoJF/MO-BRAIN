@@ -131,7 +131,12 @@ console_url_line() {  # $1 optional suffix for the working case
     echo "                 and it is this stack's only ingress. The console IS deployed —"
     echo "                 start caddy to see it:"
     echo "                   docker compose --env-file .env -f compose/docker-compose.yml \\"
-    echo "                     -f compose/docker-compose.dev.yml up -d caddy"
+    echo "                     -f compose/docker-compose.dev.yml up -d --force-recreate caddy"
+    echo "                 (--force-recreate, not a plain up: \`name:\` in the compose file is"
+    echo "                  a fixed literal, so a checkout in ANY directory drives the same"
+    echo "                  project. A container created from a checkout that has since moved"
+    echo "                  or been deleted keeps that dead path in its config and exits 127"
+    echo "                  at 'not a directory'; recreating repoints it at this tree.)"
   fi
 }
 
