@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
+import { Button, Icon, Input, Notice } from '../ui/index.tsx';
 
 /**
  * The fresh-install path, and ONLY that. D1: this form used to be the whole of
@@ -35,15 +37,30 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
       <p className="text-sm text-muted">
         This account owns the brain. Nobody else can be created until setup finishes.
       </p>
-      <input className="field" placeholder="Organization name" value={orgName}
+      {/* `Input`, not `Field`. `Field` renders a visible `<label>`, and these
+          three controls have only ever had placeholders; writing label text
+          for them would be new copy, and this phase changes none. */}
+      <Input placeholder="Organization name" value={orgName}
              onChange={(e) => setOrgName(e.target.value)} required />
-      <input className="field" type="email" placeholder="Email" value={email}
+      <Input type="email" placeholder="Email" value={email}
              onChange={(e) => setEmail(e.target.value)} required />
-      <input className="field" type="password" placeholder="Password (12+ characters)"
+      <Input type="password" placeholder="Password (12+ characters)"
              value={password} onChange={(e) => setPassword(e.target.value)}
              minLength={12} required />
-      {error && <div className="text-danger text-sm">{error}</div>}
-      <button className="btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Create admin'}</button>
+      {error && (
+        <Notice tone="danger">
+          <Icon glyph={CircleAlert} size={16} />
+          <span>{error}</span>
+        </Notice>
+      )}
+      {/* `type="submit"` is not decoration. This button was a bare `<button>`
+          inside a `<form>`, where the implicit type IS submit; `Button`
+          defaults to `type="button"` so that a control in a table row cannot
+          submit a form it happens to sit in. Without this the form would stop
+          submitting — on click AND on Enter in any field. */}
+      <Button variant="primary" type="submit" disabled={busy}>
+        {busy ? 'Creating…' : 'Create admin'}
+      </Button>
     </form>
   );
 }

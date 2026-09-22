@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { filesApi, type FileEntry } from '../api.ts';
 import { buildTree, flattenTree, toggleExpanded, indentFor, treeErrorMessage } from '../files/tree.ts';
 import { readExpanded, writeExpanded, pruneExpanded } from '../files/expanded.ts';
+import { Empty, Icon } from '../ui/index.tsx';
 
 /**
  * The sidebar's collapsible file tree. Fetches `filesApi.tree(sourceId)`
@@ -67,11 +69,19 @@ export function FileTree({
   };
 
   if (sourceId === null) return null;
-  if (loading) return <div className="file-tree text-muted">Loading…</div>;
+  // `Empty` rather than a hand-rolled muted div, and deliberately not a
+  // `Spinner`: the tree is the sidebar's whole content, and a spinner where a
+  // list is about to appear draws the eye to the wait instead of to the list.
+  // The copy is unchanged, which is the other half of the reason — a spinner
+  // would have had to replace the word "Loading…" rather than restyle it.
+  if (loading) return <div className="file-tree"><Empty>Loading…</Empty></div>;
+  // Left as coloured text, not a `Notice`: a bordered panel inside a 280px
+  // sidebar column is a card wedged into a list. `Notice` is reserved for the
+  // standing warnings that were `.card border-warning`.
   if (error !== null) return <div className="file-tree text-danger">{error}</div>;
 
   const rows = flattenTree(buildTree(entries), expanded);
-  if (rows.length === 0) return <div className="file-tree text-muted">No files in this Source.</div>;
+  if (rows.length === 0) return <div className="file-tree"><Empty>No files in this Source.</Empty></div>;
 
   return (
     <div className="file-tree" aria-label="Files">
@@ -90,7 +100,11 @@ export function FileTree({
             aria-expanded={row.kind === 'folder' ? isExpanded : undefined}
             onClick={() => (row.kind === 'folder' ? toggle(row.path) : onSelect(row.path))}
           >
-            {row.kind === 'folder' && <span className="chevron">▶</span>}
+            {/* The `▶` codepoint is gone, but `.chevron` stays on the node:
+                `.tree-row.is-expanded .chevron` is what rotates it 90°, and
+                that rule is in `styles.css`, which this phase does not own.
+                `Icon` merges the class in, so the rotation still finds it. */}
+            {row.kind === 'folder' && <Icon glyph={ChevronRight} size={14} className="chevron" />}
             {row.name}
           </button>
         );

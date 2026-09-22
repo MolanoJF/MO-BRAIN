@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { visibleTabs, type SettingsTab } from './tabs.ts';
+import { Button } from '../ui/index.tsx';
 
 /**
  * Every tab's page, lazily. `Schedules.tsx` (1,487 lines) and `Runs.tsx`
@@ -32,6 +33,25 @@ const LABEL: Record<SettingsTab, string> = {
  * The modal's interior: the header, the tab nav, and the selected page.
  * Pages mount unchanged — this component never sees their props or internals,
  * only their default-exported component.
+ *
+ * Two `.nav-item` clusters live here and only one of them migrates.
+ *
+ * The header's Close becomes a `Button`: it is an ordinary auto-width control
+ * in a header row, which is exactly what `Button` is. `settings-close` stays
+ * in its class list on purpose — `Dialog`'s `initialFocus` defaults to that
+ * selector, and it is how focus lands somewhere sensible when the modal opens.
+ * Dropping the class would not fail a test; it would just quietly stop moving
+ * focus.
+ *
+ * The tab rows do NOT become `Button`, and that is a reported gap rather than
+ * a preference. `buttonClass` hardcodes `justify-center` and a `border`, and
+ * `ui/classes.ts` states as a rule that no two utilities in one class string
+ * may set the same property — so a caller cannot reach in with `justify-start`
+ * or `border-0` and rely on winning, because the emitted CSS order decides,
+ * not the attribute order. A settings nav is a left-aligned, borderless,
+ * full-width list; `ui/` has no primitive for that shape, and `ui/**` is not
+ * this phase's to extend. `.nav-item` is kept alive through Phase 4 for
+ * precisely this kind of site.
  */
 export function SettingsPanel({
   tab, isAdmin, onTab, onClose,
@@ -46,9 +66,9 @@ export function SettingsPanel({
     <>
       <div className="settings-page-header">
         <h2>Settings</h2>
-        <button className="nav-item settings-close" onClick={onClose} aria-label="Close settings">
+        <Button className="settings-close" onClick={onClose} aria-label="Close settings">
           Close
-        </button>
+        </Button>
       </div>
       <div className="settings-body">
         <nav className="settings-nav" aria-label="Settings sections">

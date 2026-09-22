@@ -1,6 +1,21 @@
 import { useMemo, useState } from 'react';
+import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { api } from '../api.ts';
 import { wiringSnippet } from '../../control/harness.ts';
+import { Button, Card, Empty, Icon, Input, Notice } from '../ui/index.tsx';
+
+/**
+ * The credential blocks are `<pre>`, and they borrowed `.field` purely for its
+ * box — a `<pre>` is not a control and never was. They are spelled out from
+ * tokens here instead of run through `fieldClass()`, because `fieldClass()`
+ * also sets `text-[length:var(--control-font)]` and these blocks are `text-xs`
+ * on purpose: two utilities setting `font-size` in one class string is exactly
+ * the collision `ui/classes.ts` forbids, and the loser is decided by the order
+ * Tailwind emits, not by the order written here.
+ */
+const CREDENTIAL_BLOCK =
+  'w-full rounded-[var(--control-radius)] border border-border bg-surface ' +
+  'px-2.5 py-1.5 font-mono text-xs whitespace-pre-wrap';
 
 type ClaimConnection = {
   connectionId: string;
@@ -47,13 +62,14 @@ export function Claim({ token }: { token: string }) {
     return (
       <div className="mx-auto mt-16 max-w-2xl space-y-6 p-6">
         <h1 className="text-xl font-semibold">Claim complete</h1>
-        <div className="card border-warning">
-          <p className="text-sm font-medium">
+        <Notice tone="warning">
+          <Icon glyph={TriangleAlert} size={16} />
+          <p className="m-0 font-medium">
             Credentials are shown once and are not recoverable. Save them now.
           </p>
-        </div>
+        </Notice>
         {result.connections.length === 0 && (
-          <p className="text-sm text-muted">No pending connections were provisioned for this member.</p>
+          <Empty>No pending connections were provisioned for this member.</Empty>
         )}
         {result.connections.map((conn) => (
           <ClaimedConnection key={conn.connectionId} conn={conn} />
@@ -68,18 +84,26 @@ export function Claim({ token }: { token: string }) {
       <p className="text-sm text-muted">
         Enter the email this invite was issued to. Credentials appear once and cannot be recovered.
       </p>
-      <input className="field" type="email" placeholder="Email" value={email}
+      <Input type="email" placeholder="Email" value={email}
              onChange={(e) => setEmail(e.target.value)} />
       {error && (
-        <div className="text-danger text-sm space-y-1">
-          <p>{error}</p>
-          {burned && <p>This link is burned. Credentials are not recoverable — ask an admin for a new claim link.</p>}
-          {wrongEmail && <p>Wrong email. The link was not consumed; try the address the invite was sent to.</p>}
-        </div>
+        <Notice tone="danger">
+          <Icon glyph={CircleAlert} size={16} />
+          {/* All three sentences stay, in this order. The second and third are
+              the only thing standing between an operator and a burned link
+              they cannot get back. */}
+          <div className="space-y-1">
+            <p className="m-0">{error}</p>
+            {burned && <p className="m-0">This link is burned. Credentials are not recoverable — ask an admin for a new claim link.</p>}
+            {wrongEmail && <p className="m-0">Wrong email. The link was not consumed; try the address the invite was sent to.</p>}
+          </div>
+        </Notice>
       )}
-      <button className="btn-primary" disabled={busy || !email} onClick={() => void submit()}>
+      {/* Not inside a `<form>` — this one always drove off `onClick`, so it
+          keeps `Button`'s `type="button"` default. */}
+      <Button variant="primary" disabled={busy || !email} onClick={() => void submit()}>
         {busy ? 'Claiming…' : 'Claim'}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -95,9 +119,11 @@ function ClaimedConnection({ conn }: { conn: ClaimConnection }) {
   }, [conn.harness, conn.mcp_url, creds.client_id]);
 
   return (
-    <section className="card space-y-3">
-      <h2 className="font-medium font-mono text-sm">{conn.connectionId}</h2>
-      <pre className="field font-mono text-xs whitespace-pre-wrap">
+    // The connection id was an `<h2 className="font-mono">`; `Card`'s `title`
+    // is a ReactNode rendered inside its own `<h2>`, so the monospace moves
+    // onto a span rather than being lost or fought over.
+    <Card title={<span className="font-mono">{conn.connectionId}</span>} className="space-y-3">
+      <pre className={CREDENTIAL_BLOCK}>
         {JSON.stringify(conn.credentials, null, 2)}
       </pre>
       <dl className="space-y-1 text-sm font-mono">
@@ -106,7 +132,7 @@ function ClaimedConnection({ conn }: { conn: ClaimConnection }) {
         <div>harness: {conn.harness}</div>
         <div>mcp_url: {conn.mcp_url}</div>
       </dl>
-      <pre className="field font-mono text-xs whitespace-pre-wrap">{snippet}</pre>
-    </section>
+      <pre className={CREDENTIAL_BLOCK}>{snippet}</pre>
+    </Card>
   );
 }

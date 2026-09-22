@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react';
+import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { api } from '../api.ts';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
+import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
+
+/**
+ * The two pickers on this page (search mode, schema pack) are `<button>`s that
+ * were wearing `.card`. `Card` is a `<section>` and cannot become one, and
+ * `ui/` has no selectable-card primitive — so the box is spelled out from the
+ * same tokens `Card` uses. It is NOT `Card`'s padding: `.card` was `12px` and
+ * `Card` is `18px / 24px`, and a wizard step that stacks four of these would
+ * grow by most of a screen. Flagged in the report as the missing primitive.
+ */
+const PICKER_CARD =
+  'w-full text-left p-3 rounded-[var(--radius)] border border-border bg-surface ' +
+  'enabled:hover:bg-subtle disabled:opacity-45 disabled:cursor-not-allowed';
 
 type SearchMode = {
   id: string; label: string; relativeCost: number;
@@ -27,7 +41,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
     finally { setBusy(false); }
   };
 
-  if (!state) return <div className="text-muted">Loading…</div>;
+  if (!state) return <Empty>Loading…</Empty>;
 
   const modes = state.searchModes;
   const measured = modes.filter((m) => m.measuredCost !== null);
@@ -39,7 +53,12 @@ export function Wizard({ onReady }: { onReady: () => void }) {
         <p className="text-sm text-muted">Stage: <span className="font-mono">{state.lifecycle}</span></p>
       </header>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && (
+        <Notice tone="danger">
+          <Icon glyph={CircleAlert} size={16} />
+          <span>{error}</span>
+        </Notice>
+      )}
 
       {state.nextStep === 'provider-configured' && (
         <ProviderStep busy={busy} onSubmit={(b) => step('/wizard/provider', b)} />
@@ -48,14 +67,21 @@ export function Wizard({ onReady }: { onReady: () => void }) {
       {state.nextStep === 'mode-selected' && (
         <section className="space-y-3">
           <h2 className="font-medium">Choose a search mode</h2>
+          {/* `text-neutral-600` / `text-neutral-500` were raw Tailwind palette
+              greys, not tokens — they are baked literals that do not re-paint
+              under `:root.dark`, so both of these paragraphs were grey-on-grey
+              and close to unreadable on the dark console. Both collapse onto
+              `text-muted`, which is the only "secondary copy" token the system
+              has; the disclaimer loses its extra half-step of quiet, and that
+              is the right trade against a sentence nobody could read. */}
           {measured.length === modes.length ? (
-            <p className="text-sm text-neutral-600">
+            <p className="text-sm text-muted">
               On this deployment, the most expensive mode costs about{' '}
               {Math.max(...measured.map((m) => m.measuredCost!))}× the cheapest.{' '}
-              <span className="text-neutral-500">{MEASURED_COST_DISCLAIMER}</span>
+              <span className="text-muted">{MEASURED_COST_DISCLAIMER}</span>
             </p>
           ) : (
-            <p className="text-sm text-neutral-600">
+            <p className="text-sm text-muted">
               Not measured on this deployment. Upstream reports roughly{' '}
               {Math.max(...modes.map((m) => m.relativeCost))}× between the cheapest and most
               expensive mode; your own spread will differ. The Spend page shows what you
@@ -63,7 +89,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
             </p>
           )}
           {modes.map((m) => (
-            <button key={m.id} className="card w-full text-left" disabled={busy}
+            <button key={m.id} type="button" className={PICKER_CARD} disabled={busy}
                     onClick={() => step('/wizard/search-mode', { mode: m.id })}>
               <div className="flex justify-between">
                 <span className="font-medium">{m.label}</span>
@@ -91,10 +117,10 @@ export function Wizard({ onReady }: { onReady: () => void }) {
             Initializes the brain, applies your search mode, imports and embeds your Source,
             then runs a health check. This takes several minutes.
           </p>
-          <button className="btn-primary" disabled={busy}
+          <Button variant="primary" disabled={busy}
                   onClick={async () => { await step('/wizard/finish', {}); onReady(); }}>
             {busy ? 'Running…' : 'Finish setup'}
-          </button>
+          </Button>
         </section>
       )}
     </div>
@@ -109,15 +135,15 @@ function ProviderStep({ busy, onSubmit }: { busy: boolean; onSubmit: (b: unknown
       <p className="text-sm text-muted">
         Stored encrypted. It is written to the brain's config file, never to its database.
       </p>
-      <input className="field font-mono" type="password" placeholder="sk-…"
+      <Input className="font-mono" type="password" placeholder="sk-…"
              value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-      <button className="btn-primary" disabled={busy || !apiKey}
+      <Button variant="primary" disabled={busy || !apiKey}
               onClick={() => onSubmit({
                 provider: 'openai', apiKey,
                 embeddingModel: 'openai:text-embedding-3-small',
               })}>
         {busy ? 'Saving…' : 'Save key'}
-      </button>
+      </Button>
     </section>
   );
 }
@@ -139,7 +165,7 @@ function SchemaStep({ busy, onSubmit }: { busy: boolean; onSubmit: (pack: string
       {packs.map((p) => {
         const id = p.id ?? p.name ?? 'gbrain-base-v2';
         return (
-          <button key={id} className="card w-full text-left" disabled={busy}
+          <button key={id} type="button" className={PICKER_CARD} disabled={busy}
                   onClick={() => onSubmit(id)}>
             <span className="font-mono">{id}</span>
           </button>
@@ -167,19 +193,26 @@ function SpaceStep(
         Your brain starts with one Source, <span className="font-mono">{FIRST_SPACE.sourceId}</span>.
         You can add more later.
       </p>
-      {/* S4b: a blocking choice, not a tooltip. Naming went away; consent did not. */}
-      <div className="card border-warning">
-        <p className="text-sm">{notice}</p>
-        <label className="mt-2 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={acknowledged}
-                 onChange={(e) => setAcknowledged(e.target.checked)} />
-          I understand folders inside a Source are not access boundaries.
-        </label>
-      </div>
-      <button className="btn-primary" disabled={busy || !acknowledged}
+      {/* S4b: a blocking choice, not a tooltip. Naming went away; consent did not.
+          The checkbox stays INSIDE the notice, where it has always been — a
+          consent control that drifts out of the warning it consents to is a
+          checkbox about nothing. `Notice` is a flex row, so the two lines get
+          their own column beside the glyph. */}
+      <Notice tone="warning">
+        <Icon glyph={TriangleAlert} size={16} />
+        <div className="flex flex-col">
+          <p className="m-0">{notice}</p>
+          <label className="mt-2 flex items-center gap-2">
+            <input type="checkbox" checked={acknowledged}
+                   onChange={(e) => setAcknowledged(e.target.checked)} />
+            I understand folders inside a Source are not access boundaries.
+          </label>
+        </div>
+      </Notice>
+      <Button variant="primary" disabled={busy || !acknowledged}
               onClick={() => onSubmit({ ...FIRST_SPACE })}>
         {busy ? 'Creating…' : 'Continue'}
-      </button>
+      </Button>
     </section>
   );
 }

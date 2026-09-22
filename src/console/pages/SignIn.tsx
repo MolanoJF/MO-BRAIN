@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
+import { Button, Icon, Input, Notice } from '../ui/index.tsx';
 
 /**
  * A sign-in refusal an operator can act on.
@@ -65,12 +67,24 @@ export function SignIn({ onDone }: { onDone: () => void }) {
       <p className="text-sm text-muted">
         This brain is already set up. Sign in with your own account to reach the console.
       </p>
-      <input className="field" type="email" placeholder="Email" value={email}
+      {/* `autoComplete` survives the move verbatim. A password manager that
+          stops recognising this form is a support ticket that looks like a
+          restyle bug and is not one. */}
+      <Input type="email" placeholder="Email" value={email}
              onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
-      <input className="field" type="password" placeholder="Password" value={password}
+      <Input type="password" placeholder="Password" value={password}
              onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
-      {error && <div className="text-danger text-sm">{error}</div>}
-      <button className="btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+      {error && (
+        <Notice tone="danger">
+          <Icon glyph={CircleAlert} size={16} />
+          <span>{error}</span>
+        </Notice>
+      )}
+      {/* See Bootstrap.tsx: `Button` defaults to `type="button"`, so the
+          implicit submit this form relied on has to be spelled out. */}
+      <Button variant="primary" type="submit" disabled={busy}>
+        {busy ? 'Signing in…' : 'Sign in'}
+      </Button>
     </form>
   );
 }

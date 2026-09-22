@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react';
 import { filesApi, type FileContent, type FileSaveResult } from '../api.ts';
+import { Button, Empty, Icon, Notice } from '../ui/index.tsx';
 import {
   mountMarkdownEditor,
   type EditorMode,
@@ -81,6 +83,18 @@ export function Editor(props: {
   // pushes. `destroy()` is idempotent, so StrictMode's double-mount is safe:
   // the first handle is destroyed and the ref cleared before the second mount
   // creates its own.
+  //
+  // Phase 1 left `{ dark: true }` hardcoded on the CodeMirror theme
+  // (`editor/theme.ts`) and deferred the fix here on the grounds that fixing
+  // it means remounting when the theme changes — an Editor-lifecycle concern.
+  // It is NOT fixed here, and deliberately so: remounting is only half of it,
+  // and it is the half that does nothing on its own. `consoleEditorTheme` is a
+  // module-level constant with the flag baked in, and `mountMarkdownEditor`
+  // takes no theme argument, so a theme-keyed remount today would tear down
+  // the operator's caret and scroll position and rebuild a byte-identical
+  // extension set. Adding the remount dep is one line once `editor/theme.ts`
+  // exposes the flag and `editor/index.ts` threads it through; both are
+  // outside this phase's fence, so the requirement is reported instead.
   useEffect(() => {
     const parent = hostRef.current;
     if (path === null || parent === null) return;
@@ -165,7 +179,7 @@ export function Editor(props: {
   if (sourceId === null) {
     return (
       <div className="flex flex-col h-full min-h-0">
-        <p className="text-sm text-muted">No Sources you can reach.</p>
+        <Empty>No Sources you can reach.</Empty>
       </div>
     );
   }
@@ -173,7 +187,7 @@ export function Editor(props: {
   if (path === null) {
     return (
       <div className="flex flex-col h-full min-h-0">
-        <p className="text-sm text-muted">Pick a file to read it.</p>
+        <Empty>Pick a file to read it.</Empty>
       </div>
     );
   }
@@ -184,40 +198,58 @@ export function Editor(props: {
         <div className="text-xs text-muted font-mono">{path}</div>
         {canEdit(access) && file !== null && (
           <div className="flex items-center gap-2">
-            <button
-              className="nav-item"
-              onClick={() => setMode((m) => (m === 'edit' ? 'read' : 'edit'))}
-            >
+            {/* Both of these were `.nav-item`, which is a left-aligned,
+                full-width nav row wearing a button's job. They are ordinary
+                auto-width controls in a toolbar, so `Button` is the right
+                shape for them — unlike the settings tab list, which is not. */}
+            <Button onClick={() => setMode((m) => (m === 'edit' ? 'read' : 'edit'))}>
               {editToggleLabel(mode)}
-            </button>
+            </Button>
             {mode === 'edit' && (
-              <button
-                className="btn-primary"
+              <Button
+                variant="primary"
                 disabled={pending || !dirty || access !== 'write'}
                 onClick={() => void save()}
               >
                 {saveButtonLabel(pending)}
-              </button>
+              </Button>
             )}
           </div>
         )}
       </div>
 
-      {fileError && <div className="text-danger text-sm">{fileError}</div>}
-      {saveError && <div className="text-danger text-sm">{saveError}</div>}
+      {/* Five status messages, one shape. They used to be five bare coloured
+          `<div>`s of the same 13px text, which meant the one that says a save
+          did NOT land looked exactly like the one that says it did — the
+          colour was the only difference, and colour alone is not a message.
+          As `Notice` each carries its tone AND a glyph, and every string is
+          byte-identical to what it was: the copy still comes from
+          `files/tree.ts`, which is where the tests assert it. */}
+      {fileError && (
+        <Notice tone="danger"><Icon glyph={CircleAlert} size={16} /><span>{fileError}</span></Notice>
+      )}
+      {saveError && (
+        <Notice tone="danger"><Icon glyph={CircleAlert} size={16} /><span>{saveError}</span></Notice>
+      )}
       {saveResult !== null && saveResult.committed && (
-        <div className="text-sm text-ok">{saveSuccessText(saveResult.sha)}</div>
+        <Notice tone="ok"><Icon glyph={CircleCheck} size={16} /><span>{saveSuccessText(saveResult.sha)}</span></Notice>
       )}
       {bypassVisible(saveResult) && (
-        <div className="text-sm text-warning">{BYPASS_NOTICE}</div>
+        <Notice tone="warning"><Icon glyph={TriangleAlert} size={16} /><span>{BYPASS_NOTICE}</span></Notice>
       )}
       {saveResult !== null && !saveResult.committed && (
-        <div className="space-y-1">
-          <div className="text-sm text-warning">{staleNotice(saveResult.sha)}</div>
-          <button className="nav-item" disabled={reloading} onClick={() => void reload()}>
-            {reloading ? 'Reloading…' : 'Reload'}
-          </button>
-        </div>
+        // Reload lives inside the notice that explains why it is there. A
+        // stale-save warning with its remedy parked underneath it is two
+        // things an operator has to connect; this is one.
+        <Notice tone="warning">
+          <Icon glyph={TriangleAlert} size={16} />
+          <div className="flex flex-col items-start gap-2">
+            <span>{staleNotice(saveResult.sha)}</span>
+            <Button disabled={reloading} onClick={() => void reload()}>
+              {reloading ? 'Reloading…' : 'Reload'}
+            </Button>
+          </div>
+        </Notice>
       )}
 
       <div ref={hostRef} className="markdown-editor flex-1" />

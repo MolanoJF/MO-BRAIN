@@ -8,12 +8,17 @@ import { Dialog, shouldCloseOnEscape, shouldCloseOnBackdropClick } from '../ui/i
  * opacity-only animation and the containing-block reason for it); the reasons
  * they exist moved with them and are documented on `Dialog`.
  *
- * This file stays as a thin pass-through rather than disappearing today,
- * because `AppShell.tsx` and `test/unit/console-settings-modal.test.ts` both
- * name this path, and re-pointing them belongs to Phase 2 along with the rest
- * of the shell. The two predicates are re-exported for the same reason: the
- * test asserts them here, and a test that moves in the same commit as its
- * subject proves nothing about the move.
+ * Phase 2 looked at collapsing this file into `ui/Dialog` and kept it. The
+ * seam costs one indirection and buys two things. `AppShell.tsx` names a
+ * settings modal, not a generic dialog, so the shell keeps reading as what it
+ * is. And `test/unit/console-settings-modal.test.ts` asserts the two
+ * predicates HERE, at the path the shell actually imports — which is the only
+ * place an assertion proves the shell's Esc and click-away behaviour rather
+ * than some other caller's. Moving the test's import to `ui/` would make it a
+ * test of the primitive and leave the settings modal itself unasserted.
+ *
+ * So the re-export is load-bearing, not vestigial. `Dialog` supports every
+ * mechanic this modal needs, and nothing in it was restructured.
  */
 export function SettingsModal({
   label, onClose, children,

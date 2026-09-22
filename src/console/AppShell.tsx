@@ -9,6 +9,7 @@ import { SourceSwitcher } from './shell/SourceSwitcher.tsx';
 import { FileTree } from './shell/FileTree.tsx';
 import { Editor } from './pages/Editor.tsx';
 import { DesignSystem } from './pages/DesignSystem.tsx';
+import { Empty } from './ui/index.tsx';
 
 /**
  * The console's chrome, once a session is `ready`: the sidebar (account box,
@@ -169,10 +170,12 @@ function ShellBody({
           // the real sidebar to show the primitives at their actual widths.
           <DesignSystem />
         ) : spaces.length === 0 && !loading ? (
-          <p className="text-sm text-muted">
+          // The three strings stay exactly as they are and stay exported —
+          // `Empty` restyles the sentence, it does not get to write it.
+          <Empty>
             {noSourcesMessage()}
             {isAdmin ? noSourcesAdminHint() : noSourcesMemberHint()}
-          </p>
+          </Empty>
         ) : (
           <Editor sourceId={current?.sourceId ?? null} path={selectedPath} access={current?.access ?? null} />
         )}
