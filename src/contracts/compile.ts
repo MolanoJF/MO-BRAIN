@@ -73,9 +73,11 @@ export function compileConnection(
       readSpaces.map((s) => s.sourceId).filter((id) => id !== writeSpace.sourceId),
     ),
     boundSlugPrefixes,
-    // resolveGrantProfile: memory-reader/writer/coding-agent → starter.
-    // operator/full are not reachable from a compiled Connection.
-    surface: 'starter',
+    // Member skills: `full`, not the profile's `starter` default —
+    // list_skills/get_skill are outside STARTER_OPS. Scopes still come from
+    // the profile (docs/member-skills-findings.md). Applied by
+    // auth.rescopeClient, since mcp grant takes no --surface.
+    surface: 'full',
     tokenTtl: clampTokenTtl(opts?.tokenTtl),
     budgetUsdPerDay: opts?.budgetUsdPerDay ?? null,
     boundMaxConcurrent: null,

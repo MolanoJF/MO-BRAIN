@@ -202,9 +202,12 @@ describe('compileConnection bound fields', () => {
     expect(compile().boundMaxConcurrent).toBeNull();
   });
 
-  // gbrain resolveGrantProfile: memory-reader/writer/coding-agent → starter.
-  test('surface is starter for every reachable profile', () => {
-    for (const role of ROLES) expect(compile(role).surface).toBe('starter');
+  // Member skills: list_skills/get_skill are not in gbrain's STARTER_OPS, and
+  // an operator-set surface blocks request_tools widening, so a Connection
+  // must be minted at `full`. The grant profile's scopes still bound what is
+  // callable (docs/member-skills-findings.md, fact d).
+  test('surface is full for every reachable profile', () => {
+    for (const role of ROLES) expect(compile(role).surface).toBe('full');
   });
 });
 
