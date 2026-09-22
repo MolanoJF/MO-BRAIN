@@ -286,22 +286,30 @@ export function Sources() {
                   Archive
                 </Button>
                 {/*
-                  Deliberately NOT `ui`'s `ConfirmButton`, and this is the one
-                  place in Phase 3 where the primitive is the wrong shape rather
-                  than merely unused.
+                  Archive and Remove are plain `Button`s, and Remove is
+                  deliberately NOT `ui`'s `ConfirmButton`. The restyle stops at
+                  the class names here; the flow is left exactly as it was.
 
-                  `ConfirmButton` arms itself from a local boolean: click once to
-                  arm, click again to fire. This gate is not that. The first click
-                  is a REQUEST to the server (`mode: 'remove'` with no `confirm`),
-                  which answers 409 `confirmation_required` and hands back
-                  gbrain's own `--dry-run` impact preview; only a preview that
+                  The two-step is not a UI affordance — it lives in the control
+                  plane. `requestRemove` makes a REAL call (`mode: 'remove'` with
+                  no `confirm`). A server that does not demand confirmation
+                  removes the Source on that first click and the flow ends there;
+                  `Confirm remove` and `Keep it` only ever render because the
+                  server answered 409 `confirmation_required` and handed back
+                  gbrain's own `--dry-run` impact preview, and only a preview that
                   actually arrived unlocks the destructive second call
-                  (`canConfirmRemove`). Three things would be lost by swapping it:
-                  the probe would never be sent, the second click could fire
-                  without the operator having been shown what it destroys, and
-                  `ConfirmButton`'s disarm-on-blur would silently throw away a
-                  preview the server had already produced. The two-click shape
-                  here is an API contract, not an affordance.
+                  (`canConfirmRemove`). Archive is unconditional and single-click
+                  for the same reason: nothing server-side asks it to confirm.
+
+                  `ConfirmButton` arms from a local boolean — click to arm, click
+                  to fire — so adopting it would invert all of that. It would put
+                  a confirmation click in front of every ordinary archive and
+                  remove, including the ones the server was happy to do
+                  immediately; it would let the second click fire without the
+                  operator ever having been shown what the removal destroys; and
+                  its disarm-on-blur would silently discard a preview the server
+                  had already produced. Moving a server-side contract into local
+                  state makes the page lie about who is deciding.
                 */}
                 {clicked ? (
                   <>
