@@ -71,6 +71,26 @@ DOMAIN="${DOMAIN:-}"
 if [ -z "$INSTALL_MODE" ] && [ -z "$DOMAIN" ]; then
   read -r -p "Domain for this brain (leave blank to just use this machine on your local network): " DOMAIN || true
 fi
+
+# Optional "Continue with Google" sign-in, offered alongside email/password,
+# never instead of it. Asked here, while an unset INSTALL_MODE still means
+# "interactive": a caller that pre-sets INSTALL_MODE or GOOGLE_CLIENT_ID is
+# never prompted, and a blank answer (or EOF) skips it. Empty is a valid,
+# supported configuration — the control plane only registers the Google
+# provider when both values are set.
+GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
+GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
+if [ -z "$INSTALL_MODE" ] && [ -z "$GOOGLE_CLIENT_ID" ]; then
+  echo "" >&2
+  echo "Optional: 'Continue with Google' sign-in, alongside email/password." >&2
+  echo "Leave blank to skip — email/password keeps working either way." >&2
+  read -r -p "Google OAuth Client ID (leave blank to skip): " GOOGLE_CLIENT_ID || true
+  if [ -n "$GOOGLE_CLIENT_ID" ]; then
+    read -r -p "Google OAuth Client Secret: " GOOGLE_CLIENT_SECRET || true
+  fi
+fi
+export GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET
+
 if [ -z "$INSTALL_MODE" ]; then
   if [ -n "$DOMAIN" ]; then INSTALL_MODE=domain; else INSTALL_MODE=local; fi
 fi
@@ -155,6 +175,10 @@ esac
 umask 077
 cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
+# Optional "Continue with Google" sign-in. Both empty (the default) means no
+# Google provider and no button; email/password works either way.
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
 # Pins this install to its own Compose project (see the comment above this
 # script's preflight call) — do not delete this line even if you never
 # noticed it get chosen.
