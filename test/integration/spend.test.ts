@@ -37,6 +37,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
+  gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},

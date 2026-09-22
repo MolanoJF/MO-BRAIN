@@ -24,6 +24,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
+  gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedCalls.push(sourceId); },
   // --- the rest of the module's real exports, required for the app graph to

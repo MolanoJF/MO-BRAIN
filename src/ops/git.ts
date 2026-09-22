@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
@@ -501,6 +501,54 @@ export async function gitWriteFile(
       throw new Error(`git commit failed for ${req.sourceId}: ${gitFailure(commit)}`);
     }
     return { committed: true, sha: await resolveCommit(cwd, 'HEAD') };
+  });
+}
+
+export type ScaffoldRequest = {
+  sourceId: string;
+  entries: { dir: string; readme: string }[];
+  actor: { name: string; email: string };
+  message: string;
+};
+
+const SCAFFOLD_DIR = /^([a-z0-9][a-z0-9_-]*\/)+$/;
+
+/**
+ * Create-only folder scaffolding: for each entry, write `<dir>README.md` IF
+ * AND ONLY IF git does not already know that path and it is not on disk. One
+ * commit for everything created, as the actor. Never overwrites, never deletes,
+ * idempotent on re-run. Validates every dir before the lock, and the commit
+ * logic is inlined over `git()` (nesting commitAs would deadlock the pool, see
+ * revertRange).
+ */
+export async function scaffoldFolders(
+  req: ScaffoldRequest,
+  opts: { sql: SQL; root?: string },
+): Promise<{ created: string[]; skipped: string[]; sha: string | null }> {
+  if (!SOURCE_ID_RE.test(req.sourceId)) throw new Error(`invalid sourceId: ${req.sourceId}`);
+  if (req.entries.length > 500) throw new Error('too many folders');
+  for (const e of req.entries) {
+    if (!SCAFFOLD_DIR.test(e.dir)) throw new Error(`invalid scaffold dir: ${e.dir}`);
+    assertRepoRelative(`${e.dir}README.md`);
+  }
+  const cwd = join(opts.root ?? REPOS_ROOT, req.sourceId);
+
+  return withRepoLock(opts.sql, req.sourceId, async () => {
+    const created: string[] = [];
+    const skipped: string[] = [];
+    for (const e of req.entries) {
+      const rel = `${e.dir}README.md`;
+      const exists = await access(join(cwd, rel)).then(() => true, () => false);
+      if (exists) { skipped.push(rel); continue; }
+      await mkdir(join(cwd, e.dir), { recursive: true });
+      await writeFile(join(cwd, rel), e.readme, { encoding: 'utf8', flag: 'wx' });
+      created.push(rel);
+    }
+    if (created.length === 0) return { created, skipped, sha: null };
+    await git(cwd, ['add', '--', ...created]);
+    const commit = await git(cwd, commitArgs(req.actor, req.message));
+    if (commit.exitCode !== 0) throw new Error(`git commit failed for ${req.sourceId}: ${gitFailure(commit)}`);
+    return { created, skipped, sha: await resolveCommit(cwd, 'HEAD') };
   });
 }
 

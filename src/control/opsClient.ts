@@ -127,6 +127,18 @@ export async function gitWriteFile(req: WriteFileRequest): Promise<WriteFileOutc
 }
 
 /**
+ * Create-only folder scaffolding: one `<dir>README.md` per page type, one
+ * commit per Space, under the repo lock. Never overwrites or deletes, and an
+ * already-scaffolded Space answers `created: [], skipped: [...], sha: null`.
+ */
+export async function gitScaffold(req: {
+  sourceId: string; entries: { dir: string; readme: string }[];
+  actor: { name: string; email: string }; message: string;
+}): Promise<{ created: string[]; skipped: string[]; sha: string | null }> {
+  return post('/git/scaffold', req, 120_000);
+}
+
+/**
  * D10 steps 1+2 — the range comes back as ONE new commit signed by `actor`.
  * `nothing_to_revert` and `conflict` are RESULTS, not thrown errors: they are
  * refusals the console renders as choices, and only the latter's `detail` is

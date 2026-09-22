@@ -18,7 +18,9 @@ import { resetBrainSchema } from './brainSchema.ts';
 import { readBrainUsage } from './usage.ts';
 import {
   commitAs, diffRange, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths, revertRange,
+  scaffoldFolders,
 } from './git.ts';
+import type { ScaffoldRequest } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -292,6 +294,13 @@ Bun.serve({
           { sourceId, path, content, expectedSha, message, actor: { name: actor.name, email: actor.email } },
           { sql },
         ));
+      }
+
+      // Create-only folder scaffolding: one README.md per page type, one commit
+      // per Space, under the repo lock. Every dir is validated inside git.ts
+      // before the lock, so a traversing path never reaches a repo.
+      if (url.pathname === '/git/scaffold') {
+        return json(await scaffoldFolders(body as ScaffoldRequest, { sql }));
       }
 
       // D10 steps 1+2: the revert and the commit that signs it are ONE locked
