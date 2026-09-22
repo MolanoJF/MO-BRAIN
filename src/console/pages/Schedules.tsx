@@ -36,7 +36,7 @@ export type CommandScope = 'source' | 'brain-wide' | 'agent';
  */
 export const CONTROL_LANE_DISCLOSURE =
   "Scheduled commands run on gbrain's control lane as the ops service account. "
-  + 'The Connection you pick decides which Space is synced, where the report is written, '
+  + 'The Connection you pick decides which Source is synced, where the report is written, '
   + "and whose name is on the commit — it is not a permission gbrain enforces for these commands.";
 
 /**
@@ -260,23 +260,23 @@ export function slotClocks(
 }
 
 /**
- * Honesty rule 2: a brain-wide command cannot be fenced to a Space. Picking one
+ * Honesty rule 2: a brain-wide command cannot be fenced to a Source. Picking one
  * swaps the disclosure for the whole-brain warning rather than adding to it. An
  * agent run is fenceable (its tools come from the Connection), so it keeps its
- * own disclosure and names the Space it can reach.
+ * own disclosure and names the Source it can reach.
  */
 export function bannerFor(input: { scope?: string | null; writeSpace?: string | null }): string {
   if (input.scope === 'agent') {
-    return `${AGENT_LANE_DISCLOSURE} The Connection you pick decides which Space it can `
-      + `reach — ${input.writeSpace || 'no Space'} — and whose name is on the commit.`;
+    return `${AGENT_LANE_DISCLOSURE} The Connection you pick decides which Source it can `
+      + `reach — ${input.writeSpace || 'no Source'} — and whose name is on the commit.`;
   }
   if (input.scope === 'source') return CONTROL_LANE_DISCLOSURE;
   const space = input.writeSpace;
-  const tail = "gbrain's control lane cannot fence a brain-wide command to a Space, so it needs "
+  const tail = "gbrain's control lane cannot fence a brain-wide command to a Source, so it needs "
     + 'a Connection whose member is admin-or-better.';
   return space
     ? `This job reads the whole brain, not just ${space}. ${tail}`
-    : `This job reads the whole brain — there is no Space it can be fenced to. ${tail}`;
+    : `This job reads the whole brain — there is no Source it can be fenced to. ${tail}`;
 }
 
 /** Requirement 3: confirm is disabled unless the Connection's member is admin+. */
@@ -299,7 +299,7 @@ export function connectionLine(
 ): string {
   if (!connection) return 'no Connection — this schedule cannot run';
   return `runs as ${connection.clientName || 'an unnamed client'} · `
-    + `writes to ${connection.writeSpace || 'no Space'}`;
+    + `writes to ${connection.writeSpace || 'no Source'}`;
 }
 
 export function hhmm(hour: number, minute: number): string {
@@ -527,7 +527,7 @@ export function isPinnedAlert(kind: string): boolean {
 }
 
 const ALERT_LABEL: Record<string, string> = {
-  push_rejected: "Push rejected — the remote refused this Space's update",
+  push_rejected: "Push rejected — the remote refused this Source's update",
   push_blocked: 'Push blocked — a scan or a conflict stopped the push',
   lease_expired: 'Lease expired — the run was abandoned and is not retried',
   connection_revoked: 'Connection revoked — its schedules were disabled',
@@ -543,7 +543,7 @@ const ALERT_LABEL: Record<string, string> = {
   agent_run_failed:
     'Agent run failed — the harness exited non-zero or its stream carried error frames',
   agent_read_space_moved:
-    'A read Space moved under an agent run — read isolation is broken, so the run is a finding',
+    'A read Source moved under an agent run — read isolation is broken, so the run is a finding',
   runner_never_seen:
     'Agent runner never claimed — agent schedules cannot run until one connects',
   harness_pin_mismatch:
@@ -610,7 +610,7 @@ export function refusalMessage(body: Record<string, unknown>): string {
 }
 
 const FENCED_COPY =
-  "That parameter is computed from the Connection's write Space and cannot be set here.";
+  "That parameter is computed from the Connection's write Source and cannot be set here.";
 
 const REFUSAL_COPY: Record<string, string> = {
   invalid_name:
@@ -992,7 +992,7 @@ export function Schedules() {
         <h1 className="text-xl font-semibold">Schedules</h1>
         <p className="text-sm text-muted">
           Every schedule runs as a Connection, never as a Member. The Connection decides the
-          Space that is synced, where the report lands, and whose name is on the commit.
+          Source that is synced, where the report lands, and whose name is on the commit.
         </p>
       </header>
 
@@ -1188,7 +1188,7 @@ export function Schedules() {
             <option value="">Select a Connection…</option>
             {connections.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.clientName} · {c.writeSpace ?? 'no Space'} · {c.memberRole ?? 'unknown role'} ({c.state})
+                {c.clientName} · {c.writeSpace ?? 'no Source'} · {c.memberRole ?? 'unknown role'} ({c.state})
               </option>
             ))}
           </select>

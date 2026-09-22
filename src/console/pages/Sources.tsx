@@ -22,26 +22,26 @@ export const SOURCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /**
  * The server's `ISOLATION_NOTICE` (`src/control/routes/wizard.ts:32`), the same
- * words the wizard shows. Folders inside a Space are not access boundaries.
+ * words the wizard shows. Folders inside a Source are not access boundaries.
  */
 export const ISOLATION_NOTICE =
-  'A Space is a whole gbrain source. Folders inside it are NOT access boundaries — ' +
-  'every member with read on that Space can retrieve everything in it via semantic search. ' +
-  'If something needs isolation, it needs its own Space.';
+  'A Source is a whole gbrain source. Folders inside it are NOT access boundaries — ' +
+  'every member with read on that Source can retrieve everything in it via semantic search. ' +
+  'If something needs isolation, it needs its own Source.';
 
 /**
  * S6 Gate 2: `gbrain schema active --source <id>` ignores its argument at
- * 0.50.5.0, so there is NO honest per-Space pack readback. An override is the
+ * 0.50.5.0, so there is NO honest per-Source pack readback. An override is the
  * STORED intent (`config get schema_pack.source.<id>`), and the page says so
  * rather than painting a resolved-looking green state.
  */
 export const NO_SOURCE_READBACK_NOTICE =
-  'gbrain at this version offers no per-Space pack readback, so this override is shown as the ' +
+  'gbrain at this version offers no per-Source pack readback, so this override is shown as the ' +
   'stored setting, not a resolved state.';
 
 /** Additive-only, per S3: sync fills blanks and can never reclassify. */
 export const BACKFILL_NOTICE =
-  'Fills in pages in this Space that have no type yet. Already-typed pages keep their type — ' +
+  'Fills in pages in this Source that have no type yet. Already-typed pages keep their type — ' +
   'this never reclassifies.';
 
 export function validSourceId(id: string): boolean {
@@ -72,7 +72,7 @@ export function sourcePackLabel(src: {
 }): string {
   const note = inheritanceNote(src.inherited, src.pack);
   if (note !== null) return note;
-  return `Stored per-Space override: ${src.pack ?? 'unknown pack'} (tier ${src.tier ?? 'unknown'})`;
+  return `Stored per-Source override: ${src.pack ?? 'unknown pack'} (tier ${src.tier ?? 'unknown'})`;
 }
 
 /**
@@ -211,7 +211,7 @@ export function Sources() {
       <header>
         <h1 className="text-xl font-semibold">Sources</h1>
         <p className="text-sm text-muted">
-          Every Space is a gbrain source. Set each one's schema pack, backfill its blank page types,
+          Every Source is a gbrain source. Set each one's schema pack, backfill its blank page types,
           and add or retire sources.
         </p>
       </header>
@@ -224,8 +224,8 @@ export function Sources() {
       )}
 
       <section className="space-y-3">
-        <h2 className="font-medium">Spaces</h2>
-        {rows.length === 0 && <p className="text-sm text-muted">No Spaces yet.</p>}
+        <h2 className="font-medium">Sources</h2>
+        {rows.length === 0 && <p className="text-sm text-muted">No Sources yet.</p>}
         {rows.map((src) => {
           const detail = detailFor(src.pack);
           const isOpen = expanded === src.sourceId;
@@ -343,7 +343,7 @@ export function Sources() {
         <section className="space-y-1">
           <h2 className="font-medium">Unregistered sources</h2>
           <p className="text-sm text-muted">
-            These gbrain sources have no Space in this organization, so the console cannot manage them:
+            These gbrain sources have no Source in this organization, so the console cannot manage them:
           </p>
           <div className="text-sm font-mono">{unregistered.join(', ')}</div>
         </section>

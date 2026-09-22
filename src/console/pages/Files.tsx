@@ -65,32 +65,32 @@ export function treeToNodes(entries: FileEntry[]): TreeNode[] {
     }));
 }
 
-/** The picker label: the Space's name, with its source id as the disambiguator. */
+/** The picker label: the Source's name, with its source id as the disambiguator. */
 export function spacePickerLabel(space: SpaceSummary): string {
   return `${space.name} (${space.sourceId})`;
 }
 
 /**
- * What this operator may do in the selected Space, in plain words. `null` is
+ * What this operator may do in the selected Source, in plain words. `null` is
  * "nothing is selected yet", which is not the same as "no access".
  */
 export function accessNotice(access: 'read' | 'write' | null): string {
-  if (access === 'write') return 'You can edit this Space.';
-  if (access === 'read') return 'Read-only: you can browse this Space but not change it.';
-  return 'No access to this Space.';
+  if (access === 'write') return 'You can edit this Source.';
+  if (access === 'read') return 'Read-only: you can browse this Source but not change it.';
+  return 'No access to this Source.';
 }
 
 /**
- * Stage 2 copy: the inline notice shown when an org admin opens a Space they
+ * Stage 2 copy: the inline notice shown when an org admin opens a Source they
  * have no write Connection to. Defined now so the unit test locks the wording;
  * the Edit toggle that renders it lands with the PUT route.
  */
 export const BYPASS_NOTICE =
-  'You are editing this Space as an org admin outside your Connections.';
+  'You are editing this Source as an org admin outside your Connections.';
 
-export const emptyStateText = 'No Spaces are visible to your account.';
+export const emptyStateText = 'No Sources are visible to your account.';
 
-export const treeErrorMessage = 'This Space could not be listed.';
+export const treeErrorMessage = 'This Source could not be listed.';
 
 export const fileErrorMessage = 'This file could not be read.';
 
@@ -204,7 +204,7 @@ export function Files() {
         setSourceId((current) => current || (body.spaces[0]?.sourceId ?? ''));
         setError(null);
       })
-      .catch((e) => setError(errorText(e, 'The Space list could not be loaded.')));
+      .catch((e) => setError(errorText(e, 'The Source list could not be loaded.')));
   }, []);
 
   useEffect(() => {
@@ -344,14 +344,14 @@ export function Files() {
       <header>
         <h1 className="text-xl font-semibold">Files</h1>
         <p className="text-sm text-muted">
-          Browse the markdown in every Space you can reach, and edit the ones you can write to.
+          Browse the markdown in every Source you can reach, and edit the ones you can write to.
         </p>
       </header>
 
       {error && <div className="text-danger text-sm">{error}</div>}
 
       <section className="space-y-2">
-        <label className="text-sm block">Space
+        <label className="text-sm block">Source
           <select
             className="field mt-1"
             value={sourceId}
@@ -375,7 +375,7 @@ export function Files() {
           {treeError && <div className="text-danger text-sm">{treeError}</div>}
           {loading && <p className="text-sm text-muted">Loading…</p>}
           {!loading && !treeError && nodes.length === 0 && (
-            <p className="text-sm text-muted">No files in this Space.</p>
+            <p className="text-sm text-muted">No files in this Source.</p>
           )}
           {nodes.map((node) => (
             <button

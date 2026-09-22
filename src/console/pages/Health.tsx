@@ -89,9 +89,9 @@ export function Health() {
               <td className="font-mono">{health.gbrainVersion ?? 'unknown'}</td></tr>
         </tbody>
       </table>
-      <h2 className="text-lg font-semibold">Space repos</h2>
+      <h2 className="text-lg font-semibold">Source repos</h2>
       {repos.length === 0 ? (
-        <p className="text-sm text-muted">No Space repos reported.</p>
+        <p className="text-sm text-muted">No Source repos reported.</p>
       ) : (
         <table className="w-full text-sm">
           <thead>

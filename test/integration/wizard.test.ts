@@ -155,7 +155,7 @@ describe('wizard', () => {
     expect((await call('/api/wizard/space', { sourceId: 'shared', name: 'Shared' })).status).toBe(200);
     const dup = await call('/api/wizard/space', { sourceId: 'shared', name: 'Shared again' });
     expect(dup.status).toBe(409);
-    expect((await dup.json() as { error: string }).error).toMatch(/already a Space/i);
+    expect((await dup.json() as { error: string }).error).toMatch(/already a Source/i);
   });
 
   test('the space step rejects an invalid source id', async () => {
@@ -165,7 +165,7 @@ describe('wizard', () => {
 
   test('state carries the isolation warning for the space step', async () => {
     const body = await (await call('/api/wizard/state')).json() as WizardState;
-    expect(body.isolationNotice).toMatch(/every member with read on that Space/i);
+    expect(body.isolationNotice).toMatch(/every member with read on that Source/i);
   });
 
   // Critical fix: old shared run() always passed json:true, which hard-fails

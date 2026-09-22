@@ -49,8 +49,8 @@ describe('sourcePackLabel — inherited vs override copy', () => {
     expect(label).not.toMatch(/inherits the brain default/i);
   });
 
-  test('the no-readback notice states plainly that there is no per-Space readback', () => {
-    expect(NO_SOURCE_READBACK_NOTICE).toMatch(/no per-Space pack readback/i);
+  test('the no-readback notice states plainly that there is no per-Source readback', () => {
+    expect(NO_SOURCE_READBACK_NOTICE).toMatch(/no per-Source pack readback/i);
     expect(NO_SOURCE_READBACK_NOTICE).toMatch(/stored setting/i);
   });
 });
@@ -137,6 +137,6 @@ describe('the backfill copy is additive-only', () => {
 
   test('the isolation notice is the server wording', () => {
     expect(ISOLATION_NOTICE).toMatch(/NOT access boundaries/);
-    expect(ISOLATION_NOTICE).toMatch(/its own Space/i);
+    expect(ISOLATION_NOTICE).toMatch(/its own Source/i);
   });
 });

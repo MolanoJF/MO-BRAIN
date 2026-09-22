@@ -30,9 +30,9 @@ export const wizard = new Hono();
  * member with read on that Space retrieves them via semantic search.
  */
 export const ISOLATION_NOTICE =
-  'A Space is a whole gbrain source. Folders inside it are NOT access boundaries — ' +
-  'every member with read on that Space can retrieve everything in it via semantic search. ' +
-  'If something needs isolation, it needs its own Space.';
+  'A Source is a whole gbrain source. Folders inside it are NOT access boundaries — ' +
+  'every member with read on that Source can retrieve everything in it via semantic search. ' +
+  'If something needs isolation, it needs its own Source.';
 
 export const SOURCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -238,7 +238,7 @@ export async function addSpaceSource(
   const [dup] = await getDb().select().from(schema.spaces)
     .where(and(eq(schema.spaces.organizationId, orgId), eq(schema.spaces.sourceId, sourceId)));
   if (dup) {
-    return { ok: false, status: 409, body: { error: `${sourceId} is already a Space`, isolationNotice: ISOLATION_NOTICE } };
+    return { ok: false, status: 409, body: { error: `${sourceId} is already a Source`, isolationNotice: ISOLATION_NOTICE } };
   }
 
   const brain = await loadBrain(orgId);

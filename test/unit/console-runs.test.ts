@@ -510,7 +510,7 @@ describe('revert refusals are choices — D10', () => {
     expect(choice.confirmConcurrent).toBe(true);
     expect(choice.headline).toContain('2 of 5 commits in this range were not written by this run');
     expect(choice.headline).toContain('Grace Writer <grace@example.test>');
-    expect(choice.context).toContain('Write Space: shared');
+    expect(choice.context).toContain('Write Source: shared');
   });
 
   test('a conflict is surfaced and never forced', () => {

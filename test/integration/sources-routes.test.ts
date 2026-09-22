@@ -226,7 +226,7 @@ test('POST /sources rejects an invalid source id and a duplicate Space', async (
   await insertSpace('shared', 'Shared');
   const dup = await hit('POST', '/api/sources', ownerCookie, { sourceId: 'shared', name: 'Again' });
   expect(dup.status).toBe(409);
-  expect((await dup.json()).error).toMatch(/already a Space/);
+  expect((await dup.json()).error).toMatch(/already a Source/);
 });
 
 test('PATCH /sources/:sourceId renames and updates the spaces row', async () => {

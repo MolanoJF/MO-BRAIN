@@ -141,7 +141,7 @@ export function revertedLine(run: AgentRunRow, actor: SessionUser | null = null)
   const who = actor === null
     ? 'That commit is authored by the acting admin — the human who clicked it, signed with their own '
       + 'identity and never "the system" (D10) — so '
-      + `\`git log -1 --format='%an <%ae>' ${short(commit)}\` in the write Space prints their name.`
+      + `\`git log -1 --format='%an <%ae>' ${short(commit)}\` in the write Source prints their name.`
     : `That commit is authored by ${actor.email}, the acting admin who clicked it — signed with that human's `
       + 'own identity, never "the system" (D10).';
   return `Reverted ${new Date(run.revertedAt).toLocaleString()} by commit ${commit} — a new commit plus a `
@@ -452,7 +452,7 @@ export function diffText(diff: DiffSummary | null): string {
   }
   if (write.foreignCommitCount === 0) {
     return `${num(total)} commit(s) in ${write.sourceId}, ${num(write.files.length)} file(s) changed. Every commit `
-      + 'in this range was written by this run\'s own writer, and this run held the write Space alone, so no other '
+      + 'in this range was written by this run\'s own writer, and this run held the write Source alone, so no other '
       + 'agent run contributes to it.';
   }
   return `${num(write.foreignCommitCount)} of ${num(total)} commits in this range were not written by this run — `
@@ -508,7 +508,7 @@ export function readSpaceMoveAlert(diff: DiffSummary | null): string | null {
   const names = diff.readSpaceMoves
     .map((m) => `${m.sourceId} (${short(m.before)} → ${short(m.after)})`)
     .join(', ');
-  return `Read isolation broke: ${names} moved during this run. A read Space is handed to the agent as read-only and `
+  return `Read isolation broke: ${names} moved during this run. A read Source is handed to the agent as read-only and `
     + 'must not change while it runs — this run has no write authority there, so another writer or a sync moved it. '
     + 'The movement is the finding, and it is alerted rather than shown as a diff row.';
 }
@@ -552,7 +552,7 @@ export function revertChoice(body: Record<string, unknown>): RevertChoice {
       ? `This run is already recorded as reverted by commit ${commit ?? 'an unrecorded commit'}`
         + `${at === null ? '' : ` at ${new Date(at).toLocaleString()}`}. Reverting again would revert the revert.`
       : reason === 'empty_range'
-        ? 'The range recorded for this run is empty: it never committed anything in its write Space, so there is '
+        ? 'The range recorded for this run is empty: it never committed anything in its write Source, so there is '
           + 'nothing in git to undo. An MCP write lands as an untracked file in this stack, which is the normal case '
           + 'rather than a failure.'
         : reason === 'nothing_to_revert'
@@ -568,7 +568,7 @@ export function revertChoice(body: Record<string, unknown>): RevertChoice {
     const authors = Array.isArray(body.foreignAuthors)
       ? body.foreignAuthors.filter((a): a is string => typeof a === 'string')
       : [];
-    if (typeof body.sourceId === 'string') context.push(`Write Space: ${body.sourceId}`);
+    if (typeof body.sourceId === 'string') context.push(`Write Source: ${body.sourceId}`);
     if (detail !== null) context.push(detail);
     return {
       code,
@@ -581,7 +581,7 @@ export function revertChoice(body: Record<string, unknown>): RevertChoice {
   }
 
   if (code === 'revert_conflict') {
-    if (typeof body.sourceId === 'string') context.push(`Write Space: ${body.sourceId}`);
+    if (typeof body.sourceId === 'string') context.push(`Write Source: ${body.sourceId}`);
     if (detail !== null) context.push(detail);
     return {
       code,

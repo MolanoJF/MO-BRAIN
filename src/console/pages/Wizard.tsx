@@ -88,7 +88,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
         <section className="space-y-3">
           <h2 className="font-medium">Finish setup</h2>
           <p className="text-sm text-muted">
-            Initializes the brain, applies your search mode, imports and embeds your Space,
+            Initializes the brain, applies your search mode, imports and embeds your Source,
             then runs a health check. This takes several minutes.
           </p>
           <button className="btn-primary" disabled={busy}
@@ -162,9 +162,9 @@ function SpaceStep(
   const [acknowledged, setAcknowledged] = useState(false);
   return (
     <section className="space-y-3">
-      <h2 className="font-medium">Create your first Space</h2>
+      <h2 className="font-medium">Create your first Source</h2>
       <p className="text-sm text-muted">
-        Your brain starts with one Space, <span className="font-mono">{FIRST_SPACE.sourceId}</span>.
+        Your brain starts with one Source, <span className="font-mono">{FIRST_SPACE.sourceId}</span>.
         You can add more later.
       </p>
       {/* S4b: a blocking choice, not a tooltip. Naming went away; consent did not. */}
@@ -173,7 +173,7 @@ function SpaceStep(
         <label className="mt-2 flex items-center gap-2 text-sm">
           <input type="checkbox" checked={acknowledged}
                  onChange={(e) => setAcknowledged(e.target.checked)} />
-          I understand folders inside a Space are not access boundaries.
+          I understand folders inside a Source are not access boundaries.
         </label>
       </div>
       <button className="btn-primary" disabled={busy || !acknowledged}
