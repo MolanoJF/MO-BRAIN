@@ -1,12 +1,16 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { auth } from '../auth.ts';
-import { isBootstrapped, bootstrapFirstAdmin } from '../bootstrap.ts';
+import { auth, googleConfigured } from '../auth.ts';
+import { isBootstrapped, bootstrapFirstAdmin, bootstrapFirstAdminForSession } from '../bootstrap.ts';
 import { requireRole } from '../rbac.ts';
 
 export const authRoutes = new Hono();
 
 authRoutes.on(['GET', 'POST'], '/auth/*', (c) => auth.handler(c.req.raw));
+
+// D4: registered OUTSIDE the /auth/* wildcard on purpose — Better Auth owns
+// everything under /auth, and this is ours, not a route it should ever see.
+authRoutes.get('/auth-config', (c) => c.json({ google: googleConfigured }));
 
 authRoutes.get('/bootstrap', async (c) => c.json({ bootstrapped: await isBootstrapped() }));
 
