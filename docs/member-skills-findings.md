@@ -1,23 +1,45 @@
 # Member skills — measured at gbrain 0.50.5.0
 
-Source: `test/contract/member-skills.contract.test.ts`, run 2026-09-22.
+Source: `test/contract/member-skills.contract.test.ts`, run 2026-09-22, then
+re-run 2026-09-22 after Task 0 provisioned the host skills catalog.
 
 | Fact | Result |
 |---|---|
 | (a) `init` leaves `mcp.publish_skills` = `true` | pass |
 | (b) starter `tools/list` count; skills hidden | 23; pass |
-| (c) full `tools/list` count; `list_skills` bytes; `get_skill query` ok | 93; 675; **fail** (no host skills catalog) |
+| (c) full `tools/list` count; `list_skills` bytes; `get_skill query` ok | 93; 4235; pass |
 | (d) `sources_add` as memory-writer on full is denied | pass; shape: `{"error":"unknown_operation","message":"Unknown: sources_add","isError":true}` (outer `result.isError: true`) |
 | Rescope params that worked | `{ id, surface }` only |
 
 Consequence: member Connections compile to `full`. Callable scope is still
 bounded by the grant profile (d). The cost is tool-list size (b → c).
 
-## Gate verdict: FAIL (assertion c)
+## Gate verdict: PASS (assertion c)
 
-`full` exposes the tools, but serving a catalog needs an operator-provisioned
-skills directory that neither the contract test nor the repo's compose stacks
-provide. This is a stop condition for Tasks 2–6.
+All four assertions pass at the pin. `full` exposes `list_skills`/`get_skill`,
+the member can list the Mobrain catalog (`query`) and fetch its body, and the
+`memory-writer` profile is still denied an admin op. The earlier `storage_error`
+was cured by provisioning a host skills catalog (Task 0), not by any change to
+the test.
+
+### Catalog provisioning (Task 0)
+
+The catalog is **Mobrain-owned**, not gbrain's bundled dev catalog:
+
+- Mount: `../skills:/opt/mobrain-skills:ro` (compose resolves `../skills`
+  against `compose/`, i.e. repo-root `skills/`), on `gbrain-serve`
+  (`compose/docker-compose.yml`) and `gbrain-ops`
+  (`compose/docker-compose.slice0.yml`).
+- Env: `GBRAIN_SKILLS_DIR=/opt/mobrain-skills` on the same two services.
+- Contents: repo `skills/RESOLVER.md` + `skills/query/SKILL.md`, authored by
+  Mobrain. gbrain deliberately never serves its own bundled catalog to remote
+  MCP callers, so pointing `$GBRAIN_SKILLS_DIR` at it would be wrong.
+
+`compose/docker-compose.dev.yml` only adds `ports:` to `gbrain-ops`; it does
+not redefine either service's `volumes`/`environment`, so it needs no change.
+
+The measured-cause analysis below is retained as history; it is now **resolved**
+by the provisioning above.
 
 ### What passed
 
@@ -29,7 +51,11 @@ provide. This is a stop condition for Tasks 2–6.
   band: `unknown_operation` (`result.isError: true`). The grant profile still
   bounds callable scope.
 
-### What failed (c)
+### What failed (c) — history, now resolved by Task 0
+
+> Re-run after Task 0: `list_skills bytes=4235` and `get_skill query` succeeds;
+> the `storage_error` below no longer reproduces. Retained as the measured
+> record of why the catalog was needed.
 
 The surface mechanism itself works: on `full`, `tools/list` returns **93**
 tools including `list_skills` and `get_skill`. But the first catalog call
@@ -90,6 +116,8 @@ Only `{ id, surface: 'full' }` succeeded. Task 3's `applySurface` must send
 Compiling to `full` is necessary but **not sufficient**: Mobrain must also
 provision a host skills directory (`mcp.skills_dir` or `GBRAIN_SKILLS_DIR`, or
 a repo `skills/RESOLVER.md`) on the gbrain that serves members, otherwise
-`list_skills` returns `storage_error` for every member. That prerequisite is
+`list_skills` returns `storage_error` for every member. ~~That prerequisite is
 absent from the plan and must be designed before member skill delivery can
-work.
+work.~~ **Resolved:** Task 0 ships repo `skills/` mounted read-only at
+`/opt/mobrain-skills` and exports `GBRAIN_SKILLS_DIR=/opt/mobrain-skills` in the
+services that resolve skills. Tasks 2–6 may proceed.
