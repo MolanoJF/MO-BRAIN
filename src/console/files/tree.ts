@@ -2,7 +2,8 @@ import { ApiError, type FileEntry, type SpaceSummary, type FileSaveResult } from
 import type { EditorMode } from '../editor/index.ts';
 
 /* -------------------------------------------------------------------------
- * Pure helpers, moved verbatim from pages/Files.tsx (Task 3). Exported so
+ * Pure helpers, moved verbatim from the console's old Files page component
+ * (Task 3; that component was itself deleted at Task 10). Exported so
  * test/unit/console-files.test.ts and test/unit/console-tree.test.ts can
  * assert the decisions and the copy without a DOM server — the access notice
  * and the admin-bypass disclosure are strings the operator reads, so they are

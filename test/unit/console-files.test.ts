@@ -1,30 +1,24 @@
 import { test, expect, describe } from 'bun:test';
 import {
-  fileKind, treeToNodes, accessNotice, spacePickerLabel, errorText,
+  fileKind, accessNotice, spacePickerLabel, errorText,
   baseName, pathDepth, indentFor,
   canEdit, editToggleLabel, saveButtonLabel, saveSuccessText, saveFailureText,
   staleNotice, bypassVisible, isDirty, modeAfterSave, BYPASS_NOTICE,
   emptyStateText, treeErrorMessage, fileErrorMessage,
-} from '../../src/console/pages/Files.tsx';
+} from '../../src/console/files/tree.ts';
 import {
-  ApiError, encodePath, filesApi, type FileEntry, type FileSaveResult,
+  ApiError, encodePath, filesApi, type FileSaveResult,
 } from '../../src/console/api.ts';
 
 /**
  * The console's Files lane. Every assertion here is a trust property rather
- * than a rendering detail: the tree an operator reads must be deterministic and
- * must not mutate the server's rows, the access notice must say plainly what
- * the operator may do, and a path must survive the URL round-trip without
- * losing its `/` separators. There is no DOM harness in this repo, so every
- * decision below is a pure function.
+ * than a rendering detail: the access notice must say plainly what the
+ * operator may do, and a path must survive the URL round-trip without
+ * losing its `/` separators. The tree itself (its shape, sort and
+ * determinism) is asserted in console-tree.test.ts, against files/tree.ts.
+ * There is no DOM harness in this repo, so every decision below is a pure
+ * function.
  */
-
-const entry = (path: string, over: Partial<FileEntry> = {}): FileEntry => ({
-  path,
-  size: 0,
-  isMarkdown: fileKind(path) === 'markdown',
-  ...over,
-});
 
 describe('the file kind — markdown vs everything else', () => {
   // The tree's markdown marker must not depend on casing, and a near-miss
@@ -42,58 +36,24 @@ describe('the file kind — markdown vs everything else', () => {
   });
 });
 
-describe('the file tree — deterministic and non-mutating', () => {
-  // The server may hand the entries back in any order; the page sorts them so a
-  // refresh cannot reshuffle the list under the operator.
-  test('rows are sorted by path', () => {
-    const nodes = treeToNodes([
-      entry('z.md'),
-      entry('a/b.md'),
-      entry('a.md'),
-      entry('a/a.md'),
-    ]);
-    expect(nodes.map((n) => n.path)).toEqual(['a.md', 'a/a.md', 'a/b.md', 'z.md']);
-  });
-
-  // Depth is the directory level the row indents to; name is the basename, so
-  // the JSX never has to split a path to render a label.
-  test('depth comes from the separators and name from the basename', () => {
-    const [deep] = treeToNodes([entry('reports/2026/briefing.md')]);
-    expect(deep!.depth).toBe(2);
-    expect(deep!.name).toBe('briefing.md');
-
-    const [top] = treeToNodes([entry('top.md')]);
-    expect(top!.depth).toBe(0);
-    expect(top!.name).toBe('top.md');
-  });
-
+// `treeToNodes` — the flat-list renderer that lived in the console's old
+// Files page component — died with that file at Task 10: `buildTree`/
+// `flattenTree` in files/tree.ts
+// replaced it (the tree is now a real nested structure a folder can
+// collapse, not a flat sorted list). Its properties are not lost, just
+// re-homed: sorted-by-path -> 'folders sort before files ... code-unit
+// order', depth-from-separators/name-from-basename -> 'nested depth is
+// preserved' and 'baseName, pathDepth, indentFor', non-mutation of the input
+// array -> 'never mutates the input set' (toggleExpanded) plus buildTree's
+// own array copy, kind-rides-along -> 'a non-markdown file keeps its
+// fileKind through the tree', and empty-tree -> 'an empty tree flattens to
+// no rows' — all in test/unit/console-tree.test.ts. baseName/pathDepth
+// themselves are asserted directly below, unchanged.
+describe('baseName and pathDepth — reused by the tree', () => {
   test('baseName and pathDepth agree with the row they build', () => {
     expect(baseName('a/b/c.md')).toBe('c.md');
     expect(pathDepth('a/b/c.md')).toBe(2);
     expect(pathDepth('c.md')).toBe(0);
-  });
-
-  // The caller's array is data the page does not own: sorting it in place would
-  // silently reorder a state array or a server payload held elsewhere.
-  test('the input array is not mutated', () => {
-    const input = [entry('z.md'), entry('a.md')];
-    const snapshot = input.map((e) => e.path);
-    const nodes = treeToNodes(input);
-    expect(input.map((e) => e.path)).toEqual(snapshot);
-    expect(nodes.map((n) => n.path)).toEqual(['a.md', 'z.md']);
-    expect(input[0]!.path).toBe('z.md');
-  });
-
-  // The kind rides along from `fileKind`, so the tree and the badge cannot
-  // disagree about what a file is.
-  test('kind rides along from fileKind', () => {
-    const nodes = treeToNodes([entry('a.md'), entry('b.txt')]);
-    expect(nodes.find((n) => n.path === 'a.md')!.kind).toBe('markdown');
-    expect(nodes.find((n) => n.path === 'b.txt')!.kind).toBe('other');
-  });
-
-  test('an empty tree is an empty list, not a placeholder row', () => {
-    expect(treeToNodes([])).toEqual([]);
   });
 });
 

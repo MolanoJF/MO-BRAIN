@@ -2,6 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Post-implementation note — where this plan and the shipped code differ
+
+This plan was written before any of the modules below existed, and its embedded code samples
+are illustrative sketches, not the final interfaces. Every implementing agent reported following
+its task brief and the running test suite over this doc when the two disagreed, which is the
+right call — a plan is a starting hypothesis, the code and its tests are the record of what was
+actually learned along the way. This section is that record. It is added once, at Task 10, and
+is not retroactively kept in sync with the samples below it: read the "as shipped" column and
+its module, not the task bodies' `ts`/`tsx` fences, for the true interface.
+
+| Doc sample | As shipped | Authoritative module |
+|---|---|---|
+| `SETTINGS_TABS: readonly SettingsTab[]` (flat array of ids), `new Set<string>(SETTINGS_TABS)` in `router.ts` | `SETTINGS_TABS: readonly SettingsTabEntry[]`, each entry `{ id, label, minRole }`; `visibleTabs`/`resolveTab` filter on `minRole`, not a hand-kept admin `Set` | `src/console/settings/tabs.ts` |
+| `AccountBox({ email, onSignOut, onOpenSettings })` — caller supplies the email and owns sign-out | `AccountBox({ onOpenSettings })` — self-fetches the session via `sessionApi.me()` and calls `sessionApi.signOut()` itself | `src/console/shell/AccountBox.tsx` |
+| Expansion persistence as `loadExpanded`/`saveExpanded` inside `files/tree.ts`, keyed `mobrain:tree-expanded:` | A separate module, `readExpanded`/`writeExpanded`/`pruneExpanded`, keyed `mobrain:console:expanded:` — kept out of `files/tree.ts` deliberately, so that module stays pure and DOM-free | `src/console/files/expanded.ts` |
+| `SettingsModal`/`SettingsPanel` merged into one component taking `{ tab, isAdmin, onClose, onSelectTab }`; no exported decision functions | Split: `SettingsModal` is shell mechanics only (`{ label, onClose, children }`), `SettingsPanel` mounts the tab nav and lazy pages; `SettingsModal` exports two pure decision functions, `shouldCloseOnEscape` and `shouldCloseOnBackdropClick` | `src/console/settings/SettingsModal.tsx`, `src/console/settings/SettingsPanel.tsx` |
+| CSS: `.sidebar-row`, `.tree-row`, `.settings-card`, `.settings-layout`, `.settings-close` | `.account-box`, `.source-switcher`, `.file-tree`, `.settings-backdrop`, `.settings-modal`, `.settings-page-header`, `.settings-body` | `src/console/styles.css` |
+| `SourceProvider({ spaces, fromUrl, onNavigate, children })` — spaces passed in, navigation via callback | `SourceProvider({ fromUrl, children })` — fetches `filesApi.list()` itself; `AppShell` reacts to `setCurrent`/`current` rather than being called back through `onNavigate` | `src/console/SourceContext.tsx` |
+| Test file `test/unit/console-source-context.test.ts` | `test/unit/console-source.test.ts` | — |
+
+None of this changes what shipped or what the tests assert; it exists so a reader of this plan
+does not mistake a first-draft sketch for the interface the console actually runs.
+
 **Goal:** Turn the console's editor from one of eleven flat nav items into the landing screen —
 a file tree plus an editor pane driven by one app-wide Source selection — and move every
 administrative page (Sources, Schema, Members, Access, Schedules, Health, Spend, Runs, Upgrades)

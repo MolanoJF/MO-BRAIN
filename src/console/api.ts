@@ -80,11 +80,12 @@ export const sessionApi = {
 };
 
 /**
- * The Files surface (`src/control/routes/spaces.ts`). Types mirror the routes'
+ * The Files surface (`src/control/routes/files.ts`). Types mirror the routes'
  * projections exactly: the Space list carries each Connection's access so the
  * picker can say read-only vs can-edit without a second, admin-only call, and
- * the tree carries only the entries an operator may browse. Stage 2's PUT is
- * not wired here yet — this client is read-only.
+ * the tree carries only the entries an operator may browse. The PUT below
+ * (`filesApi.save`) is wired to that same route file, so this client can both
+ * read and write.
  */
 
 export type SpaceSummary = { id: string; sourceId: string; name: string; access: 'read' | 'write' };

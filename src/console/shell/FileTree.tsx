@@ -6,7 +6,7 @@ import { readExpanded, writeExpanded, pruneExpanded } from '../files/expanded.ts
 /**
  * The sidebar's collapsible file tree. Fetches `filesApi.tree(sourceId)`
  * whenever `sourceId` changes, using the same `cancelled` guard
- * `pages/Files.tsx` uses for its own tree effect, so a fast Source switch
+ * the console's old Files page component used for its own tree effect, so a fast Source switch
  * cannot let a stale response land after a newer one already did.
  *
  * Expansion state is loaded per Source (`files/expanded.ts`), pruned against

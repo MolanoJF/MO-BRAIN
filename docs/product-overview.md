@@ -110,20 +110,39 @@ Mobrain deliberately answers `404` for it rather than exposing a second, unaudit
 plane. (Recovery when the console itself is down goes through SSH + the `gbrain-ops`
 sidecar instead — see §6.6.)
 
-### 4.3 The console's pages, 1:1 with the API
+### 4.3 The console shell — editor first, everything else in Settings
 
-| Page | Route | What it's for |
-|---|---|---|
-| Sign in / Bootstrap | `/` | Auth, and first-admin creation |
-| Members | `/members` | Invite/offboard people, assign roles |
-| Connection | `/connect` | Each member wires up their own agent to the brain |
-| Schedules | `/schedules` | Create/pause/inspect recurring jobs, read alerts |
-| Runs | `/runs` | The agent-runner's run history, cost, and revert button |
-| Spend | `/spend` | Metered usage by member/org, with coverage caveats stated up front |
-| Upgrades | `/upgrades` | Check for a new gbrain version, plan/run/roll back |
-| Health | `/health` | Live component health, pin match, runner state |
-| Claim | `/claim` | Accepting an invite / pairing link |
-| Wizard | (post-bootstrap) | First-run setup: pick search mode, see isolation notice, add sources |
+After bootstrap or sign-in, the console lands directly on the **editor** — there is no
+separate landing page or nav to click through first. The Wizard is the one exception: it is
+a full-screen gate that pre-empts the editor entirely while `lifecycle !== 'ready'` (pick
+search mode, see the isolation notice, add sources).
+
+The sidebar has three parts, top to bottom:
+
+- **Account box** — the signed-in email, a settings gear, and sign-out.
+- **Source switcher** — which Source (a Space, 1:1 with a gbrain source) the editor and
+  file tree are currently pointed at.
+- **File tree** — collapsible, scoped to the current Source, the same markdown/other split
+  and read/write behavior Stage 1–2 always had.
+
+The nine pages that used to be top-level nav items — Sources, Schema, Members, Access,
+Schedules, Health, Spend, Runs, Upgrades — now live inside a **settings modal**, reached from
+the account box's gear and addressed at `/settings/<tab>`. A non-admin member sees only four
+of the nine (Schedules, Health, Runs, Upgrades); the other five are hidden outright, not
+shown-and-disabled — the console has no server-asserted role beyond "admin or not", so a
+403 from the admin-only wizard probe is the only signal it has to hide them on.
+
+| Route | What it's for |
+|---|---|
+| `/` | The editor, no Source selected |
+| `/s/:sourceId` | The editor, scoped to a Source |
+| `/s/:sourceId/:path` | The editor, a specific file open |
+| `/settings/:tab` | The settings modal, one of the nine admin pages |
+| `/claim/:token` | Accepting an invite / pairing link |
+
+`/sources`, `/schedules`, `/runs`, `/spend` and `/upgrades` still work as bookmarks: each
+redirects to its equivalent `/settings/<tab>`. `/files` redirects to `/`, the new editor
+root.
 
 ---
 

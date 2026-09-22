@@ -12,8 +12,8 @@ import {
 } from '../files/tree.ts';
 
 /* -------------------------------------------------------------------------
- * The right-hand pane, carved out of pages/Files.tsx (Task 10 deletes that
- * file once this one is wired into the shell at Task 8). Behaviour is moved,
+ * The right-hand pane, carved out of the console's old Files page component
+ * (deleted at Task 10, once this file was wired into the shell at Task 8). Behaviour is moved,
  * not changed: every save rule, error channel and piece of copy comes across
  * byte-identical. This component is fully controlled — it does not pick the
  * Source, does not list the tree, and does not own the selection; it owns
