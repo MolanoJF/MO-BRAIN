@@ -43,3 +43,41 @@ describe('personal mode refuses team routes', () => {
     await getDb().update(schema.organizations).set({ brainMode: 'personal' }).where(eq(schema.organizations.id, orgId));
   });
 });
+
+describe('/api/org', () => {
+  test('GET reports personal mode and its capabilities', async () => {
+    const body = await (await hit('GET', '/api/org', ownerCookie)).json() as {
+      brainMode: string; capabilities: Record<string, boolean>; memberCount: number; role: string;
+    };
+    expect(body.brainMode).toBe('personal');
+    expect(body.capabilities.invite).toBe(false);
+    expect(body.role).toBe('owner');
+  });
+
+  test('the owner switches to company and renames in one step', async () => {
+    const res = await hit('PATCH', '/api/org/mode', ownerCookie, { mode: 'company', name: 'Acme Inc' });
+    expect(res.status).toBe(200);
+    const body = await (await hit('GET', '/api/org', ownerCookie)).json() as { brainMode: string; name: string };
+    expect(body.brainMode).toBe('company');
+    expect(body.name).toBe('Acme Inc');
+  });
+
+  test('switching back is refused once anyone else is a member', async () => {
+    // `y@example.test` was invited in the previous describe → 2+ memberships.
+    const res = await hit('PATCH', '/api/org/mode', ownerCookie, { mode: 'personal' });
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toBe('team_exists');
+  });
+
+  test('switching back is allowed while solo with no open invite', async () => {
+    const [owner] = await getDb().select().from(schema.users).where(eq(schema.users.email, 'mode-owner@example.test'));
+    await getDb().execute(sql`DELETE FROM claim_links WHERE organization_id = ${orgId}`);
+    await getDb().execute(sql`DELETE FROM memberships WHERE organization_id = ${orgId} AND user_id <> ${owner!.id}`);
+    const res = await hit('PATCH', '/api/org/mode', ownerCookie, { mode: 'personal' });
+    expect(res.status).toBe(200);
+  });
+
+  test('an unknown mode is rejected', async () => {
+    expect((await hit('PATCH', '/api/org/mode', ownerCookie, { mode: 'enterprise' })).status).toBe(400);
+  });
+});
