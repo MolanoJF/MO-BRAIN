@@ -74,6 +74,8 @@ members.post('/members', guard('admin', async (c, { userId, orgId }) => {
     const signed = await auth.api.signUpEmail({ body: { email, password, name: email } });
     const id = (signed as { user?: { id?: string } }).user?.id;
     if (!id) throw new Error('sign_up_failed');
+    // The claim link is where this person sets a real password (zones plan 3).
+    await getDb().update(schema.users).set({ invitePlaceholder: true }).where(eq(schema.users.id, id));
     targetUserId = id;
   }
 

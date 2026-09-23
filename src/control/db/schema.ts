@@ -9,6 +9,10 @@ export const users = pgTable('users', {
   name: text('name'),
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').notNull().default(false),
+  /** Zones plan 3: true only for an account an INVITE created, whose password
+   *  is random and unusable. A claim may set a real password on such an
+   *  account, and on no other. Cleared the moment one is set. */
+  invitePlaceholder: boolean('invite_placeholder').notNull().default(false),
   image: text('image'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
