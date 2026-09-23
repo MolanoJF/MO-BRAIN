@@ -74,3 +74,49 @@ describe('Files — access comes from grants', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('admin grants API', () => {
+  test('PUT then GET a grant; members cannot call it', async () => {
+    const put = await hit('PUT', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.alice.membershipId, spaceId: fx.companySpaceId, access: 'read',
+    });
+    expect(put.status).toBe(200);
+
+    const list = await (await hit('GET', '/api/grants', fx.admin.cookie)).json() as { grants: Array<{ membershipId: string; spaceId: string; access: string }> };
+    expect(list.grants).toContainEqual({ membershipId: fx.alice.membershipId, spaceId: fx.companySpaceId, access: 'read' });
+
+    expect((await hit('GET', '/api/grants', fx.alice.cookie)).status).toBe(403);
+    expect((await hit('PUT', '/api/grants', fx.alice.cookie, {
+      membershipId: fx.alice.membershipId, spaceId: fx.companySpaceId, access: 'write',
+    })).status).toBe(403);
+  });
+
+  test('a personal Space cannot be granted', async () => {
+    const res = await hit('PUT', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.bob.membershipId, spaceId: fx.alice.privateSpaceId, access: 'read',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('personal_space_not_grantable');
+  });
+
+  test("DELETE rescopes the member's private connection instead of revoking it", async () => {
+    await getDb().update(schema.connections)
+      .set({ readSpaceIds: [fx.companySpaceId] })
+      .where(eq(schema.connections.id, fx.alice.privateConnectionId));
+
+    const res = await hit('DELETE', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.alice.membershipId, spaceId: fx.companySpaceId,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { removed: boolean; revoked: string[]; rescoped: string[] };
+    expect(body.removed).toBe(true);
+    expect(body.rescoped).toEqual([fx.alice.privateConnectionId]);
+    expect(body.revoked).toEqual([]);
+
+    const [conn] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.alice.privateConnectionId));
+    expect(conn?.state).toBe('active');
+    expect(conn?.readSpaceIds).toEqual([]);
+    expect(ops.calls.some((c) => c.op === 'auth.rescopeClient')).toBe(true);
+  });
+});
