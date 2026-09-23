@@ -209,3 +209,39 @@ describe('schedules are private to their zone', () => {
     await getDb().delete(schema.schedules).where(eq(schema.schedules.id, hiddenId));
   });
 });
+
+const { insertAgentRun } = await import('../helpers/zoneFixture.ts');
+
+describe('runs and alerts are private to their zone', () => {
+  let aliceRun = '';
+  let aliceScheduleId = '';
+
+  beforeAll(async () => {
+    const r = await insertAgentRun(fx.orgId, fx.alice.privateConnectionId, 'alice-calendar-prep');
+    aliceRun = r.runId;
+    aliceScheduleId = r.scheduleId;
+    await getDb().insert(schema.scheduleAlerts).values({
+      id: randomUUID(), organizationId: fx.orgId, scheduleId: aliceScheduleId, kind: 'run_failed',
+    });
+  });
+
+  test("an owner does not see a member's personal run in the list or by id, and cannot revert it", async () => {
+    const list = await (await hit('GET', '/api/runs', fx.owner.cookie)).json() as { runs: Array<{ scheduleName: string }> };
+    expect(list.runs.some((r) => r.scheduleName === 'alice-calendar-prep')).toBe(false);
+    expect((await hit('GET', `/api/runs/${aliceRun}`, fx.owner.cookie)).status).toBe(404);
+    expect((await hit('POST', `/api/runs/${aliceRun}/revert`, fx.owner.cookie, {})).status).toBe(404);
+  });
+
+  test('the owning member sees their run', async () => {
+    const list = await (await hit('GET', '/api/runs', fx.alice.cookie)).json() as { runs: Array<{ scheduleName: string }> };
+    expect(list.runs.some((r) => r.scheduleName === 'alice-calendar-prep')).toBe(true);
+    expect((await hit('GET', `/api/runs/${aliceRun}`, fx.alice.cookie)).status).toBe(200);
+  });
+
+  test("alerts on a personal schedule are the owner's only", async () => {
+    const forBob = await (await hit('GET', '/api/schedule-alerts', fx.bob.cookie)).json() as { alerts: Array<{ scheduleId: string }> };
+    expect(forBob.alerts.some((a) => a.scheduleId === aliceScheduleId)).toBe(false);
+    const forAlice = await (await hit('GET', '/api/schedule-alerts', fx.alice.cookie)).json() as { alerts: Array<{ scheduleId: string }> };
+    expect(forAlice.alerts.some((a) => a.scheduleId === aliceScheduleId)).toBe(true);
+  });
+});

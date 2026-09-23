@@ -22,6 +22,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { timingSafeEqual } from 'node:crypto';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
+import { callerFor, visibleZoneSql, type Caller } from '../zone.ts';
 import { recordRunnerSeen, runnerTokenConfigured } from '../../agent/runners.ts';
 import {
   RUN_CLAIM_WAIT_MS, claimAgentRun, finishAgentRun, heartbeatAgentRun, recordEvents,
@@ -295,6 +296,7 @@ export function projectRunDetail(input: {
 /** The agent lane only: this URL is the run ledger's agent view, and a
  *  `gbrain_command` row has none of the columns it projects. */
 runRoutes.get('/', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const limit = Math.min(Number(c.req.query('limit') ?? 50) || 50, 200);
   const rows = await getDb().select({
     run: schema.agentRuns,
@@ -310,9 +312,12 @@ runRoutes.get('/', guard('viewer', async (c, ctx) => {
     .from(schema.agentRuns)
     .innerJoin(schema.scheduleRuns, eq(schema.scheduleRuns.id, schema.agentRuns.runId))
     .innerJoin(schema.schedules, eq(schema.schedules.id, schema.scheduleRuns.scheduleId))
+    .leftJoin(schema.connections, eq(schema.connections.id, schema.agentRuns.connectionId))
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
     .where(and(
-      eq(schema.agentRuns.organizationId, ctx.orgId),
+      eq(schema.agentRuns.organizationId, caller.orgId),
       eq(schema.schedules.jobType, 'agent_prompt'),
+      visibleZoneSql(caller),
     ))
     .orderBy(desc(schema.scheduleRuns.startedAt))
     .limit(limit);
@@ -321,6 +326,7 @@ runRoutes.get('/', guard('viewer', async (c, ctx) => {
 }));
 
 runRoutes.get('/:id', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const runId = runIdParam(c);
   const db = getDb();
   const [row] = await db.select({
@@ -340,9 +346,11 @@ runRoutes.get('/:id', guard('viewer', async (c, ctx) => {
     .innerJoin(schema.scheduleRuns, eq(schema.scheduleRuns.id, schema.agentRuns.runId))
     .innerJoin(schema.schedules, eq(schema.schedules.id, schema.scheduleRuns.scheduleId))
     .leftJoin(schema.connections, eq(schema.connections.id, schema.agentRuns.connectionId))
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
     .where(and(
       eq(schema.agentRuns.runId, runId),
       eq(schema.agentRuns.organizationId, ctx.orgId),
+      visibleZoneSql(caller),
     ));
   if (!row) return c.json({ error: 'run_not_found' }, 404);
 
@@ -383,6 +391,20 @@ runRoutes.get('/:id', guard('viewer', async (c, ctx) => {
   }));
 }));
 
+/** Zones: a run in someone else's personal zone does not exist for the caller. */
+async function runVisible(caller: Caller, runId: string): Promise<boolean> {
+  const [row] = await getDb().select({ id: schema.agentRuns.runId })
+    .from(schema.agentRuns)
+    .leftJoin(schema.connections, eq(schema.connections.id, schema.agentRuns.connectionId))
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(
+      eq(schema.agentRuns.runId, runId),
+      eq(schema.agentRuns.organizationId, caller.orgId),
+      visibleZoneSql(caller),
+    ));
+  return row !== undefined;
+}
+
 /**
  * D10 — admin only, and the actor is a NAMED human: the audit story is that
  * someone reverted this run, never that "the system" did. `revertRun` owns the
@@ -390,6 +412,7 @@ runRoutes.get('/:id', guard('viewer', async (c, ctx) => {
  * the identity lookup.
  */
 runRoutes.post('/:id/revert', guard('admin', async (c, ctx) => {
+  if (!await runVisible(await callerFor(ctx), runIdParam(c))) return c.json({ error: 'run_not_found' }, 404);
   const confirm = c.req.query('confirm') === 'concurrent' ? 'concurrent' as const : undefined;
   const outcome = await revertRun({
     runId: runIdParam(c),

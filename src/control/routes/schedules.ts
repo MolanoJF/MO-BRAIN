@@ -31,7 +31,7 @@
  */
 import { Hono, type Context } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, lt, ne } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, lt, ne } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, ROLE_RANK, type Role } from '../rbac.ts';
 import { callerFor, visibleZoneSql, type Caller } from '../zone.ts';
@@ -595,22 +595,33 @@ scheduleRoutes.get('/schedule-presets', guard('viewer', async (c, { orgId }) => 
   return c.json({ presets: Object.values(PRESETS), system: await systemPresetsFor(orgId) });
 }));
 
-scheduleRoutes.get('/schedule-alerts', guard('viewer', async (c, { orgId }) => {
-  const alerts = await getDb().select().from(schema.scheduleAlerts)
-    .where(eq(schema.scheduleAlerts.organizationId, orgId))
+scheduleRoutes.get('/schedule-alerts', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const alerts = await getDb().select(getTableColumns(schema.scheduleAlerts))
+    .from(schema.scheduleAlerts)
+    .leftJoin(schema.schedules, eq(schema.schedules.id, schema.scheduleAlerts.scheduleId))
+    .leftJoin(schema.connections, eq(schema.connections.id, schema.schedules.connectionId))
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(eq(schema.scheduleAlerts.organizationId, caller.orgId), visibleZoneSql(caller)))
     .orderBy(desc(schema.scheduleAlerts.at))
     .limit(100);
   return c.json({ alerts });
 }));
 
-scheduleRoutes.post('/schedule-alerts/:id/ack', guard('member', async (c, { userId, orgId }) => {
+scheduleRoutes.post('/schedule-alerts/:id/ack', guard('member', async (c, ctx) => {
+  const { userId, orgId } = ctx;
+  const caller = await callerFor(ctx);
   const id = paramOf(c, 'id');
   const [row] = await getDb().select({
     id: schema.scheduleAlerts.id,
     organizationId: schema.scheduleAlerts.organizationId,
     kind: schema.scheduleAlerts.kind,
     acknowledgedAt: schema.scheduleAlerts.acknowledgedAt,
-  }).from(schema.scheduleAlerts).where(eq(schema.scheduleAlerts.id, id));
+  }).from(schema.scheduleAlerts)
+    .leftJoin(schema.schedules, eq(schema.schedules.id, schema.scheduleAlerts.scheduleId))
+    .leftJoin(schema.connections, eq(schema.connections.id, schema.schedules.connectionId))
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(eq(schema.scheduleAlerts.id, id), visibleZoneSql(caller)));
   if (!row || row.organizationId !== orgId) return c.json({ error: 'alert not found' }, 404);
 
   // Acknowledging twice keeps the FIRST acknowledgement: the column answers
