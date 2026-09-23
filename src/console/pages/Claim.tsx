@@ -34,9 +34,21 @@ function asCreds(raw: unknown): Creds {
   return {};
 }
 
+/** Better Auth's default `maxPasswordLength`. The server re-checks before burning the link. */
+export const CLAIM_PASSWORD_MAX = 128;
+
+/**
+ * Trim + lowercase, the same address `claim` stores. The claim post and the
+ * sign-in post both go through this so a pasted space cannot miss the account.
+ */
+export function normalizeClaimEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /** Client-side mirror of the server's rule; the server re-checks before burning the link. */
 export function claimFormError(password: string, confirm: string): string | null {
   if (password.length < 12) return 'Use at least 12 characters.';
+  if (password.length > CLAIM_PASSWORD_MAX) return `Use at most ${CLAIM_PASSWORD_MAX} characters.`;
   if (password !== confirm) return 'Passwords do not match.';
   return null;
 }
@@ -46,6 +58,7 @@ export function Claim({ token }: { token: string }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [signInNotice, setSignInNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' } | null>(null);
   const formError = claimFormError(password, confirm);
@@ -55,7 +68,7 @@ export function Claim({ token }: { token: string }) {
     try {
       const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' }>(
         `/claim/${token}`,
-        { email, password },
+        { email: normalizeClaimEmail(email), password },
       );
       setResult(r);
     } catch (e) {
@@ -66,8 +79,19 @@ export function Claim({ token }: { token: string }) {
   };
 
   const enter = async () => {
-    if (result?.account === 'created') await api.post('/auth/sign-in/email', { email, password });
-    window.location.assign('/');
+    if (result?.account !== 'created') {
+      window.location.assign('/');
+      return;
+    }
+    try {
+      await api.post('/auth/sign-in/email', { email: normalizeClaimEmail(email), password });
+      window.location.assign('/');
+    } catch {
+      // Any refusal, not only a bad address. The password is already set; do not log it.
+      setSignInNotice(
+        'Sign-in from this page failed. You can sign in with that password from the sign-in page.',
+      );
+    }
   };
 
   const burned = error?.toLowerCase().includes('already used') ?? false;
@@ -80,6 +104,7 @@ export function Claim({ token }: { token: string }) {
         {result.account === 'existing' && (
           <Notice>You already had an account with this email. Sign in with your existing password.</Notice>
         )}
+        {signInNotice && <Notice>{signInNotice}</Notice>}
         <Button variant="primary" onClick={() => void enter()}>
           {result.account === 'created' ? 'Open your brain' : 'Go to sign in'}
         </Button>

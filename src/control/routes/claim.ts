@@ -41,8 +41,10 @@ claimRoutes.post('/claim/:token', async (c) => {
     if (body && typeof body.password === 'string') password = body.password;
   } catch { /* missing/invalid JSON */ }
   if (!email) return c.json({ error: 'email is required' }, 400);
-  // Checked BEFORE `claim` burns the link: a typo must not cost the invite.
+  // Checked BEFORE `claim` burns the link. Better Auth's default max is 128;
+  // past that, hashPassword would run only after the link is already burned.
   if (password !== undefined && password.length < 12) return c.json({ error: 'password_too_short' }, 400);
+  if (password !== undefined && password.length > 128) return c.json({ error: 'password_too_long' }, 400);
 
   try {
     return c.json(await claim(token, email, password));

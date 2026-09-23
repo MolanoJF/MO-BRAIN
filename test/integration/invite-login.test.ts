@@ -56,6 +56,19 @@ describe('claiming sets a real login', () => {
     expect(good.status).toBe(200);
   });
 
+  test('a too-long password is refused and does NOT burn the link', async () => {
+    const { token } = await invite('il-long@example.test');
+    const bad = await hit('POST', `/api/claim/${token}`, undefined, {
+      email: 'il-long@example.test',
+      password: 'x'.repeat(129),
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json() as { error: string }).error).toBe('password_too_long');
+
+    const good = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-long@example.test', password: PASS });
+    expect(good.status).toBe(200);
+  });
+
   test('a new invitee claims with a password, then signs in with it', async () => {
     const { token } = await invite('il-claim@example.test');
     const res = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-claim@example.test', password: 'my-own-password-123' });
