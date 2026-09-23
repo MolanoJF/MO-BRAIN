@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
+import { callerFor } from '../zone.ts';
 import { callOps } from '../opsClient.ts';
 import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
 import { resolveSourcePacks } from './schema.ts';
@@ -28,7 +29,10 @@ type GbrainSource = {
   last_sync_at: string | null;
 };
 
-type SpaceRow = { id: string; sourceId: string; name: string; kind: string };
+type SpaceRow = {
+  id: string; sourceId: string; name: string; kind: string;
+  ownerMembershipId: string | null;
+};
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
@@ -53,6 +57,7 @@ async function spaceFor(orgId: string, sourceId: string): Promise<SpaceRow | nul
     sourceId: schema.spaces.sourceId,
     name: schema.spaces.name,
     kind: schema.spaces.kind,
+    ownerMembershipId: schema.spaces.ownerMembershipId,
   }).from(schema.spaces).where(and(
     eq(schema.spaces.organizationId, orgId),
     eq(schema.spaces.sourceId, sourceId),
@@ -73,11 +78,20 @@ async function dropSourceRow(spaceId: string, sourceId: string): Promise<void> {
   await callOps('config.unset', { key: `schema_pack.source.${sourceId}` }, { timeoutMs: 60_000 });
 }
 
-sourceRoutes.get('/sources', guard('admin', async (c, { orgId }) => {
-  const [packResolved, listed] = await Promise.all([
+sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const orgId = caller.orgId;
+  const hidden = new Set((await getDb().select({
+    sourceId: schema.spaces.sourceId, owner: schema.spaces.ownerMembershipId,
+  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId)))
+    .filter((s) => s.owner !== null && s.owner !== caller.membershipId)
+    .map((s) => s.sourceId));
+
+  const [packResolvedAll, listed] = await Promise.all([
     resolveSourcePacks(orgId),
     callOps<{ sources: GbrainSource[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 }),
   ]);
+  const packResolved = packResolvedAll.filter((s) => !hidden.has(s.sourceId));
 
   // A failed `sources.list` is NOT an empty brain: rows keep `pageCount: null`,
   // never 0, and the payload says the list could not be read.
@@ -106,8 +120,8 @@ sourceRoutes.get('/sources', guard('admin', async (c, { orgId }) => {
 
   // Flag the other direction of the mismatch too: a gbrain source with no
   // `spaces` row is invisible to the console unless we name it.
-  const known = new Set(packResolved.map((s) => s.sourceId));
-  const unregistered = (gbrain ?? []).filter((s) => !known.has(s.id)).map((s) => s.id);
+  const known = new Set(packResolvedAll.map((s) => s.sourceId));
+  const unregistered = (gbrain ?? []).filter((s) => !known.has(s.id) && !hidden.has(s.id)).map((s) => s.id);
 
   return c.json({ sources, unregistered, sourcesListOk: gbrain !== null });
 }));
@@ -120,10 +134,14 @@ sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
   return c.json({ ok: true, sourceId: result.sourceId, isolationNotice: ISOLATION_NOTICE });
 }));
 
-sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
   const space = await spaceFor(orgId, sourceId);
-  if (!space) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) {
+    return c.json({ error: `unknown source ${sourceId}` }, 400);
+  }
 
   const body = await c.req.json().catch(() => ({}));
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -138,10 +156,14 @@ sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, { userId, orgI
   return c.json({ ok: true, sourceId, name });
 }));
 
-sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
   const space = await spaceFor(orgId, sourceId);
-  if (!space) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) {
+    return c.json({ error: `unknown source ${sourceId}` }, 400);
+  }
 
   const body = await c.req.json().catch(() => ({}));
   const mode = typeof body?.mode === 'string' ? body.mode : 'archive';

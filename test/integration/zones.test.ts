@@ -245,3 +245,34 @@ describe('runs and alerts are private to their zone', () => {
     expect(forAlice.alerts.some((a) => a.scheduleId === aliceScheduleId)).toBe(true);
   });
 });
+
+describe('connections and sources hide other members\' personal rows', () => {
+  test("GET /connections omits other members' private connections", async () => {
+    const body = await (await hit('GET', '/api/connections', fx.owner.cookie)).json() as { connections: Array<{ id: string }> };
+    const ids = body.connections.map((c) => c.id);
+    expect(ids).toContain(fx.owner.privateConnectionId);
+    expect(ids).not.toContain(fx.alice.privateConnectionId);
+  });
+
+  test("an owner cannot revoke a member's private connection", async () => {
+    expect((await hit('POST', `/api/connections/${fx.alice.privateConnectionId}/revoke`, fx.owner.cookie, {})).status).toBe(404);
+  });
+
+  test('an admin cannot create a connection that touches a personal Space', async () => {
+    const res = await hit('POST', '/api/connections', fx.admin.cookie, {
+      membershipId: fx.bob.membershipId, writeSpaceId: fx.companySpaceId,
+      readSpaceIds: [fx.alice.privateSpaceId], harness: 'generic',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('personal_space_not_grantable');
+  });
+
+  test("GET /sources omits other members' private Spaces; PATCH/DELETE on them is unknown", async () => {
+    const body = await (await hit('GET', '/api/sources', fx.owner.cookie)).json() as { sources: Array<{ sourceId: string }> };
+    const ids = body.sources.map((s) => s.sourceId);
+    expect(ids).toContain(fx.owner.privateSourceId);
+    expect(ids).not.toContain(fx.alice.privateSourceId);
+    expect((await hit('PATCH', `/api/sources/${fx.alice.privateSourceId}`, fx.owner.cookie, { name: 'x' })).status).toBe(400);
+    expect((await hit('DELETE', `/api/sources/${fx.alice.privateSourceId}`, fx.owner.cookie, { mode: 'archive' })).status).toBe(400);
+  });
+});

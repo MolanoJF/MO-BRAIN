@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray, isNotNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, ROLE_RANK, type Role } from '../rbac.ts';
 import {
@@ -12,6 +12,7 @@ import {
   type ConnectionInput,
 } from '../connections.ts';
 import { grantsForConnection } from '../grants.ts';
+import { callerFor, visibleZoneSql } from '../zone.ts';
 import { annotateAdapters } from '../harness.ts';
 import { commitAsMember } from '../opsClient.ts';
 import { GBRAIN_PIN, capabilityPath } from '../../contracts/pin.ts';
@@ -84,6 +85,18 @@ async function connectionInputFromBody(orgId: string, body: unknown): Promise<Co
   return input;
 }
 
+/** Zones: a connection an admin issues lives in the company zone. A personal
+ *  Space is reachable only through its owner's own private connection. */
+async function assertCompanyOnly(input: ConnectionInput): Promise<void> {
+  const ids = [input.writeSpaceId, ...input.readSpaceIds];
+  const [personal] = await getDb().select({ id: schema.spaces.id }).from(schema.spaces).where(and(
+    eq(schema.spaces.organizationId, input.organizationId),
+    inArray(schema.spaces.id, ids),
+    isNotNull(schema.spaces.ownerMembershipId),
+  ));
+  if (personal) throw Object.assign(new Error('personal_space_not_grantable'), { status: 400 });
+}
+
 connectionRoutes.get('/harnesses', guard('viewer', async (c) => {
   return c.json({
     adapters: annotateAdapters(capability.wellKnown?.adapters ?? []),
@@ -91,20 +104,26 @@ connectionRoutes.get('/harnesses', guard('viewer', async (c) => {
   });
 }));
 
-connectionRoutes.get('/connections', guard('admin', async (c, { orgId }) => {
-  const rows = await getDb().select().from(schema.connections)
-    .where(eq(schema.connections.organizationId, orgId));
+connectionRoutes.get('/connections', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const rows = await getDb().select(getTableColumns(schema.connections))
+    .from(schema.connections)
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(eq(schema.connections.organizationId, caller.orgId), visibleZoneSql(caller)));
   return c.json({ connections: rows });
 }));
 
 connectionRoutes.post('/connections/preview', guard('admin', async (c, { orgId }) => {
-  const preview = await previewConnection(await connectionInputFromBody(orgId, await c.req.json()));
+  const input = await connectionInputFromBody(orgId, await c.req.json());
+  await assertCompanyOnly(input);
+  const preview = await previewConnection(input);
   return c.json(preview);
 }));
 
 connectionRoutes.post('/connections', guard('admin', async (c, { userId, orgId }) => {
   const input = await connectionInputFromBody(orgId, await c.req.json());
   delete input.connectionId;
+  await assertCompanyOnly(input);
   const created = await createPendingConnection(input);
   // Zones D7: access is a grant, not a side effect of a connection existing.
   await grantsForConnection(input, userId);
@@ -115,14 +134,19 @@ connectionRoutes.post('/connections', guard('admin', async (c, { userId, orgId }
   return c.json({ id: created.connectionId, state: 'pending', compiled: created.compiled });
 }));
 
-connectionRoutes.post('/connections/:id/revoke', guard('admin', async (c, { userId, orgId }) => {
+connectionRoutes.post('/connections/:id/revoke', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const id = c.req.param('id');
-  const [row] = await getDb().select({
-    id: schema.connections.id,
-    organizationId: schema.connections.organizationId,
-  }).from(schema.connections).where(eq(schema.connections.id, id));
-  if (!row || row.organizationId !== orgId) return c.json({ error: 'connection not found' }, 404);
-  await revokeConnection(id, userId);
+  const [row] = await getDb().select({ id: schema.connections.id })
+    .from(schema.connections)
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(
+      eq(schema.connections.id, id),
+      eq(schema.connections.organizationId, caller.orgId),
+      visibleZoneSql(caller),
+    ));
+  if (!row) return c.json({ error: 'connection not found' }, 404);
+  await revokeConnection(id, caller.userId);
   return c.json({ ok: true });
 }));
 
