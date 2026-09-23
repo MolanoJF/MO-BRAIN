@@ -123,15 +123,27 @@ wizard.post('/provider', guard(async (c, { userId, orgId }) => {
   return c.json({ ok: true, lifecycle: 'provider-configured', keyName });
 }));
 
-/** Step 2 — the one mandatory human decision (V4). */
+/**
+ * Step 2 — the one mandatory human decision (V4).
+ *
+ * Zones spec D6: bootstrap stores `gbrain-base-v2`, so when a pack is already
+ * stored this step also passes `schema-selected` — the Schema step no longer
+ * exists for a fresh install. A legacy brain with no stored pack stops at
+ * `mode-selected` and the console still renders the Schema step for it.
+ */
 wizard.post('/search-mode', guard(async (c, { userId, orgId }) => {
   const { mode } = await c.req.json();
   if (!SEARCH_MODES.some((m) => m.id === mode)) return c.json({ error: `unknown search mode ${mode}` }, 400);
 
   const brain = await loadBrain(orgId);
   await advance(brain.id, brain.lifecycle as Lifecycle, 'mode-selected', { searchMode: mode });
-  await audit(orgId, userId, 'wizard.searchMode', brain.id, { mode });
-  return c.json({ ok: true, lifecycle: 'mode-selected', mode });
+  let lifecycle: Lifecycle = 'mode-selected';
+  if (brain.schemaPack) {
+    await advance(brain.id, 'mode-selected', 'schema-selected');
+    lifecycle = 'schema-selected';
+  }
+  await audit(orgId, userId, 'wizard.searchMode', brain.id, { mode, schemaPack: brain.schemaPack ?? null });
+  return c.json({ ok: true, lifecycle, mode });
 }));
 
 /**

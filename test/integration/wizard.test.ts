@@ -217,11 +217,26 @@ describe('wizard', () => {
     expect(brain?.lifecycle).toBe('provider-configured');
   });
 
-  test('the search-mode step records the choice', async () => {
-    expect((await call('/api/wizard/search-mode', { mode: 'conservative' })).status).toBe(200);
+  // Zones spec D6: the pack is stored at bootstrap, so choosing a search mode
+  // is the last decision before the private Space — there is no Schema step.
+  test('the search-mode step records the choice and passes the stored pack', async () => {
+    const res = await call('/api/wizard/search-mode', { mode: 'conservative' });
+    expect(res.status).toBe(200);
+    expect((await res.json() as { lifecycle: string }).lifecycle).toBe('schema-selected');
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.searchMode).toBe('conservative');
-    expect(brain?.lifecycle).toBe('mode-selected');
+    expect(brain?.lifecycle).toBe('schema-selected');
+    expect(brain?.schemaPack).toBe('gbrain-base-v2');
+  });
+
+  test('a legacy brain with no stored pack still stops at the Schema step', async () => {
+    const [brain] = await getDb().select().from(schema.brains);
+    await getDb().update(schema.brains).set({ lifecycle: 'provider-configured', schemaPack: null })
+      .where(eq(schema.brains.id, brain!.id));
+    const res = await call('/api/wizard/search-mode', { mode: 'conservative' });
+    expect((await res.json() as { lifecycle: string }).lifecycle).toBe('mode-selected');
+    await getDb().update(schema.brains).set({ lifecycle: 'schema-selected', schemaPack: 'gbrain-base-v2' })
+      .where(eq(schema.brains.id, brain!.id));
   });
 
   test('an unknown search mode is rejected', async () => {

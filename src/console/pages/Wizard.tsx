@@ -50,7 +50,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
   return (
     <div className="max-w-2xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Set up your brain</h1>
+        <h1 className="text-xl font-semibold">Set up your personal brain</h1>
         <p className="text-sm text-muted">Stage: <span className="font-mono">{state.lifecycle}</span></p>
       </header>
 

@@ -21,7 +21,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      await api.post('/bootstrap', { email, password, orgName });
+      await api.post('/bootstrap', orgName.trim() ? { email, password, orgName } : { email, password });
       await api.post('/auth/sign-in/email', { email, password });
       onDone();
     } catch (err) {
@@ -33,15 +33,15 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
 
   return (
     <form onSubmit={submit} className="mx-auto mt-16 max-w-md space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Create the first admin</h1>
+      <h1 className="text-xl font-semibold">Create your account</h1>
       <p className="text-sm text-muted">
-        This account owns the brain. Nobody else can be created until setup finishes.
+        This sets up your own private brain. You can turn it into a company brain later in Settings.
       </p>
       {/* `Input`, not `Field`. `Field` renders a visible `<label>`, and these
           three controls have only ever had placeholders; writing label text
           for them would be new copy, and this phase changes none. */}
-      <Input placeholder="Organization name" value={orgName}
-             onChange={(e) => setOrgName(e.target.value)} required />
+      <Input placeholder="Name your brain (optional)" value={orgName}
+             onChange={(e) => setOrgName(e.target.value)} />
       <Input type="email" placeholder="Email" value={email}
              onChange={(e) => setEmail(e.target.value)} required />
       <Input type="password" placeholder="Password (12+ characters)"
@@ -59,7 +59,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
           submit a form it happens to sit in. Without this the form would stop
           submitting — on click AND on Enter in any field. */}
       <Button variant="primary" type="submit" disabled={busy}>
-        {busy ? 'Creating…' : 'Create admin'}
+        {busy ? 'Creating…' : 'Create account'}
       </Button>
     </form>
   );
