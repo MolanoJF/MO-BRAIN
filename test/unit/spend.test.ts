@@ -1,6 +1,6 @@
 // test/unit/spend.test.ts
 import { describe, expect, test } from 'bun:test';
-import { rollup } from '../../src/control/spend.ts';
+import { collapsePersonal, rollup } from '../../src/control/spend.ts';
 
 const run = (over: Partial<any> = {}) => ({
   runId: 'r1', memberId: 'm1', memberLabel: 'alice@example.test',
@@ -32,5 +32,28 @@ describe('rollup (D9)', () => {
                         'memberId', 'memberLabel');
     expect(rows.map((r) => r.key).sort()).toEqual(['m1', 'unattributed']);
     expect(rows.find((r) => r.key === 'unattributed')!.label).toBe('Unattributed (Connection deleted)');
+  });
+});
+
+describe('collapsePersonal — admins never see personal schedule names', () => {
+  test('a company schedule keeps its id and name', () => {
+    expect(collapsePersonal({
+      scheduleId: 's1', scheduleLabel: 'company-sync', ownerMembershipId: null, ownerEmail: null, costUsd: '0.10',
+    })).toEqual({ scheduleId: 's1', scheduleLabel: 'company-sync', costUsd: '0.10' });
+  });
+
+  test('a personal schedule becomes one row per member', () => {
+    expect(collapsePersonal({
+      scheduleId: 's2', scheduleLabel: 'alice-inbox-digest', ownerMembershipId: 'm-alice',
+      ownerEmail: 'alice@example.test', costUsd: '0.25',
+    })).toEqual({
+      scheduleId: 'personal:m-alice', scheduleLabel: 'Personal automations (alice@example.test)', costUsd: '0.25',
+    });
+  });
+
+  test('a departed owner is still collapsed, never named by schedule', () => {
+    expect(collapsePersonal({
+      scheduleId: 's3', scheduleLabel: 'secret', ownerMembershipId: 'm-gone', ownerEmail: null, costUsd: null,
+    }).scheduleLabel).toBe('Personal automations (former member)');
   });
 });

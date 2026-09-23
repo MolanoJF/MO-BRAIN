@@ -276,3 +276,15 @@ describe('connections and sources hide other members\' personal rows', () => {
     expect((await hit('DELETE', `/api/sources/${fx.alice.privateSourceId}`, fx.owner.cookie, { mode: 'archive' })).status).toBe(400);
   });
 });
+
+describe('spend', () => {
+  test("the admin Spend page never names a member's personal schedule", async () => {
+    const body = await (await hit('GET', '/api/spend?days=30', fx.owner.cookie)).json() as {
+      ours: { bySchedule: Array<{ key: string; label: string }>; byMember: Array<{ label: string }> };
+    };
+    const labels = body.ours.bySchedule.map((r) => r.label);
+    expect(labels).not.toContain('alice-calendar-prep');
+    expect(labels).toContain('Personal automations (z-alice@example.test)');
+    expect(body.ours.byMember.map((r) => r.label)).toContain('z-alice@example.test');
+  });
+});

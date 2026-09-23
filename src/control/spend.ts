@@ -19,11 +19,12 @@
  *      (`brainUsage`) that is never added to ours.
  *
  * The queries are pure reads over `agent_runs` / `agent_run_usage` /
- * `connections` / `memberships` / `users` / `schedule_runs` / `schedules`.
+ * `connections` / `spaces` / `memberships` / `users` / `schedule_runs` / `schedules`.
  * `rollup` is pure and takes already-joined rows, so the arithmetic is testable
  * without a database.
  */
 import { and, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { getDb, schema } from './db/client.ts';
 import { brainUsage } from './opsClient.ts';
 import type { BrainUsage } from '../ops/usage.ts';
@@ -132,20 +133,45 @@ export async function spendByMember(orgId: string, days: number): Promise<SpendR
   return rollup(rows, 'memberId', 'memberLabel');
 }
 
-/** Per schedule. `schedule_runs` cascades from `schedules`, so the join always
- *  resolves; the left-join shape keeps a null schedule from inventing one. */
+/**
+ * Zones spec D4: an admin sees a member's personal automations only as ONE
+ * row per member — the total, never which automations they run.
+ */
+export function collapsePersonal(row: {
+  scheduleId: string | null; scheduleLabel: string | null;
+  ownerMembershipId: string | null; ownerEmail: string | null; costUsd: string | null;
+}): { scheduleId: string | null; scheduleLabel: string | null; costUsd: string | null } {
+  if (row.ownerMembershipId === null) {
+    return { scheduleId: row.scheduleId, scheduleLabel: row.scheduleLabel, costUsd: row.costUsd };
+  }
+  return {
+    scheduleId: `personal:${row.ownerMembershipId}`,
+    scheduleLabel: `Personal automations (${row.ownerEmail ?? 'former member'})`,
+    costUsd: row.costUsd,
+  };
+}
+
+/** Per schedule, with personal schedules collapsed per member (above). */
 export async function spendBySchedule(orgId: string, days: number): Promise<SpendRow[]> {
+  const owner = alias(schema.memberships, 'space_owner');
+  const ownerUser = alias(schema.users, 'space_owner_user');
   const rows = await getDb().select({
     scheduleId: schema.schedules.id,
     scheduleLabel: schema.schedules.name,
+    ownerMembershipId: schema.spaces.ownerMembershipId,
+    ownerEmail: ownerUser.email,
     costUsd: schema.agentRuns.costUsd,
   })
     .from(schema.agentRuns)
     .innerJoin(schema.scheduleRuns, eq(schema.agentRuns.runId, schema.scheduleRuns.id))
     .leftJoin(schema.schedules, eq(schema.scheduleRuns.scheduleId, schema.schedules.id))
+    .leftJoin(schema.connections, eq(schema.agentRuns.connectionId, schema.connections.id))
+    .leftJoin(schema.spaces, eq(schema.connections.writeSpaceId, schema.spaces.id))
+    .leftJoin(owner, eq(schema.spaces.ownerMembershipId, owner.id))
+    .leftJoin(ownerUser, eq(owner.userId, ownerUser.id))
     .where(and(eq(schema.agentRuns.organizationId, orgId), withinWindow(days)));
 
-  return rollup(rows, 'scheduleId', 'scheduleLabel');
+  return rollup(rows.map(collapsePersonal), 'scheduleId', 'scheduleLabel');
 }
 
 /** Per model. A row here is one metered model CALL (`agent_run_usage` is the
