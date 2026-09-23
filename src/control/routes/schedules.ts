@@ -293,7 +293,9 @@ async function calendarFootprints(orgId: string, exceptId?: string): Promise<Cal
 /**
  * The one enabled sub-hourly schedule of this org, if any. At most one: a
  * sub-hourly interval occupies every slot on the grid, so a second one cannot
- * be staggered against the first. Returns the row so the 409 names the holder.
+ * be staggered against the first. Not zone-filtered — a personal schedule the
+ * caller cannot see still holds the shared lane. The 409 names it only when
+ * `loadScheduleRow` can already see that row.
  */
 async function subHourlyLane(orgId: string, exceptId?: string) {
   const [row] = await getDb().select({ id: schema.schedules.id, name: schema.schedules.name })
@@ -307,6 +309,18 @@ async function subHourlyLane(orgId: string, exceptId?: string) {
     ))
     .limit(1);
   return row ?? null;
+}
+
+/** 409 for the one-lane rule. `holder` is omitted when the caller cannot see it. */
+async function subHourlyConflict(caller: Caller, exceptId?: string) {
+  const holder = await subHourlyLane(caller.orgId, exceptId);
+  if (!holder) return null;
+  const visible = await loadScheduleRow(caller, holder.id);
+  return {
+    error: 'sub_hourly_limit' as const,
+    ...(visible ? { holder: visible.name } : {}),
+    detail: ONE_LANE_EXPLANATION,
+  };
 }
 
 /**
@@ -793,12 +807,8 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
       return c.json({ error: 'invalid_interval' }, 400);
     }
     if (isSubHourly(intervalSeconds)) {
-      const holder = await subHourlyLane(orgId);
-      if (holder) {
-        return c.json({
-          error: 'sub_hourly_limit', holder: holder.name, detail: ONE_LANE_EXPLANATION,
-        }, 409);
-      }
+      const conflict = await subHourlyConflict(caller);
+      if (conflict) return c.json(conflict, 409);
     }
     values.intervalSeconds = intervalSeconds;
     // The occurrence grid is anchored at creation: an interval schedule with no
@@ -907,12 +917,8 @@ scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId
       return c.json({ error: 'invalid_interval' }, 400);
     }
     if (isSubHourly(intervalSeconds)) {
-      const holder = await subHourlyLane(orgId, id);
-      if (holder) {
-        return c.json({
-          error: 'sub_hourly_limit', holder: holder.name, detail: ONE_LANE_EXPLANATION,
-        }, 409);
-      }
+      const conflict = await subHourlyConflict(caller, id);
+      if (conflict) return c.json(conflict, 409);
     }
     patch.intervalSeconds = intervalSeconds;
   }

@@ -169,4 +169,43 @@ describe('schedules are private to their zone', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  test('a sub-hourly 409 does not name a holder outside the caller\'s zone', async () => {
+    const hidden = 'alice-live-lane';
+    const hiddenId = await insertCommandSchedule(fx.orgId, fx.alice.privateConnectionId, hidden);
+    await getDb().update(schema.schedules).set({ intervalSeconds: 300 }).where(eq(schema.schedules.id, hiddenId));
+
+    const refused = async (cookie: string, connectionId: string, name: string) => {
+      const res = await hit('POST', '/api/schedules', cookie, {
+        name, connectionId, operation: 'sync', kind: 'interval', intervalSeconds: 300,
+      });
+      expect(res.status).toBe(409);
+      return await res.json() as { error: string; holder?: string; detail?: string };
+    };
+
+    for (const [cookie, connectionId, name] of [
+      [fx.owner.cookie, fx.owner.privateConnectionId, 'owner-live'],
+      [fx.admin.cookie, fx.admin.privateConnectionId, 'admin-live'],
+      [fx.bob.cookie, fx.bob.privateConnectionId, 'bob-live'],
+    ] as const) {
+      const body = await refused(cookie, connectionId, name);
+      expect(body.error).toBe('sub_hourly_limit');
+      expect(body.holder).toBeUndefined();
+      expect(JSON.stringify(body)).not.toContain(hidden);
+    }
+
+    const own = await refused(fx.alice.cookie, fx.alice.privateConnectionId, 'alice-second-lane');
+    expect(own.error).toBe('sub_hourly_limit');
+    expect(own.holder).toBe(hidden);
+
+    const bobHourly = await insertCommandSchedule(fx.orgId, fx.bob.privateConnectionId, 'bob-hourly');
+    const patched = await hit('PATCH', `/api/schedules/${bobHourly}`, fx.bob.cookie, { intervalSeconds: 300 });
+    expect(patched.status).toBe(409);
+    const patchBody = await patched.json() as { error: string; holder?: string };
+    expect(patchBody.error).toBe('sub_hourly_limit');
+    expect(patchBody.holder).toBeUndefined();
+    expect(JSON.stringify(patchBody)).not.toContain(hidden);
+
+    await getDb().delete(schema.schedules).where(eq(schema.schedules.id, hiddenId));
+  });
 });
