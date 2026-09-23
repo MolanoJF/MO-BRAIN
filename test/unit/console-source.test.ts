@@ -11,7 +11,7 @@ import type { SpaceSummary } from '../../src/console/api.ts';
  * Source selection has to be decidable without mounting anything.
  */
 
-const space = (sourceId: string): SpaceSummary => ({ id: sourceId, sourceId, name: sourceId, access: 'write' });
+const space = (sourceId: string): SpaceSummary => ({ id: sourceId, sourceId, name: sourceId, access: 'write', zone: 'company' });
 
 describe('pickSource — URL wins, then the remembered id, then the first entry, then null', () => {
   const spaces = [space('a'), space('b')];

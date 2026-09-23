@@ -117,7 +117,7 @@ describe('plain strings and error text', () => {
   });
 
   test('the picker label names the Space and disambiguates with its source id', () => {
-    expect(spacePickerLabel({ id: '1', sourceId: 'shared', name: 'Shared', access: 'read' }))
+    expect(spacePickerLabel({ id: '1', sourceId: 'shared', name: 'Shared', access: 'read', zone: 'company' }))
       .toBe('Shared (shared)');
   });
 

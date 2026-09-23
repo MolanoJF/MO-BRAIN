@@ -105,7 +105,9 @@ fileRoutes.get('/spaces', guard('viewer', async (c, ctx) => {
 
   const visible = spaces.flatMap((space) => {
     const access = accessFromGrants(ctx.role, grants, space.id, space.ownerMembershipId, membershipId);
-    return access === null ? [] : [{ ...space, access }];
+    return access === null ? [] : [{
+      ...space, access, zone: space.ownerMembershipId === null ? 'company' as const : 'personal' as const,
+    }];
   });
   return c.json({ spaces: visible });
 }));

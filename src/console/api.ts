@@ -89,7 +89,7 @@ export const sessionApi = {
  * read and write.
  */
 
-export type SpaceSummary = { id: string; sourceId: string; name: string; access: 'read' | 'write' };
+export type SpaceSummary = { id: string; sourceId: string; name: string; access: 'read' | 'write'; zone: 'personal' | 'company' };
 export type FileEntry = { path: string; size: number; isMarkdown: boolean };
 export type SpaceTree = { sourceId: string; root: string; entries: FileEntry[] };
 export type FileContent = { content: string; sha: string; size: number };

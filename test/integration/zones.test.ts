@@ -376,3 +376,12 @@ describe('export, commit, schema, and offboard stay inside the zone', () => {
     expect(spaces.spaces.some((s) => s.id === spaceId)).toBe(false);
   });
 });
+
+describe('/api/spaces carries the zone', () => {
+  test("a member's own Space is personal, a granted one is company", async () => {
+    const body = await (await hit('GET', '/api/spaces', fx.bob.cookie)).json() as { spaces: Array<{ id: string; zone: string }> };
+    expect(body.spaces.find((s) => s.id === fx.bob.privateSpaceId)?.zone).toBe('personal');
+    const company = body.spaces.find((s) => s.id === fx.companySpaceId);
+    if (company) expect(company.zone).toBe('company');
+  });
+});

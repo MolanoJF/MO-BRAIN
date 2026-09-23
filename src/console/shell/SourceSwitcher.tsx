@@ -1,6 +1,7 @@
 import { useSource } from '../SourceContext.tsx';
 import { spacePickerLabel, emptyStateText } from '../files/tree.ts';
 import { Empty, Select } from '../ui/index.tsx';
+import { groupByZone } from './zones.ts';
 
 /**
  * A native `<select>`, now through the `Select` primitive rather than the
@@ -37,10 +38,14 @@ export function SourceSwitcher() {
         onChange={(e) => setCurrent(e.target.value)}
       >
         {current === null && <option value="" disabled>Select a Source…</option>}
-        {spaces.map((space) => (
-          <option key={space.sourceId} value={space.sourceId}>
-            {spacePickerLabel(space)}
-          </option>
+        {groupByZone(spaces).map((group) => (
+          <optgroup key={group.label} label={group.label}>
+            {group.spaces.map((space) => (
+              <option key={space.sourceId} value={space.sourceId}>
+                {spacePickerLabel(space)}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </Select>
     </div>
