@@ -8,6 +8,7 @@ import { wizard } from './routes/wizard.ts';
 import { backup } from './routes/backup.ts';
 import { members } from './routes/members.ts';
 import { grantRoutes } from './routes/grants.ts';
+import { myConnectionRoutes } from './routes/myConnection.ts';
 import { fileRoutes } from './routes/files.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import { schemaRoutes } from './routes/schema.ts';
@@ -35,6 +36,7 @@ app.route('/api/wizard', wizard);
 app.route('/api', backup);
 app.route('/api', members);
 app.route('/api', grantRoutes);
+app.route('/api', myConnectionRoutes);
 // S1: the read-only Space Files browse lives under /api/spaces.
 app.route('/api', fileRoutes);
 app.route('/api', connectionRoutes);

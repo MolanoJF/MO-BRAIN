@@ -288,3 +288,33 @@ describe('spend', () => {
     expect(body.ours.byMember.map((r) => r.label)).toContain('z-alice@example.test');
   });
 });
+
+describe('my connection — self-service read scope', () => {
+  test('a member without a grant has nothing readable; with one they can add it', async () => {
+    const before = await (await hit('GET', '/api/my/connection', fx.bob.cookie)).json() as {
+      space: { id: string }; connection: { id: string; readSpaceIds: string[] } | null; readable: Array<{ id: string }>;
+    };
+    expect(before.space.id).toBe(fx.bob.privateSpaceId);
+    expect(before.connection?.id).toBe(fx.bob.privateConnectionId);
+    expect(before.readable).toEqual([]);
+
+    const refused = await hit('PUT', '/api/my/connection', fx.bob.cookie, { readSpaceIds: [fx.companySpaceId] });
+    expect(refused.status).toBe(400);
+    expect((await refused.json() as { error: string }).error).toBe('space_not_readable');
+
+    await hit('PUT', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.bob.membershipId, spaceId: fx.companySpaceId, access: 'read',
+    });
+    const ok = await hit('PUT', '/api/my/connection', fx.bob.cookie, { readSpaceIds: [fx.companySpaceId] });
+    expect(ok.status).toBe(200);
+
+    const [conn] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    expect(conn?.readSpaceIds).toEqual([fx.companySpaceId]);
+  });
+
+  test("another member's private Space is never readable", async () => {
+    const res = await hit('PUT', '/api/my/connection', fx.bob.cookie, { readSpaceIds: [fx.alice.privateSpaceId] });
+    expect(res.status).toBe(400);
+  });
+});
