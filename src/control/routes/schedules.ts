@@ -34,6 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, lt, ne } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, ROLE_RANK, type Role } from '../rbac.ts';
+import { callerFor, visibleZoneSql, type Caller } from '../zone.ts';
 import { PRESETS, systemPresetsFor, type Preset } from '../../scheduler/presets.ts';
 import { SCHEDULER_COMMANDS, validateParams } from '../../scheduler/commands.ts';
 import {
@@ -178,7 +179,7 @@ function ownsConnection(role: Role, userId: string, memberUserId: string | null)
  * identity, so a foreign Connection is a 403, not a silently-accepted id.
  */
 async function loadOwnConnection(
-  orgId: string, connectionId: unknown, userId: string, role: Role,
+  caller: Caller, connectionId: unknown,
 ): Promise<{ id: string; memberRole: Role } | null> {
   if (typeof connectionId !== 'string' || !connectionId) return null;
   const [row] = await getDb().select({
@@ -186,13 +187,18 @@ async function loadOwnConnection(
     organizationId: schema.connections.organizationId,
     memberUserId: schema.memberships.userId,
     memberRole: schema.memberships.role,
+    writeSpaceOwner: schema.spaces.ownerMembershipId,
   })
     .from(schema.connections)
     .innerJoin(schema.memberships, eq(schema.connections.membershipId, schema.memberships.id))
+    .innerJoin(schema.spaces, eq(schema.connections.writeSpaceId, schema.spaces.id))
     .where(eq(schema.connections.id, connectionId));
 
-  if (!row || row.organizationId !== orgId) return null;
-  if (!ownsConnection(role, userId, row.memberUserId)) return null;
+  if (!row || row.organizationId !== caller.orgId) return null;
+  // Zones: a personal connection is its owner's alone — the admin override
+  // below never reaches it.
+  if (row.writeSpaceOwner !== null && row.writeSpaceOwner !== caller.membershipId) return null;
+  if (!ownsConnection(caller.role, caller.userId, row.memberUserId)) return null;
   return { id: row.id, memberRole: asRole(row.memberRole) };
 }
 
@@ -240,11 +246,15 @@ function scheduleQuery() {
     .leftJoin(schema.spaces, eq(schema.connections.writeSpaceId, schema.spaces.id));
 }
 
-/** One schedule in this org, or null when it is not ours to see. */
-async function loadScheduleRow(orgId: string, id: string): Promise<ScheduleView | null> {
-  const [row] = await scheduleQuery().where(eq(schema.schedules.id, id));
-  if (!row || row.schedules.organizationId !== orgId) return null;
-  return toView(row);
+/** One schedule in this org, or null when it is not the caller's to see —
+ *  including a schedule in someone else's personal zone (zones spec §4). */
+async function loadScheduleRow(caller: Caller, id: string): Promise<ScheduleView | null> {
+  const [row] = await scheduleQuery().where(and(
+    eq(schema.schedules.id, id),
+    eq(schema.schedules.organizationId, caller.orgId),
+    visibleZoneSql(caller),
+  ));
+  return row ? toView(row) : null;
 }
 
 /** The member a Connection belongs to, for the schedule-ownership rule. */
@@ -551,16 +561,18 @@ const RUNNER_NOT_ENABLED_DETAIL: Record<string, string> = {
     + 'is polling is accepted here.',
 };
 
-scheduleRoutes.get('/schedules', guard('viewer', async (c, { orgId }) => {
+scheduleRoutes.get('/schedules', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const rows = await scheduleQuery()
-    .where(eq(schema.schedules.organizationId, orgId))
+    .where(and(eq(schema.schedules.organizationId, caller.orgId), visibleZoneSql(caller)))
     .orderBy(schema.schedules.name);
   return c.json({ schedules: rows.map(toView) });
 }));
 
 /** The schedule itself, unwrapped — the console and the exit gate read it flat. */
-scheduleRoutes.get('/schedules/:id', guard('viewer', async (c, { orgId }) => {
-  const schedule = await loadScheduleRow(orgId, paramOf(c, 'id'));
+scheduleRoutes.get('/schedules/:id', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const schedule = await loadScheduleRow(caller, paramOf(c, 'id'));
   if (!schedule) return c.json({ error: 'not_found' }, 404);
   return c.json(schedule);
 }));
@@ -652,13 +664,14 @@ scheduleRoutes.patch('/org/schedule-settings', guard('admin', async (c, { userId
 }));
 
 scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, role }) => {
+  const caller = await callerFor({ userId, orgId, role });
   const body = asObject(await c.req.json());
 
   // The name becomes the reports/<job-name>/ directory. Refuse, never sanitize.
   const name = typeof body.name === 'string' ? body.name : '';
   if (!NAME_RE.test(name)) return c.json({ error: 'invalid_name' }, 400);
 
-  const connection = await loadOwnConnection(orgId, body.connectionId, userId, role);
+  const connection = await loadOwnConnection(caller, body.connectionId);
   if (!connection) return c.json({ error: 'forbidden' }, 403);
 
   const presetId = typeof body.preset === 'string' ? body.preset : null;
@@ -827,14 +840,15 @@ scheduleRoutes.post('/schedules', guard('member', async (c, { userId, orgId, rol
     connectionId: connection.id, slotMinute: values.slotMinute ?? null,
   });
 
-  return c.json(await loadScheduleRow(orgId, id), 201);
+  return c.json(await loadScheduleRow(caller, id), 201);
 }));
 
 scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId, role }) => {
+  const caller = await callerFor({ userId, orgId, role });
   const id = paramOf(c, 'id');
   const body = asObject(await c.req.json());
 
-  const schedule = await loadScheduleRow(orgId, id);
+  const schedule = await loadScheduleRow(caller, id);
   if (!schedule) return c.json({ error: 'not_found' }, 404);
   if (!ownsConnection(role, userId, await memberUserIdOf(schedule.connectionId))) {
     return c.json({ error: 'forbidden' }, 403);
@@ -865,7 +879,7 @@ scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId
   }
 
   if (body.connectionId !== undefined) {
-    const connection = await loadOwnConnection(orgId, body.connectionId, userId, role);
+    const connection = await loadOwnConnection(caller, body.connectionId);
     if (!connection) return c.json({ error: 'forbidden' }, 403);
     const command = schedule.operation ? (SCHEDULER_COMMANDS[schedule.operation] ?? null) : null;
     if (command && command.scope === 'brain-wide'
@@ -943,12 +957,13 @@ scheduleRoutes.patch('/schedules/:id', guard('member', async (c, { userId, orgId
   }
 
   await audit(orgId, userId, 'schedule.update', id, patch);
-  return c.json(await loadScheduleRow(orgId, id));
+  return c.json(await loadScheduleRow(caller, id));
 }));
 
 scheduleRoutes.delete('/schedules/:id', guard('member', async (c, { userId, orgId, role }) => {
+  const caller = await callerFor({ userId, orgId, role });
   const id = paramOf(c, 'id');
-  const schedule = await loadScheduleRow(orgId, id);
+  const schedule = await loadScheduleRow(caller, id);
   if (!schedule) return c.json({ error: 'not_found' }, 404);
   if (!ownsConnection(role, userId, await memberUserIdOf(schedule.connectionId))) {
     return c.json({ error: 'forbidden' }, 403);
@@ -966,9 +981,10 @@ scheduleRoutes.delete('/schedules/:id', guard('member', async (c, { userId, orgI
  * only (S3c), and no stdout, stderr or argv column is selected even if one is
  * ever added — history must never become a log tail.
  */
-scheduleRoutes.get('/schedules/:id/runs', guard('viewer', async (c, { orgId }) => {
+scheduleRoutes.get('/schedules/:id/runs', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const id = paramOf(c, 'id');
-  const schedule = await loadScheduleRow(orgId, id);
+  const schedule = await loadScheduleRow(caller, id);
   if (!schedule) return c.json({ error: 'not_found' }, 404);
 
   const runs = await getDb().select({
@@ -994,8 +1010,9 @@ scheduleRoutes.get('/schedules/:id/runs', guard('viewer', async (c, { orgId }) =
 }));
 
 scheduleRoutes.post('/schedules/:id/run-now', guard('member', async (c, { userId, orgId, role }) => {
+  const caller = await callerFor({ userId, orgId, role });
   const id = paramOf(c, 'id');
-  const schedule = await loadScheduleRow(orgId, id);
+  const schedule = await loadScheduleRow(caller, id);
   if (!schedule) return c.json({ error: 'not_found' }, 404);
   if (!ownsConnection(role, userId, await memberUserIdOf(schedule.connectionId))) {
     return c.json({ error: 'forbidden' }, 403);

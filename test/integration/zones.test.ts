@@ -120,3 +120,53 @@ describe('admin grants API', () => {
     expect(ops.calls.some((c) => c.op === 'auth.rescopeClient')).toBe(true);
   });
 });
+
+const { insertCommandSchedule } = await import('../helpers/zoneFixture.ts');
+
+describe('schedules are private to their zone', () => {
+  let aliceSchedule = '';
+  let companySchedule = '';
+  let orphanSchedule = '';
+
+  beforeAll(async () => {
+    aliceSchedule = await insertCommandSchedule(fx.orgId, fx.alice.privateConnectionId, 'alice-inbox-digest');
+    const companyConn = randomUUID();
+    await getDb().insert(schema.connections).values({
+      id: companyConn, organizationId: fx.orgId, membershipId: fx.admin.membershipId,
+      writeSpaceId: fx.companySpaceId, readSpaceIds: [], harness: 'generic',
+      clientName: `bs-company-${companyConn.slice(0, 6)}`, profile: 'coding-agent', tokenTtl: 3600, state: 'active',
+    });
+    companySchedule = await insertCommandSchedule(fx.orgId, companyConn, 'company-sync');
+    orphanSchedule = await insertCommandSchedule(fx.orgId, null, 'orphaned-job');
+  });
+
+  const names = async (cookie: string) =>
+    ((await (await hit('GET', '/api/schedules', cookie)).json()) as { schedules: Array<{ name: string }> })
+      .schedules.map((s) => s.name).sort();
+
+  test('each caller lists only their own personal schedules plus company ones', async () => {
+    expect(await names(fx.alice.cookie)).toEqual(['alice-inbox-digest', 'company-sync']);
+    expect(await names(fx.bob.cookie)).toEqual(['company-sync']);
+    expect(await names(fx.owner.cookie)).toEqual(['company-sync', 'orphaned-job']);
+  });
+
+  test("an owner gets 404 on a member's personal schedule, its runs, and its actions", async () => {
+    expect((await hit('GET', `/api/schedules/${aliceSchedule}`, fx.owner.cookie)).status).toBe(404);
+    expect((await hit('GET', `/api/schedules/${aliceSchedule}/runs`, fx.owner.cookie)).status).toBe(404);
+    expect((await hit('POST', `/api/schedules/${aliceSchedule}/run-now`, fx.owner.cookie, {})).status).toBe(404);
+    expect((await hit('PATCH', `/api/schedules/${aliceSchedule}`, fx.owner.cookie, { enabled: false })).status).toBe(404);
+    expect((await hit('DELETE', `/api/schedules/${aliceSchedule}`, fx.owner.cookie)).status).toBe(404);
+  });
+
+  test('the owning member still reads their own schedule', async () => {
+    expect((await hit('GET', `/api/schedules/${aliceSchedule}`, fx.alice.cookie)).status).toBe(200);
+  });
+
+  test("an admin cannot create a schedule on a member's private connection", async () => {
+    const res = await hit('POST', '/api/schedules', fx.admin.cookie, {
+      name: 'sneaky', connectionId: fx.alice.privateConnectionId, operation: 'sync',
+      kind: 'interval', intervalSeconds: 3600,
+    });
+    expect(res.status).toBe(403);
+  });
+});
