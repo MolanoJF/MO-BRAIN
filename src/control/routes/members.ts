@@ -9,6 +9,7 @@ import { revokeConnection } from '../connections.ts';
 import { provisionPrivateSpace } from '../privateSpaces.ts';
 import { accessFromGrants } from '../spaceAccess.ts';
 import { archiveSpace } from './sources.ts';
+import { requireCapability } from '../capabilities.ts';
 
 export const members = new Hono();
 
@@ -55,6 +56,7 @@ members.get('/members', guard('admin', async (c, { orgId }) => {
 }));
 
 members.post('/members', guard('admin', async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'invite');
   const body = await c.req.json();
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
   const role = body?.role;
@@ -233,6 +235,7 @@ members.delete('/members/:id', guard('admin', async (c, { userId, orgId }) => {
 }));
 
 members.post('/members/:id/claim-link', guard('admin', async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'invite');
   const id = c.req.param('id');
   const [membership] = await getDb().select().from(schema.memberships)
     .where(and(eq(schema.memberships.id, id), eq(schema.memberships.organizationId, orgId)));

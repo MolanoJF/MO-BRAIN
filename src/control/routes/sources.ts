@@ -7,6 +7,7 @@ import { callerFor } from '../zone.ts';
 import { callOps } from '../opsClient.ts';
 import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
 import { resolveSourcePacks } from './schema.ts';
+import { requireCapability } from '../capabilities.ts';
 
 /**
  * `/api/sources/*` — the Sources admin API (Task 5). A Space is a gbrain
@@ -143,6 +144,7 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
 }));
 
 sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'sharedSources');
   const { sourceId, name, description } = await c.req.json();
   // ONE implementation, shared with `/api/wizard/space`, so they cannot drift.
   const result = await addSpaceSource({ userId, orgId }, { sourceId, name, description }, 'source.add');

@@ -5,6 +5,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { removeGrant, upsertGrant } from '../grants.ts';
+import { requireCapability } from '../capabilities.ts';
 
 export const grantRoutes = new Hono();
 
@@ -49,6 +50,7 @@ grantRoutes.get('/grants', guard('admin', async (c, { orgId }) => {
 }));
 
 grantRoutes.put('/grants', guard('admin', async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'grants');
   const { body, membershipId, spaceId } = await readTarget(c, orgId);
   const access = body?.access;
   if (access !== 'read' && access !== 'write') return c.json({ error: 'invalid_access' }, 400);
@@ -58,6 +60,7 @@ grantRoutes.put('/grants', guard('admin', async (c, { userId, orgId }) => {
 }));
 
 grantRoutes.delete('/grants', guard('admin', async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'grants');
   const { membershipId, spaceId } = await readTarget(c, orgId);
   const result = await removeGrant(orgId, membershipId, spaceId, userId);
   await audit(orgId, userId, 'grant.delete', membershipId, {

@@ -13,6 +13,7 @@ import { parseSchemaActiveProse } from '../../contracts/capability.ts';
 import { resolveSourcePacks, effectivePack, validationError, lint } from './schema.ts';
 import { scaffoldSpaces, type ScaffoldResult } from '../scaffold.ts';
 import { validateDraft, draftToManifest } from '../schemaDraft.ts';
+import { requireCapability } from '../capabilities.ts';
 
 /**
  * Json flag for wizard `/finish` callOps. Only request --json when the
@@ -348,6 +349,7 @@ export async function addSpaceSource(
 
 /** Step 4 — the first Space. One gbrain source, git-backed, created via the CLI lane. */
 wizard.post('/space', guard(async (c, { userId, orgId }) => {
+  await requireCapability(orgId, 'sharedSources');
   const { sourceId, name, description } = await c.req.json();
   const result = await addSpaceSource({ userId, orgId }, { sourceId, name, description });
   if (!result.ok) return c.json(result.body, result.status);
