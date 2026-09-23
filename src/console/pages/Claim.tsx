@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { api } from '../api.ts';
 import { wiringSnippet } from '../../control/harness.ts';
-import { Button, Card, Empty, Icon, Input, Notice } from '../ui/index.tsx';
+import { Button, Card, Icon, Input, Notice } from '../ui/index.tsx';
 
 /**
  * The credential blocks are `<pre>`, and they borrowed `.field` purely for its
@@ -34,18 +34,28 @@ function asCreds(raw: unknown): Creds {
   return {};
 }
 
+/** Client-side mirror of the server's rule; the server re-checks before burning the link. */
+export function claimFormError(password: string, confirm: string): string | null {
+  if (password.length < 12) return 'Use at least 12 characters.';
+  if (password !== confirm) return 'Passwords do not match.';
+  return null;
+}
+
 export function Claim({ token }: { token: string }) {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean } | null>(null);
+  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' } | null>(null);
+  const formError = claimFormError(password, confirm);
 
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean }>(
+      const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' }>(
         `/claim/${token}`,
-        { email },
+        { email, password },
       );
       setResult(r);
     } catch (e) {
@@ -55,37 +65,57 @@ export function Claim({ token }: { token: string }) {
     }
   };
 
+  const enter = async () => {
+    if (result?.account === 'created') await api.post('/auth/sign-in/email', { email, password });
+    window.location.assign('/');
+  };
+
   const burned = error?.toLowerCase().includes('already used') ?? false;
   const wrongEmail = error?.toLowerCase().includes('email does not match') ?? false;
 
   if (result) {
     return (
       <div className="mx-auto mt-16 max-w-2xl space-y-6 p-6">
-        <h1 className="text-xl font-semibold">Claim complete</h1>
-        <Notice tone="warning">
-          <Icon glyph={TriangleAlert} size={16} />
-          <p className="m-0 font-medium">
-            Credentials are shown once and are not recoverable. Save them now.
-          </p>
-        </Notice>
-        {result.connections.length === 0 && (
-          <Empty>No pending connections were provisioned for this member.</Empty>
+        <h1 className="text-xl font-semibold">You're in</h1>
+        {result.account === 'existing' && (
+          <Notice>You already had an account with this email. Sign in with your existing password.</Notice>
         )}
-        {result.connections.map((conn) => (
-          <ClaimedConnection key={conn.connectionId} conn={conn} skills={result.skillsPublished} />
-        ))}
+        <Button variant="primary" onClick={() => void enter()}>
+          {result.account === 'created' ? 'Open your brain' : 'Go to sign in'}
+        </Button>
+        {result.connections.length > 0 && (
+          <>
+            <Notice tone="warning">
+              <Icon glyph={TriangleAlert} size={16} />
+              <p className="m-0 font-medium">
+                Credentials are shown once and are not recoverable. Save them now.
+              </p>
+            </Notice>
+            {result.connections.map((conn) => (
+              <ClaimedConnection key={conn.connectionId} conn={conn} skills={result.skillsPublished} />
+            ))}
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Claim your agent credentials</h1>
+      <h1 className="text-xl font-semibold">Create your account</h1>
       <p className="text-sm text-muted">
-        Enter the email this invite was issued to. Credentials appear once and cannot be recovered.
+        You've been invited to a company brain. You'll get your own private Space that only you can see,
+        plus access to the company Spaces your admin shares with you.
       </p>
-      <Input type="email" placeholder="Email" value={email}
+      <Input type="email" placeholder="The email this invite was sent to" value={email}
              onChange={(e) => setEmail(e.target.value)} />
+      <Input type="password" placeholder="Choose a password (12+ characters)" value={password}
+             onChange={(e) => setPassword(e.target.value)} />
+      <Input type="password" placeholder="Confirm password" value={confirm}
+             onChange={(e) => setConfirm(e.target.value)} />
+      {password.length > 0 && formError && (
+        <p className="text-sm text-muted">{formError}</p>
+      )}
       {error && (
         <Notice tone="danger">
           <Icon glyph={CircleAlert} size={16} />
@@ -101,8 +131,8 @@ export function Claim({ token }: { token: string }) {
       )}
       {/* Not inside a `<form>` — this one always drove off `onClick`, so it
           keeps `Button`'s `type="button"` default. */}
-      <Button variant="primary" disabled={busy || !email} onClick={() => void submit()}>
-        {busy ? 'Claiming…' : 'Claim'}
+      <Button variant="primary" disabled={busy || !email || formError !== null} onClick={() => void submit()}>
+        {busy ? 'Creating…' : 'Create account'}
       </Button>
     </div>
   );
