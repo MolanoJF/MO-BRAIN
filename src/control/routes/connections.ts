@@ -11,6 +11,7 @@ import {
   revokeConnection,
   type ConnectionInput,
 } from '../connections.ts';
+import { grantsForConnection } from '../grants.ts';
 import { annotateAdapters } from '../harness.ts';
 import { commitAsMember } from '../opsClient.ts';
 import { GBRAIN_PIN, capabilityPath } from '../../contracts/pin.ts';
@@ -105,6 +106,8 @@ connectionRoutes.post('/connections', guard('admin', async (c, { userId, orgId }
   const input = await connectionInputFromBody(orgId, await c.req.json());
   delete input.connectionId;
   const created = await createPendingConnection(input);
+  // Zones D7: access is a grant, not a side effect of a connection existing.
+  await grantsForConnection(input, userId);
   await audit(orgId, userId, 'connection.create', created.connectionId, {
     profile: created.compiled.profile,
     state: 'pending',

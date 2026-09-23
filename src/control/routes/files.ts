@@ -13,12 +13,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { syncAndEmbed } from '../../agent/reindex.ts';
 import { getDb, schema } from '../db/client.ts';
 import { actorIdentity } from '../actor.ts';
 import { requireRole, type Role } from '../rbac.ts';
-import { accessFromConnections, spaceAccess } from '../spaceAccess.ts';
+import { accessFromGrants, spaceAccess } from '../spaceAccess.ts';
+import { grantsFor } from '../grants.ts';
 import { callOps, gitExportBundle, gitReadFile, gitTree, gitWriteFile } from '../opsClient.ts';
 
 export const fileRoutes = new Hono();
@@ -72,19 +73,6 @@ async function membershipIdFor(userId: string, orgId: string): Promise<string | 
   return m?.id ?? null;
 }
 
-/** `('pending','active')` is the same set `/access-overview` counts — see
- *  `spaceAccess.ts` for why. */
-async function memberConnsFor(orgId: string, membershipId: string) {
-  return getDb().select({
-    writeSpaceId: schema.connections.writeSpaceId,
-    readSpaceIds: schema.connections.readSpaceIds,
-  }).from(schema.connections).where(and(
-    eq(schema.connections.organizationId, orgId),
-    eq(schema.connections.membershipId, membershipId),
-    inArray(schema.connections.state, ['pending', 'active']),
-  ));
-}
-
 /** The resolve → membership → grant sequence both file routes run. */
 async function readGate(
   c: Context,
@@ -112,10 +100,10 @@ fileRoutes.get('/spaces', guard('viewer', async (c, ctx) => {
 
   const membershipId = await membershipIdFor(ctx.userId, ctx.orgId);
   if (!membershipId) return c.json({ error: 'forbidden' }, 403);
-  const conns = await memberConnsFor(ctx.orgId, membershipId);
+  const grants = await grantsFor(ctx.orgId, membershipId);
 
   const visible = spaces.flatMap((space) => {
-    const access = accessFromConnections(ctx.role, conns, space.id, space.ownerMembershipId, membershipId);
+    const access = accessFromGrants(ctx.role, grants, space.id, space.ownerMembershipId, membershipId);
     return access === null ? [] : [{ ...space, access }];
   });
   return c.json({ spaces: visible });
@@ -198,15 +186,15 @@ fileRoutes.put('/spaces/:sourceId/files/:path{.*}', guard('member', async (c, ct
   const access = await spaceAccess(ctx.orgId, membershipId, ctx.role, space.id);
   if (access !== 'write') return c.json({ error: 'forbidden' }, 403);
 
-  // 6. `bypass` is the admin/owner reaching a Space their CONNECTIONS do not
-  //    grant write to. The viewer-role derivation isolates the connection half
-  //    (a viewer never gets the role-based write), so `!connWrite` means the
+  // 6. `bypass` is the admin/owner reaching a Space their GRANTS do not
+  //    grant write to. The viewer-role derivation isolates the grant half
+  //    (a viewer never gets the role-based write), so `!grantWrite` means the
   //    role alone opened the door — the explicit bypass, not a silent one.
-  const conns = await memberConnsFor(ctx.orgId, membershipId);
-  const connWrite = accessFromConnections(
-    'viewer', conns, space.id, space.ownerMembershipId, membershipId,
+  const grants = await grantsFor(ctx.orgId, membershipId);
+  const grantWrite = accessFromGrants(
+    'viewer', grants, space.id, space.ownerMembershipId, membershipId,
   ) === 'write';
-  const bypass = (ctx.role === 'admin' || ctx.role === 'owner') && !connWrite;
+  const bypass = (ctx.role === 'admin' || ctx.role === 'owner') && !grantWrite;
 
   // 3. The commit identity is the session's user, never a request body.
   const actor = await actorIdentity(ctx.userId);

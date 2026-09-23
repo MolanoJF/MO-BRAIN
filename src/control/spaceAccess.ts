@@ -3,64 +3,36 @@
  *
  * The Access matrix (`/access-overview`) and the Files routes both call this,
  * so a cell the page renders as `read` is exactly a read the Files browser
- * will allow. Two callers computing permission independently is the drift this
- * module exists to prevent (plan §1.3).
+ * will allow.
  *
- * A private Space (`ownerMembershipId` non-null) is reachable ONLY by the
- * membership that owns it — the admin/owner override does not pierce it, and
- * every other membership gets `null` (not even the Space's name). A shared
- * Space (`ownerMembershipId` null) resolves exactly as it always has.
- *
- * IMPORTANT: the connection state set is the EXISTING `('pending','active')`
- * pair the Access matrix has always counted. The plan's word is "active", but
- * the page this replaces — and therefore the page that must not silently
- * change — treats a pending invitation as access too. Preserve the pair.
+ * Zones spec D7: access to a COMPANY Space comes from `space_grants`, not from
+ * connection rows. A personal Space (`ownerMembershipId` non-null) is `write`
+ * for its owner and `null` for everyone else — the admin/owner override does
+ * not pierce it, and no grant can either.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Role } from './rbac.ts';
 import { getDb, schema } from './db/client.ts';
+import { grantsFor } from './grants.ts';
 
-/**
- * The columns this derivation needs from a `connections` row. A full row
- * satisfies it; a projection may carry only these.
- */
-export type ConnRow = { writeSpaceId: string; readSpaceIds: unknown };
+export type GrantRow = { spaceId: string; access: string };
 
-/**
- * Pure: a role plus one member's connection rows decides one Space.
- *
- * A private Space owned by anyone other than the requesting membership is
- * inaccessible to every role, `admin`/`owner` included. Otherwise `admin`/
- * `owner` reach every Space in the org. A connection's write Space beats any
- * read listing of the same Space, and a `readSpaceIds` entry that is not a
- * string (the column is jsonb, so it can hold anything) is skipped rather than
- * guessed at.
- */
-export function accessFromConnections(
+export function accessFromGrants(
   role: Role,
-  conns: readonly ConnRow[],
+  grants: readonly GrantRow[],
   spaceId: string,
   ownerMembershipId: string | null,
   requestingMembershipId: string,
 ): 'write' | 'read' | null {
-  if (ownerMembershipId !== null && ownerMembershipId !== requestingMembershipId) return null;
+  if (ownerMembershipId !== null) return ownerMembershipId === requestingMembershipId ? 'write' : null;
   if (role === 'admin' || role === 'owner') return 'write';
-  let read = false;
-  for (const conn of conns) {
-    if (conn.writeSpaceId === spaceId) return 'write';
-    const listed = Array.isArray(conn.readSpaceIds) ? conn.readSpaceIds : [];
-    for (const sid of listed) {
-      if (typeof sid === 'string' && sid === spaceId) read = true;
-    }
-  }
-  return read ? 'read' : null;
+  const grant = grants.find((g) => g.spaceId === spaceId);
+  if (grant?.access === 'write') return 'write';
+  if (grant?.access === 'read') return 'read';
+  return null;
 }
 
-/**
- * DB-backed. Scoped to the ORG as well as the membership: a connection row is
- * trusted only when both match, so a stale membership id from another org can
- * never borrow access.
- */
+/** DB-backed. Scoped to the org as well as the membership. */
 export async function spaceAccess(
   orgId: string,
   membershipId: string,
@@ -70,13 +42,5 @@ export async function spaceAccess(
   const [space] = await getDb().select({ ownerMembershipId: schema.spaces.ownerMembershipId })
     .from(schema.spaces).where(and(eq(schema.spaces.organizationId, orgId), eq(schema.spaces.id, spaceId)));
   if (!space) return null;
-  const conns = await getDb().select({
-    writeSpaceId: schema.connections.writeSpaceId,
-    readSpaceIds: schema.connections.readSpaceIds,
-  }).from(schema.connections).where(and(
-    eq(schema.connections.organizationId, orgId),
-    eq(schema.connections.membershipId, membershipId),
-    inArray(schema.connections.state, ['pending', 'active']),
-  ));
-  return accessFromConnections(role, conns, spaceId, space.ownerMembershipId, membershipId);
+  return accessFromGrants(role, await grantsFor(orgId, membershipId), spaceId, space.ownerMembershipId, membershipId);
 }

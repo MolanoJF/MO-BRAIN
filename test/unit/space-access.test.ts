@@ -1,65 +1,37 @@
+// test/unit/space-access.test.ts
 import { test, expect, describe } from 'bun:test';
-import { accessFromConnections, type ConnRow } from '../../src/control/spaceAccess.ts';
-import type { Role } from '../../src/control/rbac.ts';
+import { accessFromGrants } from '../../src/control/spaceAccess.ts';
 
-const SPACE = 'space-1';
-const ROLES: Role[] = ['viewer', 'member', 'admin', 'owner'];
+const me = 'm-me';
+const other = 'm-other';
+const company = 's-company';
+const mine = 's-mine';
 
-const WRITE_CONN: ConnRow = { writeSpaceId: SPACE, readSpaceIds: [] };
-const READ_CONN: ConnRow = { writeSpaceId: 'other', readSpaceIds: [SPACE] };
-
-describe('accessFromConnections private spaces', () => {
-  test('a non-owner gets null for every role, admin/owner included', () => {
-    for (const role of ROLES) {
-      expect(accessFromConnections(role, [WRITE_CONN], SPACE, 'owner-m', 'other-m')).toBeNull();
-      expect(accessFromConnections(role, [], SPACE, 'owner-m', 'other-m')).toBeNull();
+describe('accessFromGrants', () => {
+  test('a personal Space is write for its owner, for every role', () => {
+    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+      expect(accessFromGrants(role, [], mine, me, me)).toBe('write');
     }
   });
 
-  test('the owner resolves through their own write connection', () => {
-    expect(accessFromConnections('viewer', [WRITE_CONN], SPACE, 'owner-m', 'owner-m')).toBe('write');
-    expect(accessFromConnections('member', [WRITE_CONN], SPACE, 'owner-m', 'owner-m')).toBe('write');
+  test("someone else's personal Space is null for every role — grants cannot pierce it", () => {
+    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+      expect(accessFromGrants(role, [{ spaceId: mine, access: 'write' }], mine, other, me)).toBeNull();
+    }
   });
 
-  test('the owner resolves through their own read listing', () => {
-    expect(accessFromConnections('viewer', [READ_CONN], SPACE, 'owner-m', 'owner-m')).toBe('read');
-    expect(accessFromConnections('member', [READ_CONN], SPACE, 'owner-m', 'owner-m')).toBe('read');
+  test('admin and owner reach every company Space without a grant', () => {
+    expect(accessFromGrants('owner', [], company, null, me)).toBe('write');
+    expect(accessFromGrants('admin', [], company, null, me)).toBe('write');
   });
 
-  test('the owner with no connection gets null (the admin/owner override still applies)', () => {
-    expect(accessFromConnections('viewer', [], SPACE, 'owner-m', 'owner-m')).toBeNull();
-    expect(accessFromConnections('member', [], SPACE, 'owner-m', 'owner-m')).toBeNull();
-    expect(accessFromConnections('admin', [], SPACE, 'owner-m', 'owner-m')).toBe('write');
-    expect(accessFromConnections('owner', [], SPACE, 'owner-m', 'owner-m')).toBe('write');
-  });
-});
-
-describe('accessFromConnections shared spaces', () => {
-  test('admin/owner reach a shared space with no connections', () => {
-    expect(accessFromConnections('admin', [], SPACE, null, 'any-m')).toBe('write');
-    expect(accessFromConnections('owner', [], SPACE, null, 'any-m')).toBe('write');
+  test('member and viewer reach a company Space only through a grant', () => {
+    expect(accessFromGrants('member', [], company, null, me)).toBeNull();
+    expect(accessFromGrants('member', [{ spaceId: company, access: 'read' }], company, null, me)).toBe('read');
+    expect(accessFromGrants('viewer', [{ spaceId: company, access: 'write' }], company, null, me)).toBe('write');
   });
 
-  test('member with a write conn gets write, with a read list gets read', () => {
-    expect(accessFromConnections('member', [WRITE_CONN], SPACE, null, 'm')).toBe('write');
-    expect(accessFromConnections('member', [READ_CONN], SPACE, null, 'm')).toBe('read');
-  });
-
-  test('member with no connections gets null', () => {
-    expect(accessFromConnections('member', [], SPACE, null, 'm')).toBeNull();
-  });
-
-  test('viewer never writes from a read list', () => {
-    expect(accessFromConnections('viewer', [READ_CONN], SPACE, null, 'm')).toBe('read');
-    expect(accessFromConnections('viewer', [WRITE_CONN], SPACE, null, 'm')).toBe('write');
-  });
-});
-
-describe('accessFromConnections readSpaceIds non-string skip', () => {
-  test('a non-string entry never grants read', () => {
-    const conn = { writeSpaceId: 'other', readSpaceIds: [42, null, { id: SPACE }, SPACE] } as unknown as ConnRow;
-    expect(accessFromConnections('member', [conn], SPACE, null, 'm')).toBe('read');
-    const junk = { writeSpaceId: 'other', readSpaceIds: [42, null, { id: SPACE }] } as unknown as ConnRow;
-    expect(accessFromConnections('member', [junk], SPACE, null, 'm')).toBeNull();
+  test('an unknown access value is no access, never a guess', () => {
+    expect(accessFromGrants('member', [{ spaceId: company, access: 'admin' }], company, null, me)).toBeNull();
   });
 });

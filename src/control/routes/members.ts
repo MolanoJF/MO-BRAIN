@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { auth } from '../auth.ts';
 import { mintClaimLink } from '../claim.ts';
 import { revokeConnection } from '../connections.ts';
 import { provisionPrivateSpace } from '../privateSpaces.ts';
-import { accessFromConnections } from '../spaceAccess.ts';
+import { accessFromGrants } from '../spaceAccess.ts';
 
 export const members = new Hono();
 
@@ -234,28 +234,25 @@ members.get('/access-overview', guard('viewer', async (c, { userId, orgId }) => 
     (s) => s.ownerMembershipId === null || s.ownerMembershipId === callerMembershipId,
   );
 
-  const conns = await getDb().select().from(schema.connections)
-    .where(and(
-      eq(schema.connections.organizationId, orgId),
-      inArray(schema.connections.state, ['pending', 'active']),
-    ));
+  const grants = await getDb().select({
+    membershipId: schema.spaceGrants.membershipId,
+    spaceId: schema.spaceGrants.spaceId,
+    access: schema.spaceGrants.access,
+  }).from(schema.spaceGrants).where(eq(schema.spaceGrants.organizationId, orgId));
 
-  // ONE derivation, shared with the Files routes: admin/owner show `write` on
-  // every Space in the org, and a member's cells come only from their
-  // connections. Grouping is just to avoid re-scanning every connection per
-  // (member, Space) pair.
-  const connsByMembership = new Map<string, typeof conns>();
-  for (const conn of conns) {
-    const list = connsByMembership.get(conn.membershipId);
-    if (list) list.push(conn); else connsByMembership.set(conn.membershipId, [conn]);
+  // ONE derivation, shared with the Files routes (spaceAccess.ts).
+  const grantsByMembership = new Map<string, typeof grants>();
+  for (const g of grants) {
+    const list = grantsByMembership.get(g.membershipId);
+    if (list) list.push(g); else grantsByMembership.set(g.membershipId, [g]);
   }
 
   const cells: Array<{ membershipId: string; spaceId: string; access: 'read' | 'write' }> = [];
   for (const member of memberRows) {
-    const memberConns = connsByMembership.get(member.membershipId) ?? [];
+    const memberGrants = grantsByMembership.get(member.membershipId) ?? [];
     for (const space of spaces) {
-      const access = accessFromConnections(
-        member.role as Role, memberConns, space.id, space.ownerMembershipId, member.membershipId,
+      const access = accessFromGrants(
+        member.role as Role, memberGrants, space.id, space.ownerMembershipId, member.membershipId,
       );
       if (access !== null) cells.push({ membershipId: member.membershipId, spaceId: space.id, access });
     }

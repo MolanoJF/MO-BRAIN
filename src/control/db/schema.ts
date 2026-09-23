@@ -1,5 +1,5 @@
 import {
-  pgTable, text, timestamp, boolean, integer, jsonb, uniqueIndex, index, check,
+  pgTable, text, timestamp, boolean, integer, jsonb, uniqueIndex, index, check, primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -133,6 +133,28 @@ export const spaces = pgTable('spaces', {
   check('kind_valid', sql`${t.kind} in ('local-git','remote-git','db-only','github','google')`),
   uniqueIndex('spaces_owner_membership_uq').on(t.organizationId, t.ownerMembershipId)
     .where(sql`${t.ownerMembershipId} is not null`),
+]);
+
+/**
+ * D7 (zones spec): explicit access to COMPANY Spaces. A personal Space is never
+ * granted — its owner reaches it by ownership and nobody else reaches it at
+ * all — so every row here points at a Space whose `owner_membership_id` is null.
+ * Admin/owner reach every company Space without a row.
+ */
+export const spaceGrants = pgTable('space_grants', {
+  organizationId: text('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  membershipId: text('membership_id').notNull()
+    .references(() => memberships.id, { onDelete: 'cascade' }),
+  spaceId: text('space_id').notNull()
+    .references(() => spaces.id, { onDelete: 'cascade' }),
+  access: text('access').notNull(),
+  grantedBy: text('granted_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.membershipId, t.spaceId], name: 'space_grants_pk' }),
+  index('space_grants_org_idx').on(t.organizationId),
+  check('space_grant_access_valid', sql`${t.access} in ('read','write')`),
 ]);
 
 /** Envelope-encrypted. A pg_dump of this table is not a credential dump (S3b). */
