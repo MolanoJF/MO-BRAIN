@@ -155,7 +155,7 @@ beforeAll(async () => {
   ]) {
     await getDb().delete(t);
   }
-  ({ orgId } = await bootstrapFirstAdmin('admin@example.test', 'a-long-enough-password', 'Acme'));
+  ({ orgId } = await bootstrapFirstAdmin('admin@example.test', 'a-long-enough-password', 'Acme', { brainMode: 'company' }));
 
   const res = await app.request('/api/auth/sign-in/email', {
     method: 'POST', headers: { 'content-type': 'application/json' },

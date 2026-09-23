@@ -67,7 +67,7 @@ export async function buildZoneFixture(): Promise<ZoneFixture> {
   await runMigrations();
   await getDb().execute(sql`TRUNCATE users, organizations, runner_presence RESTART IDENTITY CASCADE`);
 
-  const boot = await bootstrapFirstAdmin('z-owner@example.test', PASS, 'ZoneCo');
+  const boot = await bootstrapFirstAdmin('z-owner@example.test', PASS, 'ZoneCo', { brainMode: 'company' });
   const orgId = boot.orgId;
   const [ownerM] = await getDb().select().from(schema.memberships)
     .where(sql`${schema.memberships.userId} = ${boot.userId}`);

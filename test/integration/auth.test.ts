@@ -94,10 +94,18 @@ describe('single-admin bootstrap', () => {
     expect(b?.lifecycle).toBe('uninitialized');
   });
 
-  // Company-first, personal derived: one org, one membership, one grant.
-  test('the org defaults to company mode', async () => {
+  // Zones spec D6: every install starts as ONE person's brain on gbrain's
+  // recommended default pack. Company mode is a later settings change.
+  test('the org starts in personal mode on gbrain-base-v2', async () => {
     const [o] = await getDb().select().from(schema.organizations);
-    expect(o?.brainMode).toBe('company');
+    expect(o?.brainMode).toBe('personal');
+    const [b] = await getDb().select().from(schema.brains);
+    expect(b?.schemaPack).toBe('gbrain-base-v2');
+  });
+
+  test('a brain name defaults from the email', async () => {
+    const { defaultBrainName } = await import('../../src/control/bootstrap.ts');
+    expect(defaultBrainName('jane.doe@example.test')).toBe("jane.doe's brain");
   });
 
   test('a second bootstrap attempt is refused', async () => {

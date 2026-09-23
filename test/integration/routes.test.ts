@@ -179,7 +179,7 @@ beforeAll(async () => {
   ]) {
     await getDb().delete(t);
   }
-  const boot = await bootstrapFirstAdmin('rt-owner@example.test', PASS, 'RouteCo');
+  const boot = await bootstrapFirstAdmin('rt-owner@example.test', PASS, 'RouteCo', { brainMode: 'company' });
   orgId = boot.orgId;
 
   for (const { email, role } of [

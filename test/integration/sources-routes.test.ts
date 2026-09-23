@@ -140,7 +140,7 @@ beforeAll(async () => {
   ]) {
     await getDb().delete(t);
   }
-  const boot = await bootstrapFirstAdmin('sources-owner@example.test', PASS, 'SourcesCo');
+  const boot = await bootstrapFirstAdmin('sources-owner@example.test', PASS, 'SourcesCo', { brainMode: 'company' });
   orgId = boot.orgId;
   ownerCookie = await signIn('sources-owner@example.test', PASS);
   memberCookie = await makeMember('sources-member@example.test');
