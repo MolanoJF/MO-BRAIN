@@ -9,6 +9,7 @@ import {
 } from './connections.ts';
 import { takeGrantCredentials } from './opsClient.ts';
 import { skillsPublished } from './configValue.ts';
+import { setInvitePassword } from './inviteAccount.ts';
 import type { Role } from './rbac.ts';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +23,7 @@ export type ClaimResult = {
     mcp_url: string;
   }>;
   skillsPublished: boolean;
+  account: 'created' | 'existing' | 'unchanged';
 };
 
 /** Email is case-normalized to lowercase so a leaked link still needs the matching address. */
@@ -79,7 +81,7 @@ export async function mintClaimLink(
  * Burn-on-fetch: the claim is marked consumed in the SAME statement that selects
  * it, so two concurrent requests cannot both succeed.
  */
-export async function claim(token: string, email: string): Promise<ClaimResult> {
+export async function claim(token: string, email: string, password?: string): Promise<ClaimResult> {
   const hash = hashToken(token);
   const normalized = normalizeEmail(email);
 
@@ -148,7 +150,13 @@ export async function claim(token: string, email: string): Promise<ClaimResult> 
       });
     }
 
-    return { membershipId, connections, skillsPublished: await skillsPublished() };
+    // After provisioning succeeded: a failure above has already compensated,
+    // and the password must not be set for a claim that is being unwound.
+    const account = password === undefined
+      ? 'unchanged' as const
+      : await setInvitePassword(membership.userId, password);
+
+    return { membershipId, connections, skillsPublished: await skillsPublished(), account };
   } catch (e) {
     for (const g of granted) {
       try {

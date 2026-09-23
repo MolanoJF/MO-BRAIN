@@ -34,14 +34,18 @@ claimRoutes.post('/claim/:token', async (c) => {
 
   const token = c.req.param('token');
   let email = '';
+  let password: string | undefined;
   try {
     const body = await c.req.json();
     if (body && typeof body.email === 'string') email = body.email;
+    if (body && typeof body.password === 'string') password = body.password;
   } catch { /* missing/invalid JSON */ }
   if (!email) return c.json({ error: 'email is required' }, 400);
+  // Checked BEFORE `claim` burns the link: a typo must not cost the invite.
+  if (password !== undefined && password.length < 12) return c.json({ error: 'password_too_short' }, 400);
 
   try {
-    return c.json(await claim(token, email));
+    return c.json(await claim(token, email, password));
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'claim_failed';
     return c.json({ error: message }, 400);
