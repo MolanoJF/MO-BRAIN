@@ -10,14 +10,14 @@ import {
  * blank panel.
  */
 
-describe('the registry: eleven tabs, in the deliberate menu order', () => {
-  test('all eleven ids appear, in the order the product owner asked for', () => {
+describe('the registry: twelve tabs, in the deliberate menu order', () => {
+  test('all twelve ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
     // appearance sits LAST for a mechanical reason, asserted below: the first
     // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      'general', 'sources', 'schema', 'members', 'access', 'schedules',
+      'general', 'mine', 'sources', 'schema', 'members', 'access', 'schedules',
       'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
   });
@@ -26,6 +26,7 @@ describe('the registry: eleven tabs, in the deliberate menu order', () => {
     const roles = Object.fromEntries(SETTINGS_TABS.map((t) => [t.id, t.minRole]));
     expect(roles).toEqual({
       general: 'admin',
+      mine: 'viewer',
       sources: 'admin', schema: 'admin', members: 'admin', access: 'admin',
       schedules: 'viewer', health: 'viewer', spend: 'admin', runs: 'viewer',
       upgrades: 'viewer', appearance: 'viewer',
@@ -34,12 +35,14 @@ describe('the registry: eleven tabs, in the deliberate menu order', () => {
 });
 
 describe('visibleTabs: role-gated menu contents', () => {
-  test('an admin sees all eleven tabs, in registry order', () => {
+  test('an admin sees all twelve tabs, in registry order', () => {
     expect(visibleTabs(true).map((t) => t.id)).toEqual(SETTINGS_TABS.map((t) => t.id));
   });
 
-  test('a non-admin sees exactly the five viewer tabs, in order', () => {
-    expect(visibleTabs(false).map((t) => t.id)).toEqual(['schedules', 'health', 'runs', 'upgrades', 'appearance']);
+  test('a non-admin sees exactly the six viewer tabs, in order', () => {
+    expect(visibleTabs(false).map((t) => t.id)).toEqual([
+      'mine', 'schedules', 'health', 'runs', 'upgrades', 'appearance',
+    ]);
   });
 
   test('appearance is visible to EVERY role — the theme is not a permission', () => {
@@ -54,7 +57,7 @@ describe('visibleTabs: role-gated menu contents', () => {
     // resolveTab(null, …) returns the FIRST visible tab, which is what opening
     // settings lands on. Moving a preferences tab to the top of the registry
     // would silently move every admin off General and every member off
-    // Schedules — a product change disguised as a reordering.
+    // My Brain — a product change disguised as a reordering.
     expect(visibleTabs(true).at(-1)!.id).toBe('appearance');
     expect(visibleTabs(false).at(-1)!.id).toBe('appearance');
     expect(resolveTab(null, true)).not.toBe('appearance');
@@ -90,17 +93,17 @@ describe('resolveTab: what the modal actually opens on', () => {
     // The exact regression this guards: spend is a real, valid tab id, so a
     // naive isSettingsTab-only check would let it through for anyone.
     expect(resolveTab('spend', false)).not.toBe('spend');
-    expect(resolveTab('spend', false)).toBe('schedules');
+    expect(resolveTab('spend', false)).toBe('mine');
   });
 
   test('an unknown segment falls back to the first visible tab', () => {
     expect(resolveTab('nonsense', true)).toBe('general');
-    expect(resolveTab('nonsense', false)).toBe('schedules');
+    expect(resolveTab('nonsense', false)).toBe('mine');
   });
 
   test('no requested tab at all (null) also falls back, same as unknown', () => {
     expect(resolveTab(null, true)).toBe('general');
-    expect(resolveTab(null, false)).toBe('schedules');
+    expect(resolveTab(null, false)).toBe('mine');
   });
 });
 
@@ -123,5 +126,9 @@ describe('personal mode hides the team tabs', () => {
 
   test('admins open settings on General', () => {
     expect(resolveTab(null, true)).toBe('general');
+  });
+
+  test('a member opens settings on My Brain', () => {
+    expect(resolveTab(null, false)).toBe('mine');
   });
 });

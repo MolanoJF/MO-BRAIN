@@ -20,7 +20,7 @@
  */
 
 export type SettingsTab =
-  | 'general' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
+  | 'general' | 'mine' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
   | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
@@ -41,10 +41,11 @@ export interface SettingsTabEntry {
  * aesthetic: `resolveTab(null, isAdmin)` returns the first visible tab, so
  * whatever sits at the top of this list is what opening settings lands on.
  * Putting a per-operator preference there would move every admin off General
- * and every member off Schedules on the way to a tab most people open once.
+ * and every member off My Brain on the way to a tab most people open once.
  */
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'general', label: 'General', minRole: 'admin' },
+  { id: 'mine', label: 'My Brain', minRole: 'viewer' },
   { id: 'sources', label: 'Sources', minRole: 'admin' },
   { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
@@ -61,7 +62,7 @@ const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t
 
 /**
  * The tabs a caller may see. An admin in company mode (the default) sees all
- * eleven; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
+ * twelve; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
  * rather than shown-and-disabled — there is no locked/greyed state to design
  * for, because a member never sees the tab exists. Personal mode additionally
  * hides `companyOnly` tabs.
@@ -83,7 +84,7 @@ export function isSettingsTab(value: string): value is SettingsTab {
 /**
  * What the modal actually opens on. A valid, visible tab opens as asked.
  * An unknown segment, or a tab the caller's role cannot see, falls back to
- * the first visible tab — `general` for an admin, `schedules` for a member
+ * the first visible tab — `general` for an admin, `mine` for a member
  * — rather than showing an empty panel. This matters most for the case
  * that looks harmless: `spend` is a real, valid tab id, so checking
  * `isSettingsTab` alone would let a member's pasted admin URL through.

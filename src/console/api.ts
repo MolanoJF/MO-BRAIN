@@ -886,3 +886,14 @@ export const orgApi = {
   setMode: (mode: 'personal' | 'company', name?: string) =>
     api.patch<{ ok: true; brainMode: string }>('/org/mode', name ? { mode, name } : { mode }),
 };
+
+export type MyConnection = {
+  space: { id: string; sourceId: string; name: string };
+  connection: { id: string; state: string; readSpaceIds: string[] } | null;
+  readable: Array<{ id: string; sourceId: string; name: string }>;
+};
+
+export const myConnectionApi = {
+  get: () => api.get<MyConnection>('/my/connection'),
+  setReads: (readSpaceIds: string[]) => api.put<{ ok: true; readSpaceIds: string[] }>('/my/connection', { readSpaceIds }),
+};

@@ -149,8 +149,8 @@ export function Members() {
           )}
           {/* Not `text-muted`: a Notice paints its own copy colour per theme,
               and muting one line inside it drops that line out of the warning
-              palette — the "save it now" line is the one that must not fade. */}
-          <p>Save it now. We cannot show this link again.</p>
+              palette — this line is the one that must not fade. */}
+          <p>Send this link to them. They'll create their account, get their own private Space, and see the company Spaces you grant on the Access tab. It expires in 24 hours.</p>
         </Notice>
       )}
 
