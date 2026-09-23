@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.ts';
+import { GrantsCard } from './GrantsCard.tsx';
 import { autoInstall, connectionClass, wiringSnippet } from '../../control/harness.ts';
 import { Button, Card, Empty, Field, Input, Notice, Select, Table, TableWrap } from '../ui/index.tsx';
 
@@ -13,7 +14,7 @@ import { Button, Card, Empty, Field, Input, Notice, Select, Table, TableWrap } f
 
 type Role = 'owner' | 'admin' | 'member' | 'viewer';
 type Member = { id: string; email: string; role: Role };
-type Space = { id: string; sourceId: string; name: string };
+type Space = { id: string; sourceId: string; name: string; ownerMembershipId?: string | null };
 type Adapter = { id: string; connectionClass?: string; autoInstall?: boolean };
 type ConnectionRow = {
   id: string;
@@ -222,6 +223,7 @@ export function Access() {
 
   return (
     <div className="max-w-4xl space-y-8">
+      <GrantsCard members={members} spaces={spaces.filter((s) => !s.ownerMembershipId)} />
       <header>
         <h1 className="text-xl font-semibold">Access</h1>
         <p className="text-sm text-muted">

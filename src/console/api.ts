@@ -863,3 +863,13 @@ export type SpendReport = {
 export const spendApi = {
   get: (days = 30) => api.get<SpendReport>(`/spend?days=${encodeURIComponent(String(days))}`),
 };
+
+/** Zones D7 — admin-issued access to COMPANY Spaces. */
+export type GrantRow = { membershipId: string; spaceId: string; access: 'read' | 'write' };
+
+export const grantsApi = {
+  list: () => api.get<{ grants: GrantRow[] }>('/grants'),
+  put: (row: GrantRow) => api.put<{ ok: true }>('/grants', row),
+  remove: (membershipId: string, spaceId: string) =>
+    api.delete<{ removed: boolean; revoked: string[]; rescoped: string[] }>('/grants', { membershipId, spaceId }),
+};
