@@ -18,22 +18,19 @@ export function defaultBrainName(email: string): string {
 }
 
 /**
- * Creates the first user, their org, and an UNINITIALIZED brain row. The brain
- * becomes real only when the wizard runs `gbrain init`.
+ * Shared by both bootstrap paths (D2): creates the org, owner membership,
+ * UNINITIALIZED brain row, and audit entry for an ALREADY-EXISTING user. The
+ * brain becomes real only when the wizard runs `gbrain init` — the image
+ * ships uninitialized because on Postgres the database does not exist at
+ * build time.
  *
  * Zones spec D6: a fresh install is a PERSONAL brain. `opts.brainMode` exists
- * for test setups that exercise team routes; the HTTP route never passes it.
+ * for test setups that exercise team routes; neither HTTP route passes it.
  */
-export async function bootstrapFirstAdmin(
-  email: string, password: string, orgName: string,
+async function createOrgForNewAdmin(
+  userId: string, orgName: string,
   opts: { brainMode?: 'personal' | 'company' } = {},
 ) {
-  if (await isBootstrapped()) throw new Error('already_bootstrapped');
-
-  const signed = await auth.api.signUpEmail({ body: { email, password, name: email } });
-  const userId = (signed as { user?: { id?: string } }).user?.id;
-  if (!userId) throw new Error('sign_up_failed');
-
   const orgId = randomUUID();
   const brainId = randomUUID();
   const slug = orgName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'org';
@@ -55,4 +52,34 @@ export async function bootstrapFirstAdmin(
   });
 
   return { userId, orgId, brainId };
+}
+
+/**
+ * Password path: creates the user, then the org. Every existing caller of
+ * this exact name/signature keeps working with no edits — D2.
+ */
+export async function bootstrapFirstAdmin(
+  email: string, password: string, orgName: string,
+  opts: { brainMode?: 'personal' | 'company' } = {},
+) {
+  if (await isBootstrapped()) throw new Error('already_bootstrapped');
+
+  const signed = await auth.api.signUpEmail({ body: { email, password, name: email } });
+  const userId = (signed as { user?: { id?: string } }).user?.id;
+  if (!userId) throw new Error('sign_up_failed');
+
+  return createOrgForNewAdmin(userId, orgName, opts);
+}
+
+/**
+ * Google path (D2): the caller already has a session (they completed
+ * sign-in/social in the browser before POSTing here) — nothing left to do
+ * but create the org for that existing user.
+ */
+export async function bootstrapFirstAdminForSession(
+  userId: string, orgName: string,
+  opts: { brainMode?: 'personal' | 'company' } = {},
+) {
+  if (await isBootstrapped()) throw new Error('already_bootstrapped');
+  return createOrgForNewAdmin(userId, orgName, opts);
 }

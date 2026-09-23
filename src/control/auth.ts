@@ -18,6 +18,12 @@ const db: Db = new Proxy({} as Db, {
   },
 });
 
+/** D1: present only when both env vars are set — an unconfigured deployment
+ *  registers no social provider at all, not a Google button that 500s. */
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+export const googleConfigured = !!googleClientId && !!googleClientSecret;
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: 'pg',
@@ -32,6 +38,9 @@ export const auth = betterAuth({
   baseURL: process.env.PUBLIC_URL ?? 'http://localhost:3150',
   basePath: '/api/auth',
   emailAndPassword: { enabled: true, minPasswordLength: 12 },
+  ...(googleConfigured
+    ? { socialProviders: { google: { clientId: googleClientId!, clientSecret: googleClientSecret! } } }
+    : {}),
   // Organization plugin dropped (plan ruling / Group 1): it always mounts
   // invitation endpoints and wants an unmapped `invitation` table. We own
   // claim links (A3). RBAC is hand-rolled in rbac.ts.

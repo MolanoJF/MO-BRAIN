@@ -193,6 +193,18 @@ In local mode that address works from the host itself and from any phone, tablet
 
 Open `https://<DOMAIN>`. A box with no admin shows the bootstrap form; create the first admin (owner). That account can then add members, Connections, and the org's provider API keys. A returning operator sees the sign-in page instead.
 
+### Google sign-in (optional)
+
+You can skip this entirely. It adds a **"Continue with Google"** button next to the email/password form, a second way in, not a replacement. Everything above works the same with or without it, and a deployment that leaves it unset behaves exactly as before.
+
+To turn it on:
+
+1. In the Google Cloud Console, open **APIs & Services → Credentials**, and create an **OAuth client ID** of type **Web application**.
+2. Under **Authorized redirect URIs**, add exactly `https://<DOMAIN>/api/auth/callback/google`, using the same `DOMAIN` the installer wrote to `.env`. Google only accepts a real hostname here, not a bare LAN IP address, so this is for domain mode.
+3. Give the resulting Client ID and Client Secret to the installer: answer its optional *"Google OAuth Client ID (leave blank to skip):"* prompt, or set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the environment before you run it. On an existing install, set `GOOGLE_CLIENT_ID=` and `GOOGLE_CLIENT_SECRET=` in `.env` (add the lines if an older `.env` lacks them) and run `docker compose up -d` again.
+
+Google is only enabled when both values are set. If either is empty, no Google provider is registered and no button appears. A non-interactive install (`INSTALL_MODE` set) never asks and skips Google unless you pass the two variables.
+
 Verify the stack before you go further:
 
 ```bash

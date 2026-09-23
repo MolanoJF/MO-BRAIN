@@ -75,7 +75,14 @@ members.post('/members', guard('admin', async (c, { userId, orgId }) => {
     const id = (signed as { user?: { id?: string } }).user?.id;
     if (!id) throw new Error('sign_up_failed');
     // The claim link is where this person sets a real password (zones plan 3).
-    await getDb().update(schema.users).set({ invitePlaceholder: true }).where(eq(schema.users.id, id));
+    // D3: the admin is vouching for this exact address. Without emailVerified,
+    // an invitee who later chooses "Continue with Google" would be refused —
+    // Better Auth's account-linking (node_modules/better-auth/dist/oauth2/
+    // link-account.mjs:76-85) requires the LOCAL row's emailVerified to
+    // already be true, no matter what Google itself reports.
+    await getDb().update(schema.users)
+      .set({ invitePlaceholder: true, emailVerified: true })
+      .where(eq(schema.users.id, id));
     targetUserId = id;
   }
 

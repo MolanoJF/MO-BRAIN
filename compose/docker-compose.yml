@@ -130,6 +130,11 @@ services:
       RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?required}
+      # Optional Google OAuth sign-in. Defaults to empty; an empty value keeps
+      # the Google provider disabled. Trailing `:-`, not `:?`, so deployments
+      # that never set these still interpolate.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       PUBLIC_URL: https://${DOMAIN}
       GBRAIN_HOME: /srv/gbrain-home
       GBRAIN_VERSION: ${GBRAIN_VERSION:?required}

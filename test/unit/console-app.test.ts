@@ -15,35 +15,43 @@ describe('the console door: the bootstrap form, the sign-in page, or the app (D1
   test('a fresh install gets the bootstrap form, whatever the probe says', () => {
     // `bootstrapped: false` is the ONLY thing that earns the fresh-install form —
     // it is the one screen that can create an admin.
-    expect(phaseFor(false, { status: 401 })).toBe('bootstrap');
-    expect(phaseFor(false, { status: 'unreachable' })).toBe('bootstrap');
-    expect(phaseFor(false, { status: 200, lifecycle: 'ready' })).toBe('bootstrap');
+    expect(phaseFor(false, { status: 401 }, false)).toBe('bootstrap');
+    expect(phaseFor(false, { status: 'unreachable' }, false)).toBe('bootstrap');
+    expect(phaseFor(false, { status: 200, lifecycle: 'ready' }, false)).toBe('bootstrap');
   });
 
   test('bootstrapped and unsigned-in is the sign-in page, never the fresh-install form', () => {
     // The exact regression: the 401 from `GET /api/wizard/state` used to fall
     // into `catch { setPhase('bootstrap') }`, so a returning operator filled in a
     // create-admin form that answered `already_bootstrapped`.
-    expect(phaseFor(true, { status: 401 })).toBe('signin');
-    expect(phaseFor(true, { status: 401 })).not.toBe('bootstrap');
+    expect(phaseFor(true, { status: 401 }, false)).toBe('signin');
+    expect(phaseFor(true, { status: 401 }, false)).not.toBe('bootstrap');
   });
 
   test('bootstrapped and signed in reaches the app', () => {
-    expect(phaseFor(true, { status: 200, lifecycle: 'ready' })).toBe('ready');
+    expect(phaseFor(true, { status: 200, lifecycle: 'ready' }, false)).toBe('ready');
     // A half-finished install still goes to the wizard, not the app.
-    expect(phaseFor(true, { status: 200, lifecycle: 'sources-added' })).toBe('wizard');
+    expect(phaseFor(true, { status: 200, lifecycle: 'sources-added' }, false)).toBe('wizard');
   });
 
   test('a signed-in non-admin is not sent to sign in: a 403 is a session, not its absence', () => {
     // `GET /api/wizard/state` is admin-only, so a member gets 403 while holding a
     // valid session. Treating that as "signed out" would loop them through a
     // form that cannot fail.
-    expect(phaseFor(true, { status: 403 })).toBe('ready');
+    expect(phaseFor(true, { status: 403 }, true)).toBe('ready');
   });
 
   test('a failing probe never claims the install is empty', () => {
-    expect(phaseFor(true, { status: 'unreachable' })).toBe('signin');
-    expect(phaseFor(true, { status: 500 })).toBe('signin');
+    expect(phaseFor(true, { status: 'unreachable' }, false)).toBe('signin');
+    expect(phaseFor(true, { status: 500 }, false)).toBe('signin');
+  });
+
+  test('a 403 with no membership at all is noAccess, not ready', () => {
+    expect(phaseFor(true, { status: 403 }, false)).toBe('noAccess');
+  });
+
+  test('a 403 with a membership stays ready (wrong role, not no access)', () => {
+    expect(phaseFor(true, { status: 403 }, true)).toBe('ready');
   });
 });
 

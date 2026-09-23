@@ -673,6 +673,14 @@ describe('DELETE /api/members/:id offboard', () => {
     expect(revokes.every((c) => c.opts?.json !== true)).toBe(true);
     expect(revokes.map((c) => c.params?.clientId)).toContain('gbrain_cl_live');
   });
+
+  test('an invited user is pre-verified so a later Google sign-in can link', async () => {
+    const email = `future-google-user-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', ownerCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const [u] = await getDb().select().from(schema.users).where(eq(schema.users.email, email));
+    expect(u?.emailVerified).toBe(true);
+  });
 });
 
 describe('POST /api/connections/:id/commit', () => {
