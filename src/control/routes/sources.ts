@@ -78,6 +78,22 @@ async function dropSourceRow(spaceId: string, sourceId: string): Promise<void> {
   await callOps('config.unset', { key: `schema_pack.source.${sourceId}` }, { timeoutMs: 60_000 });
 }
 
+/**
+ * gbrain soft-delete, then drop the `spaces` row and the per-source pack key.
+ * Callers must already have removed connections that write here:
+ * `connections.write_space_id` has no ON DELETE, so the row delete fails
+ * while one remains. Deleting the membership instead SET NULLs
+ * `owner_membership_id` and publishes a personal Space as company.
+ */
+export async function archiveSpace(space: { id: string; sourceId: string }): Promise<
+  { ok: true } | { ok: false; exitCode: number; stderr: string }
+> {
+  const r = await callOps('sources.archive', { id: space.sourceId }, { timeoutMs: 120_000 });
+  if (!r.ok) return { ok: false, exitCode: r.exitCode, stderr: r.stderr ?? '' };
+  await dropSourceRow(space.id, space.sourceId);
+  return { ok: true };
+}
+
 sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const orgId = caller.orgId;
@@ -175,9 +191,10 @@ sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, ctx) => {
   // ("For most workflows prefer the soft-delete path"): hide from search,
   // preserve data for 72h.
   if (mode === 'archive') {
-    const r = await callOps('sources.archive', { id: sourceId }, { timeoutMs: 120_000 });
-    if (!r.ok) return c.json({ error: `sources archive failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
-    await dropSourceRow(space.id, sourceId);
+    const archived = await archiveSpace(space);
+    if (!archived.ok) {
+      return c.json({ error: `sources archive failed (exit ${archived.exitCode})`, detail: archived.stderr }, 400);
+    }
     await audit(orgId, userId, 'source.archive', sourceId, { mode });
     return c.json({ ok: true, mode, sourceId });
   }

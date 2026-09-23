@@ -660,12 +660,10 @@ describe('DELETE /api/members/:id offboard', () => {
     expect(space).toBeDefined();
     expect(space?.sourceId).toMatch(/^desk-/);
 
-    // The private space outlives the member: the FK's `set null` reclaims it as
-    // an ordinary orphaned shared space.
+    // The personal Space is archived, not published by ON DELETE SET NULL.
     const [privateSpace] = await getDb().select().from(schema.spaces)
       .where(eq(schema.spaces.id, privateSpaceId));
-    expect(privateSpace).toBeDefined();
-    expect(privateSpace?.ownerMembershipId).toBeNull();
+    expect(privateSpace).toBeUndefined();
 
     const [gone] = await getDb().select().from(schema.memberships)
       .where(eq(schema.memberships.id, member.id));

@@ -318,3 +318,61 @@ describe('my connection — self-service read scope', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('export, commit, schema, and offboard stay inside the zone', () => {
+  test("an owner export of Alice's private source is 404 and not a bundle", async () => {
+    const res = await hit('GET', `/api/spaces/${fx.alice.privateSourceId}/export`, fx.owner.cookie);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type') ?? '').not.toContain('application/octet-stream');
+    expect(res.headers.get('content-disposition')).toBeNull();
+    expect(await res.json()).toEqual({ error: 'space_not_found' });
+  });
+
+  test("an owner commit of Alice's private connection is 404", async () => {
+    const res = await hit('POST', `/api/connections/${fx.alice.privateConnectionId}/commit`, fx.owner.cookie, {
+      message: 'should not land',
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'connection not found' });
+  });
+
+  test('schema source list omits Alice; brain-wide scaffold does not receive her source id', async () => {
+    const listed = await hit('GET', '/api/schema/sources', fx.owner.cookie);
+    expect(listed.status).toBe(200);
+    const sources = await listed.json() as { sources: Array<{ sourceId: string }> };
+    const ids = sources.sources.map((s) => s.sourceId);
+    expect(ids).not.toContain(fx.alice.privateSourceId);
+    expect(ids).toContain(fx.companySourceId);
+    expect(ids).toContain(fx.owner.privateSourceId);
+
+    ops.reset();
+    const scaffold = await hit('POST', '/api/schema/scaffold', fx.owner.cookie, {});
+    expect(scaffold.status).toBe(200);
+    const body = await scaffold.json() as { results: Array<{ sourceId: string }> };
+    const scaffolded = body.results.map((r) => r.sourceId);
+    expect(scaffolded).not.toContain(fx.alice.privateSourceId);
+    expect(scaffolded).not.toContain(fx.owner.privateSourceId);
+    expect(scaffolded).toContain(fx.companySourceId);
+  });
+
+  test('offboard of Alice does not leave her Space readable as a company Space', async () => {
+    const sourceId = fx.alice.privateSourceId;
+    const spaceId = fx.alice.privateSpaceId;
+    const res = await hit('DELETE', `/api/members/${fx.alice.membershipId}`, fx.owner.cookie);
+    expect(res.status).toBe(200);
+
+    const [space] = await getDb().select().from(schema.spaces).where(eq(schema.spaces.id, spaceId));
+    expect(space).toBeUndefined();
+
+    const files = await hit('GET', `/api/spaces/${sourceId}/files`, fx.owner.cookie);
+    expect(files.status).toBe(404);
+    const sources = await (await hit('GET', '/api/sources', fx.owner.cookie)).json() as {
+      sources: Array<{ sourceId: string }>;
+    };
+    expect(sources.sources.map((s) => s.sourceId)).not.toContain(sourceId);
+    const spaces = await (await hit('GET', '/api/spaces', fx.owner.cookie)).json() as {
+      spaces: Array<{ id: string }>;
+    };
+    expect(spaces.spaces.some((s) => s.id === spaceId)).toBe(false);
+  });
+});

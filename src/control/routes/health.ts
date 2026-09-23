@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { desc, isNull, sql } from 'drizzle-orm';
+import { desc, isNotNull, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { opsHealthy, callOps, inspectRepos } from '../opsClient.ts';
 import { GBRAIN_PIN, verifyRuntimePin, type PinVerification } from '../../contracts/pin.ts';
@@ -18,6 +18,15 @@ export function reposFromSourcesStatus(json: unknown): unknown[] {
     return (json as { sources: unknown[] }).sources;
   }
   return [];
+}
+
+/** `/api/health` has no caller, so every personal Space is omitted — including
+ *  one that would be the requester's own zone on an authenticated route. */
+export function omitPersonalRepos<T extends { sourceId: string }>(
+  repos: readonly T[],
+  personalSourceIds: ReadonlySet<string>,
+): T[] {
+  return repos.filter((repo) => !personalSourceIds.has(repo.sourceId));
 }
 
 /**
@@ -101,10 +110,20 @@ health.get('/health', async (c) => {
 
   // inspectRepos: stale index.lock plus uncommitted/unpushed drift. Sync
   // imports commits, not the working tree, so uncommitted files are pages
-  // the brain cannot see yet.
+  // the brain cannot see yet. Personal Space directories live under the same
+  // root; without a session this probe cannot keep "own zone" either. If the
+  // control DB cannot name them, publish no source ids rather than all of them.
   let repos: unknown[] = [];
-  if (components.ops === 'ok') {
-    try { repos = await inspectRepos(); } catch { repos = []; }
+  if (components.ops === 'ok' && components.controlDb === 'ok') {
+    try {
+      const all = await inspectRepos();
+      const personal = new Set(
+        (await getDb().select({ sourceId: schema.spaces.sourceId }).from(schema.spaces)
+          .where(isNotNull(schema.spaces.ownerMembershipId)))
+          .map((row) => row.sourceId),
+      );
+      repos = omitPersonalRepos(all, personal);
+    } catch { repos = []; }
   }
 
   const ok = Object.values(components).every((s) => s === 'ok');

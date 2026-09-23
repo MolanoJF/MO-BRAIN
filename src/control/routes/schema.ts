@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
+import { callerFor } from '../zone.ts';
 import { callOps, patchFilePlaneConfig, putSchemaPack, putSchemaPackJson, removeSchemaPack } from '../opsClient.ts';
 import { readConfigValue } from '../configValue.ts';
 import { listSchemaPackSections, listSchemaPacks } from './wizard.ts';
@@ -232,12 +233,32 @@ function toPackDetail(
   };
 }
 
-/** Resolves a Space id against the ORG's OWN rows. Never interpolate a client
- *  string into a gbrain config key or argv without this. */
-async function spaceExists(orgId: string, sourceId: string): Promise<boolean> {
-  const [row] = await getDb().select({ id: schema.spaces.id }).from(schema.spaces)
+/** A source this caller may name. Missing and someone else's personal Space
+ *  are the same answer — callers return `unknown source`. */
+async function sourceVisible(orgId: string, sourceId: string, membershipId: string): Promise<boolean> {
+  const [row] = await getDb().select({ owner: schema.spaces.ownerMembershipId }).from(schema.spaces)
     .where(and(eq(schema.spaces.organizationId, orgId), eq(schema.spaces.sourceId, sourceId)));
-  return row !== undefined;
+  if (!row) return false;
+  return row.owner === null || row.owner === membershipId;
+}
+
+/** Company Spaces only. Brain-wide scaffold and apply must not commit into a
+ *  personal repo, including the caller's own. */
+async function companySourceIds(orgId: string): Promise<Set<string>> {
+  const rows = await getDb().select({ sourceId: schema.spaces.sourceId }).from(schema.spaces)
+    .where(and(eq(schema.spaces.organizationId, orgId), isNull(schema.spaces.ownerMembershipId)));
+  return new Set(rows.map((r) => r.sourceId));
+}
+
+/** Company Spaces plus the caller's own personal Space. */
+async function visibleSourceIds(orgId: string, membershipId: string): Promise<Set<string>> {
+  const rows = await getDb().select({
+    sourceId: schema.spaces.sourceId,
+    owner: schema.spaces.ownerMembershipId,
+  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId));
+  return new Set(
+    rows.filter((r) => r.owner === null || r.owner === membershipId).map((r) => r.sourceId),
+  );
 }
 
 export type SourcePackResolution = {
@@ -348,8 +369,11 @@ schemaRoutes.get('/schema/packs', guard('admin', async (c, { orgId }) => {
  * See resolveSourcePacks for why this is a `config get` read and not a
  * `schema active --source` readback (S6 Gate 2 failed).
  */
-schemaRoutes.get('/schema/sources', guard('admin', async (c, { orgId }) => {
-  return c.json({ sources: await resolveSourcePacks(orgId) });
+schemaRoutes.get('/schema/sources', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const visible = await visibleSourceIds(caller.orgId, caller.membershipId);
+  const sources = (await resolveSourcePacks(caller.orgId)).filter((s) => visible.has(s.sourceId));
+  return c.json({ sources });
 }));
 
 /**
@@ -364,9 +388,13 @@ schemaRoutes.get('/schema/sources', guard('admin', async (c, { orgId }) => {
  * If the readback disagrees the write is NOT reported as applied: same 409
  * shape and same refusal to round a mismatch up as `/schema/apply`.
  */
-schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
-  if (!(await spaceExists(orgId, sourceId))) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  if (!(await sourceVisible(orgId, sourceId, caller.membershipId))) {
+    return c.json({ error: `unknown source ${sourceId}` }, 400);
+  }
 
   const { pack } = await c.req.json();
   if (typeof pack !== 'string' || !PACK_NAME.test(pack)) return c.json({ error: 'pack is required' }, 400);
@@ -417,9 +445,13 @@ schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, { userId
  * readback, not the exit code: an absent key IS the requested end state. If the
  * key survives the unset we answer 409 rather than claim a reset.
  */
-schemaRoutes.delete('/schema/sources/:sourceId', guard('admin', async (c, { userId, orgId }) => {
+schemaRoutes.delete('/schema/sources/:sourceId', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
-  if (!(await spaceExists(orgId, sourceId))) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  if (!(await sourceVisible(orgId, sourceId, caller.membershipId))) {
+    return c.json({ error: `unknown source ${sourceId}` }, 400);
+  }
 
   const key = `schema_pack.source.${sourceId}`;
   await callOps('config.unset', { key }, { timeoutMs: 60_000 });
@@ -466,10 +498,11 @@ schemaRoutes.post('/schema/lint', guard('admin', async (c) => {
  * the brain-wide behavior is unchanged. The source is validated against the
  * org's own `spaces` rows before it reaches argv.
  */
-schemaRoutes.post('/schema/preview', guard('admin', async (c, { orgId }) => {
+schemaRoutes.post('/schema/preview', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
   const body = await c.req.json().catch(() => ({}));
   const source = typeof body?.source === 'string' ? body.source : undefined;
-  if (source !== undefined && !(await spaceExists(orgId, source))) {
+  if (source !== undefined && !(await sourceVisible(caller.orgId, source, caller.membershipId))) {
     return c.json({ error: `unknown source ${source}` }, 400);
   }
   const r = await callOps<unknown>('schema.sync',
@@ -534,8 +567,9 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
   // Folder scaffolding for the Spaces that now inherit this brain-wide pack.
   // README.md is a gbrain metafile, so sync never imports it (S7); a scaffold
   // failure is reported per Space, never fatal to the apply.
+  const company = await companySourceIds(orgId);
   const inherited = (await resolveSourcePacks(orgId))
-    .filter((s) => s.inherited).map((s) => s.sourceId);
+    .filter((s) => s.inherited && company.has(s.sourceId)).map((s) => s.sourceId);
   const scaffolded = inherited.length
     ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), inherited)
     : [];
@@ -562,12 +596,14 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
  * container with a pack whose prefixes deliberately targeted already-typed
  * pages — zero rows changed. See docs/schema-pack-findings.md S3.
  */
-schemaRoutes.post('/schema/sync', guard('admin', async (c, { userId, orgId }) => {
+schemaRoutes.post('/schema/sync', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   // An optional `{ source }` runs the per-Space backfill (gate 4 passed). The
   // audit target names the Space, not 'brain', when a fence is in play.
   const body = await c.req.json().catch(() => ({}));
   const source = typeof body?.source === 'string' ? body.source : undefined;
-  if (source !== undefined && !(await spaceExists(orgId, source))) {
+  if (source !== undefined && !(await sourceVisible(orgId, source, caller.membershipId))) {
     return c.json({ error: `unknown source ${source}` }, 400);
   }
 
@@ -648,7 +684,9 @@ async function checkPack(name: string) {
  * delete. `usedBy.brain` is the resolved active pack; `usedBy.sources` is the
  * per-Space stored intent, never a resolved-looking guess (S6 Gate 2).
  */
-schemaRoutes.get('/schema/packs/:name', guard('admin', async (c, { orgId }) => {
+schemaRoutes.get('/schema/packs/:name', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { orgId } = caller;
   const name = c.req.param('name') ?? '';
   if (!PACK_NAME.test(name)) return c.json({ error: 'invalid pack name' }, 400);
   const brain = await loadBrain(orgId);
@@ -661,8 +699,9 @@ schemaRoutes.get('/schema/packs/:name', guard('admin', async (c, { orgId }) => {
     linkVerbs: (raw.json.link_types ?? []).map((l) => l.name ?? '').filter(Boolean),
   } : null;
   const active = await readActive();
+  const visible = await visibleSourceIds(orgId, caller.membershipId);
   const sources = (await resolveSourcePacks(orgId))
-    .filter((s) => !s.inherited && s.pack === name).map((s) => s.sourceId);
+    .filter((s) => !s.inherited && s.pack === name && visible.has(s.sourceId)).map((s) => s.sourceId);
   return c.json({
     effective, own,
     editable: !bundled.includes(name),
@@ -757,7 +796,9 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
   // New types need folders wherever this pack is in effect. Folders are
   // create-only, so re-running for existing types is a no-op.
   const brain = await loadBrain(orgId);
-  const using = (await resolveSourcePacks(orgId)).filter((s) => s.pack === name).map((s) => s.sourceId);
+  const company = await companySourceIds(orgId);
+  const using = (await resolveSourcePacks(orgId))
+    .filter((s) => s.pack === name && company.has(s.sourceId)).map((s) => s.sourceId);
   const scaffolded = using.length
     ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), using)
     : [];
@@ -776,12 +817,15 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
  * overrides to it, or while another installed pack extends it — all three
  * would leave gbrain unable to resolve a name it still honors.
  */
-schemaRoutes.delete('/schema/packs/:name', guard('admin', async (c, { userId, orgId }) => {
+schemaRoutes.delete('/schema/packs/:name', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const name = c.req.param('name') ?? '';
   if (!PACK_NAME.test(name) || isBundled(name)) return c.json({ error: 'only user packs can be deleted' }, 400);
   const active = await readActive();
+  const visible = await visibleSourceIds(orgId, caller.membershipId);
   const sources = (await resolveSourcePacks(orgId))
-    .filter((s) => !s.inherited && s.pack === name).map((s) => s.sourceId);
+    .filter((s) => !s.inherited && s.pack === name && visible.has(s.sourceId)).map((s) => s.sourceId);
   if (active.pack === name || sources.length) {
     return c.json({ error: `${name} is in use`, usedBy: { brain: active.pack === name, sources } }, 409);
   }
@@ -806,14 +850,19 @@ schemaRoutes.delete('/schema/packs/:name', guard('admin', async (c, { userId, or
  * answers an empty `created`. `ok` is true only when every Space succeeded —
  * a per-Space error is reported, never rounded into a single green.
  */
-schemaRoutes.post('/schema/scaffold', guard('admin', async (c, { userId, orgId }) => {
+schemaRoutes.post('/schema/scaffold', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId } = caller;
   const body = await c.req.json().catch(() => ({}));
   const source = typeof body?.source === 'string' ? body.source : undefined;
-  if (source !== undefined && !(await spaceExists(orgId, source))) {
+  if (source !== undefined && !(await sourceVisible(orgId, source, caller.membershipId))) {
     return c.json({ error: `unknown source ${source}` }, 400);
   }
   const brain = await loadBrain(orgId);
-  const results = await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), source ? [source] : undefined);
+  // No named source: company Spaces only. A personal repo, including the
+  // caller's, must not receive a brain-wide folder commit.
+  const sourceIds = source ? [source] : [...await companySourceIds(orgId)];
+  const results = await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), sourceIds);
   await audit(orgId, userId, 'schema.scaffold', source ?? 'brain', {
     spaces: results.length, created: results.reduce((n, r) => n + r.created.length, 0),
   });

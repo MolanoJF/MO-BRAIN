@@ -20,6 +20,7 @@ import { actorIdentity } from '../actor.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { accessFromGrants, spaceAccess } from '../spaceAccess.ts';
 import { grantsFor } from '../grants.ts';
+import { callerFor, canSeeZone } from '../zone.ts';
 import { callOps, gitExportBundle, gitReadFile, gitTree, gitWriteFile } from '../opsClient.ts';
 
 export const fileRoutes = new Hono();
@@ -121,12 +122,13 @@ fileRoutes.get('/spaces/:sourceId/files', guard('viewer', async (c, ctx) => {
 // `admin`, not `viewer`: a bundle hands over the whole history at once,
 // including anything a since-deleted page's commits still carry, so this is
 // stricter than the read-only browse above rather than reusing `readGate`.
-// `spaceFor` alone resolves the Space — `admin`/`owner` already reach every
-// Space in the org (`spaceAccess.ts:37`), so there is no grant left to check.
+// Someone else's personal Space is the same 404 as a missing Space.
+// `canSeeZone` does not let admin/owner through.
 fileRoutes.get('/spaces/:sourceId/export', guard('admin', async (c, ctx) => {
   const sourceId = c.req.param('sourceId') ?? '';
-  const space = await spaceFor(ctx.orgId, sourceId);
-  if (!space) return c.json({ error: 'space_not_found' }, 404);
+  const caller = await callerFor(ctx);
+  const space = await spaceFor(caller.orgId, sourceId);
+  if (!space || !canSeeZone(caller, space)) return c.json({ error: 'space_not_found' }, 404);
 
   const upstream = await gitExportBundle(space.sourceId);
   if (!upstream.ok) {

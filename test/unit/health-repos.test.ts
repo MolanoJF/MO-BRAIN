@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { reposFromSourcesStatus } from '../../src/control/routes/health.ts';
+import { omitPersonalRepos, reposFromSourcesStatus } from '../../src/control/routes/health.ts';
 
 describe('reposFromSourcesStatus', () => {
   // Would have failed against Array.isArray(r.json) ? r.json : [] — the
@@ -25,5 +25,18 @@ describe('reposFromSourcesStatus', () => {
     expect(reposFromSourcesStatus(null)).toEqual([]);
     expect(reposFromSourcesStatus({})).toEqual([]);
     expect(reposFromSourcesStatus({ sources: 'nope' })).toEqual([]);
+  });
+});
+
+describe('omitPersonalRepos', () => {
+  test('drops every personal source id, own zone included, and keeps company ones', () => {
+    const repos = [
+      { sourceId: 'handbook', uncommittedFiles: 1 },
+      { sourceId: 'my-space-aaaaaaaa', uncommittedFiles: 2 },
+      { sourceId: 'my-space-bbbbbbbb', uncommittedFiles: 3 },
+    ];
+    expect(omitPersonalRepos(repos, new Set(['my-space-aaaaaaaa', 'my-space-bbbbbbbb']))).toEqual([
+      { sourceId: 'handbook', uncommittedFiles: 1 },
+    ]);
   });
 });

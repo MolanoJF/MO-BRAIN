@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { auth } from '../auth.ts';
@@ -8,6 +8,7 @@ import { mintClaimLink } from '../claim.ts';
 import { revokeConnection } from '../connections.ts';
 import { provisionPrivateSpace } from '../privateSpaces.ts';
 import { accessFromGrants } from '../spaceAccess.ts';
+import { archiveSpace } from './sources.ts';
 
 export const members = new Hono();
 
@@ -174,16 +175,58 @@ members.delete('/members/:id', guard('admin', async (c, { userId, orgId }) => {
     if (owners.length <= 1) return c.json({ error: 'cannot offboard the last owner' }, 400);
   }
 
+  // A personal Space must be removed before the membership delete.
+  // `owner_membership_id` is ON DELETE SET NULL, and that null is what
+  // publishes My Space as a company Space.
+  const owned = await getDb().select({
+    id: schema.spaces.id, sourceId: schema.spaces.sourceId,
+  }).from(schema.spaces).where(and(
+    eq(schema.spaces.organizationId, orgId),
+    eq(schema.spaces.ownerMembershipId, id),
+  ));
+  const personalConns = owned.length === 0 ? [] : await getDb().select({ id: schema.connections.id })
+    .from(schema.connections)
+    .where(inArray(schema.connections.writeSpaceId, owned.map((s) => s.id)));
+  const personalConnIds = personalConns.map((c) => c.id);
+
+  if (personalConnIds.length > 0) {
+    const scheds = await getDb().select({ id: schema.schedules.id }).from(schema.schedules)
+      .where(inArray(schema.schedules.connectionId, personalConnIds));
+    const schedIds = scheds.map((s) => s.id);
+    if (schedIds.length > 0) {
+      await getDb().delete(schema.scheduleAlerts).where(inArray(schema.scheduleAlerts.scheduleId, schedIds));
+      await getDb().delete(schema.heldNotifications).where(inArray(schema.heldNotifications.scheduleId, schedIds));
+      await getDb().delete(schema.schedules).where(inArray(schema.schedules.id, schedIds));
+    }
+  }
+
   const conns = await getDb().select().from(schema.connections)
     .where(eq(schema.connections.membershipId, id));
+  const memberConnIds = new Set(conns.map((c) => c.id));
   let revoked = 0;
   for (const conn of conns) {
     if (conn.state === 'revoked') continue;
     await revokeConnection(conn.id, userId);
     revoked += 1;
   }
+  for (const connId of personalConnIds) {
+    if (memberConnIds.has(connId)) continue;
+    await revokeConnection(connId, userId);
+  }
 
-  // Spaces outlive the member (S4b). v1 always orphans; never delete the gbrain source.
+  // Company Spaces still outlive the member (S4b). The personal Space does not:
+  // its write connections have to go first (`write_space_id` has no ON DELETE),
+  // then the same archive path as DELETE /sources.
+  if (personalConnIds.length > 0) {
+    await getDb().delete(schema.connections).where(inArray(schema.connections.id, personalConnIds));
+  }
+  for (const space of owned) {
+    const archived = await archiveSpace(space);
+    if (!archived.ok) {
+      throw Object.assign(new Error(`sources archive failed (exit ${archived.exitCode})`), { status: 400 });
+    }
+  }
+
   await getDb().delete(schema.memberships).where(eq(schema.memberships.id, id));
   await audit(orgId, userId, 'member.offboard', id, { revoked, spaces: 'orphaned' });
   return c.json({ revoked, spaces: 'orphaned' });

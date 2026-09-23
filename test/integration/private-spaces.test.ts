@@ -414,7 +414,7 @@ describe('org private-spaces toggle', () => {
 });
 
 describe('offboarding a private-space owner', () => {
-  test('the space survives with a null owner and becomes visible to admins', async () => {
+  test('the personal space is removed and does not become a company space', async () => {
     const email = `ps-offboard-${randomUUID().slice(0, 8)}@example.test`;
     const created = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
     expect(created.status).toBe(200);
@@ -426,8 +426,7 @@ describe('offboarding a private-space owner', () => {
     expect(del.status).toBe(200);
 
     const [space] = await getDb().select().from(schema.spaces).where(eq(schema.spaces.id, spaceId));
-    expect(space).toBeDefined();
-    expect(space?.ownerMembershipId).toBeNull();
+    expect(space).toBeUndefined();
 
     const [gone] = await getDb().select().from(schema.memberships)
       .where(eq(schema.memberships.id, member.id));
@@ -435,7 +434,7 @@ describe('offboarding a private-space owner', () => {
 
     const adminView = await hit('GET', '/api/access-overview', adminCookie);
     const adminBody = await adminView.json() as { spaces: Array<{ id: string }> };
-    expect(adminBody.spaces.some((s) => s.id === spaceId)).toBe(true);
+    expect(adminBody.spaces.some((s) => s.id === spaceId)).toBe(false);
   });
 });
 

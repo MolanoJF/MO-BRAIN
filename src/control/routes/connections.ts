@@ -150,7 +150,9 @@ connectionRoutes.post('/connections/:id/revoke', guard('admin', async (c, ctx) =
   return c.json({ ok: true });
 }));
 
-connectionRoutes.post('/connections/:id/commit', guard('viewer', async (c, { userId, orgId, role }) => {
+connectionRoutes.post('/connections/:id/commit', guard('viewer', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const { userId, orgId, role } = caller;
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({}));
   const message = typeof (body as { message?: unknown })?.message === 'string'
@@ -171,7 +173,11 @@ connectionRoutes.post('/connections/:id/commit', guard('viewer', async (c, { use
     .innerJoin(schema.spaces, eq(schema.connections.writeSpaceId, schema.spaces.id))
     .innerJoin(schema.memberships, eq(schema.connections.membershipId, schema.memberships.id))
     .innerJoin(schema.users, eq(schema.memberships.userId, schema.users.id))
-    .where(eq(schema.connections.id, id));
+    .where(and(
+      eq(schema.connections.id, id),
+      eq(schema.connections.organizationId, orgId),
+      visibleZoneSql(caller),
+    ));
   if (!row || row.organizationId !== orgId) return c.json({ error: 'connection not found' }, 404);
   if (ROLE_RANK[role] < ROLE_RANK.admin && row.memberUserId !== userId) {
     return c.json({ error: 'forbidden' }, 403);
