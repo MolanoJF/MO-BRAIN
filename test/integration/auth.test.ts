@@ -19,7 +19,7 @@ const DECLARED_TABLES = new Set([
   'users', 'sessions', 'accounts', 'verifications',
   'organizations', 'memberships', 'brains', 'spaces', 'secrets',
   'capability_snapshots', 'playbook_ledger', 'audit_log',
-  'connections', 'claim_links',
+  'connections', 'claim_links', 'space_grants',
   // Slice 3 scheduler.
   'schedules', 'schedule_runs', 'schedule_alerts', 'held_notifications',
   // Slice 3.5 upgrades.
