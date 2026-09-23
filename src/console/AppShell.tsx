@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useRoute } from './router.ts';
+import { useOrg } from './OrgContext.tsx';
 import { SourceProvider, useSource } from './SourceContext.tsx';
 import { resolveTab } from './settings/tabs.ts';
 import { SettingsModal } from './settings/SettingsModal.tsx';
@@ -98,6 +99,8 @@ function ShellBody({
   navigate: RouteApi['navigate'];
 }) {
   const { spaces, current, loading } = useSource();
+  const { org } = useOrg();
+  const mode = org?.brainMode ?? 'company';
 
   // The Source that resolution landed on (URL, then remembered, then first)
   // is reflected into the address bar exactly once, as a `replace` — the
@@ -147,7 +150,7 @@ function ShellBody({
   const sourceIdForTree = current?.sourceId ?? null;
 
   const openSettings = () => {
-    navigate({ kind: 'settings', tab: resolveTab(null, isAdmin) });
+    navigate({ kind: 'settings', tab: resolveTab(null, isAdmin, mode) });
   };
   const closeSettings = () => {
     navigate({ kind: 'editor', sourceId: current?.sourceId ?? null, path: selectedPath });
@@ -183,8 +186,9 @@ function ShellBody({
       {route.kind === 'settings' && (
         <SettingsModal label="Settings" onClose={closeSettings}>
           <SettingsPanel
-            tab={resolveTab(route.tab, isAdmin)}
+            tab={resolveTab(route.tab, isAdmin, mode)}
             isAdmin={isAdmin}
+            mode={mode}
             onTab={(tab) => navigate({ kind: 'settings', tab })}
             onClose={closeSettings}
           />

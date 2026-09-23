@@ -4,6 +4,7 @@ import {
   type PackDetail, type SchemaSync, type SourceSummary,
 } from '../api.ts';
 import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
+import { useOrg } from '../OrgContext.tsx';
 import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
 
 /* -------------------------------------------------------------------------
@@ -110,6 +111,7 @@ function reason(e: unknown): string {
 }
 
 export function Sources() {
+  const { org } = useOrg();
   const [rows, setRows] = useState<SourceSummary[]>([]);
   const [unregistered, setUnregistered] = useState<string[]>([]);
   const [listOk, setListOk] = useState(true);
@@ -351,18 +353,20 @@ export function Sources() {
         })}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="font-medium">Add source</h2>
-        <Input placeholder="source-id" value={newId}
-               onChange={(e) => setNewId(e.target.value)} />
-        <Input placeholder="Name" value={newName}
-               onChange={(e) => setNewName(e.target.value)} />
-        <Button variant="primary" disabled={busy !== null || !canAddSource(newId, newName)}
-                onClick={() => void add()}>
-          {busy === 'add' ? 'Adding…' : 'Add source'}
-        </Button>
-        <p className="text-sm text-muted">{notice ?? ISOLATION_NOTICE}</p>
-      </section>
+      {(org?.capabilities.sharedSources ?? true) && (
+        <section className="space-y-3">
+          <h2 className="font-medium">Add source</h2>
+          <Input placeholder="source-id" value={newId}
+                 onChange={(e) => setNewId(e.target.value)} />
+          <Input placeholder="Name" value={newName}
+                 onChange={(e) => setNewName(e.target.value)} />
+          <Button variant="primary" disabled={busy !== null || !canAddSource(newId, newName)}
+                  onClick={() => void add()}>
+            {busy === 'add' ? 'Adding…' : 'Add source'}
+          </Button>
+          <p className="text-sm text-muted">{notice ?? ISOLATION_NOTICE}</p>
+        </section>
+      )}
 
       {unregistered.length > 0 && (
         <section className="space-y-1">

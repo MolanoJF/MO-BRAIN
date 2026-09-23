@@ -20,7 +20,7 @@
  */
 
 export type SettingsTab =
-  | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
+  | 'general' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
   | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
@@ -29,6 +29,8 @@ export interface SettingsTabEntry {
   readonly id: SettingsTab;
   readonly label: string;
   readonly minRole: SettingsTabRole;
+  /** Zones spec D5: hidden in a personal brain, where the API refuses it anyway. */
+  readonly companyOnly?: true;
 }
 
 /**
@@ -38,14 +40,15 @@ export interface SettingsTabEntry {
  * `appearance` goes LAST, and that position is load-bearing rather than
  * aesthetic: `resolveTab(null, isAdmin)` returns the first visible tab, so
  * whatever sits at the top of this list is what opening settings lands on.
- * Putting a per-operator preference there would move every admin off Sources
+ * Putting a per-operator preference there would move every admin off General
  * and every member off Schedules on the way to a tab most people open once.
  */
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
+  { id: 'general', label: 'General', minRole: 'admin' },
   { id: 'sources', label: 'Sources', minRole: 'admin' },
   { id: 'schema', label: 'Schema', minRole: 'admin' },
-  { id: 'members', label: 'Members', minRole: 'admin' },
-  { id: 'access', label: 'Access', minRole: 'admin' },
+  { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
+  { id: 'access', label: 'Access', minRole: 'admin', companyOnly: true },
   { id: 'schedules', label: 'Schedules', minRole: 'viewer' },
   { id: 'health', label: 'Health', minRole: 'viewer' },
   { id: 'spend', label: 'Spend', minRole: 'admin' },
@@ -57,17 +60,19 @@ export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
 const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t.id));
 
 /**
- * The tabs a caller may see. An admin sees all ten; a non-admin sees only
- * the `minRole === 'viewer'` tabs, hidden rather than shown-and-disabled —
- * there is no locked/greyed state to design for, because a member never
- * sees the tab exists.
+ * The tabs a caller may see. An admin in company mode (the default) sees all
+ * eleven; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
+ * rather than shown-and-disabled — there is no locked/greyed state to design
+ * for, because a member never sees the tab exists. Personal mode additionally
+ * hides `companyOnly` tabs.
  *
  * `appearance` is `viewer`, which is to say everybody: the theme is a
  * property of the person looking at the screen, not of their permissions, and
  * an admin-gated dark mode would be a member staring at the wrong one.
  */
-export function visibleTabs(isAdmin: boolean): SettingsTabEntry[] {
-  return SETTINGS_TABS.filter((t) => isAdmin || t.minRole === 'viewer');
+export function visibleTabs(isAdmin: boolean, mode: 'personal' | 'company' = 'company'): SettingsTabEntry[] {
+  return SETTINGS_TABS.filter((t) =>
+    (isAdmin || t.minRole === 'viewer') && !(mode === 'personal' && t.companyOnly));
 }
 
 /** The narrowing the router needs to validate a raw URL segment. */
@@ -78,13 +83,15 @@ export function isSettingsTab(value: string): value is SettingsTab {
 /**
  * What the modal actually opens on. A valid, visible tab opens as asked.
  * An unknown segment, or a tab the caller's role cannot see, falls back to
- * the first visible tab — `sources` for an admin, `schedules` for a member
+ * the first visible tab — `general` for an admin, `schedules` for a member
  * — rather than showing an empty panel. This matters most for the case
  * that looks harmless: `spend` is a real, valid tab id, so checking
  * `isSettingsTab` alone would let a member's pasted admin URL through.
  */
-export function resolveTab(requested: string | null, isAdmin: boolean): SettingsTab {
-  const visible = visibleTabs(isAdmin);
+export function resolveTab(
+  requested: string | null, isAdmin: boolean, mode: 'personal' | 'company' = 'company',
+): SettingsTab {
+  const visible = visibleTabs(isAdmin, mode);
   if (requested !== null && isSettingsTab(requested) && visible.some((t) => t.id === requested)) {
     return requested;
   }

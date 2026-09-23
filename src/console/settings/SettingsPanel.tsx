@@ -11,6 +11,7 @@ import { Button, NavItem } from '../ui/index.tsx';
  * pages themselves export `export function Sources()` etc., not a default.
  */
 const PAGES: Record<SettingsTab, ComponentType> = {
+  general: lazy(() => import('../pages/General.tsx').then((m) => ({ default: m.General }))),
   sources: lazy(() => import('../pages/Sources.tsx').then((m) => ({ default: m.Sources }))),
   schema: lazy(() => import('../pages/Schema.tsx').then((m) => ({ default: m.Schema }))),
   members: lazy(() => import('../pages/Members.tsx').then((m) => ({ default: m.Members }))),
@@ -24,6 +25,7 @@ const PAGES: Record<SettingsTab, ComponentType> = {
 };
 
 const LABEL: Record<SettingsTab, string> = {
+  general: 'General',
   sources: 'Sources', schema: 'Schema', members: 'Members', access: 'Access',
   schedules: 'Schedules', health: 'Health', spend: 'Spend', runs: 'Runs', upgrades: 'Upgrades',
   appearance: 'Appearance',
@@ -53,10 +55,11 @@ const LABEL: Record<SettingsTab, string> = {
  * live `.nav-item` in the console, and that rule is now deleted.
  */
 export function SettingsPanel({
-  tab, isAdmin, onTab, onClose,
+  tab, isAdmin, mode, onTab, onClose,
 }: {
   tab: SettingsTab;
   isAdmin: boolean;
+  mode: 'personal' | 'company';
   onTab: (tab: SettingsTab) => void;
   onClose: () => void;
 }) {
@@ -71,7 +74,7 @@ export function SettingsPanel({
       </div>
       <div className="settings-body">
         <nav className="settings-nav" aria-label="Settings sections">
-          {visibleTabs(isAdmin).map((t) => (
+          {visibleTabs(isAdmin, mode).map((t) => (
             <NavItem key={t.id} active={t.id === tab} onClick={() => onTab(t.id)}>
               {t.label}
             </NavItem>

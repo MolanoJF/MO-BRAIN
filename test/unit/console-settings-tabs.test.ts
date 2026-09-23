@@ -10,14 +10,14 @@ import {
  * blank panel.
  */
 
-describe('the registry: ten tabs, in the deliberate menu order', () => {
-  test('all ten ids appear, in the order the product owner asked for', () => {
+describe('the registry: eleven tabs, in the deliberate menu order', () => {
+  test('all eleven ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
     // appearance sits LAST for a mechanical reason, asserted below: the first
     // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      'sources', 'schema', 'members', 'access', 'schedules',
+      'general', 'sources', 'schema', 'members', 'access', 'schedules',
       'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
   });
@@ -25,6 +25,7 @@ describe('the registry: ten tabs, in the deliberate menu order', () => {
   test('minRole matches the design doc\'s table exactly', () => {
     const roles = Object.fromEntries(SETTINGS_TABS.map((t) => [t.id, t.minRole]));
     expect(roles).toEqual({
+      general: 'admin',
       sources: 'admin', schema: 'admin', members: 'admin', access: 'admin',
       schedules: 'viewer', health: 'viewer', spend: 'admin', runs: 'viewer',
       upgrades: 'viewer', appearance: 'viewer',
@@ -33,7 +34,7 @@ describe('the registry: ten tabs, in the deliberate menu order', () => {
 });
 
 describe('visibleTabs: role-gated menu contents', () => {
-  test('an admin sees all ten tabs, in registry order', () => {
+  test('an admin sees all eleven tabs, in registry order', () => {
     expect(visibleTabs(true).map((t) => t.id)).toEqual(SETTINGS_TABS.map((t) => t.id));
   });
 
@@ -52,7 +53,7 @@ describe('visibleTabs: role-gated menu contents', () => {
   test('appearance is last, so it never becomes the default settings landing', () => {
     // resolveTab(null, …) returns the FIRST visible tab, which is what opening
     // settings lands on. Moving a preferences tab to the top of the registry
-    // would silently move every admin off Sources and every member off
+    // would silently move every admin off General and every member off
     // Schedules — a product change disguised as a reordering.
     expect(visibleTabs(true).at(-1)!.id).toBe('appearance');
     expect(visibleTabs(false).at(-1)!.id).toBe('appearance');
@@ -93,12 +94,34 @@ describe('resolveTab: what the modal actually opens on', () => {
   });
 
   test('an unknown segment falls back to the first visible tab', () => {
-    expect(resolveTab('nonsense', true)).toBe('sources');
+    expect(resolveTab('nonsense', true)).toBe('general');
     expect(resolveTab('nonsense', false)).toBe('schedules');
   });
 
   test('no requested tab at all (null) also falls back, same as unknown', () => {
-    expect(resolveTab(null, true)).toBe('sources');
+    expect(resolveTab(null, true)).toBe('general');
     expect(resolveTab(null, false)).toBe('schedules');
+  });
+});
+
+describe('personal mode hides the team tabs', () => {
+  test('an admin in personal mode sees no Members or Access', () => {
+    const ids = visibleTabs(true, 'personal').map((t) => t.id);
+    expect(ids).not.toContain('members');
+    expect(ids).not.toContain('access');
+    expect(ids[0]).toBe('general');
+  });
+
+  test('company mode is the default and shows them', () => {
+    expect(visibleTabs(true).map((t) => t.id)).toContain('members');
+    expect(visibleTabs(true, 'company').map((t) => t.id)).toContain('access');
+  });
+
+  test('a pasted members URL in personal mode lands on General', () => {
+    expect(resolveTab('members', true, 'personal')).toBe('general');
+  });
+
+  test('admins open settings on General', () => {
+    expect(resolveTab(null, true)).toBe('general');
   });
 });

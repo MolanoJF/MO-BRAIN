@@ -873,3 +873,16 @@ export const grantsApi = {
   remove: (membershipId: string, spaceId: string) =>
     api.delete<{ removed: boolean; revoked: string[]; rescoped: string[] }>('/grants', { membershipId, spaceId }),
 };
+
+export type OrgInfo = {
+  id: string; name: string; brainMode: 'personal' | 'company';
+  capabilities: { invite: boolean; sharedSources: boolean; grants: boolean };
+  memberCount: number; role: string;
+};
+
+export const orgApi = {
+  get: () => api.get<OrgInfo>('/org'),
+  rename: (name: string) => api.patch<{ ok: true; name: string }>('/org', { name }),
+  setMode: (mode: 'personal' | 'company', name?: string) =>
+    api.patch<{ ok: true; brainMode: string }>('/org/mode', name ? { mode, name } : { mode }),
+};

@@ -6,6 +6,7 @@ import { Wizard } from './pages/Wizard.tsx';
 import { Claim } from './pages/Claim.tsx';
 import { legacyRedirect } from './router.ts';
 import { AppShell } from './AppShell.tsx';
+import { OrgProvider } from './OrgContext.tsx';
 
 type Phase = 'loading' | 'bootstrap' | 'signin' | 'wizard' | 'ready';
 
@@ -118,5 +119,5 @@ export function App() {
     return <Wizard onReady={refresh} />;
   }
 
-  return <AppShell isAdmin={isAdmin} />;
+  return <OrgProvider><AppShell isAdmin={isAdmin} /></OrgProvider>;
 }
