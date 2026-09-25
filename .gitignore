@@ -6,4 +6,7 @@ contracts/*/capability.local.json
 # SDD scratch workspace (ledger, briefs, review packages)
 .superpowers/
 
+# Local git worktrees
+.worktrees/
+
 dist/
