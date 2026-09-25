@@ -153,6 +153,10 @@ function post(path: string, body: unknown) {
   return fetchInsecure(path, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body) });
 }
 
+function patch(path: string, body: unknown) {
+  return fetchInsecure(path, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(body) });
+}
+
 function get(path: string) {
   return fetchInsecure(path, { headers: { cookie } });
 }
@@ -454,6 +458,10 @@ describe('Slice 2 seam gate B', () => {
       const schema = await post('/api/wizard/schema', { pack: 'gbrain-base-v2' });
       expect([200, 409]).toContain(schema.status);
     }
+
+    const mode = await patch('/api/org/mode', { mode: 'company' });
+    expect(mode.status).toBe(200);
+    expect((await readJson<{ brainMode: string }>(mode, 'PATCH /api/org/mode')).brainMode).toBe('company');
 
     for (const s of SPACES) {
       const res = await post('/api/wizard/space', { sourceId: s.sourceId, name: s.name });

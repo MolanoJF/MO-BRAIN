@@ -157,6 +157,16 @@ describe('Slice 1 exit gate', () => {
     })).status).toBe(200);
     expect((await post('/api/wizard/search-mode', { mode: 'conservative' })).status).toBe(200);
     expect((await post('/api/wizard/schema', { pack: 'gbrain-base-v2' })).status).toBe(200);
+    // Fresh bootstrap is personal (zones D6). This gate's `shared` source is a
+    // company Space: /api/wizard/space requires sharedSources. The owner is
+    // alone here, so D3 allows the switch. Already-company repeat runs 200 too.
+    const mode = await fetchInsecure('/api/org/mode', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ mode: 'company' }),
+    });
+    expect(mode.status).toBe(200);
+    expect((await mode.json() as { brainMode: string }).brainMode).toBe('company');
     expect((await post('/api/wizard/space', { sourceId: 'shared', name: 'Shared' })).status).toBe(200);
 
     const finish = await post('/api/wizard/finish', {});

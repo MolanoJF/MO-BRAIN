@@ -53,7 +53,7 @@ type Json = Record<string, unknown>;
 type ApiResponse = { status: number; body: Json; cookie: string };
 
 async function request(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH',
   path: string,
   body: unknown,
   cookie = '',
@@ -165,6 +165,11 @@ if (lifecycleIndex(current.lifecycle) < 3) {
 }
 
 if (lifecycleIndex(current.lifecycle) < 4) {
+  const mode = await request('PATCH', '/api/org/mode', { mode: 'company' }, cookie);
+  if (mode.status !== 200 || mode.body.brainMode !== 'company') {
+    throw new Error(`PATCH /api/org/mode -> ${mode.status}: ${JSON.stringify(mode.body)}`);
+  }
+  console.log('wizard: brain mode company (shared Spaces require it)');
   for (const sourceId of SOURCES) {
     const r = await request('POST', '/api/wizard/space', { sourceId, name: sourceId }, cookie);
     if (r.status !== 200) throw new Error(`/wizard/space ${sourceId} -> ${r.status}: ${JSON.stringify(r.body)}`);
