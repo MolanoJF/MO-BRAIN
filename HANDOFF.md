@@ -1,10 +1,10 @@
 # Handoff — read this first
 
-**Mobrain 1.0.0 shipped.** This is the cold-start entry point for a released product, not a build in
-progress. Slices 0–5 are complete and merged on `main` (Slice 5 at the `v1.0.0` tag); `main` is the only
-branch. The eight verification commands are green on the frozen tree, e2e twice consecutively, with
-verbatim tails in [`PROGRESS.md`](docs/superpowers/plans/PROGRESS.md). The release artifacts are the three
-published digests below — **a release is its digests; a tag is a label someone can move.**
+**Mobrain 1.0.0 is the tagged release.** `main` has moved since that tag. Tip `578bbaa` (2026-09-23) is personal-and-company zones plus optional Google sign-in, on top of the console, schema, skills, and autopilot work that landed after the tag. Nothing since `v1.0.0` has been tagged or published. The published digests below are still the 1.0.0 artifacts.
+
+**Next product slice:** hosted sandboxes, §5.4 of [`docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md`](docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md). It needs its own brainstorm before a plan. The open questions there are who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud (Slice 6) stays deferred; pricing still waits on a search-mode cost measurement on a real corpus.
+
+[`PROGRESS.md`](docs/superpowers/plans/PROGRESS.md) and [`docs/pending-tasks.md`](docs/pending-tasks.md) still describe the 1.0.0 close. Where they say the next stage is Slice 6, this file wins.
 
 ---
 
@@ -76,7 +76,33 @@ populated corpus before pricing, and that is the deferred slice's first job.
 
 ---
 
+## What landed on main after 1.0.0
+
+Not a release. All of this is on `main` at `578bbaa` and is not in the published `1.0.0` images.
+
+- Local-first install: no domain, LAN address, internal TLS.
+- Console shell and design system, and editing a Space's markdown in the console.
+- Schema-pack management and custom packs, including folder scaffolding from the pack.
+- Private member Spaces, the autopilot tripwire, member agent skills over MCP, and Space git-bundle export.
+- **Zones 5.1–5.3.** Spec: [`docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md`](docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md). Plans: [`zones-1-privacy`](docs/superpowers/plans/2026-09-22-zones-1-privacy.md), [`zones-2-personal-first`](docs/superpowers/plans/2026-09-22-zones-2-personal-first.md), [`zones-3-invite-login`](docs/superpowers/plans/2026-09-22-zones-3-invite-login.md).
+- **Optional Google sign-in.** Plan: [`docs/superpowers/plans/2026-09-22-google-exclusive-auth.md`](docs/superpowers/plans/2026-09-22-google-exclusive-auth.md). Email and password stay. The button exists only when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
+
+Zones behavior a caller can rely on:
+
+- A fresh install is a personal brain on schema pack `gbrain-base-v2`. The wizard has no mode step and skips the schema step when that pack is already stored.
+- Company mode is the owner's switch in Settings → General. Switching back to personal is allowed only while that owner is the only member and no invite is open.
+- Company Space access is an explicit `space_grants` row. Personal mode refuses invites, shared sources, and grants with `403 { error: "company_mode_required" }`.
+- An invite creates a placeholder account. The claim page is "Create your account" and sets a password only on that placeholder.
+- Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. The admin Spend page still collapses that member's personal automations to one row.
+- The Space picker groups My Brain and Company. A member chooses which granted company Spaces their agent reads from the My Brain settings tab.
+
+**Not built:** hosted sandboxes (§5.4). Per-member budget caps were deferred with them.
+
+---
+
 ## Live state on the dev stack (measured 2026-09-19)
+
+**Historical.** These measurements are from 2026-09-19, before zones and optional Google. This handoff pass did not re-measure the dev stack.
 
 - **The stack is up** on the base + dev compose files: `caddy`, `postgres` (healthy), `gbrain-ops` and
   `control-plane` and `scheduler` (all `ghcr.io/molanojf/control-plane:dev`), `gbrain-serve`/`gbrain-worker`
@@ -116,7 +142,7 @@ populated corpus before pricing, and that is the deferred slice's first job.
 - The `bs-fp-pg` scratch Postgres is still up on `localhost:5432` for host-run tests; `test/integration`
   needs `CONTROL_DATABASE_URL` exported. Pausing the scheduler is `docker compose stop scheduler`.
 
-### The console design system (branch `feat/console-shell-redesign`, HEAD `ffd64ca`)
+### The console design system (branch `feat/console-shell-redesign`, HEAD `ffd64ca`; the branch is gone and `ffd64ca` is an ancestor of `main`)
 
 - **The console has a design system now**, ported from qm's admin kit (`C:\Users\juanp\Desktop\qm\plugins\admin`,
   read-only). Tokens: `src/console/styles/tokens.css` — two tiers, and `@theme inline` (not `@theme`) is the
@@ -235,7 +261,7 @@ non-promises.
 | | |
 |---|---|
 | Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
-| Branch | `feat/console-shell-redesign` — the shell redesign plus the design system; Slices 0–5 are all merged to `main` (Slice 4 at `6ba1754`, Slice 5 at the `v1.0.0` tag) |
+| Branch | `main` at `578bbaa`, tracking `origin/main`. Slices 0–5 are merged. The post-1.0.0 work in the section above is on this same branch. |
 | Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
 | Slice 5 plan | [`docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`](docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md) — D1–D13, Tasks 1–18 |
 | Slice 5 findings | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) — U1–U3, P1–P9, F20–F32, the deferrals |
@@ -250,8 +276,7 @@ non-promises.
 
 ## Process facts the next session needs
 
-- **The next stage is the deferred cloud slice**, not more self-host GA work. Execute it from a new plan
-  written at that gate; D12 records the substrate decision and Open Question 2 keeps pricing open.
+- **The next product slice is hosted sandboxes (zones spec §5.4).** It has no plan yet; brainstorm it before writing one. Slice 6 (managed cloud) stays deferred behind the search-mode cost measurement. `PROGRESS.md` still names Slice 6 as next; this file wins.
 - **`bash` on PATH is a broken WSL relay** (`C:\Windows\system32\bash.exe`). The two build gates
   (`test/build/pin.test.sh`, `test/build/harness-pin.test.sh`) must be run through **Git bash**:
   `"C:/Program Files/Git/bin/bash.exe" test/build/pin.test.sh`. Export `GBRAIN_VERSION` / `HARNESS_VERSION`
