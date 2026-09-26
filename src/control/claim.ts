@@ -3,11 +3,9 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
 import {
   compensateGrantedConnection,
-  grantCredentialsOutPath,
   mcpUrl,
   provisionConnection,
 } from './connections.ts';
-import { takeGrantCredentials } from './opsClient.ts';
 import { skillsPublished } from './configValue.ts';
 import { setInvitePassword } from './inviteAccount.ts';
 import type { Role } from './rbac.ts';
@@ -141,10 +139,9 @@ export async function claim(token: string, email: string, password?: string): Pr
         budgetUsdPerDay: row.budgetUsdPerDay != null ? Number(row.budgetUsdPerDay) : undefined,
       }, membership.userId);
       granted.push({ id: provisioned.connectionId, clientName: row.clientName });
-      const credentials = await takeGrantCredentials(grantCredentialsOutPath(provisioned.connectionId));
       connections.push({
         connectionId: provisioned.connectionId,
-        credentials,
+        credentials: provisioned.memberHandoff,
         harness: row.harness,
         mcp_url: mcpUrlFromGrant(provisioned.credentials) ?? mcpUrl(),
       });

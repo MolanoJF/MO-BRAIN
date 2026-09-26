@@ -13,7 +13,7 @@ import {
   type GrantProfileId,
 } from '../contracts/compile.ts';
 
-/** Ops-side --credentials-out path. Claim takes (reads+deletes) this file once. */
+/** Ops-side --credentials-out path for the member client. Taken once on a fresh grant. */
 export function grantCredentialsOutPath(connectionId: string): string {
   return `/srv/gbrain-home/.creds-${connectionId}.json`;
 }
@@ -31,6 +31,11 @@ export function serverClientName(memberClientName: string): string {
 /** Where the server client's secret lives: envelope-encrypted, never on a row. */
 export function serverClientSecretName(connectionId: string): string {
   return `connection:${connectionId}:server_client`;
+}
+
+/** Where the member client's secret lives: envelope-encrypted, never on a row. */
+export function memberClientSecretName(connectionId: string): string {
+  return `connection:${connectionId}:member_client`;
 }
 
 /** Ops-side handoff for the server client. Taken once, then deleted (S2/S3c). */
@@ -101,7 +106,7 @@ export async function previewConnection(input: ConnectionInput): Promise<{
 export async function provisionConnection(
   input: ConnectionInput,
   actor: string,
-): Promise<{ connectionId: string; credentials: unknown }> {
+): Promise<{ connectionId: string; credentials: unknown; memberHandoff?: unknown }> {
   await assertMembership(input.organizationId, input.membershipId);
   const { write, reads } = await loadSpaces(input.organizationId, input.writeSpaceId, input.readSpaceIds);
   const compiled = compileFrom(input, write, reads);
@@ -152,8 +157,14 @@ export async function provisionConnection(
   // D8: the server-side client, alongside the member's. Same compiler output —
   // same write Space, same federatedRead, same fence, same profile — because it
   // is the same `compiled`. Its secret goes to `secrets`, not to a row.
+  // The member handoff is taken first, before that second grant. A failure
+  // after the member client exists revokes it in the catch below.
   let serverClientId: string;
+  let memberHandoff: unknown;
   try {
+    memberHandoff = await storeMemberClientHandoff(
+      input.organizationId, connectionId, gbrainClientId, credentialsOut,
+    );
     serverClientId = await provisionServerClient(
       connectionId, input.organizationId, name, input.harness, compiled,
     );
@@ -188,9 +199,30 @@ export async function provisionConnection(
     writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
     profile: compiled.profile,
   });
-  // Grant JSON is the redacted receipt (client_id, not client_secret). The
-  // secret stays in the ops-side --credentials-out file; we do not cat it (S2).
-  return { connectionId, credentials: r.json };
+  // credentials is the redacted grant receipt. memberHandoff is the taken
+  // private handoff, also stored only under memberClientSecretName.
+  return { connectionId, credentials: r.json, memberHandoff };
+}
+
+/**
+ * Fresh-grant only. Take the member client's private handoff, keep the only
+ * copy envelope-encrypted, and delete gbrain's delivery journal so the
+ * plaintext file is not a second copy.
+ */
+async function storeMemberClientHandoff(
+  organizationId: string,
+  connectionId: string,
+  clientId: string,
+  credentialsOut: string,
+): Promise<unknown> {
+  const handoff = await takeGrantCredentials(credentialsOut);
+  if (!handoff || typeof handoff !== 'object' || !('client_secret' in handoff)
+    || typeof handoff.client_secret !== 'string' || handoff.client_secret.length === 0) {
+    throw new Error('member client handoff carried no client_secret');
+  }
+  await storeSecret(organizationId, memberClientSecretName(connectionId), JSON.stringify(handoff));
+  await deleteCredentialJournal(clientId);
+  return handoff;
 }
 
 /**

@@ -129,7 +129,8 @@ const {
   previewConnection, provisionConnection, revokeConnection, createPendingConnection,
   retiredClientName, widenConnectionSurfaces,
 } = await import('../../src/control/connections.ts');
-const { serverClientSecretName, serverClientName } = await import('../../src/control/connections.ts');
+const { serverClientSecretName, serverClientName, memberClientSecretName } =
+  await import('../../src/control/connections.ts');
 const { mintRunToken, revokeRunToken } = await import('../../src/agent/token.ts');
 const { readSecret } = await import('../../src/control/secrets.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
@@ -351,6 +352,9 @@ describe('provisionConnection', () => {
     expect(row?.gbrainClientId).toBe('gbrain_cl_mock');
     expect(row?.provisionedAt).toBeTruthy();
     expect(JSON.stringify(row)).not.toMatch(/client_secret|sk-/);
+
+    const stored = await readSecret(orgId, memberClientSecretName(result.connectionId));
+    expect(JSON.parse(String(stored))).toEqual(HANDOFF);
   });
 
   test('rescope never requests --dry-run on auth.rescopeClient', async () => {
@@ -393,7 +397,7 @@ describe('provisionConnection', () => {
     expect(server!.params?.credentialsOut).not.toBe(member!.params?.credentialsOut);
     const serverOut = String(server!.params?.credentialsOut);
     expect(serverOut).toMatch(/^\/srv\/gbrain-home\/\.creds-[\w-]+-server\.json$/);
-    expect(handoffsTaken).toEqual([serverOut]);
+    expect(handoffsTaken).toEqual([String(member!.params?.credentialsOut), serverOut]);
 
     const [row] = await getDb().select().from(schema.connections)
       .where(eq(schema.connections.id, result.connectionId));
@@ -406,7 +410,7 @@ describe('provisionConnection', () => {
     expect(JSON.parse(String(stored)).client_secret).toBe(HANDOFF.client_secret);
     // F7: the plaintext journal the grant retained is deleted, and no secret
     // ever reaches the connection row.
-    expect(journalDeletes).toEqual(['gbrain_cl_mock_1']);
+    expect(journalDeletes).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
     expect(JSON.stringify(row)).not.toMatch(/not-a-real-secret/);
   });
 
@@ -443,10 +447,25 @@ describe('provisionConnection', () => {
     const result = await provisionConnection(input(), actor);
     calls.length = 0;
 
+    const memberName = memberClientSecretName(result.connectionId);
+    const versionsBefore = (await getDb().select({ version: schema.secrets.version })
+      .from(schema.secrets)
+      .where(eq(schema.secrets.name, memberName)))
+      .map((r) => r.version)
+      .sort((a, b) => a - b);
+    expect(versionsBefore).toEqual([1]);
+
     await provisionConnection(
       input({ connectionId: result.connectionId, readSpaceIds: [] }),
       actor,
     );
+
+    const versionsAfter = (await getDb().select({ version: schema.secrets.version })
+      .from(schema.secrets)
+      .where(eq(schema.secrets.name, memberName)))
+      .map((r) => r.version)
+      .sort((a, b) => a - b);
+    expect(versionsAfter).toEqual(versionsBefore);
 
     const rescopes = calls.filter((c) => c.op === 'auth.rescopeClient');
     expect(rescopes.map((c) => c.params?.id)).toEqual(['gbrain_cl_mock_1', 'gbrain_cl_mock']);

@@ -94,8 +94,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
 }));
 
 const { mintClaimLink, claim } = await import('../../src/control/claim.ts');
-const { grantCredentialsOutPath, serverCredentialsOutPath, serverClientName } =
+const { grantCredentialsOutPath, serverCredentialsOutPath, serverClientName, memberClientSecretName } =
   await import('../../src/control/connections.ts');
+const { readSecret } = await import('../../src/control/secrets.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
 const { clientName } = await import('../../src/contracts/compile.ts');
@@ -314,9 +315,8 @@ describe('claim', () => {
     const ids = result.connections.map((c) => c.connectionId).sort();
     expect(ids).toEqual([a, b].sort());
 
-    // D8 (Task 5): two pending Connections, two clients each — 4 grants and 4
-    // handoffs, one per client (the server client's taken inside
-    // provisionConnection, the member's taken by claim itself).
+    // Two pending Connections, two clients each. Both handoffs are taken inside
+    // provisionConnection (member path, then server path), so 4 grants and 4 takes.
     const grants = calls.filter((c) => c.op === 'mcp.grant' && c.opts?.dryRun !== true);
     expect(grants.length).toBe(4);
     expect(takes.length).toBe(4);
@@ -329,7 +329,7 @@ describe('claim', () => {
     }
   });
 
-  test('credentials from takeGrantCredentials are on the claim result and not persisted', async () => {
+  test('member handoff is on the claim result and only in the encrypted member secret', async () => {
     const pendingId = await insertPending(writeSpace, 'claude-code');
     const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
     const result = await claim(minted.token, EMAIL);
@@ -353,13 +353,11 @@ describe('claim', () => {
       serverClientName(clientName(membershipId, writeSpace.sourceId)),
     ]);
 
-    // One handoff per client, from one file each, never a shared file: the
-    // server client's is taken inside provisionServerClient (which is how its
-    // secret reaches the `secrets` table), the member's by claim after
-    // provisionConnection returns — and only the member's lands on the result.
+    // Both takes happen inside provisionConnection, member file then server file.
+    // Only the member handoff lands on the claim result.
     expect(takes).toEqual([
-      serverCredentialsOutPath(pendingId),
       grantCredentialsOutPath(pendingId),
+      serverCredentialsOutPath(pendingId),
     ]);
 
     const claimRows = await getDb().select().from(schema.claimLinks);
@@ -369,6 +367,12 @@ describe('claim', () => {
     expect(JSON.stringify(connRows)).not.toContain(SECRET);
     expect(JSON.stringify(audits)).not.toContain(SECRET);
     expect(JSON.stringify(claimRows)).not.toContain(minted.token);
+
+    const stored = await readSecret(orgId, memberClientSecretName(pendingId));
+    expect(JSON.parse(String(stored))).toEqual({
+      client_id: 'gbrain_cl_taken',
+      client_secret: SECRET,
+    });
   });
 
   test('skillsPublished is true only when config.get reads back exactly "true"', async () => {
