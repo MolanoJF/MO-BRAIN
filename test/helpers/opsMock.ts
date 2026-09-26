@@ -17,7 +17,13 @@ export type OpsResult = {
 export type OpsMock = {
   calls: OpsCall[];
   seedSpaceCalls: string[];
+  /** Client ids passed to deleteCredentialJournal, in call order. */
+  journalDeletes: string[];
   reset(): void;
+  /** When set, replaces the default handoff. Pass null to restore it. */
+  setTake(handler: ((path: string) => Promise<unknown> | unknown) | null): void;
+  /** When set, may rewrite a callOps result (stdout for config.get). */
+  setCallDecorator(fn: ((op: string, result: OpsResult) => OpsResult) | null): void;
 };
 
 const HANDOFF = {
@@ -36,7 +42,10 @@ const HANDOFF = {
 export function installOpsMock(): OpsMock {
   const calls: OpsCall[] = [];
   const seedSpaceCalls: string[] = [];
+  const journalDeletes: string[] = [];
   let grantSeq = 0;
+  let takeHandler: ((path: string) => Promise<unknown> | unknown) | null = null;
+  let callDecorator: ((op: string, result: OpsResult) => OpsResult) | null = null;
 
   const grantJson = (dryRun: boolean): unknown => {
     if (dryRun) return { status: 'preview', grant: { profile: 'memory-writer', sourceId: 'customers' } };
@@ -62,7 +71,8 @@ export function installOpsMock(): OpsMock {
     brainUsage: async () => { throw new Error('ops unreachable'); },
     callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) => {
       calls.push({ op, params, opts });
-      return ok(op, opts);
+      const result = ok(op, opts);
+      return callDecorator ? callDecorator(op, result) : result;
     },
     patchFilePlaneConfig: async () => {},
     putSchemaPack: async () => {},
@@ -71,8 +81,14 @@ export function installOpsMock(): OpsMock {
     removeSchemaPack: async () => ({ removed: false }),
     seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
     resetBrainSchema: async () => {},
-    takeGrantCredentials: async () => HANDOFF,
-    deleteCredentialJournal: async () => ({ deleted: true }),
+    takeGrantCredentials: async (path: string) => {
+      if (takeHandler) return takeHandler(path);
+      return HANDOFF;
+    },
+    deleteCredentialJournal: async (clientId: string) => {
+      journalDeletes.push(clientId);
+      return { deleted: true };
+    },
     opsHealthy: async () => true,
     commitAsMember: async () => ({ committed: false, sha: null }),
     inspectRepos: async () => [],
@@ -91,6 +107,15 @@ export function installOpsMock(): OpsMock {
   return {
     calls,
     seedSpaceCalls,
-    reset() { calls.length = 0; seedSpaceCalls.length = 0; },
+    journalDeletes,
+    reset() {
+      calls.length = 0;
+      seedSpaceCalls.length = 0;
+      journalDeletes.length = 0;
+      takeHandler = null;
+      callDecorator = null;
+    },
+    setTake(handler) { takeHandler = handler; },
+    setCallDecorator(fn) { callDecorator = fn; },
   };
 }

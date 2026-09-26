@@ -9,6 +9,9 @@ const ops = installOpsMock();
 const { getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { sql, and, eq } = await import('drizzle-orm');
 const { buildZoneFixture, hit } = await import('../helpers/zoneFixture.ts');
+const { memberClientSecretName, grantCredentialsOutPath } = await import('../../src/control/connections.ts');
+const { storeSecret, readSecret } = await import('../../src/control/secrets.ts');
+const { wiringSnippet } = await import('../../src/control/harness.ts');
 type ZoneFixture = Awaited<ReturnType<typeof buildZoneFixture>>;
 
 pinDb();
@@ -316,6 +319,274 @@ describe('my connection — self-service read scope', () => {
   test("another member's private Space is never readable", async () => {
     const res = await hit('PUT', '/api/my/connection', fx.bob.cookie, { readSpaceIds: [fx.alice.privateSpaceId] });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('my mcp config', () => {
+  const bobHandoff = {
+    version: 1,
+    mcp_url: 'https://bob.example.test/mcp',
+    client_id: 'gbrain_cl_bob_owned',
+    client_secret: 'bob-member-secret-do-not-leak-0123456789',
+  };
+  const aliceHandoff = {
+    version: 1,
+    mcp_url: 'https://alice.example.test/mcp',
+    client_id: 'gbrain_cl_alice_owned',
+    client_secret: 'alice-member-secret-do-not-leak-9876543210',
+  };
+
+  async function putHandoff(connectionId: string, handoff: object) {
+    await storeSecret(fx.orgId, memberClientSecretName(connectionId), JSON.stringify(handoff));
+  }
+
+  async function clearHandoff(connectionId: string) {
+    await getDb().delete(schema.secrets).where(and(
+      eq(schema.secrets.organizationId, fx.orgId),
+      eq(schema.secrets.name, memberClientSecretName(connectionId)),
+    ));
+  }
+
+  type McpBody = {
+    mcp_url: string;
+    harness: string;
+    credentials: { client_id: string; client_secret: string; mcp_url: string };
+    snippet: string;
+  };
+
+  test('the caller gets their own url, client id, secret, and snippet', async () => {
+    await putHandoff(fx.bob.privateConnectionId, bobHandoff);
+    ops.setTake(async () => { throw new Error('ENOENT: no such file or directory'); });
+
+    const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+    expect(res.status).toBe(200);
+    const body = await res.json() as McpBody;
+    expect(body.mcp_url).toBe(bobHandoff.mcp_url);
+    expect(body.harness).toBe('generic');
+    expect(body.credentials).toEqual(bobHandoff);
+    expect(body.snippet).toBe(wiringSnippet('generic', {
+      client_id: bobHandoff.client_id,
+      mcp_url: bobHandoff.mcp_url,
+    }, { skills: false }));
+    expect(ops.calls.some((c) => c.op === 'config.get' && c.params?.key === 'mcp.publish_skills')).toBe(true);
+    expect(ops.journalDeletes).toEqual([]);
+  });
+
+  test("another member's secret is not in the body", async () => {
+    await putHandoff(fx.bob.privateConnectionId, bobHandoff);
+    await putHandoff(fx.alice.privateConnectionId, aliceHandoff);
+    ops.setTake(async () => { throw new Error('ENOENT: no such file or directory'); });
+
+    const asBob = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+    expect(asBob.status).toBe(200);
+    const bobBody = JSON.stringify(await asBob.json());
+    expect(bobBody).toContain(bobHandoff.client_id);
+    expect(bobBody).toContain(bobHandoff.client_secret);
+    expect(bobBody).not.toContain(aliceHandoff.client_id);
+    expect(bobBody).not.toContain(aliceHandoff.client_secret);
+
+    const asAlice = await hit('GET', '/api/my/mcp', fx.alice.cookie);
+    expect(asAlice.status).toBe(200);
+    const aliceBody = JSON.stringify(await asAlice.json());
+    expect(aliceBody).toContain(aliceHandoff.client_secret);
+    expect(aliceBody).not.toContain(bobHandoff.client_secret);
+  });
+
+  test('a non-generic harness still gets that harness snippet', async () => {
+    await putHandoff(fx.bob.privateConnectionId, bobHandoff);
+    const [before] = await getDb().select({ harness: schema.connections.harness })
+      .from(schema.connections).where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    await getDb().update(schema.connections).set({ harness: 'claude-code' })
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    try {
+      ops.setCallDecorator((op, result) => (
+        op === 'config.get' ? { ...result, ok: true, stdout: 'true\n' } : result
+      ));
+      const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+      expect(res.status).toBe(200);
+      const body = await res.json() as McpBody;
+      expect(body.harness).toBe('claude-code');
+      expect(body.credentials.client_secret).toBe(bobHandoff.client_secret);
+      expect(body.snippet).toBe(wiringSnippet('claude-code', {
+        client_id: bobHandoff.client_id,
+        mcp_url: bobHandoff.mcp_url,
+      }, { skills: true }));
+    } finally {
+      await getDb().update(schema.connections).set({ harness: before!.harness })
+        .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    }
+  });
+
+  test('pending returns connection_pending and does not take or show the stored secret', async () => {
+    await putHandoff(fx.bob.privateConnectionId, bobHandoff);
+    let took = false;
+    ops.setTake(async () => { took = true; throw new Error('ENOENT: no such file or directory'); });
+    await getDb().update(schema.connections).set({ state: 'pending' })
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    try {
+      const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'connection_pending' });
+      expect(took).toBe(false);
+      expect(ops.journalDeletes).toEqual([]);
+      expect(ops.calls.some((c) => c.op === 'auth.revokeClient')).toBe(false);
+    } finally {
+      await getDb().update(schema.connections).set({ state: 'active' })
+        .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    }
+  });
+
+  test('no private space does not invent a url', async () => {
+    await getDb().update(schema.spaces).set({ ownerMembershipId: null })
+      .where(eq(schema.spaces.id, fx.admin.privateSpaceId));
+    try {
+      const res = await hit('GET', '/api/my/mcp', fx.admin.cookie);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'no_private_space' });
+    } finally {
+      await getDb().update(schema.spaces).set({ ownerMembershipId: fx.admin.membershipId })
+        .where(eq(schema.spaces.id, fx.admin.privateSpaceId));
+    }
+  });
+
+  test('space with no live connection is no_private_connection', async () => {
+    const [before] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    await getDb().update(schema.connections).set({ state: 'revoked' })
+      .where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    try {
+      const res = await hit('GET', '/api/my/mcp', fx.admin.cookie);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'no_private_connection' });
+      expect(ops.calls.some((c) => c.op === 'auth.revokeClient' || c.op === 'mcp.grant')).toBe(false);
+    } finally {
+      await getDb().update(schema.connections).set({
+        state: 'active', clientName: before!.clientName, revokedAt: null,
+      }).where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    }
+  });
+
+  test('a missing file and no stored secret is credentials_unavailable and does not revoke', async () => {
+    await clearHandoff(fx.bob.privateConnectionId);
+    const seen: string[] = [];
+    ops.setTake(async (path: string) => {
+      seen.push(path);
+      throw new Error('ENOENT: no such file or directory');
+    });
+    const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'credentials_unavailable' });
+    expect(seen).toEqual([grantCredentialsOutPath(fx.bob.privateConnectionId)]);
+    expect(ops.journalDeletes).toEqual([]);
+    expect(ops.calls.some((c) => c.op === 'auth.revokeClient' || c.op === 'mcp.grant')).toBe(false);
+    const [conn] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    expect(conn?.state).toBe('active');
+    expect(conn?.revokedAt).toBeNull();
+    expect(await readSecret(fx.orgId, memberClientSecretName(fx.bob.privateConnectionId))).toBeNull();
+  });
+
+  test('a missing secret is taken once, stored, and the journal for that client is deleted', async () => {
+    await clearHandoff(fx.bob.privateConnectionId);
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId));
+    expect(row?.gbrainClientId).toBeTruthy();
+    const handoff = {
+      version: 1,
+      mcp_url: 'https://taken.example.test/mcp',
+      client_id: 'gbrain_cl_taken_once',
+      client_secret: 'taken-once-secret-abcdefghijklmnop',
+    };
+    const seen: string[] = [];
+    ops.setTake(async (path: string) => {
+      seen.push(path);
+      return handoff;
+    });
+
+    const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      mcp_url: handoff.mcp_url,
+      harness: 'generic',
+      credentials: handoff,
+    });
+    expect(seen).toEqual([grantCredentialsOutPath(fx.bob.privateConnectionId)]);
+    expect(ops.journalDeletes).toEqual([row!.gbrainClientId]);
+    expect(JSON.parse(await readSecret(fx.orgId, memberClientSecretName(fx.bob.privateConnectionId)) ?? 'null'))
+      .toEqual(handoff);
+    expect((await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.bob.privateConnectionId)))[0]?.state).toBe('active');
+
+    ops.setTake(async () => { seen.push('second'); throw new Error('ENOENT: no such file or directory'); });
+    const again = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+    expect(again.status).toBe(200);
+    expect((await again.json() as McpBody).credentials).toEqual(handoff);
+    expect(seen).toEqual([grantCredentialsOutPath(fx.bob.privateConnectionId)]);
+  });
+
+  test('reissue without a live connection is no_private_connection', async () => {
+    const [before] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    await getDb().update(schema.connections).set({ state: 'revoked' })
+      .where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    try {
+      const res = await hit('POST', '/api/my/mcp/reissue', fx.admin.cookie);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'no_private_connection' });
+      expect(ops.calls.some((c) => c.op === 'auth.revokeClient' || c.op === 'mcp.grant')).toBe(false);
+    } finally {
+      await getDb().update(schema.connections).set({
+        state: 'active', clientName: before!.clientName, revokedAt: null,
+      }).where(eq(schema.connections.id, fx.admin.privateConnectionId));
+    }
+  });
+
+  test('reissue returns a new client id and the old connection is revoked', async () => {
+    const oldId = fx.owner.privateConnectionId;
+    const before = await hit('GET', '/api/my/mcp', fx.owner.cookie);
+    expect(before.status).toBe(200);
+    const previous = await before.json() as McpBody;
+    let n = 0;
+    ops.setTake(async () => {
+      n += 1;
+      if (n > 2) throw new Error('ENOENT: no such file or directory');
+      return {
+        version: 1,
+        mcp_url: 'https://reissue.example.test/mcp',
+        client_id: `gbrain_cl_reissue_${n}`,
+        client_secret: `reissue-secret-${n}-xxxxxxxxxxxx`,
+      };
+    });
+
+    const res = await hit('POST', '/api/my/mcp/reissue', fx.owner.cookie);
+    expect(res.status).toBe(200);
+    const body = await res.json() as McpBody;
+    expect(body.credentials.client_id).toBe('gbrain_cl_reissue_1');
+    expect(body.credentials.client_id).not.toBe(previous.credentials.client_id);
+    expect(body.credentials.client_secret).toBe('reissue-secret-1-xxxxxxxxxxxx');
+    expect(body.mcp_url).toBe('https://reissue.example.test/mcp');
+    expect(body.harness).toBe('generic');
+    expect(body.snippet).toBe(wiringSnippet('generic', {
+      client_id: 'gbrain_cl_reissue_1',
+      mcp_url: 'https://reissue.example.test/mcp',
+    }, { skills: false }));
+    expect(JSON.stringify(body)).not.toContain('reissue-secret-2-xxxxxxxxxxxx');
+    expect(ops.calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
+
+    const [old] = await getDb().select().from(schema.connections).where(eq(schema.connections.id, oldId));
+    expect(old?.state).toBe('revoked');
+    const active = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.membershipId, fx.owner.membershipId),
+      eq(schema.connections.writeSpaceId, fx.owner.privateSpaceId),
+      eq(schema.connections.state, 'active'),
+    ));
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).not.toBe(oldId);
+
+    ops.setTake(async () => { throw new Error('ENOENT: no such file or directory'); });
+    const again = await hit('GET', '/api/my/mcp', fx.owner.cookie);
+    expect(again.status).toBe(200);
+    expect((await again.json() as McpBody).credentials).toEqual(body.credentials);
   });
 });
 
