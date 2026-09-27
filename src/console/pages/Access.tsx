@@ -218,7 +218,11 @@ export function Access() {
 
   let snippet = '';
   try {
-    if (harness) snippet = wiringSnippet(harness, { client_id: '<client_id>', mcp_url: '<mcp_url>' });
+    if (harness) {
+      snippet = wiringSnippet(harness, {
+        client_id: '<client_id>', access_token: '<access_token>', mcp_url: '<mcp_url>',
+      }).snippet;
+    }
   } catch { /* unknown adapter until picker loads */ }
 
   return (
