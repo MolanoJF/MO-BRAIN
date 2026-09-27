@@ -201,7 +201,7 @@ function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: bo
       </dl>
       <pre className={CREDENTIAL_BLOCK}>{snippet}</pre>
       {verifyLine && (
-        <Notice tone={conn.verify?.status === 'ok' ? undefined : 'warning'}>{verifyLine}</Notice>
+        <Notice tone={conn.verify?.status === 'ok' ? 'ok' : 'warning'}>{verifyLine}</Notice>
       )}
       {agentInstructions && (
         <div className="space-y-1">
