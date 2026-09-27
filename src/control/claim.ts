@@ -19,6 +19,7 @@ export type ClaimResult = {
     credentials: unknown;
     harness: string;
     mcp_url: string;
+    verify: { status: string | null; message: string | null } | null;
   }>;
   skillsPublished: boolean;
   account: 'created' | 'existing' | 'unchanged';
@@ -144,6 +145,7 @@ export async function claim(token: string, email: string, password?: string): Pr
         credentials: provisioned.memberHandoff,
         harness: row.harness,
         mcp_url: mcpUrlFromGrant(provisioned.credentials) ?? mcpUrl(),
+        verify: provisioned.verify,
       });
     }
 

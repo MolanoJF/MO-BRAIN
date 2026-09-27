@@ -140,7 +140,7 @@ async function verifyManualHarness(
 export async function provisionConnection(
   input: ConnectionInput,
   actor: string,
-): Promise<{ connectionId: string; credentials: unknown; memberHandoff?: unknown }> {
+): Promise<{ connectionId: string; credentials: unknown; memberHandoff?: unknown; verify: VerifyResult | null }> {
   await assertMembership(input.organizationId, input.membershipId);
   const { write, reads } = await loadSpaces(input.organizationId, input.writeSpaceId, input.readSpaceIds);
   const compiled = compileFrom(input, write, reads);
@@ -173,7 +173,7 @@ export async function provisionConnection(
       writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
       profile: compiled.profile,
     });
-    return { connectionId: existing.id, credentials: r.json };
+    return { connectionId: existing.id, credentials: r.json, verify: null };
   }
 
   const connectionId = existing ? existing.id : randomUUID();
@@ -240,7 +240,7 @@ export async function provisionConnection(
   });
   // credentials is the redacted grant receipt. memberHandoff is the taken
   // private handoff, also stored only under memberClientSecretName.
-  return { connectionId, credentials: r.json, memberHandoff };
+  return { connectionId, credentials: r.json, memberHandoff, verify: verifyResult };
 }
 
 /**

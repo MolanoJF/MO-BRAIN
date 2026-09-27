@@ -392,7 +392,7 @@ describe('my mcp config', () => {
     expect(body.snippet).toBe(wiringSnippet('generic', {
       client_id: bobHandoff.client_id,
       mcp_url: bobHandoff.mcp_url,
-    }, { skills: false }));
+    }, { skills: false }).snippet);
     expect(ops.calls.some((c) => c.op === 'config.get' && c.params?.key === 'mcp.publish_skills')).toBe(true);
     expect(ops.journalDeletes).toEqual([]);
   });
@@ -435,7 +435,7 @@ describe('my mcp config', () => {
       expect(body.snippet).toBe(wiringSnippet('claude-code', {
         client_id: bobHandoff.client_id,
         mcp_url: bobHandoff.mcp_url,
-      }, { skills: true }));
+      }, { skills: true }).snippet);
     } finally {
       await getDb().update(schema.connections).set({ harness: before!.harness })
         .where(eq(schema.connections.id, fx.bob.privateConnectionId));
@@ -596,7 +596,7 @@ describe('my mcp config', () => {
     expect(body.snippet).toBe(wiringSnippet('generic', {
       client_id: 'gbrain_cl_reissue_1',
       mcp_url: 'https://reissue.example.test/mcp',
-    }, { skills: false }));
+    }, { skills: false }).snippet);
     expect(JSON.stringify(body)).not.toContain('reissue-secret-2-xxxxxxxxxxxx');
     expect(ops.calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
 
