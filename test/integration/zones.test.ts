@@ -490,7 +490,9 @@ describe('my mcp config', () => {
     await clearHandoff(fx.bob.privateConnectionId);
     const [row] = await getDb().select().from(schema.connections)
       .where(eq(schema.connections.id, fx.bob.privateConnectionId));
-    expect(row?.gbrainClientId).toBeTruthy();
+    const clientId = row?.gbrainClientId;
+    expect(clientId).toBeTruthy();
+    if (typeof clientId !== 'string') throw new Error('expected a gbrain client id');
     const handoff = {
       version: 1,
       mcp_url: 'https://taken.example.test/mcp',
@@ -511,7 +513,7 @@ describe('my mcp config', () => {
       credentials: handoff,
     });
     expect(seen).toEqual([grantCredentialsOutPath(fx.bob.privateConnectionId)]);
-    expect(ops.journalDeletes).toEqual([row!.gbrainClientId]);
+    expect(ops.journalDeletes).toEqual([clientId]);
     expect(JSON.parse(await readSecret(fx.orgId, memberClientSecretName(fx.bob.privateConnectionId)) ?? 'null'))
       .toEqual(handoff);
     expect((await getDb().select().from(schema.connections)
