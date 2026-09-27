@@ -97,6 +97,9 @@ function blockedFor(e: unknown, keepReissue: boolean): Blocked {
 export function Mcp() {
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
+  /** True only while the reissue POST is in flight. The paste stays hidden for that, and no longer. */
+  const [posting, setPosting] = useState(false);
+  const [postError, setPostError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,8 +113,26 @@ export function Mcp() {
   const reissue = async () => {
     if (busy) return;
     setBusy(true);
+    setPosting(true);
+    setPostError(null);
+    let failed: unknown = null;
     try {
       setView(viewFor(await myMcpApi.reissue()));
+    } catch (e) {
+      failed = e;
+    } finally {
+      setPosting(false);
+    }
+    if (failed === null) {
+      setBusy(false);
+      return;
+    }
+    // The POST returned no body. Read, which does not revoke: the request may
+    // never have arrived, or its body may have been lost after a new handoff
+    // was stored. The paste already on screen stays up until this read settles.
+    setPostError(failed instanceof Error ? failed.message : 'Could not issue a new connection');
+    try {
+      setView(viewFor(await myMcpApi.get()));
     } catch (e) {
       setView(blockedFor(e, true));
     } finally {
@@ -125,8 +146,9 @@ export function Mcp() {
 
   return (
     <div className="max-w-2xl space-y-6">
+      {postError && <Notice tone="danger">{postError}</Notice>}
       {view.kind === 'blocked' && <Notice tone={view.tone}>{view.text}</Notice>}
-      {view.kind === 'ready' && !busy && (
+      {view.kind === 'ready' && !posting && (
         <Card
           title="Connect your agent"
           subtitle="Paste these into the agent that should use your private Space."
