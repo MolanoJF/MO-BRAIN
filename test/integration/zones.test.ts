@@ -590,6 +590,108 @@ describe('my mcp config', () => {
     expect(again.status).toBe(200);
     expect((await again.json() as McpBody).credentials).toEqual(body.credentials);
   });
+
+  test('a grant failure after revoke leaves the old row revoked and GET returns credentials_unavailable without revoking again', async () => {
+    const oldId = fx.bob.privateConnectionId;
+    const [before] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, oldId));
+    expect(before?.state).toBe('active');
+    expect(before?.gbrainClientId).toEqual(expect.any(String));
+    const schedules = await getDb().select({
+      id: schema.schedules.id,
+      enabled: schema.schedules.enabled,
+      disabledReason: schema.schedules.disabledReason,
+    }).from(schema.schedules).where(eq(schema.schedules.connectionId, oldId));
+
+    const planted = {
+      version: 1,
+      mcp_url: 'https://stub.example.test/mcp',
+      client_id: 'gbrain_cl_pending_stub',
+      client_secret: 'stub-secret-not-a-live-connection-xxxx',
+    };
+    let pendingId: string | null = null;
+    try {
+      ops.setCallDecorator((op, result) => (
+        op === 'mcp.grant' ? { ...result, ok: false, exitCode: 1 } : result
+      ));
+      const posted = await hit('POST', '/api/my/mcp/reissue', fx.bob.cookie);
+      expect(posted.status).toBeGreaterThanOrEqual(400);
+
+      const [old] = await getDb().select().from(schema.connections)
+        .where(eq(schema.connections.id, oldId));
+      expect(old?.state).toBe('revoked');
+
+      const stubs = await getDb().select().from(schema.connections).where(and(
+        eq(schema.connections.organizationId, fx.orgId),
+        eq(schema.connections.membershipId, fx.bob.membershipId),
+        eq(schema.connections.writeSpaceId, fx.bob.privateSpaceId),
+        eq(schema.connections.state, 'pending'),
+      ));
+      expect(stubs).toHaveLength(1);
+      pendingId = stubs[0]!.id;
+      expect(pendingId).not.toBe(oldId);
+      await storeSecret(fx.orgId, memberClientSecretName(pendingId), JSON.stringify(planted));
+
+      const revokes = ops.calls
+        .filter((c) => c.op === 'auth.revokeClient')
+        .map((c) => c.params?.clientId);
+      expect(revokes).toEqual(
+        [before!.gbrainClientId, before!.serverClientId].filter((id) => id != null),
+      );
+      const grants = ops.calls.filter((c) => c.op === 'mcp.grant');
+      expect(grants).toHaveLength(1);
+      expect(grants[0]?.opts?.dryRun).not.toBe(true);
+      expect(ops.calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
+
+      let took = false;
+      ops.setTake(async () => {
+        took = true;
+        throw new Error('ENOENT: no such file or directory');
+      });
+      ops.setCallDecorator(null);
+
+      const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toEqual({ error: 'credentials_unavailable' });
+      expect(JSON.stringify(body)).not.toContain(planted.client_secret);
+      expect(took).toBe(false);
+      expect(ops.calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId))
+        .toEqual(revokes);
+      expect(ops.calls.filter((c) => c.op === 'mcp.grant')).toHaveLength(grants.length);
+
+      const [stub] = await getDb().select().from(schema.connections)
+        .where(eq(schema.connections.id, pendingId));
+      expect(stub?.state).toBe('pending');
+      expect(stub?.revokedAt).toBeNull();
+    } finally {
+      if (pendingId) {
+        await getDb().delete(schema.secrets).where(and(
+          eq(schema.secrets.organizationId, fx.orgId),
+          eq(schema.secrets.name, memberClientSecretName(pendingId)),
+        ));
+      }
+      await getDb().delete(schema.connections).where(and(
+        eq(schema.connections.organizationId, fx.orgId),
+        eq(schema.connections.membershipId, fx.bob.membershipId),
+        eq(schema.connections.writeSpaceId, fx.bob.privateSpaceId),
+        eq(schema.connections.state, 'pending'),
+      ));
+      if (before) {
+        await getDb().update(schema.connections).set({
+          state: before.state,
+          clientName: before.clientName,
+          revokedAt: before.revokedAt,
+        }).where(eq(schema.connections.id, oldId));
+      }
+      for (const row of schedules) {
+        await getDb().update(schema.schedules).set({
+          enabled: row.enabled,
+          disabledReason: row.disabledReason,
+        }).where(eq(schema.schedules.id, row.id));
+      }
+    }
+  });
 });
 
 describe('export, commit, schema, and offboard stay inside the zone', () => {

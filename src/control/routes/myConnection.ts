@@ -25,7 +25,7 @@ import {
 } from '../connections.ts';
 import { wiringSnippet } from '../harness.ts';
 import { deleteCredentialJournal, takeGrantCredentials } from '../opsClient.ts';
-import { provisionPrivateSpace } from '../privateSpaces.ts';
+import { privateSpaceRefusal, provisionPrivateSpace } from '../privateSpaces.ts';
 import { readSecret, storeSecret } from '../secrets.ts';
 
 export const myConnectionRoutes = new Hono();
@@ -51,6 +51,17 @@ async function mine(caller: Caller) {
     inArray(schema.connections.state, ['pending', 'active']),
   ));
   return { space, connection: connection ?? null };
+}
+
+/** A failed replacement leaves its pending stub beside the connection just revoked. */
+async function hasRevokedSibling(orgId: string, membershipId: string, writeSpaceId: string): Promise<boolean> {
+  const [row] = await getDb().select({ id: schema.connections.id }).from(schema.connections).where(and(
+    eq(schema.connections.organizationId, orgId),
+    eq(schema.connections.membershipId, membershipId),
+    eq(schema.connections.writeSpaceId, writeSpaceId),
+    eq(schema.connections.state, 'revoked'),
+  )).limit(1);
+  return row != null;
 }
 
 /** Company Spaces this caller may read: all of them for an admin, else granted ones. */
@@ -169,7 +180,13 @@ myConnectionRoutes.get('/my/mcp', guard(async (c, caller) => {
   if (!space) return c.json({ error: 'no_private_space' }, 404);
   if (!connection) return c.json({ error: 'no_private_connection' }, 404);
   // Pending is not readable, even when a secret row was stored before the grant failed.
-  if (connection.state === 'pending') return c.json({ error: 'connection_pending' }, 409);
+  // A revoked sibling means the stub is a failed reissue, not an unclaimed invite.
+  if (connection.state === 'pending') {
+    const error = await hasRevokedSibling(caller.orgId, caller.membershipId, space.id)
+      ? 'credentials_unavailable'
+      : 'connection_pending';
+    return c.json({ error }, 409);
+  }
   const loaded = await loadHandoff(caller.orgId, connection);
   if (!loaded.ok) return c.json({ error: 'credentials_unavailable' }, 409);
   return c.json(await present(connection, loaded.handoff));
@@ -178,6 +195,8 @@ myConnectionRoutes.get('/my/mcp', guard(async (c, caller) => {
 myConnectionRoutes.post('/my/mcp/reissue', guard(async (c, caller) => {
   const { connection } = await mine(caller);
   if (!connection) return c.json({ error: 'no_private_connection' }, 404);
+  const refused = await privateSpaceRefusal(caller.orgId, caller.membershipId);
+  if (refused) return c.json({ error: refused.error }, refused.status);
   await revokeConnection(connection.id, caller.userId);
   const created = await provisionPrivateSpace(caller.orgId, caller.membershipId, caller.userId);
   if (!created.ok) return c.json({ error: created.error }, created.status);

@@ -22,16 +22,32 @@ async function audit(orgId: string, actor: string, action: string, target: strin
     .values({ id: randomUUID(), organizationId: orgId, actor, action, target, before: null, after: after as object });
 }
 
-export async function provisionPrivateSpace(
+/** Cheap refusals. Callers that revoke first must check this before the revoke. */
+export async function privateSpaceRefusal(
   orgId: string,
   membershipId: string,
-  actor: string,
-): Promise<ProvisionPrivateSpaceResult> {
+): Promise<{ ok: false; error: string; status: 404 | 409 } | null> {
   const [org] = await getDb()
     .select({ privateSpacesEnabled: schema.organizations.privateSpacesEnabled })
     .from(schema.organizations).where(eq(schema.organizations.id, orgId));
   if (!org) return { ok: false, error: 'organization_not_found', status: 404 };
   if (!org.privateSpacesEnabled) return { ok: false, error: 'private_spaces_disabled', status: 409 };
+
+  const [membership] = await getDb()
+    .select({ id: schema.memberships.id })
+    .from(schema.memberships)
+    .where(and(eq(schema.memberships.id, membershipId), eq(schema.memberships.organizationId, orgId)));
+  if (!membership) return { ok: false, error: 'member_not_found', status: 404 };
+  return null;
+}
+
+export async function provisionPrivateSpace(
+  orgId: string,
+  membershipId: string,
+  actor: string,
+): Promise<ProvisionPrivateSpaceResult> {
+  const refused = await privateSpaceRefusal(orgId, membershipId);
+  if (refused) return refused;
 
   const [membership] = await getDb()
     .select({ id: schema.memberships.id, role: schema.memberships.role })
