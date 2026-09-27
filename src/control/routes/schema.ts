@@ -11,7 +11,7 @@ import { readConfigValue } from '../configValue.ts';
 import { listSchemaPackSections, listSchemaPacks } from './wizard.ts';
 import { parseSchemaActiveProse, type SchemaActive } from '../../contracts/capability.ts';
 import { BUNDLED_PACKS, draftToManifest, validateDraft, validateMutations } from '../schemaDraft.ts';
-import { isManagedPack, LAYER_PACK, visiblePackNames } from '../../contracts/packs.ts';
+import { isManagedPack, LAYER_PACK, LAYER_PARENT, visiblePackNames } from '../../contracts/packs.ts';
 import { scaffoldSpaces } from '../scaffold.ts';
 
 export const schemaRoutes = new Hono();
@@ -769,6 +769,13 @@ schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) =
  * success (S7 step 1). A refusal answers 409 with gbrain's own code and index,
  * and a new type's folder is scaffolded into every Space that resolves the
  * pack, create-only and idempotent.
+ *
+ * `mobrain-personal` itself is read-only: an edit is redirected to `my-personal`
+ * (created on first edit, extending `mobrain-personal`), which is activated
+ * afterward when the brain was on the parent — so future shipped versions of
+ * `mobrain-personal` keep flowing in underneath the layer (spec §4.5). A
+ * mutation that isn't `add_type`/`add_link_type` and targets a name the layer
+ * doesn't declare itself is refused as `INHERITED_READONLY` before gbrain runs.
  */
 schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { userId, orgId }) => {
   const name = c.req.param('name') ?? '';
@@ -776,20 +783,57 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
   if (isBundled(name)) {
     return c.json({ error: `${name} is bundled and read-only. Fork it first.`, code: 'PACK_READONLY' }, 400);
   }
+
+  let target = name;
+  let redirected = false;
+  const brain = await loadBrain(orgId);
+  if (isManagedPack(name)) {
+    if (name !== LAYER_PARENT) return c.json({ error: `${name} is read-only`, code: 'PACK_READONLY' }, 400);
+    target = LAYER_PACK; redirected = true;
+    const { installed: before } = await listSchemaPackSections();
+    if (!before.includes(LAYER_PACK)) {
+      await putSchemaPackJson(LAYER_PACK, draftToManifest({
+        name: LAYER_PACK, description: 'Your changes, layered on top of mobrain-personal.',
+        extends: LAYER_PARENT, pageTypes: [], linkVerbs: [],
+      }, brain.gbrainVersion ?? '0.50.5.0'));
+      invalidateSchemaPackCache();
+    } else if ((await effectivePack(brain.gbrainVersion ?? '', LAYER_PACK)).extends !== LAYER_PARENT) {
+      return c.json({ error: `${LAYER_PACK} exists and does not extend ${LAYER_PARENT}` }, 409);
+    }
+  }
   const { installed } = await listSchemaPackSections();
-  if (!installed.includes(name)) return c.json({ error: `unknown schema pack ${name}` }, 404);
+  if (!installed.includes(target)) return c.json({ error: `unknown schema pack ${target}` }, 404);
 
   const body = await c.req.json().catch(() => ({}));
   const v = validateMutations(body?.mutations);
   if (!v.ok) return c.json({ error: 'invalid mutations', errors: v.errors }, 400);
 
+  if (target === LAYER_PACK) {
+    const raw = await callOps<RawManifest>('schema.showRaw', { packName: LAYER_PACK }, { json: true, timeoutMs: 60_000 });
+    const ownTypes = new Set((raw.json?.page_types ?? []).map((t) => t.name));
+    const ownVerbs = new Set((raw.json?.link_types ?? []).map((l) => l.name));
+    const inherited = v.mutations.find((m) => {
+      if (m.op === 'add_type' || m.op === 'add_link_type') return false;
+      if (m.op === 'remove_link_type') return !ownVerbs.has(m.name);
+      const t = 'type' in m ? m.type : m.name;
+      return !ownTypes.has(t);
+    });
+    if (inherited) {
+      const t = 'type' in inherited ? inherited.type : inherited.name;
+      return c.json({
+        error: `${t} comes from ${LAYER_PARENT} and cannot be changed here. Add a new type instead.`,
+        code: 'INHERITED_READONLY',
+      }, 400);
+    }
+  }
+
   const r = await callOps<never>('schema.mutate',
-    { payload: JSON.stringify({ pack: name, mutations: v.mutations }) }, { timeoutMs: 120_000 });
+    { payload: JSON.stringify({ pack: target, mutations: v.mutations }) }, { timeoutMs: 120_000 });
   let out: any = null;
   try { out = JSON.parse(r.stdout ?? ''); } catch { /* prose or empty: handled below */ }
   // `call` exits 0 on a handler-level failure (S7 step 1), so the BODY decides.
   if (!r.ok || !out || out.error) {
-    await audit(orgId, userId, 'schema.pack.mutate.failed', name, {
+    await audit(orgId, userId, 'schema.pack.mutate.failed', target, {
       count: v.mutations.length, code: out?.code ?? null, index: out?.failed_at_index ?? null,
     });
     return c.json({
@@ -802,22 +846,45 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
   }
 
   invalidateSchemaPackCache();
-  const { invalid, lint: report } = await checkPack(name);
+  const { invalid, lint: report } = await checkPack(target);
   // New types need folders wherever this pack is in effect. Folders are
   // create-only, so re-running for existing types is a no-op.
-  const brain = await loadBrain(orgId);
   const company = await companySourceIds(orgId);
   const using = (await resolveSourcePacks(orgId))
-    .filter((s) => s.pack === name && company.has(s.sourceId)).map((s) => s.sourceId);
+    .filter((s) => s.pack === target && company.has(s.sourceId)).map((s) => s.sourceId);
   const scaffolded = using.length
     ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), using)
     : [];
 
-  await audit(orgId, userId, 'schema.pack.mutate', name, {
+  await audit(orgId, userId, 'schema.pack.mutate', target, {
     count: v.mutations.length, ops: [...new Set(v.mutations.map((m) => m.op))], batchId: out.batch_id,
   });
+
+  // Redirected onto the layer: if the brain was still resolving the parent,
+  // flip it onto the layer so future mobrain-personal upgrades keep flowing
+  // in underneath the user's edits. If a higher tier keeps winning, say so
+  // rather than claiming an activation that didn't take (spec §4.5 step 4).
+  let activated = false;
+  let activeError: string | null = null;
+  if (redirected) {
+    const before = await readActive();
+    if (before.pack === LAYER_PARENT) {
+      await patchFilePlaneConfig({ schema_pack: LAYER_PACK });
+      const after = await readActive();
+      if (after.pack === LAYER_PACK) {
+        await getDb().update(schema.brains).set({ schemaPack: LAYER_PACK, updatedAt: new Date() })
+          .where(eq(schema.brains.id, brain.id));
+        await audit(orgId, userId, 'schema.apply', LAYER_PACK, { pack: LAYER_PACK, source: after.source, via: 'auto-layer' });
+        activated = true;
+      } else {
+        activeError = `gbrain still resolves ${after.pack ?? 'no pack'} from the "${after.source}" tier, which outranks the config.json value just written.`;
+      }
+    }
+  }
+
   return c.json({
-    ok: invalid === null, batchId: out.batch_id, applied: out.mutations_applied,
+    ok: invalid === null, pack: target, activated, activeError,
+    batchId: out.batch_id, applied: out.mutations_applied,
     error: invalid, lint: report, scaffolded,
   });
 }));

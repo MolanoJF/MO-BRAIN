@@ -17,6 +17,10 @@ const filePlanePatches: Record<string, unknown>[] = [];
 const packWrites: { name: string; yaml: string }[] = [];
 const jsonPackWrites: { name: string; manifest: any }[] = [];
 const packRemoves: string[] = [];
+// Hooks a test can set to react to a write happening (e.g. make a freshly
+// written layer show up in the next `schema.list`), reset in beforeEach.
+let onJsonPackWrite: () => void = () => {};
+let onFilePlanePatch: () => void = () => {};
 const scaffolds: {
   sourceId: string; entries: { dir: string; readme: string }[];
   actor: { name: string; email: string }; message: string;
@@ -25,9 +29,9 @@ const scaffolds: {
 mock.module('../../src/control/opsClient.ts', () => ({
   // --- the three this suite drives ---
   callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) => opsHandler(op, params, opts),
-  patchFilePlaneConfig: async (patch: Record<string, unknown>) => { filePlanePatches.push(patch); },
+  patchFilePlaneConfig: async (patch: Record<string, unknown>) => { filePlanePatches.push(patch); onFilePlanePatch(); },
   putSchemaPack: async (name: string, yaml: string) => { packWrites.push({ name, yaml }); },
-  putSchemaPackJson: async (name: string, manifest: any) => { jsonPackWrites.push({ name, manifest }); },
+  putSchemaPackJson: async (name: string, manifest: any) => { jsonPackWrites.push({ name, manifest }); onJsonPackWrite(); },
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[]; actor: { name: string; email: string }; message: string }) => {
     scaffolds.push(req);
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
@@ -174,6 +178,8 @@ beforeEach(async () => {
   jsonPackWrites.length = 0;
   packRemoves.length = 0;
   scaffolds.length = 0;
+  onJsonPackWrite = () => {};
+  onFilePlanePatch = () => {};
   invalidateSchemaPackCache();
   await setStoredPack(null);
   await getDb().delete(schema.auditLog);
@@ -767,4 +773,94 @@ test('PUT /schema/pack and fork refuse managed and layer names', async () => {
   expect(packWrites).toEqual([]);
   const fork = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'fork', from: 'gbrain-base-v2', name: 'my-personal' });
   expect(fork.status).toBe(400);
+});
+
+// --- Task 4: auto-layer edits of mobrain-personal into my-personal ---
+
+const LIST_LAYERED = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n  my-personal\n';
+const layerRaw = (types: string[] = []) => ({
+  name: 'my-personal', version: '0.1.0', extends: 'mobrain-personal',
+  page_types: types.map((n) => ({ name: n, primitive: 'concept', path_prefixes: [`${n}s/`], aliases: [] })),
+  link_types: [],
+});
+
+test('editing mobrain-personal creates my-personal, mutates it, and activates it', async () => {
+  let listed = LIST_SHIPPED;
+  let active = 'mobrain-personal';
+  const mutated: string[] = [];
+  opsHandler = (op, params, opts) => {
+    if (op === 'schema.list') return ok(listed);
+    if (op === 'schema.active') return ok(ACTIVE(active));
+    if (op === 'schema.showRaw') return ok('', layerRaw());
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: opts?.packOverride === 'my-personal' ? 'mobrain-personal' : null });
+    if (op === 'schema.mutate') {
+      mutated.push(JSON.parse(String(params.payload)).pack);
+      return ok(JSON.stringify({ schema_version: 1, pack: 'my-personal', batch_id: 'b9', mutations_applied: 1, results: [{}] }));
+    }
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    return ok('');
+  };
+  onJsonPackWrite = () => { listed = LIST_LAYERED; };
+  onFilePlanePatch = () => { active = 'my-personal'; };
+
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
+
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.pack).toBe('my-personal');
+  expect(body.activated).toBe(true);
+  expect(jsonPackWrites.at(-1)!.name).toBe('my-personal');
+  expect(jsonPackWrites.at(-1)!.manifest.extends).toBe('mobrain-personal');
+  expect(mutated).toEqual(['my-personal']);
+  expect(filePlanePatches.at(-1)).toEqual({ schema_pack: 'my-personal' });
+  expect(await storedPack()).toBe('my-personal');
+});
+
+test('a second edit reuses the existing layer', async () => {
+  opsHandler = (op, _p, opts) => {
+    if (op === 'schema.list') return ok(LIST_LAYERED);
+    if (op === 'schema.active') return ok(ACTIVE('my-personal'));
+    if (op === 'schema.showRaw') return ok('', layerRaw(['recipe']));
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: 'mobrain-personal' });
+    if (op === 'schema.mutate') return ok(JSON.stringify({ schema_version: 1, pack: 'my-personal', batch_id: 'b10', mutations_applied: 1, results: [{}] }));
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [{ op: 'add_prefix', type: 'recipe', prefix: 'cooking/' }] });
+  expect(res.status).toBe(200);
+  expect(jsonPackWrites).toEqual([]);
+  expect((await res.json()).activated).toBe(false);
+});
+
+test('changing an inherited type is refused before gbrain runs', async () => {
+  const calls: string[] = [];
+  opsHandler = (op, _p, opts) => {
+    calls.push(op);
+    if (op === 'schema.list') return ok(LIST_LAYERED);
+    if (op === 'schema.showRaw') return ok('', layerRaw());
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: 'mobrain-personal' });
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [{ op: 'remove_type', name: 'idea' }] });
+  expect(res.status).toBe(400);
+  expect((await res.json()).code).toBe('INHERITED_READONLY');
+  expect(calls).not.toContain('schema.mutate');
+});
+
+test('a foreign my-personal is never hijacked', async () => {
+  opsHandler = (op, _p, opts) => {
+    if (op === 'schema.list') return ok(LIST_LAYERED);
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: 'gbrain-base-v2' });
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
+  expect(res.status).toBe(409);
 });
