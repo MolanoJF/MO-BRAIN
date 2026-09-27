@@ -324,7 +324,10 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     params: [
       { name: 'client', flag: '--client', kind: 'value' },
       { name: 'harness', flag: '--harness', kind: 'value' },
+      { name: 'url', flag: '--url', kind: 'value', required: true, secret: true },
+      { name: 'credentialsFile', flag: '--credentials-file', kind: 'value', secret: true },
       { name: 'timeoutMs', flag: '--timeout-ms', kind: 'value' },
+      { name: 'delegate', flag: '--delegate', kind: 'flag' },
     ],
     supportsJson: true,
     supportsDryRun: false,
