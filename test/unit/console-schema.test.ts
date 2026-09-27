@@ -1,8 +1,9 @@
 import { test, expect, describe } from 'bun:test';
 import {
   activeSummary, divergenceWarning, canApply, syncSummary, ADDITIVE_NOTICE,
-  packSummary, pageTypeLabel, inheritanceNote,
+  packSummary, pageTypeLabel, inheritanceNote, editLabel,
 } from '../../src/console/pages/Schema.tsx';
+import { MANAGED_EDIT_NOTE } from '../../src/console/pages/SchemaBuilder.tsx';
 import type { PackDetail, PackPageType } from '../../src/console/api.ts';
 
 const ACTIVE = {
@@ -208,5 +209,18 @@ describe('the inheritance note', () => {
   test('an inherited pack with no resolved name still says it inherits', () => {
     const note = inheritanceNote(true, null);
     expect(note).toMatch(/inherits the brain default/i);
+  });
+});
+
+describe('edit affordances', () => {
+  test('bundled packs fork, managed and user packs edit', () => {
+    expect(editLabel({ bundled: true, managed: false })).toBe('Fork to edit');
+    expect(editLabel({ bundled: false, managed: true })).toBe('Customize');
+    expect(editLabel({ bundled: false, managed: false })).toBe('Edit');
+  });
+
+  test('the managed note says where edits go and that updates keep arriving', () => {
+    expect(MANAGED_EDIT_NOTE).toContain('my-personal');
+    expect(MANAGED_EDIT_NOTE).toMatch(/updates/i);
   });
 });

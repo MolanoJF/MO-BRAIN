@@ -83,6 +83,10 @@ export const ADDITIVE_BUILDER_NOTICE =
   'Adding a type creates its folder in every Space using this pack. Existing pages keep their type; ' +
   'Sync fills in pages that have none.';
 
+export const MANAGED_EDIT_NOTE =
+  'mobrain-personal is maintained by Mobrain. Your changes go into my-personal, layered on top, ' +
+  'so Mobrain updates still reach you. Types that come from mobrain-personal cannot be removed; add new ones instead.';
+
 const PRIMITIVES = ['entity', 'media', 'temporal', 'annotation', 'concept'] as const;
 const splitList = (s: string): string[] => s.split(',').map((x) => x.trim()).filter(Boolean);
 
@@ -383,7 +387,12 @@ const toRow = (t: { name: string; primitive: string; pathPrefixes: string[]; ali
  * NOT_FOUND). A bundled pack renders only its "Fork to edit" fallback, because
  * gbrain refuses mutations to it outright (PACK_READONLY).
  */
-export function PackEditor({ name, onSaved }: { name: string; onSaved: () => void }) {
+export function PackEditor({ name, onSaved, onOpen }: {
+  name: string;
+  onSaved: () => void;
+  /** Called with the layer's name after a save lands there instead of `name`. */
+  onOpen?: (name: string) => void;
+}) {
   const [detail, setDetail] = useState<PackDetailResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<EditState | null>(null);
@@ -448,11 +457,19 @@ export function PackEditor({ name, onSaved }: { name: string; onSaved: () => voi
     try {
       const mutations = editsToMutations(loaded, { pageTypes: rows, linkTypes: links });
       if (mutations.length === 0) {
-        setSaved({ ok: true, batchId: '', applied: 0, error: null, lint: null, scaffolded: [] });
+        setSaved({ ok: true, batchId: '', applied: 0, error: null, lint: null, scaffolded: [], pack: name, activated: false, activeError: null });
         return;
       }
       const r = await schemaPacksApi.mutate(name, mutations);
       setSaved(r);
+      if (r.pack !== name) {
+        onSaved();
+        onOpen?.(r.pack);
+        return;
+      }
+      if (r.activeError) {
+        setSaveError({ message: r.activeError, code: null, failedAtIndex: null, packUnchanged: false });
+      }
       await load();
       onSaved();
     } catch (e) {
@@ -492,6 +509,7 @@ export function PackEditor({ name, onSaved }: { name: string; onSaved: () => voi
 
   return (
     <Card title={name} subtitle={`Editing ${name}'s own declarations. Save sends one atomic batch to gbrain.`}>
+      {detail.effective.managed && <p className="text-sm text-muted">{MANAGED_EDIT_NOTE}</p>}
       <p className="text-sm text-muted">{ADDITIVE_BUILDER_NOTICE}</p>
 
       <div className="mt-3">

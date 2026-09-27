@@ -209,6 +209,10 @@ export type PackMutateResult = {
   error: string | null;
   lint: SchemaLint | null;
   scaffolded: ScaffoldResult[];
+  /** The pack actually mutated — `my-personal` when the request targeted a managed pack. */
+  pack: string;
+  activated: boolean;
+  activeError: string | null;
 };
 
 export type PackRemoveResult = { ok: boolean; removed: boolean };
