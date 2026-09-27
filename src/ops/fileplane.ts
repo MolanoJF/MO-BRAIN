@@ -205,7 +205,7 @@ export function packPath(name: string): string {
 
 /** Write a user schema pack manifest. 0644: gbrain reads it as another user. */
 export async function writeSchemaPack(name: string, yaml: string, opts: { sql: SQL }): Promise<void> {
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error(`invalid schema pack name: ${name}`);
+  assertUserPackName(name);
   await writeFilePlane(packPath(name), () => yaml, { ...opts, mode: 0o644 });
   // The loader takes the first existing of pack.yaml / pack.yml / pack.json
   // (load-active.ts; MEASURED docs/schema-pack-findings.md S7 step 4), so a

@@ -18,7 +18,7 @@ process.env.GBRAIN_HOME = MODULE_HOME;
 
 const {
   mergeConfigJson, takeGrantCredentialsFile, packPath, SCHEMA_PACK_DIR,
-  writeSchemaPackJson, removeSchemaPack, seedManagedPacks,
+  writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedManagedPacks,
 } = await import('../../src/ops/fileplane.ts');
 
 afterAll(async () => {
@@ -114,6 +114,12 @@ test('a user pack is written as <name>/pack.yaml, the only shape gbrain discover
   // the pinned container; see docs/schema-pack-findings.md S1.
   expect(packPath('hr-policies')).toBe(join(SCHEMA_PACK_DIR, 'hr-policies', 'pack.yaml'));
   expect(packPath('hr-policies')).not.toBe(join(SCHEMA_PACK_DIR, 'hr-policies.yaml'));
+});
+
+describe('schema pack yaml', () => {
+  test('M4: refuses to write the managed pack name', async () => {
+    await expect(writeSchemaPack('mobrain-personal', 'name: x\n', { sql: fakeSql })).rejects.toThrow(/managed/);
+  });
 });
 
 describe('schema pack json', () => {

@@ -402,6 +402,37 @@ test('GET /schema/packs reports a pack that failed to resolve, never an empty li
   expect(creator.error).toMatch(/unresolvable/);
 });
 
+test('a managed pack is never served from the effectivePack cache, an ordinary pack still is', async () => {
+  // I3: the ops process's boot seeder can rewrite mobrain-personal's manifest
+  // (new pack version, same gbrain version), so the control-plane cache must
+  // never serve a stale managed-pack PackDetail.
+  const showCalls: Record<string, number> = {};
+  let mobrainVersion = '1.0.0';
+  opsHandler = (op, _params, opts) => {
+    if (op === 'schema.list') return ok(LIST_SHIPPED);
+    if (op === 'schema.active') return ok(ACTIVE('mobrain-personal'));
+    if (op === 'schema.show') {
+      const pack = opts?.packOverride ?? '';
+      showCalls[pack] = (showCalls[pack] ?? 0) + 1;
+      const version = pack === 'mobrain-personal' ? mobrainVersion : '1.0.0';
+      return ok('', { ...showJson(3, 2, pack), version });
+    }
+    throw new Error(`unexpected op ${op}`);
+  };
+
+  const first = await (await hit('GET', '/api/schema/packs', ownerCookie)).json();
+  expect(first.packs.find((p: any) => p.name === 'mobrain-personal').version).toBe('1.0.0');
+  expect(showCalls['mobrain-personal']).toBe(1);
+  expect(showCalls['gbrain-base-v2']).toBe(1);
+
+  mobrainVersion = '2.0.0';
+  const second = await (await hit('GET', '/api/schema/packs', ownerCookie)).json();
+  expect(second.packs.find((p: any) => p.name === 'mobrain-personal').version).toBe('2.0.0');
+  expect(showCalls['mobrain-personal']).toBe(2);
+  // An ordinary bundled pack is still served from cache: no second call.
+  expect(showCalls['gbrain-base-v2']).toBe(1);
+});
+
 test('GET /schema/sources reads the stored intent and the inherited fallback', async () => {
   await insertSpace('customers', 'Customers');
   await insertSpace('internal', 'Internal');
@@ -819,6 +850,37 @@ test('editing mobrain-personal creates my-personal, mutates it, and activates it
   expect(await storedPack()).toBe('my-personal');
 });
 
+test('the first edit that activates the layer scaffolds Spaces inheriting it', async () => {
+  // I2: the auto-layer activation must run BEFORE resolveSourcePacks is used
+  // to decide which Spaces to scaffold, or a Space inheriting the brain-wide
+  // pack still resolves the OLD active pack (mobrain-personal) and is skipped.
+  await insertSpace('team', 'Team');
+  let listed = LIST_SHIPPED;
+  let active = 'mobrain-personal';
+  opsHandler = (op, params, opts) => {
+    if (op === 'schema.list') return ok(listed);
+    if (op === 'schema.active') return ok(ACTIVE(active));
+    if (op === 'schema.showRaw') return ok('', layerRaw());
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: opts?.packOverride === 'my-personal' ? 'mobrain-personal' : null });
+    if (op === 'schema.mutate') return ok(JSON.stringify({ schema_version: 1, pack: 'my-personal', batch_id: 'b12', mutations_applied: 1, results: [{}] }));
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found: schema_pack.source.team');
+    return ok('');
+  };
+  onJsonPackWrite = () => { listed = LIST_LAYERED; };
+  onFilePlanePatch = () => { active = 'my-personal'; };
+
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
+
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.activated).toBe(true);
+  expect(body.scaffolded.map((s: any) => s.sourceId)).toContain('team');
+  expect(scaffolds.some((s) => s.sourceId === 'team' && s.entries.length > 0)).toBe(true);
+});
+
 test('a second edit reuses the existing layer', async () => {
   opsHandler = (op, _p, opts) => {
     if (op === 'schema.list') return ok(LIST_LAYERED);
@@ -836,6 +898,52 @@ test('a second edit reuses the existing layer', async () => {
   expect(res.status).toBe(200);
   expect(jsonPackWrites).toEqual([]);
   expect((await res.json()).activated).toBe(false);
+});
+
+test('a new type introduced earlier in the same batch may be edited later in it', async () => {
+  // C1: add_type recipe then add_prefix recipe cooking/ in one batch must not
+  // be refused as INHERITED_READONLY — the layer does not own `recipe` yet in
+  // its raw manifest, but the batch itself introduces it first.
+  const mutated: string[] = [];
+  opsHandler = (op, params, opts) => {
+    if (op === 'schema.list') return ok(LIST_LAYERED);
+    if (op === 'schema.showRaw') return ok('', layerRaw());
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: 'mobrain-personal' });
+    if (op === 'schema.mutate') {
+      mutated.push(JSON.parse(String(params.payload)).pack);
+      return ok(JSON.stringify({ schema_version: 1, pack: 'my-personal', batch_id: 'b11', mutations_applied: 2, results: [{}, {}] }));
+    }
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [
+      { op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' },
+      { op: 'add_prefix', type: 'recipe', prefix: 'cooking/' },
+    ] });
+  expect(res.status).toBe(200);
+  expect(mutated).toEqual(['my-personal']);
+});
+
+test('a batch that edits a still-inherited type after adding another new one is still refused', async () => {
+  const calls: string[] = [];
+  opsHandler = (op, _p, opts) => {
+    calls.push(op);
+    if (op === 'schema.list') return ok(LIST_LAYERED);
+    if (op === 'schema.showRaw') return ok('', layerRaw());
+    if (op === 'schema.show') return ok('', { ...showJson(3, 2, opts?.packOverride), extends: 'mobrain-personal' });
+    return ok('');
+  };
+  const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
+    { mutations: [
+      { op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' },
+      { op: 'remove_type', name: 'idea' },
+    ] });
+  expect(res.status).toBe(400);
+  expect((await res.json()).code).toBe('INHERITED_READONLY');
+  expect(calls).not.toContain('schema.mutate');
 });
 
 test('changing an inherited type is refused before gbrain runs', async () => {

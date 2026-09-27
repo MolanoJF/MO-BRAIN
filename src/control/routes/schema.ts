@@ -152,10 +152,16 @@ type RawManifest = {
 /**
  * Resolved pack details, keyed by `${gbrainVersion}:${pack}`.
  *
- * Packs only change when their manifest is rewritten (`PUT /schema/pack`, which
- * calls invalidateSchemaPackCache) or when gbrain is upgraded — and the version
- * in the key makes the upgrade lane invalidate itself automatically, so there is
- * no separate upgrade hook to forget. Seven packs × one spawn each is ~1s cold.
+ * This is NOT automatically invalidated on every write: `PUT /schema/pack`
+ * calls invalidateSchemaPackCache explicitly, and a gbrain upgrade changes the
+ * key so the old entry is simply orphaned, never corrected. Nothing in this
+ * process observes the OPS process rewriting a pack's manifest out from under
+ * it — in particular, the ops boot seeder can rewrite `mobrain-personal`'s
+ * manifest to a new shipped version with the SAME gbrain version, which would
+ * be served stale forever. `effectivePack` therefore never caches a managed
+ * pack or the `my-personal` layer (whose effective manifest depends on its
+ * managed parent) — it always fetches those fresh. Seven packs × one spawn
+ * each is ~1s cold, so the ordinary bundled/user packs still benefit.
  */
 const packDetailCache = new Map<string, PackDetail>();
 
@@ -175,14 +181,20 @@ export function invalidateSchemaPackCache(): void {
  * de-duplication, not a union.
  */
 export async function effectivePack(version: string, pack: string): Promise<PackDetail> {
+  // Managed packs (and the layer, whose effective manifest is theirs plus its
+  // own) can be rewritten by the ops process without this process's
+  // knowledge or a version bump. Never risk serving that stale.
+  const cacheable = !isManagedPack(pack) && pack !== LAYER_PACK;
   const key = `${version}:${pack}`;
-  const cached = packDetailCache.get(key);
-  if (cached) return cached;
+  if (cacheable) {
+    const cached = packDetailCache.get(key);
+    if (cached) return cached;
+  }
 
   const r = await callOps<RawManifest>('schema.show', {},
     { json: true, packOverride: pack, timeoutMs: 60_000 });
   const detail = toPackDetail(pack, r);
-  packDetailCache.set(key, detail);
+  if (cacheable) packDetailCache.set(key, detail);
   return detail;
 }
 
@@ -812,8 +824,13 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
     const raw = await callOps<RawManifest>('schema.showRaw', { packName: LAYER_PACK }, { json: true, timeoutMs: 60_000 });
     const ownTypes = new Set((raw.json?.page_types ?? []).map((t) => t.name));
     const ownVerbs = new Set((raw.json?.link_types ?? []).map((l) => l.name));
+    // Walk the batch IN ORDER: a name an earlier op in this same batch
+    // introduces (add_type / add_link_type) is owned for every later op on it,
+    // even though the layer's raw manifest (read before the batch) does not
+    // know about it yet.
     const inherited = v.mutations.find((m) => {
-      if (m.op === 'add_type' || m.op === 'add_link_type') return false;
+      if (m.op === 'add_type') { ownTypes.add(m.name); return false; }
+      if (m.op === 'add_link_type') { ownVerbs.add(m.name); return false; }
       if (m.op === 'remove_link_type') return !ownVerbs.has(m.name);
       const t = 'type' in m ? m.type : m.name;
       return !ownTypes.has(t);
@@ -847,23 +864,18 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
 
   invalidateSchemaPackCache();
   const { invalid, lint: report } = await checkPack(target);
-  // New types need folders wherever this pack is in effect. Folders are
-  // create-only, so re-running for existing types is a no-op.
-  const company = await companySourceIds(orgId);
-  const using = (await resolveSourcePacks(orgId))
-    .filter((s) => s.pack === target && company.has(s.sourceId)).map((s) => s.sourceId);
-  const scaffolded = using.length
-    ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), using)
-    : [];
-
-  await audit(orgId, userId, 'schema.pack.mutate', target, {
-    count: v.mutations.length, ops: [...new Set(v.mutations.map((m) => m.op))], batchId: out.batch_id,
-  });
 
   // Redirected onto the layer: if the brain was still resolving the parent,
   // flip it onto the layer so future mobrain-personal upgrades keep flowing
   // in underneath the user's edits. If a higher tier keeps winning, say so
   // rather than claiming an activation that didn't take (spec §4.5 step 4).
+  //
+  // This MUST run before resolveSourcePacks decides which Spaces to scaffold
+  // below: on the first edit, the brain flips from mobrain-personal to
+  // my-personal here, and a Space that inherits the brain-wide pack only
+  // resolves my-personal (`target`) once that flip has happened. Computing
+  // the scaffold set first would leave those Spaces still resolving the OLD
+  // active pack and skip them (I2).
   let activated = false;
   let activeError: string | null = null;
   if (redirected) {
@@ -881,6 +893,19 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
       }
     }
   }
+
+  // New types need folders wherever this pack is in effect now. Folders are
+  // create-only, so re-running for existing types is a no-op.
+  const company = await companySourceIds(orgId);
+  const using = (await resolveSourcePacks(orgId))
+    .filter((s) => s.pack === target && company.has(s.sourceId)).map((s) => s.sourceId);
+  const scaffolded = using.length
+    ? await scaffoldSpaces(orgId, userId, deps(brain.gbrainVersion ?? ''), using)
+    : [];
+
+  await audit(orgId, userId, 'schema.pack.mutate', target, {
+    count: v.mutations.length, ops: [...new Set(v.mutations.map((m) => m.op))], batchId: out.batch_id,
+  });
 
   return c.json({
     ok: invalid === null, pack: target, activated, activeError,
