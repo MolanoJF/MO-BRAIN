@@ -83,6 +83,16 @@ export const ADDITIVE_BUILDER_NOTICE =
   'Adding a type creates its folder in every Space using this pack. Existing pages keep their type; ' +
   'Sync fills in pages that have none.';
 
+/**
+ * The post-save decision, pulled out so a save that both redirects to the
+ * layer AND carries an activation error is never silently green: the error
+ * must be shown even when the editor is about to move to `r.pack`. Never a
+ * silent green.
+ */
+export function afterSave(r: PackMutateResult, name: string): { error: string | null; openPack: string | null } {
+  return { error: r.activeError ?? null, openPack: r.pack !== name ? r.pack : null };
+}
+
 export const MANAGED_EDIT_NOTE =
   'mobrain-personal is maintained by Mobrain. Your changes go into my-personal, layered on top, ' +
   'so Mobrain updates still reach you. Types that come from mobrain-personal cannot be removed; add new ones instead.';
@@ -462,13 +472,14 @@ export function PackEditor({ name, onSaved, onOpen }: {
       }
       const r = await schemaPacksApi.mutate(name, mutations);
       setSaved(r);
-      if (r.pack !== name) {
-        onSaved();
-        onOpen?.(r.pack);
-        return;
+      const { error, openPack } = afterSave(r, name);
+      if (error) {
+        setSaveError({ message: error, code: null, failedAtIndex: null, packUnchanged: false });
       }
-      if (r.activeError) {
-        setSaveError({ message: r.activeError, code: null, failedAtIndex: null, packUnchanged: false });
+      if (openPack) {
+        onSaved();
+        onOpen?.(openPack);
+        return;
       }
       await load();
       onSaved();
