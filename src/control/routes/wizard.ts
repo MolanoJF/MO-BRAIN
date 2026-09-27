@@ -14,6 +14,7 @@ import { resolveSourcePacks, effectivePack, validationError, lint } from './sche
 import { scaffoldSpaces, type ScaffoldResult } from '../scaffold.ts';
 import { validateDraft, draftToManifest } from '../schemaDraft.ts';
 import { requireCapability } from '../capabilities.ts';
+import { visiblePackNames } from '../../contracts/packs.ts';
 
 /**
  * Json flag for wizard `/finish` callOps. Only request --json when the
@@ -133,7 +134,7 @@ wizard.post('/provider', guard(async (c, { userId, orgId }) => {
 /**
  * Step 2 — the one mandatory human decision (V4).
  *
- * Zones spec D6: bootstrap stores `gbrain-base-v2`, so when a pack is already
+ * Spec P6: bootstrap stores `mobrain-personal`, so when a pack is already
  * stored this step also passes `schema-selected` — the Schema step no longer
  * exists for a fresh install. A legacy brain with no stored pack stops at
  * `mode-selected` and the console still renders the Schema step for it.
@@ -202,7 +203,7 @@ export async function listSchemaPacks(): Promise<string[]> {
 }
 
 wizard.get('/schema-packs', guard(async (c) => {
-  return c.json({ packs: await listSchemaPacks() });
+  return c.json({ packs: visiblePackNames(await listSchemaPacks(), null) });
 }));
 
 /**
@@ -211,8 +212,10 @@ wizard.get('/schema-packs', guard(async (c) => {
  * The pack is PERSISTED here and APPLIED at /finish via
  * `gbrain init --schema-pack`. It deliberately is not applied here: at this
  * point in the wizard the brain has not been init'd, and `init` writes
- * config.json's `schema_pack` itself (defaulting to `gbrain-base-v2`), so a
- * pre-init write would simply be stamped over. See
+ * config.json's `schema_pack` itself (gbrain's own init default is still
+ * `gbrain-base-v2`, which is why Mobrain always passes the pack explicitly —
+ * it stores `mobrain-personal`), so a pre-init write would simply be stamped
+ * over. See
  * docs/schema-pack-findings.md S2.
  *
  * Validated against gbrain's own pack list rather than a hardcoded set, so a

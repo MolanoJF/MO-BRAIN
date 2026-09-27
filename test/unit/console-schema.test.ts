@@ -132,6 +132,7 @@ const detail = (over: Partial<PackDetail> = {}): PackDetail => ({
   description: null,
   extends: null,
   bundled: false,
+  managed: false,
   pageTypes: [],
   linkVerbs: [],
   linkTypes: [],

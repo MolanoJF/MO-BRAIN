@@ -11,6 +11,7 @@ import { readConfigValue } from '../configValue.ts';
 import { listSchemaPackSections, listSchemaPacks } from './wizard.ts';
 import { parseSchemaActiveProse, type SchemaActive } from '../../contracts/capability.ts';
 import { BUNDLED_PACKS, draftToManifest, validateDraft, validateMutations } from '../schemaDraft.ts';
+import { isManagedPack, LAYER_PACK, visiblePackNames } from '../../contracts/packs.ts';
 import { scaffoldSpaces } from '../scaffold.ts';
 
 export const schemaRoutes = new Hono();
@@ -120,6 +121,7 @@ export type PackDetail = {
   description: string | null;
   extends: string | null;
   bundled: boolean;
+  managed: boolean;
   pageTypes: PackPageType[];
   linkVerbs: string[];
   linkTypes: { name: string; inverse: string | null; pageType: string | null; targetType: string | null }[];
@@ -195,6 +197,7 @@ function toPackDetail(
     return {
       name, version: null, description: null, extends: null,
       bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
+      managed: isManagedPack(name),
       pageTypes: [], linkVerbs: [], linkTypes: [], filingRules: [], takesKinds: [],
       error: text || `schema show exited ${r.exitCode} with no manifest`,
     };
@@ -206,6 +209,7 @@ function toPackDetail(
     description: m.description ?? null,
     extends: m.extends ?? null,
     bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
+    managed: isManagedPack(name),
     pageTypes: (m.page_types ?? []).map((p) => ({
       name: p.name ?? '',
       primitive: p.primitive ?? '',
@@ -358,7 +362,8 @@ schemaRoutes.get('/schema/skill', guard('admin', async (c) => {
  */
 schemaRoutes.get('/schema/packs', guard('admin', async (c, { orgId }) => {
   const brain = await loadBrain(orgId);
-  const names = await listSchemaPacks();
+  const active = await readActive();
+  const names = visiblePackNames(await listSchemaPacks(), active.pack);
   const version = brain.gbrainVersion ?? '';
   const packs = await Promise.all(names.map((name) => effectivePack(version, name)));
   return c.json({ packs });
@@ -635,6 +640,9 @@ schemaRoutes.put('/schema/pack', guard('admin', async (c, { userId, orgId }) => 
   if (typeof name !== 'string' || !PACK_NAME.test(name)) {
     return c.json({ error: 'name must be lowercase letters, digits and hyphens' }, 400);
   }
+  if (isManagedPack(name) || name === LAYER_PACK || isBundled(name)) {
+    return c.json({ error: `${name} is reserved` }, 400);
+  }
   if (typeof yaml !== 'string' || yaml.trim() === '') return c.json({ error: 'yaml is required' }, 400);
   if (Buffer.byteLength(yaml, 'utf8') > MAX_PACK_BYTES) {
     return c.json({ error: `pack manifest exceeds ${MAX_PACK_BYTES} bytes` }, 400);
@@ -725,7 +733,9 @@ schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) =
   if (body?.mode === 'fork') {
     const from = String(body.from ?? ''); name = String(body.name ?? '');
     if (!known.includes(from)) return c.json({ error: `unknown schema pack ${from}` }, 400);
-    if (!PACK_NAME.test(name) || isBundled(name)) return c.json({ error: 'invalid pack name' }, 400);
+    if (!PACK_NAME.test(name) || isBundled(name) || isManagedPack(name) || name === LAYER_PACK) {
+      return c.json({ error: 'invalid pack name' }, 400);
+    }
     if (known.includes(name)) return c.json({ error: `${name} already exists` }, 409);
     const r = await callOps('schema.fork', { from, to: name }, { json: true, timeoutMs: 60_000 });
     if (!r.ok) return c.json({ error: `schema fork failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
@@ -821,7 +831,9 @@ schemaRoutes.delete('/schema/packs/:name', guard('admin', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const { userId, orgId } = caller;
   const name = c.req.param('name') ?? '';
-  if (!PACK_NAME.test(name) || isBundled(name)) return c.json({ error: 'only user packs can be deleted' }, 400);
+  if (!PACK_NAME.test(name) || isBundled(name) || isManagedPack(name)) {
+    return c.json({ error: 'only user packs can be deleted' }, 400);
+  }
   const active = await readActive();
   const visible = await visibleSourceIds(orgId, caller.membershipId);
   const sources = (await resolveSourcePacks(orgId))

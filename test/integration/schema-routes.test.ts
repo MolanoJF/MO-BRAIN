@@ -126,6 +126,8 @@ const fail = (exitCode: number, stdout: string, stderr = ''): OpsReply =>
 // Verbatim shapes from the pinned 0.50.5.0 container.
 const LIST = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  hr-policies\n';
 const LIST_WITH_CREATOR = 'Bundled packs:\n  gbrain-base\n  gbrain-creator\n\nInstalled packs (~/.gbrain/schema-packs/):\n  hr-policies\n';
+const LIST_SHIPPED = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n  gbrain-investor\n\n' +
+  'Installed packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
 const ACTIVE = (pack: string, source = 'home-config') =>
   `Active pack: ${pack} v1.0.0\nSource: ${source}\nPack identity: ${pack}@1.0.0+deadbeef\nPage types: 3\nLink verbs: 2\n`;
 
@@ -359,6 +361,7 @@ test('GET /schema/packs reports EFFECTIVE counts, not the raw manifest', async (
   // resolver via the packOverride env seam.
   opsHandler = (op, params, opts) => {
     if (op === 'schema.list') return ok(LIST_WITH_CREATOR);
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-creator'));
     if (op === 'schema.show') {
       // `params: []` is deliberate — a positional pack name is the raw path.
       expect(params).toEqual({});
@@ -380,6 +383,7 @@ test('GET /schema/packs reports EFFECTIVE counts, not the raw manifest', async (
 test('GET /schema/packs reports a pack that failed to resolve, never an empty list', async () => {
   opsHandler = (op, _params, opts) => {
     if (op === 'schema.list') return ok(LIST_WITH_CREATOR);
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-creator'));
     if (op === 'schema.show') {
       if (opts?.packOverride === 'gbrain-creator') return fail(1, '', 'boom: unresolvable');
       return ok('', showJson(27, 12, opts?.packOverride));
@@ -710,4 +714,57 @@ test('member gets 403 on every authoring route', async () => {
     });
     expect(res.status).toBe(403);
   }
+});
+
+test('GET /schema/packs hides every bundled pack except gbrain-base-v2', async () => {
+  opsHandler = (op, _p, opts) => {
+    if (op === 'schema.list') return ok(LIST_SHIPPED);
+    if (op === 'schema.active') return ok(ACTIVE('mobrain-personal'));
+    if (op === 'schema.show') return ok('', showJson(3, 2, opts?.packOverride));
+    return ok('');
+  };
+  const res = await hit('GET', '/api/schema/packs', ownerCookie);
+  expect(res.status).toBe(200);
+  const names = (await res.json()).packs.map((p: { name: string }) => p.name);
+  expect(names).toEqual(['gbrain-base-v2', 'mobrain-personal']);
+});
+
+test('GET /schema/packs keeps a legacy active pack visible', async () => {
+  opsHandler = (op, _p, opts) => {
+    if (op === 'schema.list') return ok(LIST_SHIPPED);
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-investor'));
+    if (op === 'schema.show') return ok('', showJson(3, 2, opts?.packOverride));
+    return ok('');
+  };
+  const names = (await (await hit('GET', '/api/schema/packs', ownerCookie)).json()).packs.map((p: { name: string }) => p.name);
+  expect(names).toContain('gbrain-investor');
+});
+
+test('a managed pack is reported as managed, not bundled', async () => {
+  opsHandler = (op, _p, opts) => {
+    if (op === 'schema.list') return ok(LIST_SHIPPED);
+    if (op === 'schema.active') return ok(ACTIVE('mobrain-personal'));
+    if (op === 'schema.show') return ok('', showJson(3, 2, opts?.packOverride));
+    return ok('');
+  };
+  const packs = (await (await hit('GET', '/api/schema/packs', ownerCookie)).json()).packs;
+  const mp = packs.find((p: { name: string }) => p.name === 'mobrain-personal');
+  expect(mp.managed).toBe(true);
+  expect(mp.bundled).toBe(false);
+});
+
+test('DELETE refuses a managed pack', async () => {
+  opsHandler = () => ok(LIST_SHIPPED);
+  const res = await hit('DELETE', '/api/schema/packs/mobrain-personal', ownerCookie);
+  expect(res.status).toBe(400);
+  expect(packRemoves).toEqual([]);
+});
+
+test('PUT /schema/pack and fork refuse managed and layer names', async () => {
+  opsHandler = () => ok(LIST_SHIPPED);
+  const put = await hit('PUT', '/api/schema/pack', ownerCookie, { name: 'mobrain-personal', yaml: 'name: x' });
+  expect(put.status).toBe(400);
+  expect(packWrites).toEqual([]);
+  const fork = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'fork', from: 'gbrain-base-v2', name: 'my-personal' });
+  expect(fork.status).toBe(400);
 });

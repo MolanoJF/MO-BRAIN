@@ -8,9 +8,10 @@ export async function isBootstrapped(): Promise<boolean> {
   return (row?.n ?? 0) > 0;
 }
 
-/** Zones spec D6: the pack gbrain itself recommends, stored explicitly so the
- *  Schema tab shows it and `diverged` checks have a stored value to compare. */
-export const DEFAULT_SCHEMA_PACK = 'gbrain-base-v2';
+/** Spec P6: Mobrain's own personal pack, seeded at ops boot (src/ops/fileplane.ts
+ *  seedManagedPacks), stored explicitly so the Schema tab shows it and diverged
+ *  checks have a stored value. */
+export const DEFAULT_SCHEMA_PACK = 'mobrain-personal';
 
 export function defaultBrainName(email: string): string {
   const local = email.split('@')[0]?.trim() || 'My';
