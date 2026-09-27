@@ -22,11 +22,13 @@ type ClaimConnection = {
   credentials: unknown;
   harness: string;
   mcp_url: string;
+  verify: { status: string | null; message: string | null } | null;
 };
 
 type Creds = {
   client_id?: string;
   client_secret?: string;
+  access_token?: string;
 };
 
 function asCreds(raw: unknown): Creds {
@@ -165,13 +167,23 @@ export function Claim({ token }: { token: string }) {
 
 function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: boolean }) {
   const creds = asCreds(conn.credentials);
-  const snippet = useMemo(() => {
+  const { snippet, agentInstructions } = useMemo(() => {
     try {
-      return wiringSnippet(conn.harness, { client_id: creds.client_id, mcp_url: conn.mcp_url }, { skills });
+      return wiringSnippet(conn.harness, {
+        client_id: creds.client_id, access_token: creds.access_token, mcp_url: conn.mcp_url,
+      }, { skills });
     } catch (e) {
-      return e instanceof Error ? e.message : 'unknown harness';
+      return { snippet: e instanceof Error ? e.message : 'unknown harness', agentInstructions: null };
     }
-  }, [conn.harness, conn.mcp_url, creds.client_id, skills]);
+  }, [conn.harness, conn.mcp_url, creds.client_id, creds.access_token, skills]);
+
+  const verifyLine = conn.verify?.status === 'ok'
+    ? 'Verified: this connection authenticated successfully.'
+    : conn.verify?.status === 'partial'
+    ? 'Server checks passed, harness evidence missing — treat as unverified.'
+    : conn.verify?.status === 'failed'
+    ? `Verify failed${conn.verify.message ? `: ${conn.verify.message}` : '.'}`
+    : null;
 
   return (
     // The connection id was an `<h2 className="font-mono">`; `Card`'s `title`
@@ -188,6 +200,15 @@ function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: bo
         <div>mcp_url: {conn.mcp_url}</div>
       </dl>
       <pre className={CREDENTIAL_BLOCK}>{snippet}</pre>
+      {verifyLine && (
+        <Notice tone={conn.verify?.status === 'ok' ? undefined : 'warning'}>{verifyLine}</Notice>
+      )}
+      {agentInstructions && (
+        <div className="space-y-1">
+          <h3 className="m-0 text-sm font-medium">Agent instructions</h3>
+          <pre className={CREDENTIAL_BLOCK}>{agentInstructions}</pre>
+        </div>
+      )}
     </Card>
   );
 }
