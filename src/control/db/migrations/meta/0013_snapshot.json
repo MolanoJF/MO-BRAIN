@@ -1,6 +1,6 @@
 {
-  "id": "78bdd45f-8cdf-4daa-a37a-a042cab77f63",
-  "prevId": "f3df4973-207d-4983-866c-17339a5d0fa0",
+  "id": "a0846888-5bb1-4dad-a57c-390f33cb57b2",
+  "prevId": "78bdd45f-8cdf-4daa-a37a-a042cab77f63",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -640,6 +640,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "schema_pack": {
+          "name": "schema_pack",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "lifecycle": {
           "name": "lifecycle",
           "type": "text",
@@ -976,6 +982,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "verify_status": {
+          "name": "verify_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verify_message": {
+          "name": "verify_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1070,6 +1094,10 @@
         "connection_state_valid": {
           "name": "connection_state_valid",
           "value": "\"connections\".\"state\" in ('pending','active','revoked')"
+        },
+        "connection_verify_status_valid": {
+          "name": "connection_verify_status_valid",
+          "value": "\"connections\".\"verify_status\" in ('ok','partial','failed') or \"connections\".\"verify_status\" is null"
         }
       },
       "isRLSEnabled": false
@@ -1331,6 +1359,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'company'"
+        },
+        "private_spaces_enabled": {
+          "name": "private_spaces_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "timezone": {
           "name": "timezone",
@@ -2333,6 +2368,125 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.space_grants": {
+      "name": "space_grants",
+      "schema": "",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "membership_id": {
+          "name": "membership_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "access": {
+          "name": "access",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "granted_by": {
+          "name": "granted_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "space_grants_org_idx": {
+          "name": "space_grants_org_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "space_grants_organization_id_organizations_id_fk": {
+          "name": "space_grants_organization_id_organizations_id_fk",
+          "tableFrom": "space_grants",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_grants_membership_id_memberships_id_fk": {
+          "name": "space_grants_membership_id_memberships_id_fk",
+          "tableFrom": "space_grants",
+          "tableTo": "memberships",
+          "columnsFrom": [
+            "membership_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_grants_space_id_spaces_id_fk": {
+          "name": "space_grants_space_id_spaces_id_fk",
+          "tableFrom": "space_grants",
+          "tableTo": "spaces",
+          "columnsFrom": [
+            "space_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "space_grants_pk": {
+          "name": "space_grants_pk",
+          "columns": [
+            "membership_id",
+            "space_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "space_grant_access_valid": {
+          "name": "space_grant_access_valid",
+          "value": "\"space_grants\".\"access\" in ('read','write')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.spaces": {
       "name": "spaces",
       "schema": "",
@@ -2392,6 +2546,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "owner_membership_id": {
+          "name": "owner_membership_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2421,6 +2581,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "spaces_owner_membership_uq": {
+          "name": "spaces_owner_membership_uq",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_membership_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"spaces\".\"owner_membership_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2435,6 +2617,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "spaces_owner_membership_id_memberships_id_fk": {
+          "name": "spaces_owner_membership_id_memberships_id_fk",
+          "tableFrom": "spaces",
+          "tableTo": "memberships",
+          "columnsFrom": [
+            "owner_membership_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2784,6 +2979,13 @@
         },
         "email_verified": {
           "name": "email_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "invite_placeholder": {
+          "name": "invite_placeholder",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
