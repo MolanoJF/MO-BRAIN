@@ -108,6 +108,35 @@ export async function previewConnection(input: ConnectionInput): Promise<{
   };
 }
 
+type VerifyResult = { status: 'ok' | 'partial' | 'failed'; message: string | null };
+
+/**
+ * Only for manual-class harnesses — auto-install classes write real adapter
+ * config via `gbrain connect --install` and have their own install-time
+ * verification story. Never throws: a verify failure is recorded, not fatal
+ * to provisioning (the credential is still valid even if the live check
+ * couldn't complete, e.g. a transient network blip to gbrain-ops).
+ */
+async function verifyManualHarness(
+  clientId: string,
+  harness: string,
+  credentialsFile: string,
+): Promise<VerifyResult | null> {
+  if (connectionClass(harness) !== 'manual') return null;
+  try {
+    const r = await callOps('mcp.verify', {
+      client: clientId, harness, url: mcpUrl(), credentialsFile, timeoutMs: 30_000,
+    }, { json: true, timeoutMs: 35_000 });
+    // mcp.verify's own exit-code contract (registry.ts comment, V10/honesty
+    // rule 5): 0 = ok, 2 = partial (server checks passed, harness evidence
+    // missing — never render this as a pass), anything else = failed.
+    const status: VerifyResult['status'] = r.exitCode === 0 ? 'ok' : r.exitCode === 2 ? 'partial' : 'failed';
+    return { status, message: r.stdout.slice(0, 500) || null };
+  } catch (e) {
+    return { status: 'failed', message: e instanceof Error ? e.message.slice(0, 500) : 'verify request failed' };
+  }
+}
+
 export async function provisionConnection(
   input: ConnectionInput,
   actor: string,
@@ -159,6 +188,8 @@ export async function provisionConnection(
   if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode})`);
   const gbrainClientId = grantedClientId(r.json);
 
+  const verifyResult = await verifyManualHarness(gbrainClientId, input.harness, credentialsOut);
+
   // D8: the server-side client, alongside the member's. Same compiler output —
   // same write Space, same federatedRead, same fence, same profile — because it
   // is the same `compiled`. Its secret goes to `secrets`, not to a row.
@@ -198,6 +229,9 @@ export async function provisionConnection(
     serverClientId,
     state: 'active',
     provisionedAt: new Date(),
+    verifyStatus: verifyResult?.status,
+    verifiedAt: verifyResult ? new Date() : undefined,
+    verifyMessage: verifyResult?.message ?? undefined,
   });
   await audit(input.organizationId, actor, 'connection.provision', connectionId, {
     clientId: gbrainClientId, serverClientId, clientName: name,
@@ -623,7 +657,10 @@ async function persistCompiled(
   input: ConnectionInput,
   name: string,
   compiled: CompiledConnection,
-  extra: { gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date } = {},
+  extra: {
+    gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date;
+    verifyStatus?: 'ok' | 'partial' | 'failed'; verifiedAt?: Date; verifyMessage?: string | null;
+  } = {},
 ): Promise<void> {
   await getDb().update(schema.connections).set({
     writeSpaceId: input.writeSpaceId,
