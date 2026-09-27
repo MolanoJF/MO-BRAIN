@@ -1224,3 +1224,130 @@ were `rm -rf`'d at the end of their sessions (MEASURED: `REMOVED` both times).
 
 - **Shared frontmatter field** — `area` declared on five page types (`goal`, `project`, `event`,
   `health_record`, `finance_record`) validates (P8.1: exit 0, 0 errors).
+
+### S8 live — live dev-stack verification (2026-09-27, Task 6, no brain reset)
+
+Run against the **live** `mobrain-local` dev stack (not a scratch home), from
+`.worktrees/personal-pack` on `feat/mobrain-personal-pack`. `.env` was copied in from the main
+checkout (git-ignored, never printed). No `gbrain init`, `down`, `-v`, or volume removal was run at
+any point; `pg-data`, `gbrain-home` and `brain-repos` volumes were never touched.
+
+**Redeploy.** `bash scripts/redeploy.sh --full` failed three times in a row with the same BuildKit
+error, unrelated to this branch's code:
+
+```
+#19 exporting to image
+#19 ERROR: failed to copy: httpReadSeeker: failed open: server message: insufficient_scope: authorization failed
+```
+
+This is a local BuildKit/containerd content-store bug on this Windows host: the Dockerfile's
+unnamespaced `FROM mobrain/gbrain-base:${GBRAIN_VERSION}` normalizes to `docker.io/mobrain/gbrain-base`
+during BuildKit's export/unpack step, which then tries to verify the layer against `docker.io`
+(a repository that does not exist there — confirmed separately: `docker pull
+docker.io/mobrain/gbrain-base:0.50.5.0` → `pull access denied: repository does not exist`) and gets
+an auth rejection instead. `docker builder prune -f` (safe: build cache only, no volumes) and
+re-tagging the local alias from a fresh `docker pull ghcr.io/molanojf/gbrain-base:0.50.5.0` did not
+fix it. **Workaround used:** `DOCKER_BUILDKIT=0 docker compose --env-file .env -f
+compose/docker-compose.yml -f compose/docker-compose.dev.yml -f compose/docker-compose.build.yml
+build --build-arg GBRAIN_VERSION=0.50.5.0 control-plane` (the legacy, non-BuildKit builder) —
+`Successfully built ... Successfully tagged ghcr.io/molanojf/control-plane:ee6cfb2...` (exit 0) —
+followed by `docker compose ... up -d --force-recreate control-plane scheduler gbrain-ops`, which is
+the same two steps `--full` runs internally. **This is a redeploy-tooling/environment finding, not a
+schema-pack finding**; the shipped code under `src/ops` and `src/control` is unaffected. Data
+integrity after the forced recreate (which also recreated `postgres` for config-hash reasons):
+`control` and `gbrain` databases both present, `gbrain` has 69 tables in `public` — **MEASURED: no
+data loss**.
+
+**Step 2 — seeding.**
+
+```
+$ docker logs mobrain-local-gbrain-ops-1 2>&1 | grep "schema pack"
+schema pack mobrain-personal: written
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema list
+Bundled packs:
+  gbrain-base
+  gbrain-recommended
+  gbrain-creator
+  gbrain-investor
+  gbrain-engineer
+  gbrain-everything
+  gbrain-base-v2
+
+Installed packs (~/.gbrain/schema-packs/):
+  mobrain-personal
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema validate mobrain-personal
+✓ mobrain-personal v1.0.0: valid manifest
+  Path: /srv/gbrain-home/.gbrain/schema-packs/mobrain-personal/pack.json
+  Page types: 20
+  Link verbs: 21
+  Takes kinds: 4
+```
+
+```
+$ docker exec -e GBRAIN_SCHEMA_PACK=mobrain-personal mobrain-local-gbrain-ops-1 gbrain schema show --json | grep -c '"primitive"'
+20
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema active
+Active pack: gbrain-base-v2 v1.2.0
+Source: home-config
+Pack identity: gbrain-base-v2@1.2.0+1a2aee67
+Page types: 19
+Link verbs: 17
+Takes kinds: fact, take, bet, hunch
+```
+
+Active pack recorded **before** the deploy (same command, run before `redeploy.sh`) was identical —
+`gbrain-base-v2 v1.2.0` — confirming **no auto-migration** (spec P9) across the redeploy.
+
+Restarted `gbrain-ops` a second time and re-grepped:
+
+```
+$ docker compose ... restart gbrain-ops
+$ docker logs mobrain-local-gbrain-ops-1 2>&1 | grep "schema pack"
+schema pack mobrain-personal: written
+schema pack mobrain-personal: unchanged
+```
+
+The second line (from the restart) is `unchanged`, as expected.
+
+**Step 3 — console API.** No credentials for the owner account were available and no account was
+created (per the task's hard rules), so `/api/schema/packs` could not be hit with an authenticated
+session. Two things **were** measured directly:
+
+```
+$ curl -sk https://localhost/api/health
+{"ok":true,"components":{"controlDb":"ok","ops":"ok"},"gbrainVersion":"0.50.5.0",...}
+
+$ curl -sk -o /dev/null -w "%{http_code}\n" https://localhost/api/schema/packs
+401
+```
+
+confirming the redeployed control plane is live and the route's `admin` guard rejects an
+unauthenticated request, as designed. As the **equivalent read from inside the control-plane
+container** (per the task's Step-3 fallback), the shipped `visiblePackNames` function
+(`src/contracts/packs.ts`) — the exact function `/api/schema/packs`'s handler calls — was invoked
+directly, inside the running `control-plane` container, against the real bundled+installed pack list
+and the real active pack observed above:
+
+```
+$ docker exec mobrain-local-control-plane-1 sh -c 'cd /app && bun -e "
+import { visiblePackNames } from \"./src/contracts/packs.ts\";
+const bundled = [\"gbrain-base\",\"gbrain-base-v2\",\"gbrain-recommended\",\"gbrain-creator\",\"gbrain-investor\",\"gbrain-engineer\",\"gbrain-everything\"];
+const installed = [\"mobrain-personal\"];
+console.log(JSON.stringify(visiblePackNames([...bundled, ...installed], \"gbrain-base-v2\")));
+"'
+["gbrain-base-v2","mobrain-personal"]
+```
+
+**MEASURED** (via the in-container function call, not the live HTTP call): the console's pack list
+resolves to exactly `gbrain-base-v2` and `mobrain-personal`. **UNVERIFIED**: the actual
+authenticated `/api/schema/packs` HTTP response body — no owner session was available, and none was
+created, per the task's constraints.
