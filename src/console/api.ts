@@ -897,3 +897,19 @@ export const myConnectionApi = {
   get: () => api.get<MyConnection>('/my/connection'),
   setReads: (readSpaceIds: string[]) => api.put<{ ok: true; readSpaceIds: string[] }>('/my/connection', { readSpaceIds }),
 };
+
+/**
+ * The caller's private MCP handoff (`GET /api/my/mcp`). `credentials` is the
+ * stored object, not a string. `snippet` is already built for that harness.
+ */
+export type MyMcpConfig = {
+  mcp_url: string;
+  harness: string;
+  credentials: unknown;
+  snippet: string;
+};
+
+export const myMcpApi = {
+  get: () => api.get<MyMcpConfig>('/my/mcp'),
+  reissue: () => api.post<MyMcpConfig>('/my/mcp/reissue'),
+};

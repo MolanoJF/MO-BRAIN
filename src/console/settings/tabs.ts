@@ -20,7 +20,7 @@
  */
 
 export type SettingsTab =
-  | 'general' | 'mine' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
+  | 'general' | 'mine' | 'mcp' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
   | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
@@ -46,6 +46,7 @@ export interface SettingsTabEntry {
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'general', label: 'General', minRole: 'admin' },
   { id: 'mine', label: 'My Brain', minRole: 'viewer' },
+  { id: 'mcp', label: 'MCP', minRole: 'viewer' },
   { id: 'sources', label: 'Sources', minRole: 'admin' },
   { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
@@ -62,7 +63,7 @@ const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t
 
 /**
  * The tabs a caller may see. An admin in company mode (the default) sees all
- * twelve; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
+ * thirteen; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
  * rather than shown-and-disabled — there is no locked/greyed state to design
  * for, because a member never sees the tab exists. Personal mode additionally
  * hides `companyOnly` tabs.
