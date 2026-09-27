@@ -1031,11 +1031,13 @@ product, matching Task 10's stated policy).
 
 ## S8 — mobrain-personal probes (2026-09-27, gbrain 0.50.5.0)
 
-All commands run **2026-09-27** against `mobrain-local-gbrain-ops-1` (`gbrain 0.50.5.0`), inside a
-scratch `GBRAIN_HOME` created with `mktemp -d` in the container (never `/srv/gbrain-home`, never the
+All commands run **2026-09-27** against `mobrain-local-gbrain-ops-1` (`gbrain 0.50.5.0`), inside
+scratch `GBRAIN_HOME`s created with `mktemp -d` in the container (never `/srv/gbrain-home`, never the
 live brain's Postgres). The manifest under test was copied in via `docker cp` to
-`/tmp/mp.json` and installed at `$H/.gbrain/schema-packs/mobrain-personal/pack.json`. The scratch
-home was `rm -rf`'d at the end of the session (MEASURED: `REMOVED`).
+`/tmp/mp.json` and installed at `$H/.gbrain/schema-packs/mobrain-personal/pack.json`. P8.1–P8.3b
+used one scratch home (`/tmp/tmp.PKjSdTATnk`); P8.4 was independently re-run in a second, fresh
+scratch home (`/tmp/tmp.QkEQc5zE5s`) to obtain and quote its verbatim output. Both scratch homes
+were `rm -rf`'d at the end of their sessions (MEASURED: `REMOVED` both times).
 
 - **P8.1 validate + lint** — **MEASURED**.
 
@@ -1050,11 +1052,62 @@ home was `rm -rf`'d at the end of the session (MEASURED: `REMOVED`).
   ```
 
   `gbrain schema lint mobrain-personal --json | grep -c '"severity": "error"'` → `0` (0 errors).
-  Full lint JSON: `"ok": true`, `"errors": []`, and exactly **8** warnings, all rule
-  `alias_references_undeclared_type`, one per alias that doesn't have its own declared page_type:
-  `event`→`calendar-event`, `journal`→`diary`, `source`→`media`, `atom`→`atom-extraction`,
-  `atom`→`atom-manual`, `atom`→`atom-lore`, `atom`→`content-atom`, `atom`→`lore`. No error-severity
-  warnings, matching the pre-check claimed in the brief.
+  Full lint JSON, `warnings` array quoted verbatim (re-run in a second, fresh scratch home to
+  confirm reproducibility; `"ok": true`, `"errors": []`, exactly **8** entries, all rule
+  `alias_references_undeclared_type`):
+
+  ```json
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'event' aliases 'calendar-event' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "event",
+    "hint": "add a page_type for 'calendar-event' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'journal' aliases 'diary' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "journal",
+    "hint": "add a page_type for 'diary' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'source' aliases 'media' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "source",
+    "hint": "add a page_type for 'media' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-extraction' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-extraction' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-manual' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-manual' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-lore' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-lore' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'content-atom' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'content-atom' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'lore' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'lore' OR remove the alias"
+  }
+  ```
+
+  No error-severity warnings, matching the pre-check claimed in the brief.
 
 - **P8.2 `gbrain init` with a user-installed pack** — **MEASURED**. `gbrain init --help` lists a
   DB-free engine: `--pglite` (embedded, zero-config, the default). Ran, in the same scratch
@@ -1082,10 +1135,15 @@ home was `rm -rf`'d at the end of the session (MEASURED: `REMOVED`).
   ```
 
   `config.json`'s `"engine": "pglite"` with a local `database_path` under `$H` confirms the init used
-  the embedded PGLite engine, not the live Postgres. `gbrain doctor --json`'s top-level
-  `"engine":"postgres"` field is PGLite's own wire-protocol label (pglite *is* an embedded
-  Postgres-compatible engine), not evidence of a connection to the live server — `db_url_source` is
-  `null` and the config file has no `database_url`.
+  the embedded PGLite engine, not the live Postgres — this is the MEASURED fact.
+
+  **Reasoning, not measurement:** `gbrain doctor --json`'s top-level `"engine":"postgres"` field
+  (quoted verbatim under P8.4 below, alongside `"db_url_source":null`) looks like it names the live
+  Postgres server, but it does not — PGLite's own wire-protocol/dialect is Postgres-compatible, so
+  gbrain's generic `engine` label reads `"postgres"` even when the backing store is the embedded
+  PGLite file at `$H/.gbrain/brain.pglite`, which is what `config.json` (quoted above) actually
+  points at. `db_url_source: null` and the absence of any `database_url` key in `config.json` are
+  the corroborating measured facts for this inference.
 
 - **P8.3 layer resolution** — **MEASURED**. Child pack `my-personal` (`extends: "mobrain-personal"`,
   empty own `page_types`/`link_types`) installed at
@@ -1125,22 +1183,44 @@ home was `rm -rf`'d at the end of the session (MEASURED: `REMOVED`).
   console must not offer "remove/edit inherited type" as an action on a layer pack, and any UI that
   surfaces this error should say the type belongs to the parent pack, not "type not found."
 
-- **P8.4 doctor under mobrain-personal** — **MEASURED: none.** Ran (in the same `$H`, post-`init`,
-  same pglite brain now active on `mobrain-personal`):
+- **P8.4 doctor under mobrain-personal** — **MEASURED: none.** Re-run in a **second, fresh scratch
+  `GBRAIN_HOME`** (`/tmp/tmp.QkEQc5zE5s`, `mktemp -d` inside `mobrain-local-gbrain-ops-1`, distinct
+  from P8.1–P8.3's home) after installing the same manifest and running the same
+  `gbrain init --pglite --schema-pack mobrain-personal --non-interactive --no-embedding` (exit 0):
 
   ```
   $ GBRAIN_HOME=$H GBRAIN_SCHEMA_PACK=mobrain-personal gbrain doctor --json 2>&1 | head -60
-  # exit 0
+  # exit 0   (30163-byte JSON body written to /tmp/doctor.out)
   ```
 
-  Scanned the full JSON for `media`, `email`, `diary`, or any dropped/unknown-type mention as a
-  *check name or finding*. The only whole-word hits are unrelated: `media` appears inside the
-  built-in skill name `media-ingest` in the `skill_currency` check's "not yet installed" list, and
-  `tweet` appears inside the hardcoded `integrity` check's generic message "no bare-tweet phrases or
-  external links" — neither names a page type, and neither is specific to this pack. `type_proliferation`
-  reports `"0 distinct typed values (pack declares 20)"`, matching the manifest's 20 declared types.
-  No check named a dropped type (`deal`, `email`, `diary`, `media`, `slack`, `civic`, `tweet`, `yc`,
-  `social-digest`) as an *unknown or orphaned* type.
+  Grepped the full JSON body verbatim for the specific claims below (exact commands and output):
+
+  ```
+  $ grep -o '{"name":"type_proliferation"[^}]*}' doctor.out
+  {"name":"type_proliferation","status":"ok","message":"0 distinct typed values (pack declares 20)","category":"meta"}
+
+  $ grep -o '.\{60\}media-ingest.\{60\}' doctor.out
+  idea-lineage","ingest","maintain","measure-before-you-fix","media-ingest","meeting-ingestion","minion-orchestrator","perplexity-rese
+
+  $ grep -o '.\{60\}bare-tweet.\{60\}' doctor.out
+  e":"integrity","status":"ok","message":"Sampled 0 pages; no bare-tweet phrases or external links.","category":"brain"},{"name":"js
+
+  $ grep -oE '\b(media|email|diary|deal|yc|tweet|slack|civic|social-digest)\b' doctor.out | sort | uniq -c
+        1 media
+        1 tweet
+
+  $ grep -o '"engine":"[a-z]*","db_url_source":[a-z]*' doctor.out
+  "engine":"postgres","db_url_source":null
+  ```
+
+  This confirms, byte-for-byte: `type_proliferation` really does say
+  `"0 distinct typed values (pack declares 20)"`; the whole-word scan for every dropped/investor
+  type name across the entire doctor payload turns up exactly two hits (`media`, `tweet`), and both
+  are the named false positives — `media` only inside the built-in skill id `media-ingest` (a
+  "not yet installed" skill suggestion, `skill_currency` check), and `tweet` only inside the
+  hardcoded, pack-agnostic `integrity` check's message "no bare-tweet phrases or external links".
+  Neither is a check naming a page type. No check named `email`, `diary`, `deal`, `yc`, `slack`,
+  `civic`, or `social-digest` at all. **No check named a dropped type as unknown/orphaned.**
 
 - **Shared frontmatter field** — `area` declared on five page types (`goal`, `project`, `event`,
   `health_record`, `finance_record`) validates (P8.1: exit 0, 0 errors).
