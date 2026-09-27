@@ -3,6 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
 import { callOps, deleteCredentialJournal, takeGrantCredentials } from './opsClient.ts';
 import { storeSecret } from './secrets.ts';
+import { connectionClass } from './harness.ts';
 import type { Role } from './rbac.ts';
 import {
   clientName,
@@ -12,6 +13,10 @@ import {
   type CompiledConnection,
   type GrantProfileId,
 } from '../contracts/compile.ts';
+
+/** Manual harnesses (generic, ChatGPT, Cursor, …) have no auto-refresh, so a
+ *  pasted credential must outlive one copy/paste, not one hour. */
+const MANUAL_HARNESS_TOKEN_TTL = 30 * 24 * 60 * 60;
 
 /** Ops-side --credentials-out path for the member client. Taken once on a fresh grant. */
 export function grantCredentialsOutPath(connectionId: string): string {
@@ -371,13 +376,15 @@ export async function compensateGrantedConnection(
 }
 
 function compileFrom(input: ConnectionInput, write: SpaceRow, reads: SpaceRow[]): CompiledConnection {
+  const tokenTtl = input.tokenTtl
+    ?? (connectionClass(input.harness) === 'manual' ? MANUAL_HARNESS_TOKEN_TTL : undefined);
   return compileConnection(
     { role: input.memberRole },
     { sourceId: write.sourceId, slug: write.sourceId },
     reads.map((s) => ({ sourceId: s.sourceId })),
     {
       boundSlugPrefixes: input.boundSlugPrefixes,
-      tokenTtl: input.tokenTtl,
+      tokenTtl,
       budgetUsdPerDay: input.budgetUsdPerDay,
       privateSpace: write.ownerMembershipId != null,
     },
