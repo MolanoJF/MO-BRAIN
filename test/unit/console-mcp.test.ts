@@ -16,6 +16,8 @@ const payload = {
     client_secret: 'secret-value-not-empty',
   },
   snippet: 'Copy/paste this MCP config fragment into the harness.',
+  agentInstructions: null,
+  verify: null,
 };
 
 describe('mcpPaste: the three strings a successful payload becomes', () => {
@@ -25,6 +27,8 @@ describe('mcpPaste: the three strings a successful payload becomes', () => {
       endpoint: 'https://brain.example/mcp',
       credentialJson: JSON.stringify(payload.credentials, null, 2),
       snippet: payload.snippet,
+      agentInstructions: null,
+      verify: null,
     });
     expect(paste!.credentialJson).toContain('gbrain_cl_example');
     expect(paste!.credentialJson).toContain('secret-value-not-empty');

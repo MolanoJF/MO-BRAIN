@@ -23,10 +23,12 @@ export type McpPaste = {
   endpoint: string;
   credentialJson: string;
   snippet: string;
+  agentInstructions: string | null;
+  verify: { status: string | null; message: string | null } | null;
 };
 
 /**
- * The three paste strings for a successful `/api/my/mcp` body.
+ * The paste strings for a successful `/api/my/mcp` body.
  * A handoff with no `client_secret` is not a config: an empty document
  * would look like something an agent can use.
  */
@@ -34,6 +36,8 @@ export function mcpPaste(payload: {
   mcp_url: string;
   credentials: unknown;
   snippet: string;
+  agentInstructions: string | null;
+  verify: { status: string | null; message: string | null } | null;
 }): McpPaste | null {
   const { credentials } = payload;
   if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) return null;
@@ -45,6 +49,8 @@ export function mcpPaste(payload: {
     endpoint: payload.mcp_url,
     credentialJson: JSON.stringify(credentials, null, 2),
     snippet: payload.snippet,
+    agentInstructions: payload.agentInstructions,
+    verify: payload.verify,
   };
 }
 
@@ -157,6 +163,18 @@ export function Mcp() {
             <PasteBlock label="Endpoint" text={view.paste.endpoint} />
             <PasteBlock label="Credentials" text={view.paste.credentialJson} />
             <PasteBlock label="Harness snippet" text={view.paste.snippet} />
+            {view.paste.agentInstructions && (
+              <PasteBlock label="Agent instructions" text={view.paste.agentInstructions} />
+            )}
+            {view.paste.verify?.status && (
+              <Notice tone={view.paste.verify.status === 'ok' ? 'ok' : 'warning'}>
+                {view.paste.verify.status === 'ok'
+                  ? 'Verified: this connection authenticated successfully.'
+                  : view.paste.verify.status === 'partial'
+                  ? 'Server checks passed, harness evidence missing — treat as unverified.'
+                  : `Verify failed${view.paste.verify.message ? `: ${view.paste.verify.message}` : '.'}`}
+              </Notice>
+            )}
           </div>
         </Card>
       )}

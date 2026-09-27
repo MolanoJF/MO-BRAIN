@@ -907,6 +907,8 @@ export type MyMcpConfig = {
   harness: string;
   credentials: unknown;
   snippet: string;
+  agentInstructions: string | null;
+  verify: { status: string | null; message: string | null } | null;
 };
 
 export const myMcpApi = {
