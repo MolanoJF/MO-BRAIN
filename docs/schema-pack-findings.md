@@ -1026,3 +1026,121 @@ product, matching Task 10's stated policy).
   show 1 page type instead of 27.
 - **`config get schema_pack` is not a readback** (inverted shadowing note, S2) — read the tier with
   `schema active`, and the per-source *intent* with `config get schema_pack.source.<id>`.
+
+---
+
+## S8 — mobrain-personal probes (2026-09-27, gbrain 0.50.5.0)
+
+All commands run **2026-09-27** against `mobrain-local-gbrain-ops-1` (`gbrain 0.50.5.0`), inside a
+scratch `GBRAIN_HOME` created with `mktemp -d` in the container (never `/srv/gbrain-home`, never the
+live brain's Postgres). The manifest under test was copied in via `docker cp` to
+`/tmp/mp.json` and installed at `$H/.gbrain/schema-packs/mobrain-personal/pack.json`. The scratch
+home was `rm -rf`'d at the end of the session (MEASURED: `REMOVED`).
+
+- **P8.1 validate + lint** — **MEASURED**.
+
+  ```
+  $ GBRAIN_HOME=$H gbrain schema validate mobrain-personal
+  ✓ mobrain-personal v1.0.0: valid manifest
+    Path: $H/.gbrain/schema-packs/mobrain-personal/pack.json
+    Page types: 20
+    Link verbs: 21
+    Takes kinds: 4
+  # exit 0
+  ```
+
+  `gbrain schema lint mobrain-personal --json | grep -c '"severity": "error"'` → `0` (0 errors).
+  Full lint JSON: `"ok": true`, `"errors": []`, and exactly **8** warnings, all rule
+  `alias_references_undeclared_type`, one per alias that doesn't have its own declared page_type:
+  `event`→`calendar-event`, `journal`→`diary`, `source`→`media`, `atom`→`atom-extraction`,
+  `atom`→`atom-manual`, `atom`→`atom-lore`, `atom`→`content-atom`, `atom`→`lore`. No error-severity
+  warnings, matching the pre-check claimed in the brief.
+
+- **P8.2 `gbrain init` with a user-installed pack** — **MEASURED**. `gbrain init --help` lists a
+  DB-free engine: `--pglite` (embedded, zero-config, the default). Ran, in the same scratch
+  `$H`, against the same installed `mobrain-personal` pack, never touching the live brain's
+  Postgres (the container's `GBRAIN_DATABASE_URL`/`CONTROL_DATABASE_URL` env vars point at the live
+  `postgres:5432` server and were never read by this init):
+
+  ```
+  $ GBRAIN_HOME=$H gbrain init --pglite --schema-pack mobrain-personal --non-interactive --no-embedding
+  ... (skill/memory-writeback onboarding prose) ...
+  # exit 0
+
+  $ cat $H/.gbrain/config.json
+  { "engine": "pglite", "database_path": "$H/.gbrain/brain.pglite",
+    "embedding_disabled": true, "schema_pack": "mobrain-personal", ... }
+
+  $ GBRAIN_HOME=$H gbrain schema active
+  Active pack: mobrain-personal v1.0.0
+  Source: home-config
+  Pack identity: mobrain-personal@1.0.0+1cd16fde
+  Page types: 20
+  Link verbs: 21
+  Takes kinds: fact, take, bet, hunch
+  # exit 0
+  ```
+
+  `config.json`'s `"engine": "pglite"` with a local `database_path` under `$H` confirms the init used
+  the embedded PGLite engine, not the live Postgres. `gbrain doctor --json`'s top-level
+  `"engine":"postgres"` field is PGLite's own wire-protocol label (pglite *is* an embedded
+  Postgres-compatible engine), not evidence of a connection to the live server — `db_url_source` is
+  `null` and the config file has no `database_url`.
+
+- **P8.3 layer resolution** — **MEASURED**. Child pack `my-personal` (`extends: "mobrain-personal"`,
+  empty own `page_types`/`link_types`) installed at
+  `$H/.gbrain/schema-packs/my-personal/pack.json`:
+
+  ```
+  $ GBRAIN_HOME=$H GBRAIN_SCHEMA_PACK=my-personal gbrain schema show --json | grep -c '"primitive"'
+  20
+  ```
+
+  Effective type count of `my-personal` extends `mobrain-personal`: **20** (expected 20 — matches).
+
+- **P8.3b removing an inherited type from the layer** — **MEASURED**. Exact `schema.mutate` argv
+  from `src/contracts/registry.ts` (`'schema.mutate'`: `argv: ['call', 'schema_apply_mutations']`),
+  run against the layer with the brief's payload:
+
+  ```
+  $ GBRAIN_HOME=$H gbrain call schema_apply_mutations \
+      '{"pack":"my-personal","mutations":[{"op":"remove_type","name":"idea"}]}'
+  {
+    "error": "mutation_failed",
+    "code": "TYPE_NOT_FOUND",
+    "message": "type 'idea' is not declared in pack 'my-personal'",
+    "batch_id": "batch-1790538860050-bbtcok",
+    "mutations_applied": 0,
+    "pack_unchanged": true,
+    "failed_at_index": 0
+  }
+  # exit 0
+  ```
+
+  gbrain's JSON answer is `TYPE_NOT_FOUND`, not a permission/authorization error: `remove_type`
+  operates only on the pack's own *raw* declarations, and `idea` isn't declared in `my-personal`
+  raw (it's inherited from `mobrain-personal`), so the mutation is rejected before it can touch
+  anything. **Consequence for the console: "refuse inherited edits" confirmed** — a layer's
+  `schema.mutate` can never remove (or otherwise target) a type it only sees through `extends`; the
+  console must not offer "remove/edit inherited type" as an action on a layer pack, and any UI that
+  surfaces this error should say the type belongs to the parent pack, not "type not found."
+
+- **P8.4 doctor under mobrain-personal** — **MEASURED: none.** Ran (in the same `$H`, post-`init`,
+  same pglite brain now active on `mobrain-personal`):
+
+  ```
+  $ GBRAIN_HOME=$H GBRAIN_SCHEMA_PACK=mobrain-personal gbrain doctor --json 2>&1 | head -60
+  # exit 0
+  ```
+
+  Scanned the full JSON for `media`, `email`, `diary`, or any dropped/unknown-type mention as a
+  *check name or finding*. The only whole-word hits are unrelated: `media` appears inside the
+  built-in skill name `media-ingest` in the `skill_currency` check's "not yet installed" list, and
+  `tweet` appears inside the hardcoded `integrity` check's generic message "no bare-tweet phrases or
+  external links" — neither names a page type, and neither is specific to this pack. `type_proliferation`
+  reports `"0 distinct typed values (pack declares 20)"`, matching the manifest's 20 declared types.
+  No check named a dropped type (`deal`, `email`, `diary`, `media`, `slack`, `civic`, `tweet`, `yc`,
+  `social-digest`) as an *unknown or orphaned* type.
+
+- **Shared frontmatter field** — `area` declared on five page types (`goal`, `project`, `event`,
+  `health_record`, `finance_record`) validates (P8.1: exit 0, 0 errors).
