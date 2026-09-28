@@ -68,4 +68,11 @@ describe('registry invariants', () => {
     const fromJson = Object.fromEntries(emitted.operations.map((o: any) => [o.id, o]));
     expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
   });
+
+  test('pinned-next operations.json is the same registry labeled 0.51.0.0', () => {
+    const emitted = JSON.parse(readFileSync('contracts/v0.51.0.0/operations.json', 'utf8'));
+    expect(emitted.gbrainVersion).toBe('0.51.0.0');
+    const fromJson = Object.fromEntries(emitted.operations.map((o: { id: string }) => [o.id, o]));
+    expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
+  });
 });
