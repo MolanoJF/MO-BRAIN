@@ -196,6 +196,16 @@ export async function resetBrainSchema(): Promise<void> {
   await post('/fileplane/reset-brain-schema', {}, 120_000);
 }
 
+/** Hold serve and the worker down across a schema reset. See writerGate.ts. */
+export async function pauseBrainWriters(): Promise<void> {
+  await post('/fileplane/pause-writers', {}, 90_000);
+}
+
+/** Allow the gated entrypoint to start serve and the worker again. */
+export async function resumeBrainWriters(): Promise<void> {
+  await post('/fileplane/resume-writers', {}, 30_000);
+}
+
 /**
  * Read-then-delete one ops-side --credentials-out file. The secret crosses
  * the RPC once; the control plane must not log the body (S3c).
