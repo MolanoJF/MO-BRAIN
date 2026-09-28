@@ -69,7 +69,7 @@ services:
       # Task 0: remote MCP callers resolve a host skills catalog from the
       # operator, never gbrain's bundled dev catalog. Mobrain owns repo skills/.
       GBRAIN_SKILLS_DIR: /opt/mobrain-skills
-    command: ["gbrain", "serve", "--http", "--bind", "0.0.0.0", "--port", "3131",
+    command: ["/opt/mobrain/gbrain-gated-entrypoint.sh", "gbrain", "serve", "--http", "--bind", "0.0.0.0", "--port", "3131",
               "--public-url", "https://${DOMAIN}"]
     volumes:
       - gbrain-home:/srv/gbrain-home
@@ -83,7 +83,7 @@ services:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment: *gbrain-env
-    command: ["gbrain", "jobs", "supervisor", "--concurrency", "${WORKER_CONCURRENCY:-2}"]
+    command: ["/opt/mobrain/gbrain-gated-entrypoint.sh", "gbrain", "jobs", "supervisor", "--concurrency", "${WORKER_CONCURRENCY:-2}"]
     # V5: SIGTERM drains; `stop` waits up to 40s. Give it room plus margin.
     stop_grace_period: 60s
     volumes:
