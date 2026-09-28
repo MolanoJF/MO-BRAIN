@@ -154,7 +154,7 @@ test('(e) a generic-harness grant produces a snippet that authenticates, and is 
 
   const verify = await execOperation(OPERATIONS['mcp.verify']!, {
     client: probeClientId, harness: 'generic', url: MCP_URL,
-    credentialsFile: '/srv/gbrain-home/.creds-verify-probe.json', timeoutMs: 30000,
+    credentialsFile: '/srv/gbrain-home/.creds-verify-probe.json', timeoutMs: '30000',
   }, { json: true });
   console.log(`[member-skills] mcp.verify exit=${verify.exitCode}`);
   expect([0, 2]).toContain(verify.exitCode);
