@@ -12,6 +12,10 @@ export { composeUp, composeDown, composeExec };
 
 /** Drop every gbrain table so the next test initializes a virgin brain. */
 export async function resetBrain(): Promise<void> {
+  const stopped = await composeExec('gbrain-ops', ['sh', '/opt/mobrain/quiesce-gbrain-procs.sh'], { timeoutMs: 60_000 });
+  if (stopped.exitCode !== 0) {
+    throw new Error(`quiesce gbrain procs failed (${stopped.exitCode}): ${stopped.stderr}`);
+  }
   await composeExec('gbrain-ops', [
     'psql', BRAIN_DB_URL, '-v', 'ON_ERROR_STOP=1', '-c',
     'DROP SCHEMA public CASCADE; CREATE SCHEMA public; ' +
