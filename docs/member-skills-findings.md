@@ -192,7 +192,7 @@ is upstream: gbrain's MCP `initialize` response should carry the same
 guidance in its own `instructions` field, which spec-compliant clients load
 automatically with no copy/paste.
 
-Not fixed in this repo — filed upstream, tracked alongside the existing
+Not fixed in this repo — to be filed upstream, tracked alongside the existing
 publish-gate divergence (issue #5358).
 
 Upstream issue: not yet filed — no tracker access from this environment. Whoever merges this should file it against gbrain, referencing this section and the live evidence in this file's earlier "Live dev-stack check" section.
