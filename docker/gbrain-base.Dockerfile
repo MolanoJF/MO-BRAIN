@@ -47,5 +47,11 @@ RUN gbrain --tools-json > /tmp/gbrain-tools.json \
 # would desynchronize the image from the running binary.
 ENV GBRAIN_SELF_UPGRADE_MODE=off
 
+COPY docker/gbrain-gated-entrypoint.sh /opt/mobrain/gbrain-gated-entrypoint.sh
+RUN chmod 0755 /opt/mobrain/gbrain-gated-entrypoint.sh
+
+COPY docker/quiesce-gbrain-procs.sh /opt/mobrain/quiesce-gbrain-procs.sh
+RUN chmod 0755 /opt/mobrain/quiesce-gbrain-procs.sh
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]

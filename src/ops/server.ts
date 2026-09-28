@@ -15,6 +15,7 @@ import {
   takeGrantCredentialsFile, readSupervisorAuditTail, deleteCredentialDelivery,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
+import { pauseBrainWriters, resumeBrainWriters } from './writerGate.ts';
 import { readBrainUsage } from './usage.ts';
 import {
   commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
@@ -169,6 +170,16 @@ Bun.serve({
       // First intentional init: clear the worker's cold-start 1280-d template.
       if (url.pathname === '/fileplane/reset-brain-schema') {
         await resetBrainSchema();
+        return json({ ok: true });
+      }
+
+      if (url.pathname === '/fileplane/pause-writers') {
+        await pauseBrainWriters();
+        return json({ ok: true });
+      }
+
+      if (url.pathname === '/fileplane/resume-writers') {
+        await resumeBrainWriters();
         return json({ ok: true });
       }
 

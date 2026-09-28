@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   GBRAIN_PIN, contractsDir, operationsPath, capabilityPath, verifyRuntimePin, type CallOps,
 } from '../../src/contracts/pin.ts';
+import { toolNames, type CapabilitySnapshot } from '../../src/contracts/capability.ts';
 
 const EXPECTED = process.env.GBRAIN_VERSION ?? '0.50.0.0';
 
@@ -49,6 +50,14 @@ describe('pin.ts', () => {
     const result = await verifyRuntimePin(async () => { throw new Error('ECONNREFUSED'); });
     expect(result.declared).toBe(GBRAIN_PIN);
     expect(result.matches).toBeNull();
+  });
+
+  test('pinned-next capability snapshot is a real 0.51.0.0 capture', async () => {
+    const snap = JSON.parse(await readFile('contracts/v0.51.0.0/capability.json', 'utf8')) as CapabilitySnapshot;
+    expect(snap.gbrainVersion).toBe('0.51.0.0');
+    expect(snap.wellKnown).not.toBeNull();
+    expect(toolNames(snap.tools).length).toBeGreaterThan(0);
+    expect(capabilityPath('0.51.0.0')).toBe('contracts/v0.51.0.0/capability.json');
   });
 
   // This is what stops the connections.ts bug class (a hardcoded

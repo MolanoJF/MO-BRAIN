@@ -96,6 +96,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
+  pauseBrainWriters: async () => {},
+  resumeBrainWriters: async () => {},
   takeGrantCredentials: async (path: string) => {
     handoffsTaken.push(path);
     return handoffHandler();

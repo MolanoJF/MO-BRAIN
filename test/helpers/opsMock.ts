@@ -81,6 +81,8 @@ export function installOpsMock(): OpsMock {
     removeSchemaPack: async () => ({ removed: false }),
     seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
     resetBrainSchema: async () => {},
+    pauseBrainWriters: async () => {},
+    resumeBrainWriters: async () => {},
     takeGrantCredentials: async (path: string) => {
       if (takeHandler) return takeHandler(path);
       return HANDOFF;

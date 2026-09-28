@@ -3,16 +3,11 @@
  * F31 (docs/slice-5-findings.md) — bootstrap the MAIN stack's brain the way an
  * operator does, before the contract suite runs.
  *
- * A fresh `docker compose up` leaves gbrain-worker/serve to cold-start
- * `content_chunks.embedding` at upstream's default width (1280) with no
- * provider key in `config.json`. The pinned binary refuses a headless
- * 1280 -> 1536 re-template even with `--force`, and clearing the table from a
- * separate command does not close the window — the worker recreates the
- * template before `init` runs. The product's own wizard `/finish` closes it:
- * `resetBrainSchema` and `gbrain init` happen back to back inside one
- * control-plane request, so nothing can re-template in between (see
- * `src/control/routes/wizard.ts`). The slice3/slice3.5 seam legs and the
- * ops-backed usage read assume exactly the brain that sequence produces.
+ * A fresh `docker compose up` used to let gbrain-worker/serve cold-start
+ * `content_chunks.embedding` at upstream's default width (1280). `/finish`
+ * now pauses those writers for the whole reset+init, and resumes them only
+ * after init succeeds. This script still drives that product path. It does
+ * not call `gbrain init` itself.
  *
  * So this script drives the PRODUCT's bootstrap path over the control-plane
  * HTTP API — first admin, provider-configured, mode-selected, schema-selected,

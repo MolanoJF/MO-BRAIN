@@ -1472,8 +1472,29 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
       assertOk(OPERATIONS['sources.add']!, await execOperation(OPERATIONS['sources.add']!, {
         id, path: `/srv/brain-repos/${id}`, federated: true,
       }));
+      await claimWriterIfSupported(id);
     }
   }, 900_000);
+
+  /**
+   * 0.51 introduced a canonical-writer model: a filesystem source must have a
+   * registered owner before `put` accepts writes (exit 1 `owner_unavailable`),
+   * and `sources writer claim <id> --path <dir>` is how it is registered. The
+   * `sources writer` subcommand does not exist at 0.50.5.0, so probe the CLI's
+   * own help and claim only where the surface is real — this keeps the
+   * page.delete assertions below verifiable at BOTH pins instead of failing the
+   * setup at 0.51. The claim command itself exits 1 after registering (it hits
+   * `JSON.stringify cannot serialize BigInt.` while printing its receipt), so
+   * its exit code is not a verdict; the `put` below is the judge, and it fails
+   * with the upstream message if the claim did not land.
+   */
+  const claimWriterIfSupported = async (id: string): Promise<void> => {
+    const help = await composeExec('gbrain-ops', ['gbrain', 'sources', '--help']);
+    if (!help.stdout.includes('writer')) return;
+    await composeExec('gbrain-ops',
+      ['gbrain', 'sources', 'writer', 'claim', id, '--path', `/srv/brain-repos/${id}`],
+      { timeoutMs: 120_000 });
+  };
 
   afterAll(async () => {
     await composeDown();

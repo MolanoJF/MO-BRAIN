@@ -23,6 +23,14 @@ const dockerAvailable = Bun.which('docker') !== null;
 const SKIP_COMPOSE_DOCKER_CHECK_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPOSE_DOCKER_CHECK';
 
 describe('compose invariants', () => {
+  test('serve and the worker start through the pause-file gate', () => {
+    expect(svc('gbrain-serve').command[0]).toBe('/opt/mobrain/gbrain-gated-entrypoint.sh');
+    expect(svc('gbrain-serve').command[1]).toBe('gbrain');
+    expect(svc('gbrain-serve').command[2]).toBe('serve');
+    expect(svc('gbrain-worker').command[0]).toBe('/opt/mobrain/gbrain-gated-entrypoint.sh');
+    expect(svc('gbrain-worker').command.slice(1, 4)).toEqual(['gbrain', 'jobs', 'supervisor']);
+  });
+
   test('caddy is the only service publishing host ports', () => {
     // Iterates every service in the file, so the profile-gated `agent-runner`
     // (present in the parsed object even though a plain `up` never starts it)

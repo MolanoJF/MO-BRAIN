@@ -135,6 +135,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
+  pauseBrainWriters: async () => {},
+  resumeBrainWriters: async () => {},
   auditTail: async () => [],
   gitRevertRange: async () => ({ reverted: false, reason: 'nothing_to_revert' }),
   // S1: routes/files.ts imports these alongside the rest, so a mock that omits

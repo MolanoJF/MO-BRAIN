@@ -86,12 +86,13 @@ jobs:
             -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
       - name: "Mirror the base and build the stack through the overlay (D2)"
         run: |
+          set -o pipefail
           docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             --build-arg "HARNESS_VERSION=${HARNESS_VERSION}" \
-            control-plane scheduler agent-runner
+            control-plane scheduler agent-runner 2>&1 | tee build-output.txt
       - name: Mirror the agent-runner under the bare name the contract test runs
         run: |
           docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION}" \
@@ -101,7 +102,9 @@ jobs:
       # F31: drive the product's own wizard so the main brain is
       # operator-initialized before the seam legs (see contract.yml).
       - name: Bootstrap the main brain through the wizard (F31)
-        run: bun run scripts/ci-bootstrap-brain.ts
+        run: |
+          set -o pipefail
+          bun run scripts/ci-bootstrap-brain.ts 2>&1 | tee bootstrap-output.txt
         env:
           BOOTSTRAP_BASE_URL: https://localhost:8443
           BOOTSTRAP_TLS_INSECURE: '1'
@@ -129,18 +132,10 @@ jobs:
           # Never duplicate: one open issue per drifting version, updated nightly.
           existing=$(gh issue list --state open --search "\"$TITLE\" in:title" \
                      --json number --jq '.[0].number // empty')
-          body=$(printf '%s\n' \
-            "Nightly pinned-next run failed against gbrain \`${{ matrix.gbrain }}\`." \
-            "" \
-            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "Pinned-current (\`$PINNED_CURRENT\`) is unaffected; this is a tripwire, not an outage." \
-            "" \
-            "Failing tests:" \
-            "\`\`\`" \
-            "$(grep -E '^\(fail\)' contract-output.txt | head -50 || echo 'see the run log')" \
-            "\`\`\`" \
-            "" \
-            "G1 holds: do not move the pin to make this pass. Fix the seam or widen the contract test.")
+          body=$(bash scripts/drift-issue-body.sh \
+            "${{ matrix.gbrain }}" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "$PINNED_CURRENT")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"
           else
