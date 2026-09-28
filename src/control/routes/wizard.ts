@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
-import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson } from '../opsClient.ts';
+import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson, pauseBrainWriters, resumeBrainWriters } from '../opsClient.ts';
 import { provisionPrivateSpace, privateSpaceSourceId } from '../privateSpaces.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
@@ -61,6 +61,12 @@ async function audit(orgId: string, actor: string, action: string, target: strin
   // S3c: `after` is a redacted summary — never a raw request body.
   await getDb().insert(schema.auditLog)
     .values({ id: randomUUID(), organizationId: orgId, actor, action, target, before: null, after: after as object });
+}
+
+function redactStepStderr(stderr: string): string {
+  return stderr
+    .replace(/(postgres(?:ql)?:\/\/[^:]+:)[^@]+@/gi, '$1[redacted]@')
+    .slice(-500);
 }
 
 const guard = (handler: (c: any, ctx: { userId: string; orgId: string }) => Promise<Response>) =>
@@ -401,18 +407,28 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     return c.json({ error: `cannot finish from ${brain.lifecycle}` }, 409);
   }
 
-  const steps: { id: string; ok: boolean; exitCode: number }[] = [];
+  const steps: { id: string; ok: boolean; exitCode: number; stderr?: string }[] = [];
   const run = async (id: string, op: string, params: Record<string, unknown>, timeoutMs = 900_000) => {
     const r = await callOps(op, params, { ...finishCallOpts(op), timeoutMs });
-    steps.push({ id, ok: r.ok, exitCode: r.exitCode });
+    steps.push({
+      id, ok: r.ok, exitCode: r.exitCode,
+      ...(r.ok ? {} : { stderr: redactStepStderr(r.stderr ?? '') }),
+    });
     return r;
   };
 
-  // Worker cold-start templates vector(1280) before any wizard init. Drop that
-  // empty schema so init can create openai:text-embedding-3-small at 1536.
-  // GBRAIN_DATABASE_URL stays inside ops (S2, V3) — control plane never sees it.
+  // Serve and the worker cold-start vector(1280) on any reconnect. The pause
+  // file keeps their entrypoint from starting gbrain until init has created
+  // the 1536-d schema. A failed init leaves the pause in place so a retry
+  // cannot race a half-written config.json.
+  try {
+    await pauseBrainWriters();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return c.json({ error: message }, 503);
+  }
   await resetBrainSchema();
-  await run('init', 'init', {
+  const initResult = await run('init', 'init', {
     nonInteractive: true,
     force: true,
     embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
@@ -421,6 +437,7 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     // than being handed an empty pack name.
     ...(brain.schemaPack ? { schemaPack: brain.schemaPack } : {}),
   });
+  if (initResult.ok) await resumeBrainWriters();
   // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
   // recorded in the control DB during /space (git repos on disk survive).
   // --federated again: this IS the row that survives, so the flag must be set

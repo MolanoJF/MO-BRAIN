@@ -32,6 +32,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   //     test/integration/schema-routes.test.ts and keep in sync with opsClient.ts. ---
   brainUsage: async () => { throw new Error('ops unreachable'); },
   resetBrainSchema: async () => {},
+  pauseBrainWriters: async () => {},
+  resumeBrainWriters: async () => {},
   takeGrantCredentials: async () => ({}),
   opsHealthy: async () => true,
   commitAsMember: async () => ({ committed: true, sha: 'abc123' }),

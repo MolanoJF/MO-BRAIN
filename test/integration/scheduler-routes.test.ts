@@ -47,6 +47,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
+  pauseBrainWriters: async () => {},
+  resumeBrainWriters: async () => {},
   takeGrantCredentials: async () => ({}),
   // Task 5's revoke path (connections.ts) imports this alongside the others; a
   // mock that omits a real export makes the whole graph unloadable.

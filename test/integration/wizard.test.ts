@@ -17,6 +17,8 @@ const callOpsCalls: {
   op: string; opts?: { json?: boolean; timeoutMs?: number }; params?: Record<string, unknown>;
 }[] = [];
 let resetBrainSchemaCalls = 0;
+let failInit = false;
+const finishOrder: string[] = [];
 let grantSeq = 0;
 const seedSpaceCalls: string[] = [];
 // Task 9: the JSON pack writes the wizard's schema step makes through the file
@@ -36,6 +38,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   ) => {
     callOpsCalls.push({ op, opts, params });
     opsOrder.push(op);
+    finishOrder.push(op);
     // The wizard's schema step calls gbrain's own validate + lint on a written
     // draft; both are DB-free at the pin (S7 probe 7). A clean envelope is what
     // lets the draft advance the lifecycle.
@@ -84,6 +87,13 @@ mock.module('../../src/control/opsClient.ts', () => ({
           credentials: 'private-file',
         }
       : null;
+    if (op === 'init' && failInit) {
+      return {
+        ok: false, exitCode: 1, argv: ['gbrain', 'init'],
+        stdout: '', stderr: 'Refusing to silently re-template existing brain\npostgres://gbrain:secret@postgres:5432/gbrain\n',
+        json: null,
+      };
+    }
     return {
       ok: true,
       exitCode: 0,
@@ -110,7 +120,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
   },
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
-  resetBrainSchema: async () => { resetBrainSchemaCalls += 1; },
+  resetBrainSchema: async () => { resetBrainSchemaCalls += 1; finishOrder.push('reset'); },
+  pauseBrainWriters: async () => { finishOrder.push('pause'); },
+  resumeBrainWriters: async () => { finishOrder.push('resume'); },
   takeGrantCredentials: async () => ({
     version: 1,
     mcp_url: 'http://127.0.0.1:3131/mcp',
@@ -301,15 +313,43 @@ describe('wizard', () => {
     expect(body.isolationNotice).toMatch(/every member with read on that Source/i);
   });
 
+  test('finish leaves writers paused when init fails and returns the stderr tail', async () => {
+    failInit = true;
+    finishOrder.length = 0;
+    try {
+      const res = await call('/api/wizard/finish', {});
+      expect(res.status).toBe(500);
+      const body = await res.json() as {
+        ok: boolean;
+        steps: { id: string; ok: boolean; stderr?: string }[];
+      };
+      expect(body.ok).toBe(false);
+      const init = body.steps.find((s) => s.id === 'init');
+      expect(init?.ok).toBe(false);
+      expect(init?.stderr).toContain('Refusing to silently re-template');
+      expect(init?.stderr).not.toContain('secret');
+      expect(finishOrder).toContain('pause');
+      expect(finishOrder).toContain('reset');
+      expect(finishOrder).not.toContain('resume');
+    } finally {
+      failInit = false;
+    }
+  });
+
   // Critical fix: old shared run() always passed json:true, which hard-fails
   // init and config.set (supportsJson: false) in buildArgv / ops RPC.
   test('finish does not pass json:true for init or config.set', async () => {
     callOpsCalls.length = 0;
     resetBrainSchemaCalls = 0;
+    finishOrder.length = 0;
     const res = await call('/api/wizard/finish', {});
     expect(res.status).toBe(200);
     // Worker cold-start compensation: wipe before init (must not be a silent no-op).
     expect(resetBrainSchemaCalls).toBe(1);
+    expect(finishOrder.indexOf('pause')).toBeGreaterThanOrEqual(0);
+    expect(finishOrder.indexOf('pause')).toBeLessThan(finishOrder.indexOf('reset'));
+    expect(finishOrder.indexOf('reset')).toBeLessThan(finishOrder.indexOf('init'));
+    expect(finishOrder.indexOf('init')).toBeLessThan(finishOrder.indexOf('resume'));
     const byOp = Object.fromEntries(callOpsCalls.map((c) => [c.op, c.opts]));
     expect(byOp.init?.json).not.toBe(true);
     expect(byOp['config.set']?.json).not.toBe(true);

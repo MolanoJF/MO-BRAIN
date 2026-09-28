@@ -92,6 +92,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
+  pauseBrainWriters: async () => {},
+  resumeBrainWriters: async () => {},
   takeGrantCredentials: async (path: string) => {
     takes.push(path);
     return { client_id: 'gbrain_cl_taken', client_secret: SECRET };
