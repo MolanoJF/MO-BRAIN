@@ -15,6 +15,7 @@ trap cleanup EXIT
 mkdir -p "$root/bin" "$root/home/.gbrain"
 cat > "$root/bin/gbrain" <<'EOF'
 #!/bin/sh
+echo "$$" >> "$GATE_PID"
 echo "started" >> "$GATE_LOG"
 trap 'echo "stopped" >> "$GATE_LOG"; exit 0' TERM INT
 while true; do sleep 1; done
@@ -24,7 +25,9 @@ export PATH="$root/bin:$PATH"
 export MOBRAIN_GBRAIN_HOME="$root/home"
 export MOBRAIN_GATE_POLL_SECONDS=0.2
 export GATE_LOG="$root/log"
+export GATE_PID="$root/pid"
 : > "$GATE_LOG"
+: > "$GATE_PID"
 
 sh docker/gbrain-gated-entrypoint.sh gbrain jobs supervisor --concurrency 2 &
 gate=$!
@@ -79,6 +82,21 @@ while [ "$(grep -c started "$GATE_LOG")" -lt 2 ]; do
   i=$((i + 1))
   if [ "$i" -gt 20 ]; then
     echo "gbrain did not start again after the pause file was removed" >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+
+# Crash-restart: SIGKILL the running gbrain outright, without toggling the
+# pause file. The gate must reap the dead child and start a fresh one on its
+# own (a zombie would otherwise defeat `kill -0` and never restart).
+last_pid=$(tail -n 1 "$GATE_PID")
+kill -KILL "$last_pid" 2>/dev/null || true
+i=0
+while [ "$(grep -c started "$GATE_LOG")" -lt 3 ]; do
+  i=$((i + 1))
+  if [ "$i" -gt 20 ]; then
+    echo "gbrain did not restart after its process was killed" >&2
     exit 1
   fi
   sleep 0.2

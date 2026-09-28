@@ -15,22 +15,43 @@ POLL=${MOBRAIN_GATE_POLL_SECONDS:-0.5}
 
 child=""
 
+# True (exit 0) only while the child is a live, non-zombie process. A crashed
+# gbrain stays a zombie until its parent reaps it, and on Linux `kill -0` on a
+# zombie still succeeds -- so a bare `kill -0` would let the gate keep polling
+# a corpse and never restart. Read the state from /proc/PID/stat when it is
+# available and fall back to the `kill -0` path when /proc is missing.
+child_alive() {
+  if [ -z "$child" ]; then
+    return 1
+  fi
+  if ! kill -0 "$child" 2>/dev/null; then
+    return 1
+  fi
+  if [ -d /proc ] && [ -r "/proc/$child/stat" ]; then
+    state=$(awk '{print $3}' "/proc/$child/stat" 2>/dev/null || true)
+    if [ "$state" = "Z" ]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
 stop_child() {
   if [ -z "$child" ]; then
     return 0
   fi
-  if ! kill -0 "$child" 2>/dev/null; then
+  if ! child_alive; then
     wait "$child" 2>/dev/null || true
     child=""
     return 0
   fi
   kill -TERM "$child" 2>/dev/null || true
   i=0
-  while kill -0 "$child" 2>/dev/null && [ "$i" -lt 50 ]; do
+  while child_alive && [ "$i" -lt 50 ]; do
     sleep 1
     i=$((i + 1))
   done
-  if kill -0 "$child" 2>/dev/null; then
+  if child_alive; then
     kill -KILL "$child" 2>/dev/null || true
   fi
   wait "$child" 2>/dev/null || true
@@ -41,7 +62,7 @@ trap 'stop_child; exit 0' TERM INT
 
 while true; do
   if [ -f "$CONFIG" ] && [ ! -f "$PAUSE" ]; then
-    if [ -z "$child" ] || ! kill -0 "$child" 2>/dev/null; then
+    if ! child_alive; then
       if [ -n "$child" ]; then
         wait "$child" 2>/dev/null || true
         child=""
