@@ -181,5 +181,5 @@ test('(e) a generic-harness grant produces a snippet that authenticates, and is 
   const r = await composeExec('gbrain-ops', ['bun', '-e', script], { env: { T } });
   expect(r.stdout).toContain('"tools"');
 
-  await composeExec('gbrain-ops', ['bash', '-c', `gbrain auth revoke-client ${probeClientId} || true`]);
+  await composeExec('gbrain-ops', ['gbrain', 'auth', 'revoke-client', probeClientId]).catch(() => {});
 });
