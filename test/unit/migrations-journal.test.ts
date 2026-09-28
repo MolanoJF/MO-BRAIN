@@ -18,8 +18,8 @@ test('migration journal entries have strictly increasing `when` timestamps', () 
   expect(entries.length).toBeGreaterThan(0);
 
   for (let i = 1; i < entries.length; i++) {
-    const prev = entries[i - 1];
-    const curr = entries[i];
+    const prev = entries[i - 1]!;
+    const curr = entries[i]!;
     expect(
       curr.when,
       `migration "${curr.tag}" (when=${curr.when}) must have a timestamp strictly greater than ` +
