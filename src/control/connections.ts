@@ -167,7 +167,14 @@ export async function provisionConnection(
       { json: true },
     );
     if (!r.ok) throw new Error(`auth.rescopeClient failed (exit ${r.exitCode})`);
-    await persistCompiled(existing.id, input, name, compiled);
+    // A rescope never re-runs verify, so any prior verify result is stale for
+    // the connection's new scope (e.g. a different harness or profile) —
+    // clear it explicitly rather than leaving a misleading "Verified" stick.
+    await persistCompiled(existing.id, input, name, compiled, {
+      verifyStatus: null,
+      verifiedAt: null,
+      verifyMessage: null,
+    });
     await audit(input.organizationId, actor, 'connection.rescope', existing.id, {
       clientId, serverClientId: existing.serverClientId, clientName: name,
       writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
@@ -659,7 +666,7 @@ async function persistCompiled(
   compiled: CompiledConnection,
   extra: {
     gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date;
-    verifyStatus?: 'ok' | 'partial' | 'failed'; verifiedAt?: Date; verifyMessage?: string | null;
+    verifyStatus?: 'ok' | 'partial' | 'failed' | null; verifiedAt?: Date | null; verifyMessage?: string | null;
   } = {},
 ): Promise<void> {
   await getDb().update(schema.connections).set({
