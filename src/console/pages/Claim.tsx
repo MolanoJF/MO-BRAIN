@@ -180,7 +180,7 @@ function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: bo
   const verifyLine = conn.verify?.status === 'ok'
     ? 'Verified: this connection authenticated successfully.'
     : conn.verify?.status === 'partial'
-    ? 'Server checks passed, harness evidence missing — treat as unverified.'
+    ? 'Server checks passed. (A full end-to-end check requires the connected agent to actually make a request, which isn\'t run automatically to avoid extra cost.)'
     : conn.verify?.status === 'failed'
     ? `Verify failed${conn.verify.message ? `: ${conn.verify.message}` : '.'}`
     : null;
@@ -201,7 +201,13 @@ function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: bo
       </dl>
       <pre className={CREDENTIAL_BLOCK}>{snippet}</pre>
       {verifyLine && (
-        <Notice tone={conn.verify?.status === 'ok' ? 'ok' : 'warning'}>{verifyLine}</Notice>
+        <Notice
+          tone={
+            conn.verify?.status === 'ok' ? 'ok' : conn.verify?.status === 'failed' ? 'danger' : 'warning'
+          }
+        >
+          {verifyLine}
+        </Notice>
       )}
       {agentInstructions && (
         <div className="space-y-1">

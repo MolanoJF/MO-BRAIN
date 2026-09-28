@@ -167,11 +167,19 @@ export function Mcp() {
               <PasteBlock label="Agent instructions" text={view.paste.agentInstructions} />
             )}
             {view.paste.verify?.status && (
-              <Notice tone={view.paste.verify.status === 'ok' ? 'ok' : 'warning'}>
+              <Notice
+                tone={
+                  view.paste.verify.status === 'ok'
+                    ? 'ok'
+                    : view.paste.verify.status === 'failed'
+                    ? 'danger'
+                    : 'warning'
+                }
+              >
                 {view.paste.verify.status === 'ok'
                   ? 'Verified: this connection authenticated successfully.'
                   : view.paste.verify.status === 'partial'
-                  ? 'Server checks passed, harness evidence missing — treat as unverified.'
+                  ? 'Server checks passed. (A full end-to-end check requires the connected agent to actually make a request, which isn\'t run automatically to avoid extra cost.)'
                   : `Verify failed${view.paste.verify.message ? `: ${view.paste.verify.message}` : '.'}`}
               </Notice>
             )}
