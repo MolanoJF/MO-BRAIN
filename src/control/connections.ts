@@ -192,7 +192,7 @@ export async function provisionConnection(
     grantParams(name, input.harness, compiled, credentialsOut),
     { json: true },
   );
-  if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode})`);
+  if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode}): ${String(r.stderr ?? '').slice(0, 500)}`);
   const gbrainClientId = grantedClientId(r.json);
 
   const verifyResult = await verifyManualHarness(gbrainClientId, input.harness, credentialsOut);
@@ -291,7 +291,7 @@ async function provisionServerClient(
     grantParams(name, harness, compiled, credentialsOut),
     { json: true },
   );
-  if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode})`);
+  if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode}): ${String(r.stderr ?? '').slice(0, 500)}`);
   const clientId = grantedClientId(r.json);
 
   try {
