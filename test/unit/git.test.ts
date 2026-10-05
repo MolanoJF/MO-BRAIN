@@ -5,6 +5,10 @@ import {
 import type { GitRange, RangeCommit, RevertRequest, TreeProbe } from '../../src/ops/git.ts';
 import { attributeCommits, captureHeads, diffForRun } from '../../src/agent/diff.ts';
 import { purgeCandidates, revertRun } from '../../src/agent/revert.ts';
+import { buildArgv, redactArgv } from '../../src/contracts/argv.ts';
+import { pageDeleteNeedsForce } from '../../src/contracts/pin.ts';
+import { OPERATIONS } from '../../src/contracts/registry.ts';
+import type { ParamValues } from '../../src/contracts/types.ts';
 import type {
   RevertDeps, RevertRefusal, RevertResult, RevertSuccess, RevertTarget,
 } from '../../src/agent/revert.ts';
@@ -384,6 +388,7 @@ function revertHarness(over: Partial<RevertDeps> = {}, target: RevertTarget | nu
       // here: exit 0 classifies as `ok` whatever the payload.
       return { ok: true, exitCode: 0, argv: ['gbrain', op], stdout: '', stderr: '', json: null };
     },
+    pageDeleteNeedsForce,
     now: () => AT,
     ...over,
   };
@@ -572,7 +577,11 @@ describe('revertRun', () => {
       removedPath: 'gate-c/r1/Nightly Page.md',
       outcome: 'purged',
       detail: "removed from customers's index by name",
-      argv: ['gbrain', 'delete', 'gate-c/r1/nightly-page', '--source-id', 'customers', '--purge', '--json'],
+      argv: [
+        'gbrain', 'delete', 'gate-c/r1/nightly-page', '--source-id', 'customers', '--purge',
+        ...(pageDeleteNeedsForce() ? ['--force'] : []),
+        '--json',
+      ],
       exitCode: 0,
       stderr: '',
       classification: 'ok',
@@ -582,10 +591,51 @@ describe('revertRun', () => {
     expect(h.probes).toEqual(['customers:gate-c/r1/Nightly Page.md,gate-c/r1/nightly-page.md']);
     // The order IS the requirement: purge, sync, embed.
     expect(ops).toEqual([
-      { op: 'page.delete', params: { slug: 'gate-c/r1/nightly-page', sourceId: 'customers', purge: true }, json: true },
+      {
+        op: 'page.delete',
+        params: {
+          slug: 'gate-c/r1/nightly-page', sourceId: 'customers', purge: true,
+          ...(pageDeleteNeedsForce() ? { force: true } : {}),
+        },
+        json: true,
+      },
       { op: 'sync', params: { source: 'customers' }, json: true },
       { op: 'embed', params: { source: 'customers', stale: true }, json: true },
     ]);
+  });
+
+  // The controller's ruling: the recorded receipt argv must BE the command that
+  // ran, `--force` included, so it is derived from the same params sent. Proven
+  // at 0.51 by forcing the gate (the declared pin stays 0.50.5.0).
+  test('at 0.51 the recorded purge argv carries the --force it actually sent', async () => {
+    const ops: OpsCall[] = [];
+    const h = revertHarness({
+      pageDeleteNeedsForce: () => true,
+      revertRange: async () => ({
+        reverted: true,
+        sha: SHA_B,
+        files: [
+          { status: 'M', path: 'gate-c/r1/edited.md' },
+          { status: 'D', path: 'gate-c/r1/Nightly Page.md' },
+        ],
+      }),
+      callOps: opsFake(ops, (op) =>
+        op === 'page.delete'
+          ? { json: { status: 'purged', slug: 'gate-c/r1/nightly-page', source_id: 'customers' } }
+          : {}),
+    });
+
+    const r = success(await revertRun({ runId: RUN_ID, actor: ADMIN }, h.deps));
+    expect(r.index.purge).toHaveLength(1);
+    const purge = r.index.purge[0]!;
+    const spec = OPERATIONS['page.delete']!;
+    const sent = ops[0]!.params;
+    expect(sent).toEqual({
+      slug: 'gate-c/r1/nightly-page', sourceId: 'customers', purge: true, force: true,
+    });
+    expect(purge.argv).toContain('--force');
+    // Exactly the argv those sent params describe — no second literal to drift.
+    expect(purge.argv).toEqual(redactArgv(spec, ['gbrain', ...buildArgv(spec, sent as ParamValues, { json: true })]));
   });
 
   // The guard's whole point: `gbrain delete --purge` UNLINKS the page's markdown
