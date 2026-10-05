@@ -2,7 +2,8 @@ import { test, expect, describe } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  GBRAIN_PIN, contractsDir, operationsPath, capabilityPath, verifyRuntimePin, type CallOps,
+  GBRAIN_PIN, contractsDir, operationsPath, capabilityPath, verifyRuntimePin,
+  pinAtLeast, pageDeleteNeedsForce, type CallOps,
 } from '../../src/contracts/pin.ts';
 import { toolNames, type CapabilitySnapshot } from '../../src/contracts/capability.ts';
 
@@ -50,6 +51,21 @@ describe('pin.ts', () => {
     const result = await verifyRuntimePin(async () => { throw new Error('ECONNREFUSED'); });
     expect(result.declared).toBe(GBRAIN_PIN);
     expect(result.matches).toBeNull();
+  });
+
+  // The pin compare that gates the 0.51-only `page.delete --force`: numeric per
+  // dot-separated part, missing parts read as 0. `'0.51.0.0' >= '0.51'` and
+  // `'1.0' >= '0.99.9.9'` are the cases a string compare gets wrong.
+  test('pinAtLeast compares dot-separated parts numerically, missing parts as 0', () => {
+    expect(pinAtLeast('0.51.0.0', '0.51')).toBe(true);
+    expect(pinAtLeast('0.50.5.0', '0.51.0.0')).toBe(false);
+    expect(pinAtLeast('0.51.0.1', '0.51.0.0')).toBe(true);
+    expect(pinAtLeast('1.0', '0.99.9.9')).toBe(true);
+  });
+
+  test('pageDeleteNeedsForce is true only where the revision-checked delete exists', () => {
+    expect(pageDeleteNeedsForce('0.50.5.0')).toBe(false);
+    expect(pageDeleteNeedsForce('0.51.0.0')).toBe(true);
   });
 
   test('pinned-next capability snapshot is a real 0.51.0.0 capture', async () => {

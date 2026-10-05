@@ -26,6 +26,38 @@ export function capabilityPath(version: string = GBRAIN_PIN): string {
   return `${contractsDir(version)}/capability.json`;
 }
 
+/**
+ * Numeric dot-separated version compare: missing parts read as 0, so
+ * `pinAtLeast('0.51.0.0', '0.51')` and `pinAtLeast('1.0', '0.99.9.9')` are true
+ * where a string compare would not be. Gates flags that exist only past a pin.
+ */
+export function pinAtLeast(version: string, min: string): boolean {
+  const part = (p: string): number => {
+    const n = Number.parseInt(p, 10);
+    return Number.isNaN(n) ? 0 : n;
+  };
+  const have = version.split('.').map(part);
+  const want = min.split('.').map(part);
+  for (let i = 0; i < Math.max(have.length, want.length); i++) {
+    const a = have[i] ?? 0;
+    const b = want[i] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return true;
+}
+
+/**
+ * 0.51.0.0 replaced page mutations with the journaled, revision-checked
+ * protocol (upstream `PAGE_MUTATION_PARAMS`): `delete` without a matching
+ * `expected_revision` fails `revision_conflict` unless `--force` explicitly
+ * overwrites the current revision. `--force` does NOT exist at the pinned-
+ * current 0.50.5.0 (`unknown flag --force for 'gbrain delete'`), so callers
+ * pass it only where the pin supports it. Never changes PINNED_CURRENT.
+ */
+export function pageDeleteNeedsForce(version: string = GBRAIN_PIN): boolean {
+  return pinAtLeast(version, '0.51.0.0');
+}
+
 export type PinVerification = {
   declared: string;
   /** null when no reachable operation carries the running binary's version. */

@@ -36,6 +36,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
+import { pageDeleteNeedsForce } from '../contracts/pin.ts';
 import { OPERATIONS } from '../contracts/registry.ts';
 import { getDb, schema } from '../control/db/client.ts';
 import { callOps, gitPathExists, gitRange, gitRevertRange } from '../control/opsClient.ts';
@@ -469,7 +470,10 @@ async function purgeRemovedPages(
       continue;
     }
 
-    const params = { slug: c.slug, sourceId: writeSourceId, purge: true };
+    const params = {
+      slug: c.slug, sourceId: writeSourceId, purge: true,
+      ...(pageDeleteNeedsForce() ? { force: true } : {}),
+    };
     const argv = argvFor(c.slug);
     try {
       const r = await deps.callOps('page.delete', params, { json: true, timeoutMs: INDEX_TIMEOUT_MS });

@@ -857,6 +857,14 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       { name: 'slug', flag: '', kind: 'value', required: true },
       { name: 'sourceId', flag: '--source-id', kind: 'value', required: true },
       { name: 'purge', flag: '--purge', kind: 'flag' },
+      // 0.51 replaced page mutations with the journaled, revision-checked
+      // protocol (upstream PAGE_MUTATION_PARAMS): a delete with no matching
+      // expected_revision conflicts, and `--force` explicitly overwrites the
+      // current revision. `--force` does NOT exist at 0.50.5.0, so the caller
+      // passes it only where the pin supports it (see pin.ts
+      // pageDeleteNeedsForce / revert.ts / runner.contract.test.ts). Omitting
+      // it leaves the pinned-current argv byte-identical.
+      { name: 'force', flag: '--force', kind: 'flag' },
     ],
     supportsJson: true,
     // `gbrain delete <slug> --purge --dry-run --json` answers

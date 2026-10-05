@@ -75,4 +75,16 @@ describe('registry invariants', () => {
     const fromJson = Object.fromEntries(emitted.operations.map((o: { id: string }) => [o.id, o]));
     expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
   });
+
+  // 0.51 made page mutations revision-checked (upstream PAGE_MUTATION_PARAMS), so
+  // `delete` takes an optional `--force` there. The param is declared for the
+  // registry but is opt-in: omitting it keeps the 0.50.5.0 argv byte-identical,
+  // and passing it appends `--force` right after `--purge`, before `--json`.
+  test('page.delete omits --force by default and places it when asked', () => {
+    const spec = OPERATIONS['page.delete']!;
+    expect(buildArgv(spec, { slug: 'x', sourceId: 's', purge: true }, { json: true }))
+      .toEqual(['delete', 'x', '--source-id', 's', '--purge', '--json']);
+    expect(buildArgv(spec, { slug: 'x', sourceId: 's', purge: true, force: true }, { json: true }))
+      .toEqual(['delete', 'x', '--source-id', 's', '--purge', '--force', '--json']);
+  });
 });
