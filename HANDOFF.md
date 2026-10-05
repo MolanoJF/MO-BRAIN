@@ -289,9 +289,7 @@ non-promises.
 - **Agent spend limit / mixed authorship.** Slice 3.5, 4 and 5 were authored by more than one agent (the
   `claude` agent's monthly limit was exhausted mid-slice); the findings docs and gate files name their
   authors where it matters. Treat the branches as mixed-authored.
-- **Workflow-file pushes need a temporary deploy key.** The `gh` OAuth token lacks the `workflow` scope, so a
-  push that changes anything under `.github/workflows/` needs a deploy key with write access; add it, push,
-  and delete it immediately.
+- **CI is budgeted.** Only `ci.yml` (lint/tsc/unit, ~1 min) runs on push/PR; the Docker suites run on demand via `stack.yml`. Read `docs/runbooks/ci.md` before touching `.github/workflows/`. The `gh` token has the `workflow` scope (checked 2026-10-05), so workflow-file pushes no longer need a deploy key.
 - **Hazards carried, not cured** (all recorded in `docs/slice-5-findings.md`): a new contract file can still
   be answered by a sibling's process-global `mock.module` (F27/F32 containment); the host-side spend read
   still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; and
