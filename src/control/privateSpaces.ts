@@ -30,13 +30,18 @@ export type ProvisionPrivateSpaceResult =
   | { ok: false; error: string; status: 400 | 404 | 409 | 502 };
 
 /**
- * gbrain's PGlite/Postgres unique violations for the `sources` table. If
- * `sources.list` could not be read and `sources.add` fails with one of these,
- * the row already exists and the source is registered.
+ * gbrain's `sources` PRIMARY-KEY unique violation. Only an id collision means
+ * THIS exact source is already registered. A `sources_name_key` (name)
+ * collision may belong to a different source, so it must not be treated as a
+ * successful registration. Used only when `sources.list` could not be read.
  */
-const SOURCE_ALREADY_EXISTS = /sources_(pkey|name_key)/;
+const SOURCE_ID_COLLISION = /sources_pkey/;
 
-/** True when absent, false when present, null when the list cannot be read. */
+function isIdCollision(stderr: string, sourceId: string): boolean {
+  return SOURCE_ID_COLLISION.test(stderr) || stderr.includes(`(id)=(${sourceId})`);
+}
+
+/** True when present, false when absent, null when the list cannot be read. */
 async function isSourceRegistered(sourceId: string): Promise<boolean | null> {
   try {
     const r = await callOps<{ sources?: Array<{ id?: string }> }>(
@@ -65,7 +70,7 @@ async function registerPrivateSpaceSource(
       federated: true,
     }, { timeoutMs: 300_000 });
     if (r.ok) return { ok: true };
-    if (SOURCE_ALREADY_EXISTS.test(r.stderr ?? '')) return { ok: true };
+    if (isIdCollision(r.stderr ?? '', space.sourceId)) return { ok: true };
     return { ok: false };
   } catch {
     return { ok: false };

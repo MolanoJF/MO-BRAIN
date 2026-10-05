@@ -333,6 +333,9 @@ describe('invite-time provisioning', () => {
       eq(schema.connections.state, 'active'),
     ));
     expect(active.length).toBe(0);
+    const anyConns = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.membershipId, body.id));
+    expect(anyConns.filter((c) => c.state !== 'revoked').length).toBe(0);
 
     const addsBefore = calls.filter((c) => c.op === 'sources.add').length;
     const retried = await hit('POST', `/api/members/${body.id}/private-space`, adminCookie);
@@ -340,6 +343,59 @@ describe('invite-time provisioning', () => {
     const retriedBody = await retried.json() as { ok: boolean };
     expect(retriedBody.ok).toBe(true);
     expect(calls.filter((c) => c.op === 'sources.add').length).toBeGreaterThan(addsBefore);
+  });
+
+  test('an id collision while sources.list is unavailable counts as registered', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sources.list') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'list'],
+          stdout: '', stderr: 'sources list unavailable', json: null,
+        };
+      }
+      if (op === 'sources.add') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'add'],
+          stdout: '',
+          stderr: 'ERROR: duplicate key value violates unique constraint "sources_pkey"',
+          json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-idc-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { privateSpace: { ok: boolean; error?: string } };
+    expect(body.privateSpace.ok).toBe(true);
+  });
+
+  test('a name collision while sources.list is unavailable is not treated as registered', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sources.list') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'list'],
+          stdout: '', stderr: 'sources list unavailable', json: null,
+        };
+      }
+      if (op === 'sources.add') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'add'],
+          stdout: '',
+          stderr: 'ERROR: duplicate key value violates unique constraint "sources_name_key"',
+          json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-namec-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { privateSpace: { ok: boolean; error?: string } };
+    expect(body.privateSpace.ok).toBe(false);
+    expect(body.privateSpace.error).toBe('private_space_source_failed');
   });
 });
 
