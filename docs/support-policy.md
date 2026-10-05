@@ -35,7 +35,7 @@ Two things make the target honest:
 
 **Promised:**
 
-- The supported pin is tested by the full contract suite against the pinned version on every change and on demand for a drift tag.
+- The supported pin is tested by the full contract suite on demand via `stack.yml` — including before every release — and for a drift tag.
 - Upgrades move through the host lane only, with a snapshot in front and a one-command rollback behind.
 - Security fixes land in the supported pin line; we do not maintain older pins.
 - Version drift is detected on demand — dispatching `stack.yml` with `gbrain_version` when an upstream tag lands — and surfaced rather than discovered by an operator mid-upgrade.

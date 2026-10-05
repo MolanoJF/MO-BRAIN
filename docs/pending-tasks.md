@@ -161,5 +161,5 @@ headline feature.
 
 Not a backlog item, so nobody re-opens it: every Slice 5 defect **F20–F32** is **fixed** (except the
 documented deferrals above); the eight verification commands are green on the frozen tree; Gate A is
-green in CI on an un-seeded runner; the nightly drift tripwire has been seen to fire and seen not to
-duplicate; and Mobrain 1.0.0 is tagged, published, and pulled by digest on a fresh runner.
+green in CI on an un-seeded runner; the drift tripwire (which was nightly until 2026-10-05 and is now an
+on-demand `stack.yml` dispatch) has been seen to fire and seen not to duplicate; and Mobrain 1.0.0 is tagged, published, and pulled by digest on a fresh runner.

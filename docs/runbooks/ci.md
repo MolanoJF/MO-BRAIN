@@ -13,11 +13,12 @@ blocks nothing; it only costs minutes.
 | `ci.yml` | every PR push and push to `main` (docs-only changes skipped; superseded runs cancelled) | ~1 min | lint:forbidden, tsc, unit |
 | `stack.yml` | **only** by hand, or from `release.yml` | `all` ≈ 29 min · `contract` ≈ 13 · `e2e` ≈ 9 · `integration` ≈ 4 · `build` ≈ 2 | the Docker stack: build gates, integration, contract, restore, slice2 |
 | `release.yml` | `v*` tag or dispatch | stack + publish | stack green → publish the three pinned images |
-| `release-verify.yml` | **only** by hand | 1–15 min per job | published images pull by digest, are anonymously public, and install on a clean host |
+| `release-verify.yml` | **only** by hand | 1–45 min per job | published images pull by digest, are anonymously public, and install on a clean host |
 
 Nothing is scheduled. `test/unit/workflows.test.ts` fails if a workflow gains a
-`schedule:`, if anything but `ci.yml` triggers on push/PR, or if a job has no
-`timeout-minutes`.
+`schedule:`, if anything but `ci.yml` triggers on push/PR (the one exemption is
+`release.yml`'s `v*` tag push), or if a job has no `timeout-minutes` (jobs that
+only `uses:` a reusable workflow are exempt: they inherit the callee's timeouts).
 
 ## Running the stack suites
 
