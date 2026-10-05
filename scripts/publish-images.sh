@@ -2,7 +2,7 @@
 # G1: three images, three exact pins, no moving tags, ever.
 set -euo pipefail
 REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-NS="${IMAGE_NAMESPACE:-molanojf}"
+NS="${IMAGE_NAMESPACE:-molioros}"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 
 exact() {  # refuse anything that is not x.y.z[.w]

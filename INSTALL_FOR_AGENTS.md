@@ -167,7 +167,7 @@ anonymously (and CI now verifies this stays true on every release — see
 pull` again, don't assume it's your environment — verify with a direct anonymous pull first:
 
 ```bash
-docker pull ghcr.io/molanojf/control-plane:1.0.0
+docker pull ghcr.io/molioros/control-plane:1.0.0
 ```
 
 If that fails for everyone (not just you), it's a registry-visibility regression on the maintainer's
@@ -204,8 +204,8 @@ Mobrain stores.
 ## Summary: the actual non-interactive recipe
 
 ```bash
-git clone https://github.com/MolanoJF/mobrain.git
-cd mobrain
+git clone https://github.com/MoliorOS/MO-BRAIN.git
+cd MO-BRAIN
 docker ps --format '{{.Ports}}' | grep -E ':80->|:443->'   # confirm nothing else holds 80/443
 ENABLE_RUNNER=n DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-prod bash scripts/install.sh
 curl -sk https://brain.example.com/api/health

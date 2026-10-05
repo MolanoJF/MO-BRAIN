@@ -7,6 +7,7 @@ name: release-verify
 on:
   workflow_dispatch:
     inputs:
+      # v1.0.0 as first published under the personal namespace; replaced with the molioros digests by the next release (see docs/runbooks/ci.md)
       gbrain_base:
         description: 'gbrain-base image reference (by digest)'
         required: true
@@ -67,7 +68,7 @@ jobs:
     timeout-minutes: 10
     env:
       IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
+      IMAGE_NAMESPACE: molioros
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
       APP_VERSION: '1.0.0'
@@ -86,7 +87,7 @@ jobs:
       CLEAN_INSTALL_E2E: '1'
       CLEAN_INSTALL_DIR: /tmp/clean-install
       IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
+      IMAGE_NAMESPACE: molioros
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
       # The published control-plane tag. Without it Compose falls back to `dev`,
@@ -118,10 +119,10 @@ jobs:
   # Answers "can release.yml publish?" without publishing anything: it opens,
   # then cancels, an OCI blob-upload session against each GHCR package. Opening
   # a session requires push rights but creates no blob, manifest, or tag. The
-  # packages live under a PERSONAL namespace (molanojf) while the repo is in the
-  # MoliorOS org, so the org repo's GITHUB_TOKEN is not automatically on each
-  # package's "Manage Actions access" list — `packages: write` in release.yml is
-  # not sufficient on its own. Dispatch this before tagging a release.
+  # packages live under the MoliorOS org namespace (ghcr.io/molioros). The org
+  # repo's GITHUB_TOKEN still has to be on each package's "Manage Actions access"
+  # list — `packages: write` in release.yml is not sufficient on its own.
+  # Dispatch this before tagging a release.
   push-permission:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -130,7 +131,7 @@ jobs:
       packages: write
     env:
       IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
+      IMAGE_NAMESPACE: molioros
     steps:
       - uses: actions/checkout@v4
       - name: Check this token can push the three GHCR images (non-mutating)

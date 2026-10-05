@@ -45,7 +45,7 @@ jobs:
     timeout-minutes: 60
     env:
       IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
+      IMAGE_NAMESPACE: molioros
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
       # A dispatch may name the version; a tag push keeps the frozen pin.
@@ -66,9 +66,9 @@ jobs:
         id: digest
         run: |
           set -euo pipefail
-          base=$(grep -oE 'ghcr\.io/molanojf/gbrain-base@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
-          control=$(grep -oE 'ghcr\.io/molanojf/control-plane@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
-          runner=$(grep -oE 'ghcr\.io/molanojf/agent-runner@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
+          base=$(grep -oE 'ghcr\.io/molioros/gbrain-base@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
+          control=$(grep -oE 'ghcr\.io/molioros/control-plane@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
+          runner=$(grep -oE 'ghcr\.io/molioros/agent-runner@sha256:[0-9a-f]{64}' publish-output.txt | tail -1)
           for ref in "$base" "$control" "$runner"; do
             [ -n "$ref" ] || { echo "missing a RepoDigest in publish-output.txt" >&2; exit 1; }
           done
@@ -151,7 +151,7 @@ jobs:
       contents: read
     env:
       IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
+      IMAGE_NAMESPACE: molioros
       GBRAIN_VERSION: '0.50.5.0'
       HARNESS_VERSION: '2.1.274'
       APP_VERSION: ${{ inputs.version || '1.0.0' }}

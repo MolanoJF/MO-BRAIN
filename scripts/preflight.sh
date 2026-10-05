@@ -261,7 +261,7 @@ check_project_identity() {
 
 check_images() {
   if [ -n "${PREFLIGHT_FAKE_PULL:-}" ]; then
-    refuse 16 "the pinned Mobrain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
+    refuse 16 "the pinned Mobrain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
   fi
   if [ "${PREFLIGHT_SKIP_PULL:-1}" = "1" ]; then
     warn "skipping the image-pull check (PREFLIGHT_SKIP_PULL=1); the installer pulls the images itself."

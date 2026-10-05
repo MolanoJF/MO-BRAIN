@@ -2,10 +2,10 @@
 # Non-mutating pre-release check: can this repo's GITHUB_TOKEN push the three
 # GHCR images release.yml publishes?
 #
-# The images live under a PERSONAL namespace (molanojf) while the repo is in
-# the MoliorOS org. Whether the org repo's GITHUB_TOKEN (release.yml grants
-# `packages: write`) may push to a user-owned package depends on that package's
-# "Manage Actions access" setting, which no API exposed to us reports.
+# The images live under the MoliorOS org namespace (ghcr.io/molioros). Whether
+# the org repo's GITHUB_TOKEN (release.yml grants `packages: write`) may push to
+# each package depends on that package's "Manage Actions access" setting, which
+# no API exposed to us reports.
 #
 # The OCI distribution API lets us ask the registry directly: POST to
 # /v2/<name>/blobs/uploads/ opens an upload session (HTTP 202 + a `Location`
@@ -13,12 +13,12 @@
 # Location cancels it. No blob, manifest, or tag is ever created. We never log
 # in with docker and never print the token or the Authorization header.
 #
-# Env: IMAGE_REGISTRY (default ghcr.io), IMAGE_NAMESPACE (default molanojf),
+# Env: IMAGE_REGISTRY (default ghcr.io), IMAGE_NAMESPACE (default molioros),
 #      GHCR_USER, GHCR_TOKEN (required; never echoed).
 set -eu
 
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-molanojf}"
+IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-molioros}"
 
 : "${GHCR_TOKEN:?GHCR_TOKEN is required (a token with packages:write) and was not set}"
 : "${GHCR_USER:?GHCR_USER is required and was not set}"
@@ -28,7 +28,7 @@ trap 'rm -f "$hdr"' EXIT
 
 denied() {  # $1 name  $2 http code
   printf 'push DENIED %s (HTTP %s)\n' "$1" "$2"
-  printf 'Grant MoliorOS/MO-BRAIN write access: GitHub -> molanojf'\''s packages -> %s -> Package settings -> Manage Actions access -> Add repository (Role: Write), or move IMAGE_NAMESPACE to the org.\n' "$1"
+  printf 'Grant MoliorOS/MO-BRAIN write access: GitHub -> MoliorOS org -> Packages -> %s -> Package settings -> Manage Actions access -> Add repository (Role: Write).\n' "$1"
 }
 
 failed=0

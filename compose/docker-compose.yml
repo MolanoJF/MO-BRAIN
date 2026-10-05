@@ -58,7 +58,7 @@ services:
     networks: [brain-net, control-net]
 
   gbrain-serve:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION:?required}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment:
       <<: *gbrain-env
@@ -80,7 +80,7 @@ services:
     networks: [brain-net]
 
   gbrain-worker:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION:?required}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION:?required}
     restart: unless-stopped
     environment: *gbrain-env
     command: ["/opt/mobrain/gbrain-gated-entrypoint.sh", "gbrain", "jobs", "supervisor", "--concurrency", "${WORKER_CONCURRENCY:-2}"]
@@ -96,7 +96,7 @@ services:
   # S2: the privilege boundary. Holds brain DB creds (required by V8) and RW
   # GBRAIN_HOME; exposes only the allowlisted RPC on the private network.
   gbrain-ops:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
     restart: unless-stopped
     environment:
       <<: *gbrain-env
@@ -113,7 +113,7 @@ services:
     networks: [brain-net, ops-net]
 
   control-plane:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
     restart: unless-stopped
     environment:
       # S2: control DB only. No GBRAIN_DATABASE_URL, no DATABASE_URL.
@@ -164,7 +164,7 @@ services:
   # no brain-repos. It reaches gbrain only through the allowlisted ops RPC (S2).
   # Replicas are safe: one wins the leader advisory lock, the rest are workers.
   scheduler:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
     restart: unless-stopped
     environment:
       CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control
@@ -189,7 +189,7 @@ services:
   # starts it.
   agent-runner:
     profiles: ["runner"]
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION:?required}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:${HARNESS_VERSION:?required}
     command: ["bun", "run", "/app/src/runner/main.ts"]
     # No `restart:` on purpose. The process refuses to start without
     # RUNNER_TOKEN (Task 8's guard), and a restart policy would turn that

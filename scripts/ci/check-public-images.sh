@@ -12,7 +12,7 @@
 # never performed `docker login ghcr.io` in the first place).
 set -euo pipefail
 REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-NS="${IMAGE_NAMESPACE:-molanojf}"
+NS="${IMAGE_NAMESPACE:-molioros}"
 
 docker logout "$REGISTRY" >/dev/null 2>&1 || true
 
@@ -39,7 +39,7 @@ check() {  # $1 image  $2 tag
   echo "FAIL: $ref is NOT publicly, anonymously pullable." >&2
   if printf '%s' "$out" | grep -qiE 'denied|unauthorized'; then
     echo "  -> This is the 'denied' error GHCR returns for a PRIVATE package." >&2
-    echo "  -> Fix: GitHub -> molanojf's packages -> $1 -> Package settings" >&2
+    echo "  -> Fix: GitHub -> MoliorOS org -> Packages -> $1 -> Package settings" >&2
     echo "     -> Danger Zone -> Change visibility -> Public." >&2
   else
     echo "  -> Unexpected failure mode (not a visibility 'denied'); investigate the" >&2
