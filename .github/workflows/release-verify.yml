@@ -114,3 +114,27 @@ jobs:
           fi
       - run: mkdir -p /tmp/clean-install
       - run: bun test test/e2e/install.e2e.test.ts
+
+  # Answers "can release.yml publish?" without publishing anything: it opens,
+  # then cancels, an OCI blob-upload session against each GHCR package. Opening
+  # a session requires push rights but creates no blob, manifest, or tag. The
+  # packages live under a PERSONAL namespace (molanojf) while the repo is in the
+  # MoliorOS org, so the org repo's GITHUB_TOKEN is not automatically on each
+  # package's "Manage Actions access" list — `packages: write` in release.yml is
+  # not sufficient on its own. Dispatch this before tagging a release.
+  push-permission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: molanojf
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check this token can push the three GHCR images (non-mutating)
+        run: bash scripts/ci/check-push-permission.sh
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
