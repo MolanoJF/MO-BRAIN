@@ -122,6 +122,31 @@ describe('admin grants API', () => {
     expect(conn?.readSpaceIds).toEqual([]);
     expect(ops.calls.some((c) => c.op === 'auth.rescopeClient')).toBe(true);
   });
+
+  test("deleting a grant drops the member's access-overview cell", async () => {
+    await hit('PUT', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.bob.membershipId, spaceId: fx.companySpaceId, access: 'read',
+    });
+
+    const before = await (await hit('GET', '/api/access-overview', fx.admin.cookie)).json() as {
+      cells: Array<{ membershipId: string; spaceId: string }>;
+    };
+    expect(before.cells.some(
+      (c) => c.membershipId === fx.bob.membershipId && c.spaceId === fx.companySpaceId,
+    )).toBe(true);
+
+    const removed = await hit('DELETE', '/api/grants', fx.admin.cookie, {
+      membershipId: fx.bob.membershipId, spaceId: fx.companySpaceId,
+    });
+    expect(removed.status).toBe(200);
+
+    const after = await (await hit('GET', '/api/access-overview', fx.admin.cookie)).json() as {
+      cells: Array<{ membershipId: string; spaceId: string }>;
+    };
+    expect(after.cells.some(
+      (c) => c.membershipId === fx.bob.membershipId && c.spaceId === fx.companySpaceId,
+    )).toBe(false);
+  });
 });
 
 const { insertCommandSchedule } = await import('../helpers/zoneFixture.ts');

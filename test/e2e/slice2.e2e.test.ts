@@ -157,6 +157,10 @@ function patch(path: string, body: unknown) {
   return fetchInsecure(path, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(body) });
 }
 
+function del(path: string, body: unknown) {
+  return fetchInsecure(path, { method: 'DELETE', headers: jsonHeaders(), body: JSON.stringify(body) });
+}
+
 function get(path: string) {
   return fetchInsecure(path, { headers: { cookie } });
 }
@@ -694,7 +698,7 @@ describe('Slice 2 seam gate B', () => {
     expect(isolatedSources.every((sid) => sid === 'shared')).toBe(true);
   }, 600_000);
 
-  test.skipIf(!dockerAvailable)('7. revoke makes thin-client search fail and drops access-overview', async () => {
+  test.skipIf(!dockerAvailable)('7. revoke makes thin-client search fail; deleting grants drops access-overview', async () => {
     const res = await post(`/api/connections/${pairingConnectionId}/revoke`, {});
     expect(res.status).toBe(200);
 
@@ -707,7 +711,24 @@ describe('Slice 2 seam gate B', () => {
     expect(overviewRes.status).toBe(200);
     const overview = await readJson<Overview>(overviewRes, 'GET /api/access-overview after revoke');
     const pairingCells = overview.cells.filter((c) => c.membershipId === members.pairing!.id);
-    expect(pairingCells.length).toBe(0);
+    // D7 (3330ae8): company-Space access is a space_grants row, and revoking a
+    // Connection is a credential action that leaves the member's grants intact.
+    expect(pairingCells.length).toBe(3);
+
+    // Drop the access through the product path: one DELETE /api/grants per
+    // company-Space grant (customers write + shared/internal read).
+    for (const sourceId of ['customers', 'shared', 'internal'] as const) {
+      const removed = await del('/api/grants', {
+        membershipId: members.pairing!.id,
+        spaceId: spacesBySource[sourceId]!.id,
+      });
+      expect(removed.status).toBe(200);
+    }
+
+    const afterGrantsRes = await get('/api/access-overview');
+    expect(afterGrantsRes.status).toBe(200);
+    const afterGrants = await readJson<Overview>(afterGrantsRes, 'GET /api/access-overview after grant delete');
+    expect(afterGrants.cells.filter((c) => c.membershipId === members.pairing!.id).length).toBe(0);
   }, 180_000);
 
   test.skipIf(!dockerAvailable)('8. /admin is still 404', async () => {
@@ -927,6 +948,9 @@ describe('Slice 2 seam gate C', () => {
 
   test.skipIf(!dockerAvailable)('C8. doctor --json exit 0', async () => {
     const doctor = await gbrain(OPERATIONS.doctor!, {}, { json: true, timeoutMs: 900_000 });
+    if (doctor.exitCode !== 0) {
+      console.error('[slice2][doctor]', doctor.stdout?.slice(0, 4000), JSON.stringify(doctor.json)?.slice(0, 4000));
+    }
     expect(doctor.exitCode).toBe(0);
   }, 900_000);
 });
