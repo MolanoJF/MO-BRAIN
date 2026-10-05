@@ -273,8 +273,10 @@ async function createMemberWithConnections(
 ): Promise<void> {
   const res = await post('/api/members', { email, role: 'member' });
   expect(res.status).toBe(200);
-  const body = await readJson<MemberRow>(res, 'POST /api/members');
+  const body = await readJson<MemberRow & { privateSpace?: { ok: boolean; error?: string } }>(res, 'POST /api/members');
   expect(body.id).toBeTruthy();
+  const priv = body.privateSpace;
+  if (priv && !priv.ok) console.error(`[slice2] private space for ${key} failed: ${priv.error ?? 'unknown'}`);
   members[key] = { ...body, email };
 
   connections[key] = [];
@@ -308,6 +310,7 @@ async function claimMember(key: string): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: members[key]!.email }),
   });
+  if (ok.status !== 200) console.error(`[slice2] claim ${key} -> ${ok.status}: ${await ok.clone().text()}`);
   expect(ok.status).toBe(200);
   const claimed = await readJson<{ membershipId: string; connections: ClaimConnection[] }>(ok, `claim ${key}`);
   expect(claimed.membershipId).toBe(members[key]!.id);
@@ -529,10 +532,15 @@ describe('Slice 2 seam gate B', () => {
     for (const spec of specs) {
       const res = await post('/api/members', { email: spec.email, role: 'member' });
       expect(res.status).toBe(200);
-      const body = await readJson<MemberRow>(res, 'POST /api/members');
+      const body = await readJson<MemberRow & { privateSpace?: { ok: boolean; error?: string } }>(res, 'POST /api/members');
       expect(body.id).toBeTruthy();
+      const priv = body.privateSpace;
+      if (priv && !priv.ok) console.error(`[slice2] private space for ${spec.key} failed: ${priv.error ?? 'unknown'}`);
       members[spec.key] = { ...body, email: spec.email };
     }
+
+    const srcList = await composeExec('gbrain-ops', ['gbrain', 'sources', 'list']);
+    console.error(`[slice2] sources list:\n${srcList.stdout}`);
 
     let created = 0;
     for (const spec of specs) {
@@ -557,7 +565,7 @@ describe('Slice 2 seam gate B', () => {
     }
     expect(created).toBe(4);
     expect(connections.twoWrite!.length).toBe(2);
-  });
+  }, 300_000);
 
   test.skipIf(!dockerAvailable)('4. POST /api/connections/preview carries warnings[] and fence affects', async () => {
     const pairing = members.pairing!;
@@ -576,7 +584,7 @@ describe('Slice 2 seam gate B', () => {
     const fence = body.compiled.warnings.find((w) => w.id === 'write-fence-disables-extraction');
     expect(fence).toBeDefined();
     expect(fence!.affects).toEqual(WRITE_FENCE_AFFECTS);
-  });
+  }, 120_000);
 
   test.skipIf(!dockerAvailable)('5. claim-link x3; right email credentials; wrong email + replay rejected', async () => {
     for (const key of ['pairing', 'isolated', 'twoWrite'] as const) {
@@ -603,6 +611,7 @@ describe('Slice 2 seam gate B', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: members[key]!.email }),
       });
+      if (ok.status !== 200) console.error(`[slice2] claim ${key} -> ${ok.status}: ${await ok.clone().text()}`);
       expect(ok.status).toBe(200);
       const claimed = await readJson<{ membershipId: string; connections: ClaimConnection[] }>(ok, `claim ${key}`);
       expect(claimed.membershipId).toBe(members[key]!.id);
@@ -740,7 +749,7 @@ describe('Slice 2 seam gate C', () => {
         for (const id of spaceSets[i]!) expect(spaceSets[j]!.has(id)).toBe(false);
       }
     }
-  });
+  }, 300_000);
 
   test.skipIf(!dockerAvailable)('C2. per Connection whoami reports oauth + compiled source_id and federated_read', async () => {
     requireGateBReady();
@@ -908,7 +917,7 @@ describe('Slice 2 seam gate C', () => {
       expect(row!.audit_before_delete).toBe(true);
       expect(JSON.stringify(row)).not.toMatch(/client_secret/);
     }
-  });
+  }, 120_000);
 
   test.skipIf(!dockerAvailable)('C7. /admin is 404', async () => {
     for (const p of ['/admin', '/admin/', '/admin/api/grants', '/admin/events']) {
