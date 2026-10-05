@@ -3,6 +3,7 @@ name: release
 # Task 5 (moved): the three pinned images publish ONLY here. A `v*` tag or an
 # explicit dispatch is a release; an ordinary push to main is not. This is what
 # stops the published digests from moving under the docs on every merge.
+# It runs stack.yml (all suites) first; nothing is published unless the stack is green.
 #
 # "A release is its digests, not its tag." This job prints the three full
 # RepoDigests and writes them into the GitHub Release body, so the record of a
@@ -30,8 +31,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Prove the stack before anything is published. This is the one place the
+  # full Docker suite runs without a human dispatching it.
+  stack:
+    uses: ./.github/workflows/stack.yml
+    with:
+      suite: all
+    secrets: inherit
+
   publish:
     runs-on: ubuntu-latest
+    needs: stack
+    timeout-minutes: 60
     env:
       IMAGE_REGISTRY: ghcr.io
       IMAGE_NAMESPACE: molanojf
@@ -135,6 +146,7 @@ jobs:
   verify-public:
     runs-on: ubuntu-latest
     needs: publish
+    timeout-minutes: 10
     permissions:
       contents: read
     env:

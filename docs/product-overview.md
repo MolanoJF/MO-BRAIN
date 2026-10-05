@@ -284,8 +284,8 @@ Every upgrade: snapshots both databases and both volumes with zero writers first
 images, applies migrations plus a hand-written per-version playbook, then gates on `doctor`
 parity before declaring success. Rollback is a snapshot restore, because upstream gbrain ships
 no reverse migrations. A console banner offers an available version (never auto-selects one);
-a nightly CI job runs the contract suite against both the current pin and the *next* upstream
-version as an early-warning tripwire for drift.
+the contract suite runs on demand via `stack.yml` against the current pin, and against the *next* upstream
+version by dispatching `stack.yml` with `gbrain_version`, as an early-warning tripwire for drift.
 
 ### 5.9 Health and observability (what exists today)
 

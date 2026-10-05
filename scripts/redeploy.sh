@@ -166,7 +166,7 @@ if [ "$FULL" = 1 ]; then
   # docker/control-plane.Dockerfile:7 resolves its base from the local daemon
   # under the BARE `mobrain/gbrain-base:<pin>` name, which is not a registry
   # reference and can never be pulled. CI mirrors the tag before every build
-  # (.github/workflows/contract.yml) and scripts/publish-images.sh does the
+  # (.github/workflows/stack.yml) and scripts/publish-images.sh does the
   # same; without it this lane dies at `pull access denied`.
   if ! docker image inspect "mobrain/gbrain-base:${GBRAIN_VERSION}" >/dev/null 2>&1; then
     step "mirroring the pinned base as mobrain/gbrain-base:${GBRAIN_VERSION}"

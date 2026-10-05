@@ -40,8 +40,8 @@ directly, stop.
 - **Spend:** `GET /api/spend` states its own coverage before its totals, carries gbrain's `notCovered` list
   verbatim, and never sums the two meters. Search-mode `measuredCost` stays `null` on this deployment
   (P5), so no ratio is shown.
-- **Drift tripwire:** the nightly pinned-next arm opens exactly one issue per drifting version and comments
-  on re-run; the pinned-current arm stays blocking.
+- **Drift tripwire:** dispatch `stack.yml` with `gbrain_version` set to the new upstream tag and the
+  contract suite runs against it; a drift finding is news, not a broken build.
 - **Upgrades:** the host `scripts/upgrade.ts` lane still passes Slice 3.5's rollback gate on the renamed,
   re-published stack (C9). An agent runner is never a path to an upgrade.
 - **Docs/licence:** `README.md`, `LICENSE` (MIT), `SECURITY.md`, `docs/support-policy.md`, plus the
@@ -216,7 +216,7 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 
 **Support policy in one line:** we support exactly the pinned gbrain (`0.50.5.0`) and harness (`2.1.274`);
 upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
-tag; the nightly drift job is the tripwire. See `docs/support-policy.md` for the full promises and
+tag; the drift check runs on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and
 non-promises.
 
 ---
@@ -289,9 +289,7 @@ non-promises.
 - **Agent spend limit / mixed authorship.** Slice 3.5, 4 and 5 were authored by more than one agent (the
   `claude` agent's monthly limit was exhausted mid-slice); the findings docs and gate files name their
   authors where it matters. Treat the branches as mixed-authored.
-- **Workflow-file pushes need a temporary deploy key.** The `gh` OAuth token lacks the `workflow` scope, so a
-  push that changes anything under `.github/workflows/` needs a deploy key with write access; add it, push,
-  and delete it immediately.
+- **CI is budgeted.** Only `ci.yml` (lint/tsc/unit, ~1 min) runs on push/PR; the Docker suites run on demand via `stack.yml`. Read `docs/runbooks/ci.md` before touching `.github/workflows/`. The `gh` token has the `workflow` scope (checked 2026-10-05), so workflow-file pushes no longer need a deploy key.
 - **Hazards carried, not cured** (all recorded in `docs/slice-5-findings.md`): a new contract file can still
   be answered by a sibling's process-global `mock.module` (F27/F32 containment); the host-side spend read
   still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; and

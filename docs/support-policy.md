@@ -28,17 +28,17 @@ Each upgrade is snapshot-first (both databases plus both volumes, with zero writ
 Two things make the target honest:
 
 - **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up and blocks nothing else.
-- **The nightly drift job is the tripwire.** `.github/workflows/contract.yml` runs on a nightly cron against **pinned-current** (`0.50.5.0`, blocking) and **pinned-next** (`0.51.0.0`, `continue-on-error`). The pinned-next arm is the early warning that an upstream release will break the contract suite; a drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade.
-- **The three pinned images stay publicly, anonymously pullable.** `scripts/ci/check-public-images.sh` runs a credential-less `docker pull` of `gbrain-base`, `control-plane`, and `agent-runner` — the same thing `scripts/install.sh` does for an external user. `release.yml`'s `verify-public` job runs it right after every publish and fails that release outright if any image isn't public; `.github/workflows/ghcr-visibility.yml` reruns the same check daily and opens/updates a GitHub issue on failure, because GHCR package visibility is a GitHub setting outside this repo's release pipeline and can regress independently of any release (a manual toggle, or a package deleted and recreated, which defaults to private).
+- **The drift check runs when an upstream tag lands.** Dispatch `stack.yml` with `gbrain_version` set to the new tag (`gh workflow run stack.yml -f suite=contract -f gbrain_version=<tag>`); pinned-current `0.50.5.0` is the default when the input is blank. A drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade. There is no nightly cron (see `docs/runbooks/ci.md` for why).
+- **The three pinned images stay publicly, anonymously pullable.** `scripts/ci/check-public-images.sh` runs a credential-less `docker pull` of `gbrain-base`, `control-plane`, and `agent-runner`, the same thing `scripts/install.sh` does for an external user. `release.yml`'s `verify-public` job runs it right after every publish and fails that release outright if any image isn't public. Visibility is a GitHub setting outside the release pipeline and can regress on its own (a manual toggle, or a package deleted and recreated, which defaults to private), so `release-verify.yml`'s `public` job runs the same check on demand.
 
 ## What this policy does and does not promise
 
 **Promised:**
 
-- The supported pin is tested by the full contract suite against the pinned version on every change and nightly.
+- The supported pin is tested by the full contract suite on demand via `stack.yml` — including before every release — and for a drift tag.
 - Upgrades move through the host lane only, with a snapshot in front and a one-command rollback behind.
 - Security fixes land in the supported pin line; we do not maintain older pins.
-- Version drift is detected nightly and surfaced rather than discovered by an operator mid-upgrade.
+- Version drift is detected on demand — dispatching `stack.yml` with `gbrain_version` when an upstream tag lands — and surfaced rather than discovered by an operator mid-upgrade.
 
 **Not promised:**
 
