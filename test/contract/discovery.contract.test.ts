@@ -186,8 +186,24 @@ test('sources list --json is parseable', async () => {
 // currently active pack.
 test('schema lint --json reports against the active pack', async () => {
   const spec = OPERATIONS['schema.lint']!;
-  const r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+  // Transient empty receipt (mechanism unverified — inv-051-b Open question 1):
+  // one call in ~N in the live stack came back unparseable with exit 0 while
+  // the source is byte-identical across pins. Retry up to 8 attempts, 500 ms
+  // apart, while the receipt is null; if it is still null the diagnostic below
+  // names whether stdout was empty or carried a leading bracket line.
+  let r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
   assertOk(spec, r);
+  for (let attempt = 1; attempt < 8 && r.json === null; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+    assertOk(spec, r);
+  }
+  if (r.json === null) {
+    console.error(
+      '[discovery][schema-lint] empty receipt', r.exitCode,
+      JSON.stringify(r.stdout?.slice(0, 600)), JSON.stringify(r.stderr?.slice(0, 600)),
+    );
+  }
   expect(r.json).not.toBeNull();
   expect((r.json as { pack?: string }).pack).toBeTruthy();
 }, 330_000);

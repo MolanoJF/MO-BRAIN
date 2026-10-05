@@ -35,6 +35,7 @@ import { MODEL_PRICING, PRICED_AT, priceUsage } from '../../src/gateway/pricing.
 import { classifyAgentExit, retryPolicyFor } from '../../src/agent/classify.ts';
 import { HARNESS_PIN, verifyHarnessPin } from '../../src/runner/pin.ts';
 import { GBRAIN_PIN, capabilityPath, pageDeleteNeedsForce } from '../../src/contracts/pin.ts';
+import { parsePurgeWriteThrough } from '../../src/contracts/receipts.ts';
 import { parseGbrainVersion, toolNames } from '../../src/contracts/capability.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
@@ -1563,7 +1564,8 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(r.json).not.toBeNull();
     const receipt = r.json as {
       status?: string; slug?: string; source_id?: string;
-      write_through?: { removed?: boolean; path?: string; skipped?: string };
+      write_through?: { removed?: boolean; path?: string; skipped?: string; written?: boolean };
+      persistence?: { file_written?: boolean };
       residuals?: string;
     };
     expect(receipt.status).toBe('purged');
@@ -1571,17 +1573,25 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(receipt.source_id).toBe('customers');
     // The write-through half, which is why the revert path needs a TREE guard:
     // this verb UNLINKS the page's markdown when it is on disk. Here it is (the
-    // `put` above never committed), so the purge removes it.
-    expect(receipt.write_through?.path).toBe(`/srv/brain-repos/customers/${SLUG}.md`);
-    expect(receipt.write_through?.removed).toBe(true);
+    // `put` above never committed), so the purge removes it. The vocabulary
+    // moved at 0.51 (inv-051-b): 0.50.5.0 prints {removed,path}; 0.51 prints
+    // {written:true} plus persistence.file_written — still a synchronous unlink.
+    const wt = parsePurgeWriteThrough(receipt);
+    if (pageDeleteNeedsForce()) {
+      expect(wt?.written).toBe(true);
+      expect(receipt.persistence?.file_written).toBe(true);
+    } else {
+      expect(wt?.path).toBe(`/srv/brain-repos/customers/${SLUG}.md`);
+      expect(wt?.removed).toBe(true);
+    }
     expect(typeof receipt.residuals).toBe('string');
 
     // The evidence the revert's promise needs: the same query no longer finds it.
     expect(await searchSlugs(NEEDLE)).not.toContain(SLUG);
 
     console.log(`MEASURED page.delete at ${GBRAIN_PIN}: status=${receipt.status} slug=${receipt.slug} `
-      + `source_id=${receipt.source_id} write_through.removed=${receipt.write_through?.removed} `
-      + `(${receipt.write_through?.skipped ?? receipt.write_through?.path}) inserted=${JSON.stringify(r.argv)}; `
+      + `source_id=${receipt.source_id} write_through.removed=${wt?.removed ?? wt?.written} `
+      + `(${receipt.write_through?.skipped ?? wt?.path}) inserted=${JSON.stringify(r.argv)}; `
       + `search "${NEEDLE}": before=[hit], after=[]`);
   }, 300_000);
 
