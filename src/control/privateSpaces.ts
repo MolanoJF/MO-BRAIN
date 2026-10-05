@@ -61,10 +61,14 @@ async function isSourceRegistered(sourceId: string): Promise<boolean | null> {
  * brain unhealthy. Non-fatal by design: the result is reported to the caller's
  * audit, never thrown, so a transient sync failure cannot fail provisioning or
  * roll back the connection.
+ *
+ * The timeout is bounded below the control plane's 60 s request boundary
+ * (src/control/app.ts IDLE_TIMEOUT_S): a hung inline sync must fail honestly
+ * here, never surface as the empty-body 499 that boundary produces.
  */
 async function syncRegisteredSource(sourceId: string): Promise<boolean> {
   try {
-    const r = await callOps('sync', { source: sourceId }, { json: true, timeoutMs: 300_000 });
+    const r = await callOps('sync', { source: sourceId }, { json: true, timeoutMs: 30_000 });
     return r.ok;
   } catch {
     return false;
@@ -185,8 +189,9 @@ export async function provisionPrivateSpace(
   // Registration is keyed on gbrain's live source list, not on `created`, so a
   // retry after a partial failure re-registers a missing source. The failure is
   // surfaced (never swallowed) and the connection is NOT provisioned without it.
-  // Sync runs only on the call that actually registered the source, never on a
-  // repeat for an already-registered one.
+  // `syncRegisteredSource` runs whenever this branch registers — a fresh
+  // `sources.add` or an id-collision recovery while the list was unreadable —
+  // and is idempotent, so a repeat cannot double-count.
   let syncOk: boolean | null = null;
   const registered = await isSourceRegistered(space.sourceId);
   if (registered !== true) {

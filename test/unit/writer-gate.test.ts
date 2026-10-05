@@ -7,8 +7,9 @@ import {
   resumeBrainWriters,
   pauseFilePath,
   defaultWaitUntilQuiet,
+  runGbrain,
 } from '../../src/ops/writerGate.ts';
-import type { Backend } from '../../src/ops/writerGate.ts';
+import type { Backend, GbrainChild } from '../../src/ops/writerGate.ts';
 
 function backend(overrides: Partial<Backend> = {}): Backend {
   return {
@@ -149,5 +150,41 @@ describe('writerGate', () => {
     expect(thrownAt).not.toBeNull();
     expect(thrownAt!).toBeGreaterThan(timeoutMs);
     expect(thrownAt! - timeoutMs).toBeLessThanOrEqual(5_000);
+  });
+
+  // M1: a probe child that ignores SIGTERM must not hang the await forever; the
+  // 45 s deadline is only honest if runGbrain force-kills after a short grace.
+  test('runGbrain escalates to SIGKILL when a TERM-resistant child never closes', async () => {
+    const signals: string[] = [];
+    let close: ((code: number | null) => void) | undefined;
+    const child: GbrainChild = {
+      kill: (signal) => {
+        signals.push(signal);
+        if (signal === 'SIGKILL') close?.(137);
+        return true;
+      },
+      stderr: { on: () => {} },
+      on: (event, listener) => { if (event === 'close') close = listener; return {}; },
+    };
+    const result = await runGbrain(['jobs', 'supervisor', 'status', '--json'], 10, {
+      spawn: () => child, killGraceMs: 20,
+    });
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(result.exitCode).toBe(137);
+  });
+
+  // The kill timer is cancelled when the child does close on SIGTERM, so a clean
+  // shutdown is never force-killed after the fact.
+  test('runGbrain clears the SIGKILL timer when the child closes on SIGTERM', async () => {
+    const signals: string[] = [];
+    let close: ((code: number | null) => void) | undefined;
+    const child: GbrainChild = {
+      kill: (signal) => { signals.push(signal); queueMicrotask(() => close?.(0)); return true; },
+      stderr: { on: () => {} },
+      on: (event, listener) => { if (event === 'close') close = listener; return {}; },
+    };
+    const result = await runGbrain(['x'], 5, { spawn: () => child, killGraceMs: 50 });
+    expect(signals).toEqual(['SIGTERM']);
+    expect(result.exitCode).toBe(0);
   });
 });

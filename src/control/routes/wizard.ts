@@ -448,7 +448,7 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     .where(eq(schema.spaces.organizationId, orgId));
   for (const s of spaces) {
     await run(`sources.add:${s.sourceId}`, 'sources.add', {
-      id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: s.name,
+      id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: gbrainSourceName(s),
       federated: true,
     }, 300_000);
   }

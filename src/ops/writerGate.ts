@@ -10,9 +10,15 @@ import { SQL } from 'bun';
 // seconds, so the shorter budget is safe.
 const QUIET_TIMEOUT_MS = 45_000;
 const QUIET_POLL_MS = 500;
-// The supervisor status probe shells out to gbrain; cap it so one poll can
-// never push the throw past the quiet deadline by more than one poll interval.
+// The supervisor status probe shells out to gbrain; cap it so a poll cannot
+// spend more than its bounded budget. If the child ignores SIGTERM, the probe
+// escalates to SIGKILL after KILL_GRACE_MS, so a hung probe still closes and
+// the throw stays within its budget plus that grace (small next to the 60 s
+// control-plane teardown).
 const SUPERVISOR_PROBE_TIMEOUT_MS = 15_000;
+// After SIGTERM, wait this long for 'close' before SIGKILL. A TERM-resistant
+// gbrain would otherwise never emit 'close' and the await would block forever.
+const KILL_GRACE_MS = 2_000;
 // After the supervisor is down, a writer backend may still be draining; give it
 // this long before terminating it, so a clean shutdown is never force-killed.
 const QUIET_GRACE_MS = 15_000;
@@ -44,14 +50,33 @@ async function defaultClearPause(): Promise<void> {
   });
 }
 
-function runGbrain(argv: string[], timeoutMs: number): Promise<{ exitCode: number; stderr: string }> {
+/** The slice of a spawned child `runGbrain` needs; exported for its unit test. */
+export interface GbrainChild {
+  kill: (signal: NodeJS.Signals) => unknown;
+  stderr: { on: (event: 'data', listener: (chunk: unknown) => void) => unknown };
+  on: (event: 'close', listener: (code: number | null) => void) => unknown;
+}
+
+export function runGbrain(
+  argv: string[],
+  timeoutMs: number,
+  deps: { spawn?: (argv: string[]) => GbrainChild; killGraceMs?: number } = {},
+): Promise<{ exitCode: number; stderr: string }> {
+  const spawnChild = deps.spawn
+    ?? ((a: string[]) => spawn('gbrain', a, { stdio: ['ignore', 'pipe', 'pipe'] }) as unknown as GbrainChild);
+  const killGraceMs = deps.killGraceMs ?? KILL_GRACE_MS;
   return new Promise((resolve) => {
-    const child = spawn('gbrain', argv, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnChild(argv);
     let stderr = '';
-    child.stderr.on('data', (d) => { stderr += d; });
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
+    child.stderr.on('data', (d) => { stderr += String(d); });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => child.kill('SIGKILL'), killGraceMs);
+    }, timeoutMs);
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({ exitCode: code ?? -1, stderr });
     });
   });
@@ -163,7 +188,8 @@ export async function defaultWaitUntilQuiet(deps: WaitUntilQuietDeps = {}): Prom
     }
 
     // Never let the probe spend more than the time left in the budget (bounded
-    // by its own cap), so the deadline is enforced within one poll interval.
+    // by its own cap and the SIGKILL grace), so the deadline is enforced within
+    // one poll interval plus that grace.
     const remaining = Math.max(0, timeoutMs - (now() - start));
     const probeTimeoutMs = Math.min(SUPERVISOR_PROBE_TIMEOUT_MS, remaining);
     const down = supervisorDown

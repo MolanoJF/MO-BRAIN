@@ -864,6 +864,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       // passes it only where the pin supports it (see pin.ts
       // pageDeleteNeedsForce / revert.ts / runner.contract.test.ts). Omitting
       // it leaves the pinned-current argv byte-identical.
+      // 0.50.5.0 rejects --force; every caller MUST gate on pageDeleteNeedsForce().
       { name: 'force', flag: '--force', kind: 'flag' },
     ],
     supportsJson: true,
