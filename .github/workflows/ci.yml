@@ -53,3 +53,7 @@ jobs:
       - run: bun run lint:forbidden
       - run: bunx tsc --noEmit
       - run: bun run test:unit
+      # The writer-gate shell tests need no Docker; they prove the pause stops
+      # orphaned gbrain workers. Run them where a Linux /proc exists.
+      - run: sh test/build/gbrain-gated-entrypoint.test.sh
+      - run: sh test/build/quiesce-gbrain-procs.test.sh
