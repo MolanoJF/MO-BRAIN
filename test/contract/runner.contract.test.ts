@@ -1589,9 +1589,13 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     // The evidence the revert's promise needs: the same query no longer finds it.
     expect(await searchSlugs(NEEDLE)).not.toContain(SLUG);
 
+    // 0.51 dropped `path`, so fall back to the field that names the file effect
+    // there instead of logging `undefined` in the MEASURED line.
+    const wtLocator = receipt.write_through?.skipped ?? wt?.path
+      ?? `file_written=${receipt.persistence?.file_written}`;
     console.log(`MEASURED page.delete at ${GBRAIN_PIN}: status=${receipt.status} slug=${receipt.slug} `
       + `source_id=${receipt.source_id} write_through.removed=${wt?.removed ?? wt?.written} `
-      + `(${receipt.write_through?.skipped ?? wt?.path}) inserted=${JSON.stringify(r.argv)}; `
+      + `(${wtLocator}) inserted=${JSON.stringify(r.argv)}; `
       + `search "${NEEDLE}": before=[hit], after=[]`);
   }, 300_000);
 

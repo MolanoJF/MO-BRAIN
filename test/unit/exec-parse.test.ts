@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { extractReceiptJson } from '../../src/contracts/exec.ts';
+import { extractReceiptJson } from '../../src/contracts/json.ts';
 
 // Failure B of inv-051-b: exec.ts's comment promised the LAST balanced JSON
 // value but the code took the FIRST `{`/`[`, so a leading diagnostic line that
@@ -26,6 +26,12 @@ describe('extractReceiptJson', () => {
   test('ignores braces inside strings', () => {
     expect(extractReceiptJson('{"note":"}{ not a brace","ok":true}'))
       .toEqual({ note: '}{ not a brace', ok: true });
+  });
+
+  test('finds a valid receipt nested inside a balanced non-JSON block', () => {
+    // The server's scanner does not skip a balanced-but-non-JSON region; it
+    // keeps scanning so a receipt nested inside a prose brace block is found.
+    expect(extractReceiptJson('{prose {"ok":true} more}\n')).toEqual({ ok: true });
   });
 
   test('returns null for empty, whitespace, or garbage', () => {

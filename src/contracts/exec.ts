@@ -1,5 +1,6 @@
 import type { ExecResult, OperationSpec, ParamValues } from './types.ts';
 import { buildArgv, redactArgv } from './argv.ts';
+import { extractReceiptJson } from './json.ts';
 import { composeExec, scrubOutput } from '../docker/host.ts';
 
 /**
@@ -39,55 +40,6 @@ export async function execOperation<T = unknown>(
     stderr: scrubOutput(raw.stderr),
     json,
   };
-}
-
-/**
- * Scan stdout for the LAST complete, balanced top-level JSON object/array that
- * `JSON.parse`s, with string/escape awareness so a bracket inside a string is
- * not a boundary. Returns null when no balanced value parses. Matches the
- * comment on `execOperation`: the first-brace slice it replaced threw on any
- * leading diagnostic line carrying a bracket (inv-051-b, Failure B).
- */
-export function extractReceiptJson(stdout: string): unknown | null {
-  let found = false;
-  let last: unknown = null;
-  for (let i = 0; i < stdout.length; i++) {
-    const ch = stdout[i];
-    if (ch !== '{' && ch !== '[') continue;
-    const end = matchingBracket(stdout, i);
-    if (end === -1) continue;
-    try {
-      last = JSON.parse(stdout.slice(i, end + 1));
-      found = true;
-    } catch {
-      // Balanced but not JSON (e.g. a prose brace): keep scanning.
-    }
-    i = end;
-  }
-  return found ? last : null;
-}
-
-/** Index of the bracket matching `start`, or -1. String/escape aware. */
-function matchingBracket(s: string, start: number): number {
-  const open = s[start];
-  const close = open === '{' ? '}' : ']';
-  let depth = 0;
-  let inString = false;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
-    if (inString) {
-      if (ch === '\\') i++;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === open) depth++;
-    else if (ch === close) {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
 }
 
 /** Throw unless the exit code is one the operation declares acceptable. */

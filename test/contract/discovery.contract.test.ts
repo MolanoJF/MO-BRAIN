@@ -190,12 +190,13 @@ test('schema lint --json reports against the active pack', async () => {
   // one call in ~N in the live stack came back unparseable with exit 0 while
   // the source is byte-identical across pins. Retry up to 8 attempts, 500 ms
   // apart, while the receipt is null; if it is still null the diagnostic below
-  // names whether stdout was empty or carried a leading bracket line.
-  let r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+  // names whether stdout was empty or carried a leading bracket line. Each
+  // attempt is capped at 30 s so all 8 stay inside the 330 s test timeout.
+  let r = await execOperation(spec, {}, { json: true, timeoutMs: 30_000 });
   assertOk(spec, r);
   for (let attempt = 1; attempt < 8 && r.json === null; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 500));
-    r = await execOperation(spec, {}, { json: true, timeoutMs: 300_000 });
+    r = await execOperation(spec, {}, { json: true, timeoutMs: 30_000 });
     assertOk(spec, r);
   }
   if (r.json === null) {
