@@ -16,6 +16,7 @@ type OpsResult = {
 
 const calls: Call[] = [];
 const seedSpaceCalls: string[] = [];
+const registeredSources: string[] = [];
 let grantSeq = 0;
 
 function grantReceipt(clientId: string): unknown {
@@ -53,13 +54,16 @@ const HANDOFF = {
 };
 
 function defaultOk(op: string, opts?: CallOpts): OpsResult {
+  let json: unknown = { ok: true };
+  if (op === 'mcp.grant') json = grantJson(Boolean(opts?.dryRun));
+  else if (op === 'sources.list') json = { sources: registeredSources.map((id) => ({ id })) };
   return {
     ok: true,
     exitCode: 0,
     argv: ['gbrain', ...op.split('.')],
     stdout: '{}',
     stderr: '',
-    json: op === 'mcp.grant' ? grantJson(Boolean(opts?.dryRun)) : { ok: true },
+    json,
   };
 }
 
@@ -81,7 +85,12 @@ mock.module('../../src/control/opsClient.ts', () => ({
   brainUsage: async () => { throw new Error('ops unreachable'); },
   callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) => {
     calls.push({ op, params, opts });
-    return callOpsHandler(op, params, opts);
+    const result = await callOpsHandler(op, params, opts);
+    if (op === 'sources.add' && result.ok && typeof params?.id === 'string'
+      && !registeredSources.includes(params.id)) {
+      registeredSources.push(params.id);
+    }
+    return result;
   },
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
@@ -112,7 +121,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
 const { default: app } = await import('../../src/control/app.ts');
 const { runMigrations, getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { bootstrapFirstAdmin } = await import('../../src/control/bootstrap.ts');
-const { eq } = await import('drizzle-orm');
+const { eq, and } = await import('drizzle-orm');
 
 pinDb();
 
@@ -191,6 +200,7 @@ beforeAll(async () => {
 beforeEach(() => {
   calls.length = 0;
   seedSpaceCalls.length = 0;
+  registeredSources.length = 0;
   grantSeq = 0;
   treeHandler = (sourceId) => ({ sourceId, root: `/repos/${sourceId}`, entries: [] });
   callOpsHandler = (op, _params, opts) => defaultOk(op, opts);
@@ -228,6 +238,37 @@ describe('invite-time provisioning', () => {
     // A NEWLY created private Space is seeded and registered as a gbrain source.
     expect(seedSpaceCalls).toContain(space!.sourceId);
     expect(calls.some((c) => c.op === 'sources.add' && c.params?.id === space!.sourceId)).toBe(true);
+    // ...and synced, so gbrain's `sync_freshness` doctor check does not fail on
+    // a source with a repo path and a null `last_sync_at` (C8).
+    expect(calls.some((c) => c.op === 'sync' && c.params?.source === space!.sourceId)).toBe(true);
+  });
+
+  test('a failed sync does not fail provisioning', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sync') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sync'],
+          stdout: '', stderr: 'sync exploded', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-syncfail-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      id: string;
+      privateSpace: { ok: boolean; spaceId?: string; connectionId?: string; error?: string };
+    };
+    expect(body.privateSpace.ok).toBe(true);
+
+    const active = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.membershipId, body.id),
+      eq(schema.connections.state, 'active'),
+    ));
+    expect(active.length).toBe(1);
+    expect(active[0]!.writeSpaceId).toBe(body.privateSpace.spaceId!);
   });
 
   test('a failed grant leaves the membership intact and the pending space+connection retryable', async () => {
@@ -280,6 +321,112 @@ describe('invite-time provisioning', () => {
     expect(conns[0]!.membershipId).toBe(body.id);
     expect(conns[0]!.state).toBe('active');
     expect(conns[0]!.profile).toBe('memory-writer');
+  });
+
+  test('two members get distinct gbrain source names', async () => {
+    for (const n of [1, 2]) {
+      const email = `ps-two-${n}-${randomUUID().slice(0, 8)}@example.test`;
+      const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { privateSpace: { ok: boolean } };
+      expect(body.privateSpace.ok).toBe(true);
+    }
+
+    const adds = calls.filter((c) => c.op === 'sources.add');
+    const names = adds.map((c) => c.params?.name);
+    expect(names.length).toBe(2);
+    expect(new Set(names).size).toBe(names.length);
+    for (const c of adds) expect(c.params?.name).toBe(c.params?.id);
+  });
+
+  test('a sources.add failure is reported, not swallowed, and a retry registers the source', async () => {
+    let failsLeft = 1;
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sources.add' && failsLeft > 0) {
+        failsLeft -= 1;
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'add'],
+          stdout: '', stderr: 'sources add exploded', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-srcfail-${randomUUID().slice(0, 8)}@example.test`;
+    const invited = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(invited.status).toBe(200);
+    const body = await invited.json() as { id: string; privateSpace: { ok: boolean; error?: string } };
+    expect(body.privateSpace.ok).toBe(false);
+    expect(body.privateSpace.error).toBe('private_space_source_failed');
+
+    const active = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.membershipId, body.id),
+      eq(schema.connections.state, 'active'),
+    ));
+    expect(active.length).toBe(0);
+    const anyConns = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.membershipId, body.id));
+    expect(anyConns.filter((c) => c.state !== 'revoked').length).toBe(0);
+
+    const addsBefore = calls.filter((c) => c.op === 'sources.add').length;
+    const retried = await hit('POST', `/api/members/${body.id}/private-space`, adminCookie);
+    expect(retried.status).toBe(200);
+    const retriedBody = await retried.json() as { ok: boolean };
+    expect(retriedBody.ok).toBe(true);
+    expect(calls.filter((c) => c.op === 'sources.add').length).toBeGreaterThan(addsBefore);
+  });
+
+  test('an id collision while sources.list is unavailable counts as registered', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sources.list') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'list'],
+          stdout: '', stderr: 'sources list unavailable', json: null,
+        };
+      }
+      if (op === 'sources.add') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'add'],
+          stdout: '',
+          stderr: 'ERROR: duplicate key value violates unique constraint "sources_pkey"',
+          json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-idc-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { privateSpace: { ok: boolean; error?: string } };
+    expect(body.privateSpace.ok).toBe(true);
+  });
+
+  test('a name collision while sources.list is unavailable is not treated as registered', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sources.list') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'list'],
+          stdout: '', stderr: 'sources list unavailable', json: null,
+        };
+      }
+      if (op === 'sources.add') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sources', 'add'],
+          stdout: '',
+          stderr: 'ERROR: duplicate key value violates unique constraint "sources_name_key"',
+          json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-namec-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { privateSpace: { ok: boolean; error?: string } };
+    expect(body.privateSpace.ok).toBe(false);
+    expect(body.privateSpace.error).toBe('private_space_source_failed');
   });
 });
 

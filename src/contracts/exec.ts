@@ -1,5 +1,6 @@
 import type { ExecResult, OperationSpec, ParamValues } from './types.ts';
 import { buildArgv, redactArgv } from './argv.ts';
+import { extractReceiptJson } from './json.ts';
 import { composeExec, scrubOutput } from '../docker/host.ts';
 
 /**
@@ -27,14 +28,9 @@ export async function execOperation<T = unknown>(
   let json: T | null = null;
   if (opts.json) {
     // Parse the LAST balanced JSON value on stdout: gbrain may emit progress
-    // lines before the machine-readable receipt.
-    const trimmed = raw.stdout.trim();
-    const start = Math.min(
-      ...[trimmed.indexOf('{'), trimmed.indexOf('[')].filter((i) => i >= 0),
-    );
-    if (Number.isFinite(start) && start >= 0) {
-      try { json = JSON.parse(trimmed.slice(start)) as T; } catch { json = null; }
-    }
+    // or diagnostic lines — some of which contain `{`/`[` — before the
+    // machine-readable receipt (inv-051-b, Failure B).
+    json = extractReceiptJson(raw.stdout) as T | null;
   }
 
   return {

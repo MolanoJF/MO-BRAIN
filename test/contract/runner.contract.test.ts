@@ -34,7 +34,8 @@ import { PRODUCT_TOOL_ALLOWLIST, TOOL_PREFIX, allowedToolsFor } from '../../src/
 import { MODEL_PRICING, PRICED_AT, priceUsage } from '../../src/gateway/pricing.ts';
 import { classifyAgentExit, retryPolicyFor } from '../../src/agent/classify.ts';
 import { HARNESS_PIN, verifyHarnessPin } from '../../src/runner/pin.ts';
-import { GBRAIN_PIN, capabilityPath } from '../../src/contracts/pin.ts';
+import { GBRAIN_PIN, capabilityPath, pageDeleteNeedsForce } from '../../src/contracts/pin.ts';
+import { parsePurgeWriteThrough } from '../../src/contracts/receipts.ts';
 import { parseGbrainVersion, toolNames } from '../../src/contracts/capability.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
@@ -1550,14 +1551,21 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(await searchSlugs(NEEDLE)).toContain(SLUG);
 
     const spec = OPERATIONS['page.delete']!;
-    const r = await execOperation(spec, { slug: SLUG, sourceId: 'customers', purge: true }, { json: true });
+    // 0.51's mutation protocol rejects a delete with no matching revision
+    // unless `--force` overwrites it; 0.50.5.0 has no such flag, so it is
+    // passed only where the pin supports it. Every assertion below is unchanged.
+    const r = await execOperation(spec, {
+      slug: SLUG, sourceId: 'customers', purge: true,
+      ...(pageDeleteNeedsForce() ? { force: true } : {}),
+    }, { json: true });
     assertOk(spec, r);
     // L6, the whole point: this parses the receipt off stdout. A flag that were
     // merely accepted would leave `json` null here.
     expect(r.json).not.toBeNull();
     const receipt = r.json as {
       status?: string; slug?: string; source_id?: string;
-      write_through?: { removed?: boolean; path?: string; skipped?: string };
+      write_through?: { removed?: boolean; path?: string; skipped?: string; written?: boolean };
+      persistence?: { file_written?: boolean };
       residuals?: string;
     };
     expect(receipt.status).toBe('purged');
@@ -1565,17 +1573,29 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(receipt.source_id).toBe('customers');
     // The write-through half, which is why the revert path needs a TREE guard:
     // this verb UNLINKS the page's markdown when it is on disk. Here it is (the
-    // `put` above never committed), so the purge removes it.
-    expect(receipt.write_through?.path).toBe(`/srv/brain-repos/customers/${SLUG}.md`);
-    expect(receipt.write_through?.removed).toBe(true);
+    // `put` above never committed), so the purge removes it. The vocabulary
+    // moved at 0.51 (inv-051-b): 0.50.5.0 prints {removed,path}; 0.51 prints
+    // {written:true} plus persistence.file_written — still a synchronous unlink.
+    const wt = parsePurgeWriteThrough(receipt);
+    if (pageDeleteNeedsForce()) {
+      expect(wt?.written).toBe(true);
+      expect(receipt.persistence?.file_written).toBe(true);
+    } else {
+      expect(wt?.path).toBe(`/srv/brain-repos/customers/${SLUG}.md`);
+      expect(wt?.removed).toBe(true);
+    }
     expect(typeof receipt.residuals).toBe('string');
 
     // The evidence the revert's promise needs: the same query no longer finds it.
     expect(await searchSlugs(NEEDLE)).not.toContain(SLUG);
 
+    // 0.51 dropped `path`, so fall back to the field that names the file effect
+    // there instead of logging `undefined` in the MEASURED line.
+    const wtLocator = receipt.write_through?.skipped ?? wt?.path
+      ?? `file_written=${receipt.persistence?.file_written}`;
     console.log(`MEASURED page.delete at ${GBRAIN_PIN}: status=${receipt.status} slug=${receipt.slug} `
-      + `source_id=${receipt.source_id} write_through.removed=${receipt.write_through?.removed} `
-      + `(${receipt.write_through?.skipped ?? receipt.write_through?.path}) inserted=${JSON.stringify(r.argv)}; `
+      + `source_id=${receipt.source_id} write_through.removed=${wt?.removed ?? wt?.written} `
+      + `(${wtLocator}) inserted=${JSON.stringify(r.argv)}; `
       + `search "${NEEDLE}": before=[hit], after=[]`);
   }, 300_000);
 
@@ -1593,7 +1613,10 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(before).toContainEqual({ slug: other, sourceId: 'shared' });
 
     const spec = OPERATIONS['page.delete']!;
-    const r = await execOperation(spec, { slug: other, sourceId: 'customers', purge: true }, { json: true });
+    const r = await execOperation(spec, {
+      slug: other, sourceId: 'customers', purge: true,
+      ...(pageDeleteNeedsForce() ? { force: true } : {}),
+    }, { json: true });
     assertOk(spec, r);
     // One named boundary read of the receipt, the shape the pin prints (above).
     const receipt = r.json as { status?: string; slug?: string; source_id?: string } | null;
@@ -1607,7 +1630,10 @@ describe('A11 the revert\'s page removal (real binary at the pin)', () => {
     expect(after.filter((h) => h.sourceId === 'customers')).toEqual([]);
     expect(after).toContainEqual({ slug: other, sourceId: 'shared' });
 
-    await execOperation(spec, { slug: other, sourceId: 'shared', purge: true }, { json: true });
+    await execOperation(spec, {
+      slug: other, sourceId: 'shared', purge: true,
+      ...(pageDeleteNeedsForce() ? { force: true } : {}),
+    }, { json: true });
     console.log(`MEASURED page.delete --source-id on a two-source brain: customers' "${other}" purged, `
       + `shared's copy still answered "${NEEDLE}-shared", then purged too`);
   }, 300_000);

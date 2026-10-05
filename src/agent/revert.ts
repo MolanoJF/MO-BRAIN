@@ -36,6 +36,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
+import { pageDeleteNeedsForce } from '../contracts/pin.ts';
 import { OPERATIONS } from '../contracts/registry.ts';
 import { getDb, schema } from '../control/db/client.ts';
 import { callOps, gitPathExists, gitRange, gitRevertRange } from '../control/opsClient.ts';
@@ -171,6 +172,11 @@ export type RevertDeps = {
    *  tree) are worth proving without a repo behind them. */
   probeTree: (sourceId: string, paths: readonly string[]) => Promise<TreeProbe>;
   callOps: typeof callOps;
+  /**
+   * The 0.51 gate, injected like the rest: a test proves the `--force` purge
+   * argv without moving the declared pin. Production uses the real function.
+   */
+  pageDeleteNeedsForce: typeof pageDeleteNeedsForce;
   now: () => number;
 };
 
@@ -408,8 +414,15 @@ async function purgeRemovedPages(
   const candidates = purgeCandidates(revertFiles);
   if (candidates.length === 0) return [];
 
-  const argvFor = (slug: string) => redactArgv(spec, ['gbrain', ...buildArgv(
-    spec, { slug, sourceId: writeSourceId, purge: true }, { json: true },
+  // The params are built ONCE per slug and the recorded argv is derived from
+  // those same params, so `PagePurge.argv` is always the command that ran — the
+  // 0.51 `--force` included. A second literal here is how the receipt drifts.
+  const paramsFor = (slug: string) => ({
+    slug, sourceId: writeSourceId, purge: true,
+    ...(deps.pageDeleteNeedsForce() ? { force: true } : {}),
+  });
+  const argvFor = (params: ReturnType<typeof paramsFor>) => redactArgv(spec, ['gbrain', ...buildArgv(
+    spec, params, { json: true },
   )]);
   const skipped = (
     c: { path: string; slug: string | null }, outcome: PagePurge['outcome'], detail: string,
@@ -418,7 +431,7 @@ async function purgeRemovedPages(
     removedPath: c.path,
     outcome,
     detail,
-    argv: c.slug === null ? [] : argvFor(c.slug),
+    argv: c.slug === null ? [] : argvFor(paramsFor(c.slug)),
     exitCode: null,
     stderr: '',
     classification: 'refused',
@@ -469,8 +482,8 @@ async function purgeRemovedPages(
       continue;
     }
 
-    const params = { slug: c.slug, sourceId: writeSourceId, purge: true };
-    const argv = argvFor(c.slug);
+    const params = paramsFor(c.slug);
+    const argv = argvFor(params);
     try {
       const r = await deps.callOps('page.delete', params, { json: true, timeoutMs: INDEX_TIMEOUT_MS });
       const receipt = r.json as { status?: unknown } | null;
@@ -581,5 +594,6 @@ const defaultDeps: RevertDeps = {
   revertRange: gitRevertRange,
   probeTree: gitPathExists,
   callOps,
+  pageDeleteNeedsForce,
   now: () => Date.now(),
 };

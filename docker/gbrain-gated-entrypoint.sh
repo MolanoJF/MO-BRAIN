@@ -12,6 +12,7 @@ HOME_DIR=${MOBRAIN_GBRAIN_HOME:-/srv/gbrain-home}
 PAUSE="$HOME_DIR/.mobrain-writers-paused"
 CONFIG="$HOME_DIR/.gbrain/config.json"
 POLL=${MOBRAIN_GATE_POLL_SECONDS:-0.5}
+QUIESCE=${MOBRAIN_QUIESCE_BIN:-/opt/mobrain/quiesce-gbrain-procs.sh}
 
 child=""
 
@@ -60,6 +61,16 @@ stop_child() {
 
 trap 'stop_child; exit 0' TERM INT
 
+# While paused, `gbrain jobs supervisor` may have left an orphaned worker
+# process behind (reparented to tini) still holding brain-DB connections --
+# `stop_child` only signals the direct child. Sweep every gbrain process on
+# each paused poll so the count can actually reach zero (docs/slice-3.5-findings.md F2).
+sweep_orphans() {
+  if [ -f "$PAUSE" ] && [ -r "$QUIESCE" ]; then
+    sh "$QUIESCE" >/dev/null 2>&1 || true
+  fi
+}
+
 while true; do
   if [ -f "$CONFIG" ] && [ ! -f "$PAUSE" ]; then
     if ! child_alive; then
@@ -72,6 +83,7 @@ while true; do
     fi
   else
     stop_child
+    sweep_orphans
   fi
   sleep "$POLL"
 done

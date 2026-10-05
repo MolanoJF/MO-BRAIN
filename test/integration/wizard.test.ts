@@ -1,4 +1,5 @@
 import { mock, test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
 process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
@@ -472,5 +473,50 @@ describe('wizard', () => {
     expect(fin.status).toBe(200);
     const init = callOpsCalls.find((c) => c.op === 'init');
     expect(init?.params?.schemaPack).toBe('legal-ops');
+  });
+
+  // I1: resetBrainSchema wipes gbrain's sources table, so /finish re-registers
+  // every recorded Space. Two private Spaces must send DISTINCT sources.add
+  // names — gbrain's sources.name is TEXT NOT NULL UNIQUE — or the second add
+  // violates sources_name_key and /finish returns 500.
+  test('finish re-registers two private Spaces under distinct gbrain source names', async () => {
+    const otherUserId = randomUUID();
+    await getDb().insert(schema.users).values({
+      id: otherUserId, email: 'second-owner@example.test', name: 'Second Owner',
+    });
+    const otherMembershipId = randomUUID();
+    await getDb().insert(schema.memberships).values({
+      id: otherMembershipId, userId: otherUserId, organizationId: orgId, role: 'member',
+    });
+    const otherSourceId = `my-space-${otherMembershipId.slice(0, 8).toLowerCase()}`;
+    await getDb().insert(schema.spaces).values({
+      id: randomUUID(), organizationId: orgId, sourceId: otherSourceId, name: 'My Space',
+      kind: 'local-git', localPath: `/srv/brain-repos/${otherSourceId}`,
+      ownerMembershipId: otherMembershipId,
+    });
+
+    const [brain] = await getDb().select().from(schema.brains);
+    await getDb().update(schema.brains).set({ lifecycle: 'sources-added' })
+      .where(eq(schema.brains.id, brain!.id));
+
+    callOpsCalls.length = 0;
+    const res = await call('/api/wizard/finish', {});
+    expect(res.status).toBe(200);
+    expect((await res.json() as { ok: boolean }).ok).toBe(true);
+
+    const privateIds = (await getDb().select().from(schema.spaces)
+      .where(eq(schema.spaces.organizationId, orgId)))
+      .filter((s) => s.ownerMembershipId)
+      .map((s) => s.sourceId)
+      .sort();
+    expect(privateIds.length).toBe(2);
+
+    const adds = callOpsCalls.filter(
+      (c) => c.op === 'sources.add' && privateIds.includes(String(c.params?.id)),
+    );
+    const names = adds.map((c) => String(c.params?.name)).sort();
+    expect(names.length).toBe(2);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(privateIds);
   });
 });

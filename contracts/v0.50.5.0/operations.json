@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.50.5.0",
-  "generatedAt": "2026-09-22T21:02:30.258Z",
+  "generatedAt": "2026-10-05T19:29:11.606Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -770,6 +770,11 @@
         {
           "name": "purge",
           "flag": "--purge",
+          "kind": "flag"
+        },
+        {
+          "name": "force",
+          "flag": "--force",
           "kind": "flag"
         }
       ],
