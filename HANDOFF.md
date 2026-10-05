@@ -40,8 +40,8 @@ directly, stop.
 - **Spend:** `GET /api/spend` states its own coverage before its totals, carries gbrain's `notCovered` list
   verbatim, and never sums the two meters. Search-mode `measuredCost` stays `null` on this deployment
   (P5), so no ratio is shown.
-- **Drift tripwire:** the nightly pinned-next arm opens exactly one issue per drifting version and comments
-  on re-run; the pinned-current arm stays blocking.
+- **Drift tripwire:** dispatch `stack.yml` with `gbrain_version` set to the new upstream tag and the
+  contract suite runs against it; a drift finding is news, not a broken build.
 - **Upgrades:** the host `scripts/upgrade.ts` lane still passes Slice 3.5's rollback gate on the renamed,
   re-published stack (C9). An agent runner is never a path to an upgrade.
 - **Docs/licence:** `README.md`, `LICENSE` (MIT), `SECURITY.md`, `docs/support-policy.md`, plus the
@@ -216,7 +216,7 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 
 **Support policy in one line:** we support exactly the pinned gbrain (`0.50.5.0`) and harness (`2.1.274`);
 upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
-tag; the nightly drift job is the tripwire. See `docs/support-policy.md` for the full promises and
+tag; the drift check runs on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and
 non-promises.
 
 ---
