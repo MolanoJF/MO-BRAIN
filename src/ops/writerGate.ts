@@ -3,8 +3,27 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { SQL } from 'bun';
 
-const QUIET_TIMEOUT_MS = 60_000;
+// The control plane severs a half-open socket at IDLE_TIMEOUT_S = 60
+// (src/control/app.ts). Stay strictly below it so a failed quiesce returns an
+// honest 503 with its diagnostic instead of an empty-body 499 from the 60 s
+// teardown. With the entrypoint sweeping orphans the pause should succeed in
+// seconds, so the shorter budget is safe.
+const QUIET_TIMEOUT_MS = 45_000;
 const QUIET_POLL_MS = 500;
+// After the supervisor is down, a writer backend may still be draining; give it
+// this long before terminating it, so a clean shutdown is never force-killed.
+const QUIET_GRACE_MS = 15_000;
+
+/** One row of `pg_stat_activity` for the brain DB, with no query text. */
+export interface Backend {
+  pid: number;
+  usename: string;
+  applicationName: string;
+  clientAddr: string | null;
+  backendType: string;
+  state: string | null;
+  idleSeconds: number | null;
+}
 
 export function pauseFilePath(): string {
   return join(process.env.GBRAIN_HOME ?? '/srv/gbrain-home', '.mobrain-writers-paused');
@@ -35,37 +54,125 @@ function runGbrain(argv: string[], timeoutMs: number): Promise<{ exitCode: numbe
   });
 }
 
-async function otherBackends(): Promise<number> {
+/**
+ * Every other connection to the brain DB, with enough identity to name a
+ * lingering writer in the quiesce error. `query` is deliberately not selected:
+ * it can hold user content and is not needed to identify the writer.
+ */
+export async function listOtherBackends(): Promise<Backend[]> {
   const url = process.env.GBRAIN_DATABASE_URL;
   if (!url) throw new Error('GBRAIN_DATABASE_URL is required to quiesce writers');
   const brain = new SQL(url, { max: 1 });
   try {
     const rows = await brain.unsafe(
-      'SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()',
-    ) as Array<{ n: number }>;
-    return Number(rows[0]?.n ?? 0);
+      'SELECT pid, usename, application_name, client_addr::text AS client_addr, backend_type, state, ' +
+      'EXTRACT(EPOCH FROM now() - state_change)::float AS idle ' +
+      'FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() ' +
+      'ORDER BY backend_start',
+    ) as Array<{
+      pid: number;
+      usename: string;
+      application_name: string;
+      client_addr: string | null;
+      backend_type: string;
+      state: string | null;
+      idle: number | null;
+    }>;
+    return rows.map((r) => ({
+      pid: Number(r.pid),
+      usename: r.usename,
+      applicationName: r.application_name,
+      clientAddr: r.client_addr,
+      backendType: r.backend_type,
+      state: r.state,
+      idleSeconds: r.idle === null ? null : Number(r.idle),
+    }));
   } finally {
     await brain.end().catch(() => {});
   }
 }
 
-export async function defaultWaitUntilQuiet(): Promise<void> {
-  const deadline = Date.now() + QUIET_TIMEOUT_MS;
-  let last = 'supervisor status not yet read';
+/**
+ * Terminate the named writer connections only. The predicate repeats the
+ * identity guard -- own database, a `client backend`, the current user -- so a
+ * blanket `pg_terminate_backend` can never take out a background or system
+ * backend, even if a caller passes a pid it should not.
+ */
+export async function terminateWriterBackends(pids: number[]): Promise<void> {
+  if (pids.length === 0) return;
+  const url = process.env.GBRAIN_DATABASE_URL;
+  if (!url) throw new Error('GBRAIN_DATABASE_URL is required to quiesce writers');
+  const brain = new SQL(url, { max: 1 });
+  try {
+    await brain.unsafe(
+      'SELECT pg_terminate_backend(pid) FROM pg_stat_activity ' +
+      "WHERE pid = ANY($1::int[]) AND datname = current_database() " +
+      "AND backend_type = 'client backend' AND usename = current_user",
+      [pids],
+    );
+  } finally {
+    await brain.end().catch(() => {});
+  }
+}
+
+export interface WaitUntilQuietDeps {
+  supervisorDown?: () => Promise<boolean>;
+  listBackends?: () => Promise<Backend[]>;
+  terminate?: (pids: number[]) => Promise<void>;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  graceMs?: number;
+  timeoutMs?: number;
+}
+
+function renderBackend(b: Backend): string {
+  const idle = b.idleSeconds === null ? 'null' : `${b.idleSeconds.toFixed(1)}s`;
+  return `[pid=${b.pid},app="${b.applicationName}",user=${b.usename},` +
+    `addr=${b.clientAddr ?? 'null'},type=${b.backendType},` +
+    `state=${b.state ?? 'null'},idle=${idle}]`;
+}
+
+export async function defaultWaitUntilQuiet(deps: WaitUntilQuietDeps = {}): Promise<void> {
+  const supervisorDown = deps.supervisorDown
+    ?? (async () => (await runGbrain(['jobs', 'supervisor', 'status', '--json'], 15_000)).exitCode === 1);
+  const listBackends = deps.listBackends ?? listOtherBackends;
+  const terminate = deps.terminate ?? terminateWriterBackends;
+  const now = deps.now ?? (() => Date.now());
+  const sleep = deps.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const graceMs = deps.graceMs ?? QUIET_GRACE_MS;
+  const timeoutMs = deps.timeoutMs ?? QUIET_TIMEOUT_MS;
+
+  const start = now();
+  let downSince: number | null = null;
   for (;;) {
-    const status = await runGbrain(['jobs', 'supervisor', 'status', '--json'], 15_000);
-    const backends = await otherBackends();
-    // Exit 1 is "not running" (registry okExitCodes). Exit 0 means it is still up.
-    const supervisorDown = status.exitCode === 1;
-    if (supervisorDown && backends === 0) return;
-    last = `supervisor exit ${status.exitCode}, other backends ${backends}`;
-    if (Date.now() > deadline) {
+    const down = await supervisorDown();
+    const backends = await listBackends();
+    if (down && backends.length === 0) return;
+
+    if (down) {
+      if (downSince === null) downSince = now();
+      // Never force a writer while the supervisor is still up; once it is down
+      // and the drain grace has elapsed, terminate the lingering client
+      // backends so the count converges instead of timing out.
+      if (now() - downSince >= graceMs) {
+        const doomed = backends
+          .filter((b) => b.backendType === 'client backend')
+          .map((b) => b.pid);
+        if (doomed.length > 0) await terminate(doomed);
+      }
+    } else {
+      downSince = null;
+    }
+
+    if (now() - start > timeoutMs) {
+      const rendered = backends.map(renderBackend).join(', ');
       throw new Error(
-        `writers did not quiesce within ${QUIET_TIMEOUT_MS}ms (${last}). ` +
+        `writers did not quiesce within ${timeoutMs}ms (supervisor ${down ? 'down' : 'up'}, ` +
+        `other backends ${backends.length}: ${rendered}). ` +
         'gbrain-serve and gbrain-worker must use gbrain-gated-entrypoint.sh',
       );
     }
-    await Bun.sleep(QUIET_POLL_MS);
+    await sleep(QUIET_POLL_MS);
   }
 }
 

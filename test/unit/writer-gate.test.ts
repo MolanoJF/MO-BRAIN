@@ -2,7 +2,26 @@ import { test, expect, describe } from 'bun:test';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pauseBrainWriters, resumeBrainWriters, pauseFilePath } from '../../src/ops/writerGate.ts';
+import {
+  pauseBrainWriters,
+  resumeBrainWriters,
+  pauseFilePath,
+  defaultWaitUntilQuiet,
+} from '../../src/ops/writerGate.ts';
+import type { Backend } from '../../src/ops/writerGate.ts';
+
+function backend(overrides: Partial<Backend> = {}): Backend {
+  return {
+    pid: 1,
+    usename: 'gbrain',
+    applicationName: 'gbrain worker',
+    clientAddr: '172.20.0.7',
+    backendType: 'client backend',
+    state: 'idle',
+    idleSeconds: 59.8,
+    ...overrides,
+  };
+}
 
 describe('writerGate', () => {
   test('pause writes the pause file and waits before returning', async () => {
@@ -48,5 +67,62 @@ describe('writerGate', () => {
       writePause: async () => {},
       waitUntilQuiet: async () => { throw new Error('writers did not quiesce within 60000ms'); },
     })).rejects.toThrow(/writers did not quiesce/);
+  });
+
+  test('never terminates a writer while the supervisor is still up', async () => {
+    let clock = 0;
+    const calls: number[][] = [];
+    await expect(defaultWaitUntilQuiet({
+      supervisorDown: async () => false,
+      listBackends: async () => [backend({ pid: 7 })],
+      terminate: async (pids) => { calls.push(pids); },
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      timeoutMs: 1_000,
+      graceMs: 100,
+    })).rejects.toThrow(/supervisor up/);
+    expect(calls).toEqual([]);
+  });
+
+  test('terminates the lingering client backend after the grace window, then returns', async () => {
+    let clock = 0;
+    let backends: Backend[] = [backend({ pid: 42 })];
+    const calls: number[][] = [];
+    await defaultWaitUntilQuiet({
+      supervisorDown: async () => true,
+      listBackends: async () => backends,
+      terminate: async (pids) => { calls.push(pids); backends = []; },
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      timeoutMs: 5_000,
+      graceMs: 1_000,
+    });
+    expect(calls).toEqual([[42]]);
+  });
+
+  test('never terminates a non-client backend', async () => {
+    let clock = 0;
+    const calls: number[][] = [];
+    await expect(defaultWaitUntilQuiet({
+      supervisorDown: async () => true,
+      listBackends: async () => [backend({ pid: 9, backendType: 'autovacuum worker', applicationName: '' })],
+      terminate: async (pids) => { calls.push(pids); },
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      timeoutMs: 2_000,
+      graceMs: 500,
+    })).rejects.toThrow(/writers did not quiesce/);
+    expect(calls).toEqual([]);
+  });
+
+  test('the timeout names the lingering writer and the default deadline is below 60s', async () => {
+    let clock = 0;
+    await expect(defaultWaitUntilQuiet({
+      supervisorDown: async () => true,
+      listBackends: async () => [backend({ pid: 5, applicationName: 'gbrain worker' })],
+      terminate: async () => {},
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+    })).rejects.toThrow(/within 45000ms[\s\S]*app="gbrain worker"/);
   });
 });
