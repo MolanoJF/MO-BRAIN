@@ -66,4 +66,20 @@ describe('workflow budget rules', () => {
       .map(([name]) => name);
     expect(scheduled).toEqual([]);
   });
+
+  test('every job has a timeout (a reusable-workflow call inherits its callee\'s)', () => {
+    const missing: string[] = [];
+    for (const [name, wf] of Object.entries(workflows())) {
+      for (const [id, job] of Object.entries(wf.jobs)) {
+        if (job.uses === undefined && job['timeout-minutes'] === undefined) missing.push(`${name}:${id}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test('release.yml publishes only after the stack suite passes', () => {
+    const { jobs } = workflows()['release.yml']!;
+    expect(jobs.stack!.uses).toBe('./.github/workflows/stack.yml');
+    expect([jobs.publish!.needs].flat()).toContain('stack');
+  });
 });
