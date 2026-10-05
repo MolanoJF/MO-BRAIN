@@ -125,4 +125,29 @@ describe('writerGate', () => {
       sleep: async (ms) => { clock += ms; },
     })).rejects.toThrow(/within 45000ms[\s\S]*app="gbrain worker"/);
   });
+
+  test('a slow probe near the deadline still throws within the bound', async () => {
+    const timeoutMs = 45_000;
+    let clock = 0;
+    let thrownAt: number | null = null;
+    try {
+      await defaultWaitUntilQuiet({
+        // A hung probe consumes its whole bounded budget each poll; the
+        // deadline must be enforced before the next probe, not after an
+        // unbounded wait, so the throw stays within timeoutMs + one poll.
+        supervisorDown: async (probeTimeoutMs) => { clock += probeTimeoutMs; return false; },
+        listBackends: async () => [backend({ pid: 7 })],
+        terminate: async () => {},
+        now: () => clock,
+        sleep: async (ms) => { clock += ms; },
+        graceMs: 1_000,
+        timeoutMs,
+      });
+    } catch {
+      thrownAt = clock;
+    }
+    expect(thrownAt).not.toBeNull();
+    expect(thrownAt!).toBeGreaterThan(timeoutMs);
+    expect(thrownAt! - timeoutMs).toBeLessThanOrEqual(5_000);
+  });
 });

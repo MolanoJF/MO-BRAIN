@@ -10,6 +10,9 @@ import { SQL } from 'bun';
 // seconds, so the shorter budget is safe.
 const QUIET_TIMEOUT_MS = 45_000;
 const QUIET_POLL_MS = 500;
+// The supervisor status probe shells out to gbrain; cap it so one poll can
+// never push the throw past the quiet deadline by more than one poll interval.
+const SUPERVISOR_PROBE_TIMEOUT_MS = 15_000;
 // After the supervisor is down, a writer backend may still be draining; give it
 // this long before terminating it, so a clean shutdown is never force-killed.
 const QUIET_GRACE_MS = 15_000;
@@ -116,7 +119,7 @@ export async function terminateWriterBackends(pids: number[]): Promise<void> {
 }
 
 export interface WaitUntilQuietDeps {
-  supervisorDown?: () => Promise<boolean>;
+  supervisorDown?: (timeoutMs: number) => Promise<boolean>;
   listBackends?: () => Promise<Backend[]>;
   terminate?: (pids: number[]) => Promise<void>;
   now?: () => number;
@@ -133,8 +136,7 @@ function renderBackend(b: Backend): string {
 }
 
 export async function defaultWaitUntilQuiet(deps: WaitUntilQuietDeps = {}): Promise<void> {
-  const supervisorDown = deps.supervisorDown
-    ?? (async () => (await runGbrain(['jobs', 'supervisor', 'status', '--json'], 15_000)).exitCode === 1);
+  const supervisorDown = deps.supervisorDown;
   const listBackends = deps.listBackends ?? listOtherBackends;
   const terminate = deps.terminate ?? terminateWriterBackends;
   const now = deps.now ?? (() => Date.now());
@@ -144,8 +146,30 @@ export async function defaultWaitUntilQuiet(deps: WaitUntilQuietDeps = {}): Prom
 
   const start = now();
   let downSince: number | null = null;
+  let lastDown = false;
   for (;;) {
-    const down = await supervisorDown();
+    // Check the deadline BEFORE the supervisor probe. The status probe can take
+    // its whole (bounded) budget, so a poll that starts just under the deadline
+    // must decide to give up first -- waiting until after the probe would let
+    // the throw cross into the control plane's 60 s teardown window.
+    if (now() - start > timeoutMs) {
+      const backends = await listBackends();
+      const rendered = backends.map(renderBackend).join(', ');
+      throw new Error(
+        `writers did not quiesce within ${timeoutMs}ms (supervisor ${lastDown ? 'down' : 'up'}, ` +
+        `other backends ${backends.length}: ${rendered}). ` +
+        'gbrain-serve and gbrain-worker must use gbrain-gated-entrypoint.sh',
+      );
+    }
+
+    // Never let the probe spend more than the time left in the budget (bounded
+    // by its own cap), so the deadline is enforced within one poll interval.
+    const remaining = Math.max(0, timeoutMs - (now() - start));
+    const probeTimeoutMs = Math.min(SUPERVISOR_PROBE_TIMEOUT_MS, remaining);
+    const down = supervisorDown
+      ? await supervisorDown(probeTimeoutMs)
+      : (await runGbrain(['jobs', 'supervisor', 'status', '--json'], probeTimeoutMs)).exitCode === 1;
+    lastDown = down;
     const backends = await listBackends();
     if (down && backends.length === 0) return;
 
@@ -164,14 +188,6 @@ export async function defaultWaitUntilQuiet(deps: WaitUntilQuietDeps = {}): Prom
       downSince = null;
     }
 
-    if (now() - start > timeoutMs) {
-      const rendered = backends.map(renderBackend).join(', ');
-      throw new Error(
-        `writers did not quiesce within ${timeoutMs}ms (supervisor ${down ? 'down' : 'up'}, ` +
-        `other backends ${backends.length}: ${rendered}). ` +
-        'gbrain-serve and gbrain-worker must use gbrain-gated-entrypoint.sh',
-      );
-    }
     await sleep(QUIET_POLL_MS);
   }
 }

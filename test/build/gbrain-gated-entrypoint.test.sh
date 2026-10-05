@@ -2,6 +2,16 @@
 # Proves the gate: no config => stay down; config => run; pause file => stop
 # and stay stopped; clearing the pause file => start again.
 set -eu
+
+# This test drives the entrypoint's real orphan sweep, which signals every
+# gbrain process in the calling PID namespace. Refuse unless the caller is CI
+# (GitHub sets GITHUB_ACTIONS=true) or has explicitly isolated the namespace, so
+# a bare local run can never TERM a live stack (task-c-review.md, "Live-stack
+# exposure" in task-c-report.md).
+if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${MOBRAIN_SWEEP_TEST_ISOLATED:-}" != "1" ]; then
+  echo 'refusing: the sweep signals every gbrain process in this PID namespace; run in CI or set MOBRAIN_SWEEP_TEST_ISOLATED=1 inside unshare --pid --fork --mount-proc' >&2
+  exit 0
+fi
 root=$(mktemp -d)
 gate=""
 cleanup() {
