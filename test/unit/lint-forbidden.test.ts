@@ -164,6 +164,26 @@ describe('lintForbidden', () => {
     const v = await lintForbidden(dir);
     expect(v.map((x) => x.rule)).toContain('secret-column-name');
   });
+
+  // Nested checkouts (.worktrees/<name>/, .claude/worktrees/<name>/, clones)
+  // are full copies of OTHER branches. Their files are linted in their own
+  // checkout, so the walker must not descend into them; otherwise a nested
+  // HANDOFF.md with no root-only exemption trips every rule.
+  test('skips nested git checkouts (worktrees) below the root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-nested-'));
+    await mkdir(join(root, '.worktrees', 'other'), { recursive: true });
+    await writeFile(join(root, '.worktrees', 'other', '.git'), 'gitdir: /elsewhere\n');
+    await writeFile(join(root, '.worktrees', 'other', 'HANDOFF.md'), 'gbrain autopilot --install\n');
+    await writeFile(join(root, '.worktrees', 'other', 'x.sh'), '#!/usr/bin/env bash\ngbrain autopilot --install\n');
+    expect(await lintForbidden(root)).toEqual([]);
+
+    // The skip is exactly one level deep: the same file outside a nested
+    // checkout is still linted.
+    await mkdir(join(root, 'sub'), { recursive: true });
+    await writeFile(join(root, 'sub', 'x.sh'), '#!/usr/bin/env bash\ngbrain autopilot --install\n');
+    expect(await lintForbidden(root)).toHaveLength(1);
+    await rm(root, { recursive: true, force: true });
+  });
 });
 
 describe('frozen-crypto-domain (D3)', () => {

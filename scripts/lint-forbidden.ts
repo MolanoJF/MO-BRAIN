@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
@@ -98,6 +99,11 @@ async function* walk(dir: string): AsyncGenerator<string> {
   for (const e of await readdir(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name)) continue;
+      // Nested git checkouts (worktrees under .worktrees/ or
+      // .claude/worktrees/, or clones) are other branches' code, linted in
+      // their own checkout. A `.git` entry (file for worktrees, dir for
+      // clones) marks one; never skip the root itself, only subdirectories.
+      if (existsSync(join(dir, e.name, '.git'))) continue;
       yield* walk(join(dir, e.name));
     } else if (EXTS.some((x) => e.name.endsWith(x))) {
       yield join(dir, e.name);
