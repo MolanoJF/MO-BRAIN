@@ -59,4 +59,11 @@ describe('workflow budget rules', () => {
   test('stack.yml runs only on demand or from another workflow', () => {
     expect(triggers(workflows()['stack.yml']!).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
   });
+
+  test('no workflow runs on a schedule', () => {
+    const scheduled = Object.entries(workflows())
+      .filter(([, wf]) => triggers(wf).includes('schedule'))
+      .map(([name]) => name);
+    expect(scheduled).toEqual([]);
+  });
 });

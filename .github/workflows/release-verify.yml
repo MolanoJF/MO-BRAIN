@@ -27,6 +27,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Log in to GHCR to pull the published images
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -54,3 +55,62 @@ jobs:
           docker pull "$IMG"
           docker inspect --format 'pulled {{index .RepoDigests 0}}' "$IMG"
           docker run --rm "$IMG" claude --version
+
+  # Was ghcr-visibility.yml's daily cron. Package visibility can flip to private
+  # outside any release (a manual toggle, or a package deleted and recreated).
+  # release.yml's verify-public catches it at publish time; dispatch this
+  # workflow to check it any other time. It never logs in to ghcr.io (see
+  # scripts/ci/check-public-images.sh); the point is to see what a
+  # credential-less `docker compose pull` sees.
+  public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: molanojf
+      GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
+      APP_VERSION: '1.0.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the three pinned images are publicly, anonymously pullable
+        run: bash scripts/ci/check-public-images.sh
+
+  # Gate A, moved from contract.yml: the clean-host install proof. It pulls the
+  # already-published RELEASE images, so it says nothing about a PR. It belongs
+  # here, after a release, on a fresh runner with none of our images.
+  clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLEAN_INSTALL_E2E: '1'
+      CLEAN_INSTALL_DIR: /tmp/clean-install
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: molanojf
+      GBRAIN_VERSION: '0.50.5.0'
+      HARNESS_VERSION: '2.1.274'
+      # The published control-plane tag. Without it Compose falls back to `dev`,
+      # which no registry carries.
+      APP_VERSION: '1.0.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.3.14 }
+      - run: bun install --frozen-lockfile
+      - name: Free disk space (preflight's 20 GB floor is real on a stock runner)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+      - name: Log in to GHCR to pull the published images
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # D1: the runner must be as clean as a stranger's box. Prove it first.
+      - name: Assert no image of ours is present
+        run: |
+          if docker image ls --format '{{.Repository}}' | grep -q "${IMAGE_NAMESPACE}"; then
+            echo "runner is pre-seeded; this gate would be a tautology" >&2; exit 1
+          fi
+      - run: mkdir -p /tmp/clean-install
+      - run: bun test test/e2e/install.e2e.test.ts
