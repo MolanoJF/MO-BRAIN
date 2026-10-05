@@ -95,7 +95,7 @@ one-line fix if not. Once preflight passes, the installer:
 1. asks, in plain language, whether to turn on the agent runner (default: **no**);
 2. generates four secrets (`POSTGRES_PASSWORD`, `OPS_RPC_TOKEN`, `ENCRYPTION_KEY`,
    `BETTER_AUTH_SECRET`) into a `.env` file, mode `600`;
-3. pulls three pinned, exact-version images from `ghcr.io/molanojf` (gbrain, control-plane,
+3. pulls three pinned, exact-version images from `ghcr.io/molioros` (gbrain, control-plane,
    and — if enabled — agent-runner);
 4. brings the whole stack up with `docker compose up -d --wait`.
 

@@ -28,7 +28,7 @@ directly, stop.
 
 - **Install:** `scripts/install.sh` + `scripts/preflight.sh` (Docker/Compose version floors, RAM, disk,
   ports 80/443, DNS for `$DOMAIN`); the console's wizard reaches `ready` on a clean host.
-- **Images published from CI to `ghcr.io/molanojf`** (the only GHCR owner available; the product name is not
+- **Images published from CI to `ghcr.io/molioros`** (the MoliorOS org namespace; the product name is not
   a registry namespace). Publishing is **tag/release-triggered**: the [`release` workflow](.github/workflows/release.yml)
   runs on a `v*` tag or a manual dispatch and is the only publisher — an ordinary push to `main` does not
   move the artifacts. The local `gh` OAuth token lacks `write:packages`, so CI owns every push — never
@@ -51,6 +51,8 @@ directly, stop.
 
 ### The published digests (v1.0.0)
 
+These are the v1.0.0 digests as first published under the personal namespace; the next release republishes under ghcr.io/molioros and replaces them.
+
 | Image | Tag | RepoDigest |
 |---|---|---|
 | `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:3a96e62b64e1a007a07d5bf42e0d778786c7af6fb762b8bf118626db102dead1` |
@@ -58,7 +60,7 @@ directly, stop.
 | `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:1727ee16b9f5d97f567d75a6893fa63e30d1301a8c126b2332b06837aa9b016b` |
 
 Source of record: the `publish` job of the [`release` workflow](.github/workflows/release.yml), written
-into the [v1.0.0 GitHub Release](https://github.com/MolanoJF/mobrain/releases/tag/v1.0.0). Publishing is
+into the [v1.0.0 GitHub Release](https://github.com/MoliorOS/MO-BRAIN/releases/tag/v1.0.0). Publishing is
 tag/release-triggered — an ordinary push to `main` does not rebuild or move these artifacts. They are
 verified from a fresh runner that did not build them by
 [`release-verify.yml`](.github/workflows/release-verify.yml) (dispatch it; it pulls all three by digest and
@@ -105,7 +107,7 @@ Zones behavior a caller can rely on:
 **Historical.** These measurements are from 2026-09-19, before zones and optional Google. This handoff pass did not re-measure the dev stack.
 
 - **The stack is up** on the base + dev compose files: `caddy`, `postgres` (healthy), `gbrain-ops` and
-  `control-plane` and `scheduler` (all `ghcr.io/molanojf/control-plane:dev`), `gbrain-serve`/`gbrain-worker`
+  `control-plane` and `scheduler` (all `ghcr.io/molioros/control-plane:dev`), `gbrain-serve`/`gbrain-worker`
   (the pinned `gbrain-base`), and `agent-runner`. `docker port brainstand-gbrain-ops-1` reads
   `3140/tcp -> 0.0.0.0:3140`.
 - **`GET /api/health` is 200**: `components: {controlDb:"ok", ops:"ok"}`, `pin: {declared:"0.50.5.0",

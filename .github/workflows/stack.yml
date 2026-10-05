@@ -37,7 +37,7 @@ permissions:
   contents: read
 
 # GHCR coordinates come from repo Actions variables; the product defaults
-# (ghcr.io / molanojf) apply when a variable is unset or empty.
+# (ghcr.io / molioros) apply when a variable is unset or empty.
 env:
   IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
@@ -96,10 +96,10 @@ jobs:
         run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" .
       - name: "Mirror the base and build the stack through the overlay (D2)"
         run: |
-          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" \
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
@@ -169,17 +169,17 @@ jobs:
             echo "HARNESS_VERSION=${HARNESS_VERSION}"
             echo "APP_VERSION=${APP_VERSION}"
             echo "IMAGE_REGISTRY=${IMAGE_REGISTRY:-ghcr.io}"
-            echo "IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-molanojf}"
+            echo "IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-molioros}"
             echo "OPENAI_API_KEY=${OPENAI_API_KEY}"
           } > .env
       - name: Build the pinned base image
         run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" .
       - name: "Mirror the base and build the stack through the overlay (D2)"
         run: |
-          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" \
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
@@ -189,7 +189,7 @@ jobs:
         run: |
           # runner.contract.test.ts runs `docker run mobrain/agent-runner:<pin>`;
           # the overlay tags it with the registry-qualified service name.
-          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION}" \
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:${HARNESS_VERSION}" \
             "mobrain/agent-runner:${HARNESS_VERSION}"
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
@@ -242,10 +242,10 @@ jobs:
         run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" .
       - name: "Mirror the base and build the stack through the overlay (D2)"
         run: |
-          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" \
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
@@ -273,10 +273,10 @@ jobs:
         run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
-            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
+            -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" .
       - name: "Mirror the base and build the stack through the overlay (D2)"
         run: |
-          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" \
+          docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:${GBRAIN_VERSION}" \
             "mobrain/gbrain-base:${GBRAIN_VERSION}"
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \

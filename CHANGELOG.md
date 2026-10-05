@@ -6,6 +6,11 @@ provenance — every `U*`, `P*` and `F*` — is in [`docs/slice-5-findings.md`](
 
 ## [Unreleased]
 
+The three images now publish to `ghcr.io/molioros/{gbrain-base,control-plane,agent-runner}` (the
+MoliorOS org namespace) instead of the personal `ghcr.io/molanojf` namespace. Existing installs that
+pulled `ghcr.io/molanojf/*` keep working, but should set `IMAGE_NAMESPACE=molioros` (or re-run the
+installer) to receive future releases.
+
 Custom schema packs. An org admin can now define their brain's own ontology — page types, the folders
 they file into, and the link verbs between them — three ways that all share one `PackDraft` shape:
 design it in the console's Schema page, paste a draft into "Import draft", or have an agent draft it

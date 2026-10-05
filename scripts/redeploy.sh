@@ -161,7 +161,7 @@ if [ "$FULL" = 1 ]; then
   [ -n "$GBRAIN_VERSION" ] || refuse 2 "GBRAIN_VERSION is not set in .env; the image build is pinned to it and has no safe default here."
 
   REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-  NS="${IMAGE_NAMESPACE:-molanojf}"
+  NS="${IMAGE_NAMESPACE:-molioros}"
 
   # docker/control-plane.Dockerfile:7 resolves its base from the local daemon
   # under the BARE `mobrain/gbrain-base:<pin>` name, which is not a registry

@@ -15,6 +15,11 @@ blocks nothing; it only costs minutes.
 | `release.yml` | `v*` tag or dispatch | stack + publish | stack green → publish the three pinned images |
 | `release-verify.yml` | **only** by hand | 1–45 min per job | published images pull by digest, are anonymously public, and install on a clean host; `push-permission` (5 min) checks the token may push the three packages — dispatch it before tagging a release |
 
+Releases publish the three pinned images under the MoliorOS org namespace
+(`ghcr.io/molioros`); after each release, refresh `release-verify.yml`'s digest
+defaults with the new `RepoDigest`s (the current defaults record the v1.0.0
+digests).
+
 Nothing is scheduled. `test/unit/workflows.test.ts` fails if a workflow gains a
 `schedule:`, if anything but `ci.yml` triggers on push/PR (the one exemption is
 `release.yml`'s `v*` tag push), or if a job has no `timeout-minutes` (jobs that

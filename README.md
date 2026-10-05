@@ -27,15 +27,15 @@ Either way the one command runs the preflight below, asks whether to enable the 
 The images are registry-qualified and exactly pinned:
 
 ```text
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:0.50.5.0
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/control-plane:${APP_VERSION:-1.0.0}
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:2.1.274   # only with the runner
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:0.50.5.0
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-1.0.0}
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   # only with the runner
 ```
 
-`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release). Both are plain environment variables, so an operator running their own registry sets them explicitly:
+`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `molioros` (the product is **Mobrain**; GHCR images publish under the MoliorOS org namespace that owns the release). Both are plain environment variables, so an operator running their own registry sets them explicitly:
 
 ```bash
-DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash scripts/install.sh
+DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
 ```
 
 Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
@@ -53,7 +53,7 @@ Never use a moving tag. The gbrain and harness versions are exact, and the produ
 | Compose project name | not already running containers on this host |
 | TCP ports 80 and 443 | free (a port held by this stack is not a conflict) |
 | `DOMAIN` (domain mode only) | resolves to one of this host's addresses — not checked in local mode, which has no public name |
-| The pinned images | pullable (`ghcr.io/molanojf/...`) |
+| The pinned images | pullable (`ghcr.io/molioros/...`) |
 
 `scripts/install.sh` picks a `COMPOSE_PROJECT_NAME` for you if you don't set one — deterministically, from the checkout's own path, so two unrelated checkouts on the same host never collide by default. See [`docs/runbooks/install.md`](docs/runbooks/install.md#compose-project-name) for why that matters and how to pin one yourself.
 

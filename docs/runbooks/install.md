@@ -27,7 +27,7 @@ The installer, in order:
 3. runs preflight, and exits with the failing check's code if the host cannot run the stack. In domain mode this now includes the DNS check against the domain you just gave it; in local mode the DNS check is skipped and says so;
 4. asks the runner question in plain words — *"This container runs model-written code against your brain, using your organization's API key, on a schedule, with nobody watching. Enable it? [y/N]:"* — unless `ENABLE_RUNNER` is already set in the environment, in which case it skips the prompt and uses that value directly. Either way, anything but an explicit yes (`y`/`yes`, case-insensitive — including EOF on a non-interactive install with neither variable set) leaves the runner **off**;
 5. generates four independent secrets and writes `.env` at mode `600`;
-6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}` and runs `docker compose up -d --wait`.
+6. pulls the pinned images from `${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}` and runs `docker compose up -d --wait`.
 
 Preflight still runs before a single secret is generated, so a host that cannot run the stack never ends up holding an `ENCRYPTION_KEY` it cannot use.
 
@@ -53,10 +53,10 @@ If you can't set the env var for some reason, piping the answer over stdin still
 printf 'n\n' | DOMAIN=brain.acme-co.com bash scripts/install.sh
 ```
 
-To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molanojf` (the product is **Mobrain**; GHCR images publish under the account that owns the release):
+To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molioros` (the product is **Mobrain**; GHCR images publish under the MoliorOS org namespace that owns the release):
 
 ```bash
-DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molanojf bash scripts/install.sh
+DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
 ```
 
 Every variable in the generated file is documented in [`.env.example`](../../.env.example).
@@ -138,7 +138,7 @@ Point the domain's DNS at this host first; Caddy needs it for the ACME challenge
 
 **Exit 16 — the pinned images cannot be pulled.**
 ```text
-PREFLIGHT: the pinned Mobrain images cannot be pulled; check ghcr.io/molanojf credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
+PREFLIGHT: the pinned Mobrain images cannot be pulled; check ghcr.io/molioros credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
 ```
 The installer reports the same failure after its own pull attempt (`Could not pull the pinned Mobrain images.`). The registry is unreachable, or your credentials lack access. See the next section.
 
@@ -146,7 +146,7 @@ The installer reports the same failure after its own pull attempt (`Could not pu
 
 ## Air-gapped or registry-less hosts
 
-The production Compose file pulls published images and has no `build:` stanza. If you cannot pull from `ghcr.io/molanojf`, build the same three images locally from the source checkout with the build overlay, then bring the stack up:
+The production Compose file pulls published images and has no `build:` stanza. If you cannot pull from `ghcr.io/molioros`, build the same three images locally from the source checkout with the build overlay, then bring the stack up:
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.build.yml build
