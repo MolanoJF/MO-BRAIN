@@ -10,11 +10,67 @@ export function privateSpaceSourceId(membershipId: string): string {
   return `my-space-${membershipId.slice(0, 8).toLowerCase()}`;
 }
 
+/**
+ * The gbrain-side source name. gbrain's `sources.name` is `TEXT NOT NULL
+ * UNIQUE`, so a private Space — one per membership — registers under its
+ * already-unique `sourceId`; a shared Space keeps its human-readable name
+ * (falling back to the id). The console label is the control-DB `spaces.name`,
+ * which stays 'My Space', and is untouched here.
+ */
+export function gbrainSourceName(
+  space: { sourceId: string; ownerMembershipId?: string | null; name?: string | null },
+): string {
+  return space.ownerMembershipId ? space.sourceId : (space.name ?? space.sourceId);
+}
+
 export const PRIVATE_SPACE_HARNESS = 'generic';
 
 export type ProvisionPrivateSpaceResult =
   | { ok: true; spaceId: string; sourceId: string; connectionId: string }
-  | { ok: false; error: string; status: 400 | 404 | 409 };
+  | { ok: false; error: string; status: 400 | 404 | 409 | 502 };
+
+/**
+ * gbrain's PGlite/Postgres unique violations for the `sources` table. If
+ * `sources.list` could not be read and `sources.add` fails with one of these,
+ * the row already exists and the source is registered.
+ */
+const SOURCE_ALREADY_EXISTS = /sources_(pkey|name_key)/;
+
+/** True when absent, false when present, null when the list cannot be read. */
+async function isSourceRegistered(sourceId: string): Promise<boolean | null> {
+  try {
+    const r = await callOps<{ sources?: Array<{ id?: string }> }>(
+      'sources.list', {}, { json: true, timeoutMs: 60_000 },
+    );
+    if (!r.ok || !Array.isArray(r.json?.sources)) return null;
+    return r.json!.sources!.some((s) => s.id === sourceId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Seed + register one private Space's gbrain source. Returns ok when the
+ * source is registered OR already existed; never throws.
+ */
+async function registerPrivateSpaceSource(
+  space: { sourceId: string; localPath?: string | null; name?: string | null; ownerMembershipId?: string | null },
+): Promise<{ ok: boolean }> {
+  try {
+    await seedSpace(space.sourceId);
+    const r = await callOps('sources.add', {
+      id: space.sourceId,
+      path: space.localPath ?? `/srv/brain-repos/${space.sourceId}`,
+      name: gbrainSourceName(space),
+      federated: true,
+    }, { timeoutMs: 300_000 });
+    if (r.ok) return { ok: true };
+    if (SOURCE_ALREADY_EXISTS.test(r.stderr ?? '')) return { ok: true };
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
@@ -60,7 +116,6 @@ export async function provisionPrivateSpace(
     eq(schema.spaces.ownerMembershipId, membershipId),
   ));
 
-  let created = false;
   if (!space) {
     const sourceId = privateSpaceSourceId(membershipId);
     try {
@@ -73,7 +128,6 @@ export async function provisionPrivateSpace(
         localPath: `/srv/brain-repos/${sourceId}`,
         ownerMembershipId: membershipId,
       });
-      created = true;
     } catch (e) {
       // A concurrent invite/retry raced us to the partial unique index; the row
       // it created is the one we want.
@@ -103,16 +157,15 @@ export async function provisionPrivateSpace(
     eq(schema.connections.state, 'pending'),
   ));
 
-  if (created) {
-    try {
-      await seedSpace(space.sourceId);
-      await callOps('sources.add', {
-        id: space.sourceId,
-        path: space.localPath ?? `/srv/brain-repos/${space.sourceId}`,
-        name: space.name,
-        federated: true,
-      }, { timeoutMs: 300_000 });
-    } catch { /* best-effort: the Space row is the durable record; provisioning still proceeds */ }
+  // Registration is keyed on gbrain's live source list, not on `created`, so a
+  // retry after a partial failure re-registers a missing source. The failure is
+  // surfaced (never swallowed) and the connection is NOT provisioned without it.
+  const registered = await isSourceRegistered(space.sourceId);
+  if (registered !== true) {
+    const ensured = await registerPrivateSpaceSource(space);
+    if (!ensured.ok) {
+      return { ok: false, error: 'private_space_source_failed', status: 502 };
+    }
   }
 
   // `privateSpace: true` is derived inside connections.ts from the write Space's

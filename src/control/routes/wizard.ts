@@ -5,7 +5,7 @@ import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
 import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson, pauseBrainWriters, resumeBrainWriters } from '../opsClient.ts';
-import { provisionPrivateSpace, privateSpaceSourceId } from '../privateSpaces.ts';
+import { provisionPrivateSpace, privateSpaceSourceId, gbrainSourceName } from '../privateSpaces.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
@@ -317,7 +317,8 @@ export async function addSpaceSource(
 
   await seedSpace(sourceId);
   const r = await callOps('sources.add', {
-    id: sourceId, path: localPath, name: name ?? sourceId, federated: true,
+    id: sourceId, path: localPath,
+    name: gbrainSourceName({ sourceId, name, ownerMembershipId }), federated: true,
   }, { timeoutMs: 300_000 });
   if (!r.ok) return { ok: false, status: 400, body: { error: `sources add failed (exit ${r.exitCode})`, detail: r.stderr } };
 
