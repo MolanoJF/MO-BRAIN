@@ -1,63 +1,54 @@
-name: contract
+name: stack
 
-# The PR and push workflow (Task 13): lint/tsc/unit, integration, the two build
-# gates, and the contract suite at PINNED-CURRENT only. The pinned-next drift
-# tripwire now lives in nightly.yml — a drift finding is news, not a broken PR.
-#
-# Publishing the three pinned images moved out of this file (Task 5) into
-# release.yml, which runs on a `v*` tag or a manual dispatch. An ordinary push
-# to main must never move the published artifacts: Gate A (clean-install) below
-# pulls the release images as published, not images this run rebuilt.
+# The Docker-backed suites: build gates, integration, contract, and the restore
+# and slice2 e2e legs. `all` costs ~30 billed minutes, so this workflow NEVER
+# runs on push or pull_request (docs/runbooks/ci.md). Run it by hand when a
+# change touches the stack, ideally one suite at a time:
+#   gh workflow run stack.yml --ref <branch> -f suite=contract
+# release.yml calls it before publishing. It also replaces nightly.yml's
+# pinned-next drift arm:
+#   gh workflow run stack.yml -f gbrain_version=0.51.0.0
 on:
-  push: { branches: [main] }
-  pull_request:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Suite to run'
+        type: choice
+        options: [all, build, integration, contract, e2e]
+        default: all
+      gbrain_version:
+        description: 'gbrain pin under test (blank = pinned-current 0.50.5.0)'
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        default: all
+      gbrain_version:
+        type: string
+        default: ''
+
+concurrency:
+  group: stack-${{ github.ref }}-${{ inputs.suite }}-${{ inputs.gbrain_version }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 # GHCR coordinates come from repo Actions variables; the product defaults
 # (ghcr.io / molanojf) apply when a variable is unset or empty.
 env:
   IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
+  GBRAIN_VERSION: ${{ inputs.gbrain_version || '0.50.5.0' }}
+  HARNESS_VERSION: '2.1.274'
 
 jobs:
-  unit:
-    runs-on: ubuntu-latest
-    env:
-      # Bun loads the repo's .env locally; a CI runner has none, so the pin is
-      # passed explicitly. Without it pin.ts falls back to 0.50.0.0 and the
-      # operations.json seam test reads the wrong registered version.
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
-      CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
-    services:
-      # The unit suite's Postgres-backed checks refuse to skip silently.
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: gbrain
-          POSTGRES_PASSWORD: ci-not-a-real-secret
-          POSTGRES_DB: control
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U gbrain -d control"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.3.14 }
-      - run: bun install --frozen-lockfile
-      - run: bun run lint:forbidden
-      - run: bunx tsc --noEmit
-      - run: bun run test:unit
-
   build-gates:
+    if: inputs.suite == 'all' || inputs.suite == 'build'
     runs-on: ubuntu-latest
-    needs: unit
-    env:
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -71,11 +62,10 @@ jobs:
         run: bash test/build/harness-pin.test.sh
 
   integration:
+    if: inputs.suite == 'all' || inputs.suite == 'integration'
     runs-on: ubuntu-latest
-    needs: unit
+    timeout-minutes: 30
     env:
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -121,14 +111,17 @@ jobs:
       # isolation the suite needs, and it bounds peak memory to one file's
       # module graph (the full-stack + all-files run was OOM-killed).
       - run: bun run test:integration:isolated
+      # CI had no container logs, which is why the 499s in the audit are still
+      # unexplained. Cheap to print, priceless when red.
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml logs --no-color --tail=300
 
   contract:
+    if: inputs.suite == 'all' || inputs.suite == 'contract'
     runs-on: ubuntu-latest
-    needs: unit
+    timeout-minutes: 45
     env:
-      # G4/G1: pinned-current only on PR/push. pinned-next is nightly.yml's job.
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
       APP_VERSION: '1.0.0'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
@@ -198,18 +191,10 @@ jobs:
           # the overlay tags it with the registry-qualified service name.
           docker tag "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/agent-runner:${HARNESS_VERSION}" \
             "mobrain/agent-runner:${HARNESS_VERSION}"
-      # Most of test/contract targets the LIVE main stack (the slice0 harness
-      # covers only the pinned binary), so the stack must be up first.
       - name: Bring the dev stack up on the pinned images
         run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
-      # F31: the slice3/slice3.5 seam legs (and the ops-backed usage read) run
-      # against the MAIN stack and assume an operator-initialized brain — a
-      # provider key in config.json and an OpenAI-width embedding column. A fresh
-      # compose stack cold-starts a 1280d template the pinned binary refuses to
-      # re-template, and a reset issued as a separate command loses the race to
-      # the worker recreating it. Drive the PRODUCT's own wizard over the
-      # control-plane API — the path every operator uses — never a hand-rolled
-      # `gbrain init`. Idempotent: a brain already ready is left alone.
+      # F31: drive the PRODUCT's own wizard so the main brain is
+      # operator-initialized before the seam legs. Idempotent.
       - name: Bootstrap the main brain through the wizard (F31)
         run: bun run scripts/ci-bootstrap-brain.ts
         env:
@@ -220,24 +205,27 @@ jobs:
           BOOTSTRAP_ORG: Acme
       # One process per file: see test:integration:isolated above.
       - run: bun run test:contract:isolated
-      - name: Capture the capability snapshot and report drift
-        if: always()
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f compose/docker-compose.yml -f compose/docker-compose.dev.yml logs --no-color --tail=300
+      # A capability snapshot is only news on a drift run (a non-default pin).
+      - name: Capture the capability snapshot (drift runs only)
+        if: always() && inputs.gbrain_version != ''
         run: bun run capability:capture || true
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && inputs.gbrain_version != ''
         with:
-          name: capability-${{ github.sha }}
+          name: capability-${{ env.GBRAIN_VERSION }}-${{ github.sha }}
           path: contracts/
+          retention-days: 7
 
+  # Untested restore is not backup. Not chained behind `contract` any more:
+  # the chain hid slice2's deterministic failure for a week (audit R1).
   restore:
+    if: inputs.suite == 'all' || inputs.suite == 'e2e'
     runs-on: ubuntu-latest
-    needs: contract
+    timeout-minutes: 45
     env:
-      GBRAIN_VERSION: '0.50.5.0'
-      # Compose interpolates agent-runner's required HARNESS_VERSION even when
-      # that profile-gated service is not built or started; without it the
-      # overlay build fails before a single test runs.
-      HARNESS_VERSION: '2.1.274'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -250,7 +238,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
-      - run: |
+      - name: Build the pinned base image
+        run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
@@ -261,16 +250,13 @@ jobs:
           docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             control-plane scheduler
-      # Untested restore is not backup.
       - run: bun test test/e2e/restore.e2e.test.ts
-        timeout-minutes: 90
 
   slice2:
+    if: inputs.suite == 'all' || inputs.suite == 'e2e'
     runs-on: ubuntu-latest
-    needs: restore
+    timeout-minutes: 45
     env:
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
       DOMAIN: localhost
       POSTGRES_PASSWORD: ci-not-a-real-secret
       OPS_RPC_TOKEN: ci-not-a-real-token
@@ -283,7 +269,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
-      - run: |
+      - name: Build the pinned base image
+        run: |
           docker build -f docker/gbrain-base.Dockerfile \
             --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
             -t "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molanojf}/gbrain-base:${GBRAIN_VERSION}" .
@@ -296,48 +283,3 @@ jobs:
             control-plane scheduler
       # Keyword search does not need OPENAI_API_KEY (sync --no-embed).
       - run: bun test test/e2e/slice2.e2e.test.ts
-        timeout-minutes: 90
-
-  # Task 7 — Gate A: the clean-host install proof. Runs on a fresh runner with
-  # none of our images, pulling the already-published RELEASE images from GHCR.
-  # Publishing moved to release.yml (tag/release-triggered), so an ordinary push
-  # to main no longer moves the artifacts this gate consumes.
-  clean-install:
-    runs-on: ubuntu-latest
-    needs: [unit]
-    permissions:
-      contents: read
-      packages: read
-    env:
-      CLEAN_INSTALL_E2E: '1'
-      CLEAN_INSTALL_DIR: /tmp/clean-install
-      IMAGE_REGISTRY: ghcr.io
-      IMAGE_NAMESPACE: molanojf
-      GBRAIN_VERSION: '0.50.5.0'
-      HARNESS_VERSION: '2.1.274'
-      # The published control-plane tag. Without it Compose falls back to `dev`,
-      # which no registry carries.
-      APP_VERSION: '1.0.0'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.3.14 }
-      - run: bun install --frozen-lockfile
-      - name: Free disk space (preflight's 20 GB floor is real on a stock runner)
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          tool-cache: false
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-      - name: Log in to GHCR to pull the published images
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      # D1: the runner must be as clean as a stranger's box. Prove it first.
-      - name: Assert no image of ours is present
-        run: |
-          if docker image ls --format '{{.Repository}}' | grep -q "${IMAGE_NAMESPACE}"; then
-            echo "runner is pre-seeded; this gate would be a tautology" >&2; exit 1
-          fi
-      - run: mkdir -p /tmp/clean-install
-      - run: bun test test/e2e/install.e2e.test.ts
-        timeout-minutes: 45
