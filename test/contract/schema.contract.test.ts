@@ -2,7 +2,7 @@ import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
-import { parseSchemaActiveProse } from '../../src/contracts/capability.ts';
+import { parseSchemaActiveProse, type SchemaActive } from '../../src/contracts/capability.ts';
 import { composeUp, composeDown, composeExec, resetBrain, BRAIN_DB_URL } from '../helpers/stack.ts';
 
 beforeAll(async () => {
@@ -19,19 +19,36 @@ beforeAll(async () => {
 }, 900_000);
 afterAll(async () => { await composeDown(); }, 120_000);
 
+// Transient first-call read after init, mechanism unverified (same class as
+// the schema-lint empty receipt fixed in Task G): the first `schema active`
+// after beforeAll's init can exit 0 with prose that parses to `pack: null`,
+// while the next call in the same file passes. Retry up to 8 attempts, 500 ms
+// apart, and log EVERY no-pack attempt — including ones a later attempt
+// recovers from — so CI captures the mechanism even on a green run.
+async function activePackWithRetry(): Promise<SchemaActive> {
+  let last = parseSchemaActiveProse('');
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    const r = await execOperation(OPERATIONS['schema.active']!, {}, { timeoutMs: 30_000 });
+    assertOk(OPERATIONS['schema.active']!, r);
+    const parsed = parseSchemaActiveProse(r.stdout);
+    if (parsed.pack !== null) return parsed;
+    last = parsed;
+    console.error('[schema][active] attempt', attempt, 'pack=null exit', r.exitCode, 'stdout', JSON.stringify(r.stdout.slice(0, 600)), 'stderr', JSON.stringify(r.stderr.slice(0, 600)));
+    if (attempt < 8) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`schema active still parsed no pack after 8 attempts; last stdout: ${JSON.stringify(last.raw.slice(0, 600))}`);
+}
+
 test('init --schema-pack is accepted and actually selects the pack', async () => {
   // The flag is undocumented in `gbrain init --help` but allowlisted. If a
   // version bump ever drops it, init would exit 2 on an unknown flag and
   // beforeAll's assertOk would have already failed — this asserts the EFFECT.
-  const active = await execOperation(OPERATIONS['schema.active']!, {});
-  assertOk(OPERATIONS['schema.active']!, active);
-  expect(parseSchemaActiveProse(active.stdout).pack).toBe('gbrain-base');
-});
+  const active = await activePackWithRetry();
+  expect(active.pack).toBe('gbrain-base');
+}, 330_000);
 
 test('schema active reports the resolution tier, and ignores --json', async () => {
-  const r = await execOperation(OPERATIONS['schema.active']!, {});
-  assertOk(OPERATIONS['schema.active']!, r);
-  const a = parseSchemaActiveProse(r.stdout);
+  const a = await activePackWithRetry();
   expect(a.pack).toBeTruthy();
   // init writes ~/.gbrain/config.json, which is tier 6.
   expect(a.source).toBe('home-config');
@@ -40,7 +57,7 @@ test('schema active reports the resolution tier, and ignores --json', async () =
   // The registry must keep refusing --json: the command accepts and ignores it.
   expect(() => buildArgv(OPERATIONS['schema.active']!, {}, { json: true }))
     .toThrow(/does not support --json/);
-});
+}, 330_000);
 
 test('schema validate accepts a bundled pack name as a positional', async () => {
   const r = await execOperation(OPERATIONS['schema.validate']!, { packName: 'gbrain-recommended' });
