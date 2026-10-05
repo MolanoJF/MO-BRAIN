@@ -55,12 +55,31 @@ async function isSourceRegistered(sourceId: string): Promise<boolean | null> {
 }
 
 /**
+ * Sync a source this call just registered so gbrain stamps `last_sync_at`. A
+ * federated source with a repo path and a null `last_sync_at` fails gbrain's
+ * `sync_freshness` doctor check, so an unsynced private Space makes the whole
+ * brain unhealthy. Non-fatal by design: the result is reported to the caller's
+ * audit, never thrown, so a transient sync failure cannot fail provisioning or
+ * roll back the connection.
+ */
+async function syncRegisteredSource(sourceId: string): Promise<boolean> {
+  try {
+    const r = await callOps('sync', { source: sourceId }, { json: true, timeoutMs: 300_000 });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Seed + register one private Space's gbrain source. Returns ok when the
- * source is registered OR already existed; never throws.
+ * source is registered OR already existed; never throws. `syncOk` reports
+ * whether the just-registered source was synced (false when registration
+ * failed or the sync itself did).
  */
 async function registerPrivateSpaceSource(
   space: { sourceId: string; localPath?: string | null; name?: string | null; ownerMembershipId?: string | null },
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; syncOk: boolean }> {
   try {
     await seedSpace(space.sourceId);
     const r = await callOps('sources.add', {
@@ -69,11 +88,12 @@ async function registerPrivateSpaceSource(
       name: gbrainSourceName(space),
       federated: true,
     }, { timeoutMs: 300_000 });
-    if (r.ok) return { ok: true };
-    if (isIdCollision(r.stderr ?? '', space.sourceId)) return { ok: true };
-    return { ok: false };
+    if (r.ok || isIdCollision(r.stderr ?? '', space.sourceId)) {
+      return { ok: true, syncOk: await syncRegisteredSource(space.sourceId) };
+    }
+    return { ok: false, syncOk: false };
   } catch {
-    return { ok: false };
+    return { ok: false, syncOk: false };
   }
 }
 
@@ -165,12 +185,16 @@ export async function provisionPrivateSpace(
   // Registration is keyed on gbrain's live source list, not on `created`, so a
   // retry after a partial failure re-registers a missing source. The failure is
   // surfaced (never swallowed) and the connection is NOT provisioned without it.
+  // Sync runs only on the call that actually registered the source, never on a
+  // repeat for an already-registered one.
+  let syncOk: boolean | null = null;
   const registered = await isSourceRegistered(space.sourceId);
   if (registered !== true) {
     const ensured = await registerPrivateSpaceSource(space);
     if (!ensured.ok) {
       return { ok: false, error: 'private_space_source_failed', status: 502 };
     }
+    syncOk = ensured.syncOk;
   }
 
   // `privateSpace: true` is derived inside connections.ts from the write Space's
@@ -188,6 +212,7 @@ export async function provisionPrivateSpace(
   await audit(orgId, actor, 'member.privateSpace', space.id, {
     sourceId: space.sourceId,
     connectionId: provisioned.connectionId,
+    ...(syncOk === null ? {} : { syncOk }),
   });
 
   return { ok: true, spaceId: space.id, sourceId: space.sourceId, connectionId: provisioned.connectionId };

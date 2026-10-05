@@ -238,6 +238,37 @@ describe('invite-time provisioning', () => {
     // A NEWLY created private Space is seeded and registered as a gbrain source.
     expect(seedSpaceCalls).toContain(space!.sourceId);
     expect(calls.some((c) => c.op === 'sources.add' && c.params?.id === space!.sourceId)).toBe(true);
+    // ...and synced, so gbrain's `sync_freshness` doctor check does not fail on
+    // a source with a repo path and a null `last_sync_at` (C8).
+    expect(calls.some((c) => c.op === 'sync' && c.params?.source === space!.sourceId)).toBe(true);
+  });
+
+  test('a failed sync does not fail provisioning', async () => {
+    callOpsHandler = (op, _params, opts) => {
+      if (op === 'sync') {
+        return {
+          ok: false, exitCode: 1, argv: ['gbrain', 'sync'],
+          stdout: '', stderr: 'sync exploded', json: null,
+        };
+      }
+      return defaultOk(op, opts);
+    };
+
+    const email = `ps-syncfail-${randomUUID().slice(0, 8)}@example.test`;
+    const res = await hit('POST', '/api/members', adminCookie, { email, role: 'member' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      id: string;
+      privateSpace: { ok: boolean; spaceId?: string; connectionId?: string; error?: string };
+    };
+    expect(body.privateSpace.ok).toBe(true);
+
+    const active = await getDb().select().from(schema.connections).where(and(
+      eq(schema.connections.membershipId, body.id),
+      eq(schema.connections.state, 'active'),
+    ));
+    expect(active.length).toBe(1);
+    expect(active[0]!.writeSpaceId).toBe(body.privateSpace.spaceId!);
   });
 
   test('a failed grant leaves the membership intact and the pending space+connection retryable', async () => {
