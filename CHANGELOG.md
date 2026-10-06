@@ -11,6 +11,15 @@ MoliorOS org namespace) instead of the personal `ghcr.io/molanojf` namespace. Ex
 pulled `ghcr.io/molanojf/*` keep working, but should set `IMAGE_NAMESPACE=molioros` (or re-run the
 installer) to receive future releases.
 
+v1.0.0 was republished under the org namespace by `release.yml` run `37390755438` (2026-10-05). Its
+`RepoDigest`s are:
+
+| Image | Tag | RepoDigest |
+|---|---|---|
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molioros/gbrain-base@sha256:4a11043b17857a2839680c5702147d601997a26fd2be3ccdbcc87bf2a89b3efe` |
+| `control-plane` | `1.0.0` | `ghcr.io/molioros/control-plane@sha256:d3a6ea37e08beed104a74570632b8d33cd63df46f467ec84b7d61394749ba10b` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molioros/agent-runner@sha256:07372e94871d23b25ef85a01d179c4db37b2433b0028ebd56fc61dfcff5d1551` |
+
 Custom schema packs. An org admin can now define their brain's own ontology — page types, the folders
 they file into, and the link verbs between them — three ways that all share one `PackDraft` shape:
 design it in the console's Schema page, paste a draft into "Import draft", or have an agent draft it

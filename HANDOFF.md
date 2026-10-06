@@ -51,13 +51,13 @@ directly, stop.
 
 ### The published digests (v1.0.0)
 
-These are the v1.0.0 digests as first published under the personal namespace; the next release republishes under ghcr.io/molioros and replaces them.
+These are the v1.0.0 digests as republished under the MoliorOS org namespace on 2026-10-05; the earlier personal-namespace digests are recorded in CHANGELOG.md.
 
 | Image | Tag | RepoDigest |
 |---|---|---|
-| `gbrain-base` | `0.50.5.0` | `ghcr.io/molanojf/gbrain-base@sha256:3a96e62b64e1a007a07d5bf42e0d778786c7af6fb762b8bf118626db102dead1` |
-| `control-plane` | `1.0.0` | `ghcr.io/molanojf/control-plane@sha256:a327595c357026322cbe7021771db99ad6be04a0589c60d554433e9043dc33e9` |
-| `agent-runner` | `2.1.274` | `ghcr.io/molanojf/agent-runner@sha256:1727ee16b9f5d97f567d75a6893fa63e30d1301a8c126b2332b06837aa9b016b` |
+| `gbrain-base` | `0.50.5.0` | `ghcr.io/molioros/gbrain-base@sha256:4a11043b17857a2839680c5702147d601997a26fd2be3ccdbcc87bf2a89b3efe` |
+| `control-plane` | `1.0.0` | `ghcr.io/molioros/control-plane@sha256:d3a6ea37e08beed104a74570632b8d33cd63df46f467ec84b7d61394749ba10b` |
+| `agent-runner` | `2.1.274` | `ghcr.io/molioros/agent-runner@sha256:07372e94871d23b25ef85a01d179c4db37b2433b0028ebd56fc61dfcff5d1551` |
 
 Source of record: the `publish` job of the [`release` workflow](.github/workflows/release.yml), written
 into the [v1.0.0 GitHub Release](https://github.com/MoliorOS/MO-BRAIN/releases/tag/v1.0.0). Publishing is

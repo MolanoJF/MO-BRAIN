@@ -24,12 +24,6 @@ function allowed(file: string): boolean {
   return ALLOWLIST.some((entry) => file === entry || file.startsWith(entry));
 }
 
-// A v1.0.0 `RepoDigest` pin published under the old namespace is an immutable
-// historical record — release-verify.yml's three `default:` inputs and
-// HANDOFF.md's digest table — that the controller replaces after the republish.
-// It is not a live namespace reference, so it is exempt.
-const DIGEST_PIN = /ghcr\.io\/molanojf\/[a-z0-9-]+@sha256:[0-9a-f]{64}/i;
-
 // Narrowed to the IMAGE NAMESPACE, not the username: the GitHub account
 // `MolanoJF` may still appear in a repo URL or branch name without being a
 // registry namespace. The bare-token arm therefore only matches `molanojf`
@@ -41,12 +35,11 @@ const OFFENSES: RegExp[] = [
   /(?<![A-Za-z0-9_/.-])molanojf(?![A-Za-z0-9_/-])/i,
 ];
 
-function offendingLines(file: string, text: string): number[] {
+function offendingLines(text: string): number[] {
   const hits: number[] = [];
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (DIGEST_PIN.test(line)) continue;
     if (OFFENSES.some((re) => re.test(line))) hits.push(i + 1);
   }
   return hits;
@@ -67,7 +60,7 @@ describe('image namespace', () => {
       if (allowed(file)) continue;
       const buf = readFileSync(join(ROOT, file));
       if (buf.includes(0)) continue; // binary
-      for (const line of offendingLines(file, buf.toString('utf8'))) {
+      for (const line of offendingLines(buf.toString('utf8'))) {
         offenders.push(`${file}:${line}`);
       }
     }
