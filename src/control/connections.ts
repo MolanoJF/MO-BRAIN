@@ -3,6 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
 import { callOps, deleteCredentialJournal, takeGrantCredentials } from './opsClient.ts';
 import { storeSecret } from './secrets.ts';
+import { connectionClass } from './harness.ts';
 import type { Role } from './rbac.ts';
 import {
   clientName,
@@ -12,6 +13,10 @@ import {
   type CompiledConnection,
   type GrantProfileId,
 } from '../contracts/compile.ts';
+
+/** Manual harnesses (generic, ChatGPT, Cursor, …) have no auto-refresh, so a
+ *  pasted credential must outlive one copy/paste, not one hour. */
+const MANUAL_HARNESS_TOKEN_TTL = 30 * 24 * 60 * 60;
 
 /** Ops-side --credentials-out path for the member client. Taken once on a fresh grant. */
 export function grantCredentialsOutPath(connectionId: string): string {
@@ -103,10 +108,39 @@ export async function previewConnection(input: ConnectionInput): Promise<{
   };
 }
 
+type VerifyResult = { status: 'ok' | 'partial' | 'failed'; message: string | null };
+
+/**
+ * Only for manual-class harnesses — auto-install classes write real adapter
+ * config via `gbrain connect --install` and have their own install-time
+ * verification story. Never throws: a verify failure is recorded, not fatal
+ * to provisioning (the credential is still valid even if the live check
+ * couldn't complete, e.g. a transient network blip to gbrain-ops).
+ */
+async function verifyManualHarness(
+  clientId: string,
+  harness: string,
+  credentialsFile: string,
+): Promise<VerifyResult | null> {
+  if (connectionClass(harness) !== 'manual') return null;
+  try {
+    const r = await callOps('mcp.verify', {
+      client: clientId, harness, url: mcpUrl(), credentialsFile, timeoutMs: 30_000,
+    }, { json: true, timeoutMs: 35_000 });
+    // mcp.verify's own exit-code contract (registry.ts comment, V10/honesty
+    // rule 5): 0 = ok, 2 = partial (server checks passed, harness evidence
+    // missing — never render this as a pass), anything else = failed.
+    const status: VerifyResult['status'] = r.exitCode === 0 ? 'ok' : r.exitCode === 2 ? 'partial' : 'failed';
+    return { status, message: r.stdout.slice(0, 500) || null };
+  } catch (e) {
+    return { status: 'failed', message: e instanceof Error ? e.message.slice(0, 500) : 'verify request failed' };
+  }
+}
+
 export async function provisionConnection(
   input: ConnectionInput,
   actor: string,
-): Promise<{ connectionId: string; credentials: unknown; memberHandoff?: unknown }> {
+): Promise<{ connectionId: string; credentials: unknown; memberHandoff?: unknown; verify: VerifyResult | null }> {
   await assertMembership(input.organizationId, input.membershipId);
   const { write, reads } = await loadSpaces(input.organizationId, input.writeSpaceId, input.readSpaceIds);
   const compiled = compileFrom(input, write, reads);
@@ -133,13 +167,20 @@ export async function provisionConnection(
       { json: true },
     );
     if (!r.ok) throw new Error(`auth.rescopeClient failed (exit ${r.exitCode})`);
-    await persistCompiled(existing.id, input, name, compiled);
+    // A rescope never re-runs verify, so any prior verify result is stale for
+    // the connection's new scope (e.g. a different harness or profile) —
+    // clear it explicitly rather than leaving a misleading "Verified" stick.
+    await persistCompiled(existing.id, input, name, compiled, {
+      verifyStatus: null,
+      verifiedAt: null,
+      verifyMessage: null,
+    });
     await audit(input.organizationId, actor, 'connection.rescope', existing.id, {
       clientId, serverClientId: existing.serverClientId, clientName: name,
       writeSpace: write.sourceId, readSpaces: reads.map((s) => s.sourceId),
       profile: compiled.profile,
     });
-    return { connectionId: existing.id, credentials: r.json };
+    return { connectionId: existing.id, credentials: r.json, verify: null };
   }
 
   const connectionId = existing ? existing.id : randomUUID();
@@ -151,8 +192,10 @@ export async function provisionConnection(
     grantParams(name, input.harness, compiled, credentialsOut),
     { json: true },
   );
-  if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode})`);
+  if (!r.ok) throw new Error(`mcp.grant failed (exit ${r.exitCode}): ${String(r.stderr ?? '').slice(0, 500)}`);
   const gbrainClientId = grantedClientId(r.json);
+
+  const verifyResult = await verifyManualHarness(gbrainClientId, input.harness, credentialsOut);
 
   // D8: the server-side client, alongside the member's. Same compiler output —
   // same write Space, same federatedRead, same fence, same profile — because it
@@ -193,6 +236,9 @@ export async function provisionConnection(
     serverClientId,
     state: 'active',
     provisionedAt: new Date(),
+    verifyStatus: verifyResult?.status,
+    verifiedAt: verifyResult ? new Date() : undefined,
+    verifyMessage: verifyResult?.message ?? undefined,
   });
   await audit(input.organizationId, actor, 'connection.provision', connectionId, {
     clientId: gbrainClientId, serverClientId, clientName: name,
@@ -201,7 +247,7 @@ export async function provisionConnection(
   });
   // credentials is the redacted grant receipt. memberHandoff is the taken
   // private handoff, also stored only under memberClientSecretName.
-  return { connectionId, credentials: r.json, memberHandoff };
+  return { connectionId, credentials: r.json, memberHandoff, verify: verifyResult };
 }
 
 /**
@@ -245,7 +291,7 @@ async function provisionServerClient(
     grantParams(name, harness, compiled, credentialsOut),
     { json: true },
   );
-  if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode})`);
+  if (!r.ok) throw new Error(`mcp.grant (server client) failed (exit ${r.exitCode}): ${String(r.stderr ?? '').slice(0, 500)}`);
   const clientId = grantedClientId(r.json);
 
   try {
@@ -371,13 +417,15 @@ export async function compensateGrantedConnection(
 }
 
 function compileFrom(input: ConnectionInput, write: SpaceRow, reads: SpaceRow[]): CompiledConnection {
+  const tokenTtl = input.tokenTtl
+    ?? (connectionClass(input.harness) === 'manual' ? MANUAL_HARNESS_TOKEN_TTL : undefined);
   return compileConnection(
     { role: input.memberRole },
     { sourceId: write.sourceId, slug: write.sourceId },
     reads.map((s) => ({ sourceId: s.sourceId })),
     {
       boundSlugPrefixes: input.boundSlugPrefixes,
-      tokenTtl: input.tokenTtl,
+      tokenTtl,
       budgetUsdPerDay: input.budgetUsdPerDay,
       privateSpace: write.ownerMembershipId != null,
     },
@@ -616,7 +664,10 @@ async function persistCompiled(
   input: ConnectionInput,
   name: string,
   compiled: CompiledConnection,
-  extra: { gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date } = {},
+  extra: {
+    gbrainClientId?: string; serverClientId?: string; state?: string; provisionedAt?: Date;
+    verifyStatus?: 'ok' | 'partial' | 'failed' | null; verifiedAt?: Date | null; verifyMessage?: string | null;
+  } = {},
 ): Promise<void> {
   await getDb().update(schema.connections).set({
     writeSpaceId: input.writeSpaceId,

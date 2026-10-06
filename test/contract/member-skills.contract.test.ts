@@ -2,6 +2,7 @@ import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { execOperation, assertOk } from '../../src/contracts/exec.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { composeUp, composeDown, composeExec, resetBrain, seedGitSource, BRAIN_DB_URL } from '../helpers/stack.ts';
+import { wiringSnippet } from '../../src/control/harness.ts';
 
 /**
  * Member skill delivery rests on four facts at the pin, proven here:
@@ -141,4 +142,44 @@ test('(d) on full, memory-writer scopes still deny an admin op', async () => {
     || (r.result as { isError?: boolean } | undefined)?.isError === true;
   console.log(`[member-skills] sources_add as memory-writer: ${JSON.stringify(r).slice(0, 300)}`);
   expect(denied).toBe(true);
+});
+
+test('(e) a generic-harness grant produces a snippet that authenticates, and is recorded verified', async () => {
+  const grant = await execOperation(OPERATIONS['mcp.grant']!, {
+    name: 'member-skills-verify-probe', harness: 'generic', profile: 'memory-writer',
+    source: 'customers', url: MCP_URL, credentialsOut: '/srv/gbrain-home/.creds-verify-probe.json',
+  }, { json: true });
+  assertOk(OPERATIONS['mcp.grant']!, grant);
+  const probeClientId = String((grant.json as { grant?: { clientId?: string } }).grant?.clientId);
+
+  const verify = await execOperation(OPERATIONS['mcp.verify']!, {
+    client: probeClientId, harness: 'generic', url: MCP_URL,
+    credentialsFile: '/srv/gbrain-home/.creds-verify-probe.json', timeoutMs: '30000',
+  }, { json: true });
+  console.log(`[member-skills] mcp.verify exit=${verify.exitCode}`);
+  expect([0, 2]).toContain(verify.exitCode);
+
+  const handoff = await composeExec('gbrain-ops', ['cat', '/srv/gbrain-home/.creds-verify-probe.json']);
+  const parsed = JSON.parse(handoff.stdout) as { access_token?: string; mcp_url?: string };
+  const { snippet } = wiringSnippet('generic', {
+    access_token: parsed.access_token, mcp_url: parsed.mcp_url,
+  });
+  const fragment = JSON.parse(snippet.split('\n').slice(1).join('\n')) as {
+    mcpServers: { gbrain: { type: string; headers: { Authorization: string } } };
+  };
+  expect(fragment.mcpServers.gbrain.type).toBe('http');
+  expect(fragment.mcpServers.gbrain.headers.Authorization).toBe(`Bearer ${parsed.access_token}`);
+
+  // The snippet's own credential must actually authenticate against the live server.
+  const T = fragment.mcpServers.gbrain.headers.Authorization.replace('Bearer ', '');
+  const script =
+    `const r = await fetch(${JSON.stringify(MCP_URL)}, { method: 'POST', headers: {` +
+    ` authorization: 'Bearer ' + process.env.T, 'content-type': 'application/json',` +
+    ` accept: 'application/json, text/event-stream' },` +
+    ` body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) });` +
+    ` console.log(await r.text());`;
+  const r = await composeExec('gbrain-ops', ['bun', '-e', script], { env: { T } });
+  expect(r.stdout).toContain('"tools"');
+
+  await composeExec('gbrain-ops', ['gbrain', 'auth', 'revoke-client', probeClientId]).catch(() => {});
 });

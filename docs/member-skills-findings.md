@@ -180,3 +180,19 @@ The divergence is the over-reporting case only.
 gbrain exposes a supported way to read the effective gate value.
 
 Upstream issue: https://github.com/garrytan/gbrain/issues/5358
+
+## Upstream ask: initialize.instructions (2026-09-27)
+
+`list_skills` already returns a complete self-instruction block (verified
+live this session — `instructions.summary`/`how_to_use`/`fetch_op`). The
+remaining gap is that nothing prompts an agent to call `list_skills` in the
+first place; Mobrain's near-term fix is a pasteable `AGENT_INSTRUCTIONS`
+block on the Connect page (`src/control/harness.ts`), but the durable fix
+is upstream: gbrain's MCP `initialize` response should carry the same
+guidance in its own `instructions` field, which spec-compliant clients load
+automatically with no copy/paste.
+
+Not fixed in this repo — to be filed upstream, tracked alongside the existing
+publish-gate divergence (issue #5358).
+
+Upstream issue: not yet filed — no tracker access from this environment. Whoever merges this should file it against gbrain, referencing this section and the live evidence in this file's earlier "Live dev-stack check" section.

@@ -165,14 +165,22 @@ async function loadHandoff(
   return { ok: true, handoff };
 }
 
-async function present(connection: { harness: string }, handoff: Record<string, unknown>) {
+async function present(
+  connection: { harness: string; verifyStatus: string | null; verifyMessage: string | null },
+  handoff: Record<string, unknown>,
+) {
   const mcp_url = handoffMcpUrl(handoff);
   const clientId = handoff.client_id;
-  const snippet = wiringSnippet(connection.harness, {
+  const accessToken = handoff.access_token;
+  const { snippet, agentInstructions } = wiringSnippet(connection.harness, {
     client_id: typeof clientId === 'string' && clientId.length > 0 ? clientId : undefined,
+    access_token: typeof accessToken === 'string' && accessToken.length > 0 ? accessToken : undefined,
     mcp_url,
   }, { skills: await skillsPublished() });
-  return { mcp_url, harness: connection.harness, credentials: handoff, snippet };
+  return {
+    mcp_url, harness: connection.harness, credentials: handoff, snippet, agentInstructions,
+    verify: connection.verifyStatus ? { status: connection.verifyStatus, message: connection.verifyMessage } : null,
+  };
 }
 
 myConnectionRoutes.get('/my/mcp', guard(async (c, caller) => {

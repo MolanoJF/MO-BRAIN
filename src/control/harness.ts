@@ -17,6 +17,7 @@ export type ConnectionClass =
 export type WiringCredentials = {
   client_id?: string;
   mcp_url?: string;
+  access_token?: string;
 };
 
 /**
@@ -53,14 +54,15 @@ export function autoInstall(id: string): boolean {
 function baseSnippet(id: string, credentials: WiringCredentials): string {
   const klass = connectionClass(id);
   if (klass === 'manual') {
-    const clientId = credentials.client_id ?? '<client_id>';
     const mcpUrl = credentials.mcp_url ?? '<mcp_url>';
+    const accessToken = credentials.access_token ?? '<access_token>';
     const fragment = JSON.stringify(
       {
         mcpServers: {
           gbrain: {
+            type: 'http',
             url: mcpUrl,
-            client_id: clientId,
+            headers: { Authorization: `Bearer ${accessToken}` },
           },
         },
       },
@@ -70,17 +72,15 @@ function baseSnippet(id: string, credentials: WiringCredentials): string {
     return [
       'Copy/paste this MCP config fragment into the harness:',
       fragment,
-      'We have not runtime-tested this adapter.',
+      '',
     ].join('\n');
   }
   return `gbrain mcp grant already wrote this adapter's config (${klass}).`;
 }
 
 /**
+ * Human-facing context, shown alongside (not instead of) AGENT_INSTRUCTIONS.
  * Appended only when the claim read `mcp.publish_skills` back as true.
- * MCP-native: the member's agent pulls skills over its own Connection, so
- * nothing is installed and nothing can go stale. Nothing here promises a skill
- * is callable — `unavailable_tools` is gbrain's per-caller answer to that.
  */
 export const SKILLS_NOTE = [
   '',
@@ -90,13 +90,27 @@ export const SKILLS_NOTE = [
   'In Mobrain, new agents are connected from the Connection page, not `gbrain connect`.',
 ].join('\n');
 
+/**
+ * Machine-facing: meant to be pasted as the agent's system prompt or first
+ * message, not read by a human. MCP-native — the agent pulls skills over its
+ * own Connection, so nothing is installed and nothing can go stale.
+ */
+export const AGENT_INSTRUCTIONS = [
+  'Before responding to any request on this connection, call `list_skills`.',
+  "If a returned skill's triggers match the user's request, call `get_skill`",
+  'with its name and follow the returned instructions. Only call tools listed',
+  "in that skill's `usable_tools` — tools under `unavailable_tools` are not",
+  'callable by you on this server.',
+].join(' ');
+
 export function wiringSnippet(
   id: string,
   credentials: WiringCredentials,
   opts: { skills?: boolean } = {},
-): string {
+): { snippet: string; agentInstructions: string | null } {
   const base = baseSnippet(id, credentials);
-  return opts.skills ? `${base}\n${SKILLS_NOTE}` : base;
+  const snippet = opts.skills ? `${base}\n${SKILLS_NOTE}` : base;
+  return { snippet, agentInstructions: opts.skills ? AGENT_INSTRUCTIONS : null };
 }
 
 /** Attach connectionClass + autoInstall for GET /api/harnesses. */

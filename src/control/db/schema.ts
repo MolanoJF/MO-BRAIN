@@ -234,11 +234,15 @@ export const connections = pgTable('connections', {
   state: text('state').notNull().default('pending'),
   provisionedAt: timestamp('provisioned_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  verifyStatus: text('verify_status'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  verifyMessage: text('verify_message'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('connections_org_client_name_uq').on(t.organizationId, t.clientName),
   index('connections_membership_idx').on(t.membershipId),
   check('connection_state_valid', sql`${t.state} in ('pending','active','revoked')`),
+  check('connection_verify_status_valid', sql`${t.verifyStatus} in ('ok','partial','failed') or ${t.verifyStatus} is null`),
 ]);
 
 /** A3: one link per member. Hash only — the token itself is never stored. */

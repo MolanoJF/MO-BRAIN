@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   HARVEST_MAP,
   SKILLS_NOTE,
+  AGENT_INSTRUCTIONS,
   annotateAdapters,
   autoInstall,
   connectionClass,
@@ -81,42 +82,58 @@ describe('autoInstall', () => {
 });
 
 describe('wiringSnippet', () => {
-  const creds = { client_id: 'gbrain_cl_example', mcp_url: 'https://brain.example/mcp' };
+  const creds = {
+    client_id: 'gbrain_cl_example',
+    mcp_url: 'https://brain.example/mcp',
+    access_token: 'gbrain_at_example',
+  };
 
   test('auto-install classes mention grant already wrote config and the class name', () => {
     for (const [id, klass] of Object.entries(EXPECTED)) {
       if (klass === 'manual') continue;
-      const snip = wiringSnippet(id, creds);
-      expect(snip).toContain('gbrain mcp grant already wrote this adapter\'s config');
-      expect(snip).toContain(`(${klass})`);
-      expect(snip).not.toContain('we have not runtime-tested this adapter');
+      const { snippet } = wiringSnippet(id, creds);
+      expect(snippet).toContain('gbrain mcp grant already wrote this adapter\'s config');
+      expect(snippet).toContain(`(${klass})`);
     }
   });
 
-  test('manual class is copy/paste with client_id + mcp_url and the untested note', () => {
+  test('manual class is a valid http-transport MCP config with a bearer header', () => {
     for (const [id, klass] of Object.entries(EXPECTED)) {
       if (klass !== 'manual') continue;
-      const snip = wiringSnippet(id, creds);
-      expect(snip).toContain(creds.client_id);
-      expect(snip).toContain(creds.mcp_url);
-      expect(snip.toLowerCase()).toContain('we have not runtime-tested this adapter');
-      expect(snip).not.toContain('already wrote this adapter\'s config');
+      const { snippet } = wiringSnippet(id, creds);
+      const parsed = JSON.parse(snippet.split('\n').slice(1, -1).join('\n')) as {
+        mcpServers: { gbrain: { type: string; url: string; headers: { Authorization: string } } };
+      };
+      expect(parsed.mcpServers.gbrain.type).toBe('http');
+      expect(parsed.mcpServers.gbrain.url).toBe(creds.mcp_url);
+      expect(parsed.mcpServers.gbrain.headers.Authorization).toBe(`Bearer ${creds.access_token}`);
+      expect(snippet).not.toContain('already wrote this adapter\'s config');
     }
   });
 
-  test('skills omitted or false is byte-identical to the plain snippet', () => {
+  test('manual-class snippet no longer contains a permanent untested disclaimer', () => {
+    const { snippet } = wiringSnippet('generic', { mcp_url: 'https://x', access_token: 't' });
+    expect(snippet).not.toContain('We have not runtime-tested this adapter');
+  });
+
+  test('skills omitted or false is byte-identical to the plain snippet, with no agentInstructions', () => {
     for (const id of Object.keys(EXPECTED)) {
       const plain = wiringSnippet(id, creds);
-      expect(wiringSnippet(id, creds, { skills: false })).toBe(plain);
-      expect(plain).not.toContain('list_skills');
+      const explicitFalse = wiringSnippet(id, creds, { skills: false });
+      expect(explicitFalse.snippet).toBe(plain.snippet);
+      expect(plain.snippet).not.toContain('list_skills');
+      expect(plain.agentInstructions).toBeNull();
+      expect(explicitFalse.agentInstructions).toBeNull();
     }
   });
 
-  test('skills true appends the MCP-native skills note for every class', () => {
+  test('skills true appends the MCP-native skills note and returns AGENT_INSTRUCTIONS', () => {
     for (const id of Object.keys(EXPECTED)) {
-      const snip = wiringSnippet(id, creds, { skills: true });
-      expect(snip.startsWith(wiringSnippet(id, creds))).toBe(true);
-      expect(snip.endsWith(SKILLS_NOTE)).toBe(true);
+      const plain = wiringSnippet(id, creds);
+      const withSkills = wiringSnippet(id, creds, { skills: true });
+      expect(withSkills.snippet.startsWith(plain.snippet)).toBe(true);
+      expect(withSkills.snippet.endsWith(SKILLS_NOTE)).toBe(true);
+      expect(withSkills.agentInstructions).toBe(AGENT_INSTRUCTIONS);
     }
   });
 
@@ -125,6 +142,17 @@ describe('wiringSnippet', () => {
     expect(SKILLS_NOTE).toContain('get_skill');
     expect(SKILLS_NOTE).toContain('unavailable_tools');
     expect(SKILLS_NOTE).not.toMatch(/skillpack scaffold|--stub/);
+  });
+
+  test('AGENT_INSTRUCTIONS names the tools and installs nothing', () => {
+    expect(AGENT_INSTRUCTIONS).toContain('list_skills');
+    expect(AGENT_INSTRUCTIONS).toContain('get_skill');
+    expect(AGENT_INSTRUCTIONS).toContain('unavailable_tools');
+  });
+
+  test('auto-install classes are unaffected and stay a plain string message', () => {
+    const { snippet } = wiringSnippet('claude-code', {});
+    expect(snippet).toBe("gbrain mcp grant already wrote this adapter's config (claude-json).");
   });
 });
 

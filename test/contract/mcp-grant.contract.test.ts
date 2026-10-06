@@ -106,7 +106,7 @@ test('a real grant emits a client_id and a credentials receipt', async () => {
 // harness evidence is missing. Slice 2 must never render that green.
 test('mcp verify exit codes are captured, with 2 meaning partial', async () => {
   const spec = OPERATIONS['mcp.verify']!;
-  const r = await execOperation(spec, { client: 'generic' }, { json: true });
+  const r = await execOperation(spec, { client: 'generic', url: MCP_URL }, { json: true });
   expect(spec.okExitCodes).toContain(0);
   expect([0, 1, 2]).toContain(r.exitCode);
 });
