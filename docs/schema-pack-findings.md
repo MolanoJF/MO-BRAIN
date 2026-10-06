@@ -1246,11 +1246,11 @@ during BuildKit's export/unpack step, which then tries to verify the layer again
 (a repository that does not exist there — confirmed separately: `docker pull
 docker.io/mobrain/gbrain-base:0.50.5.0` → `pull access denied: repository does not exist`) and gets
 an auth rejection instead. `docker builder prune -f` (safe: build cache only, no volumes) and
-re-tagging the local alias from a fresh `docker pull ghcr.io/molanojf/gbrain-base:0.50.5.0` did not
+re-tagging the local alias from a fresh `docker pull ghcr.io/molioros/gbrain-base:0.50.5.0` did not
 fix it. **Workaround used:** `DOCKER_BUILDKIT=0 docker compose --env-file .env -f
 compose/docker-compose.yml -f compose/docker-compose.dev.yml -f compose/docker-compose.build.yml
 build --build-arg GBRAIN_VERSION=0.50.5.0 control-plane` (the legacy, non-BuildKit builder) —
-`Successfully built ... Successfully tagged ghcr.io/molanojf/control-plane:ee6cfb2...` (exit 0) —
+`Successfully built ... Successfully tagged ghcr.io/molioros/control-plane:ee6cfb2...` (exit 0) —
 followed by `docker compose ... up -d --force-recreate control-plane scheduler gbrain-ops`, which is
 the same two steps `--full` runs internally. **This is a redeploy-tooling/environment finding, not a
 schema-pack finding**; the shipped code under `src/ops` and `src/control` is unaffected. Data
