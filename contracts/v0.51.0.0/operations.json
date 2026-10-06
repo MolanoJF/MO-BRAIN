@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.51.0.0",
-  "generatedAt": "2026-10-06T00:53:45.008Z",
+  "generatedAt": "2026-10-06T00:45:30.885Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -737,27 +737,9 @@
           "kind": "value"
         },
         {
-          "name": "url",
-          "flag": "--url",
-          "kind": "value",
-          "required": true,
-          "secret": true
-        },
-        {
-          "name": "credentialsFile",
-          "flag": "--credentials-file",
-          "kind": "value",
-          "secret": true
-        },
-        {
           "name": "timeoutMs",
           "flag": "--timeout-ms",
           "kind": "value"
-        },
-        {
-          "name": "delegate",
-          "flag": "--delegate",
-          "kind": "flag"
         }
       ],
       "supportsJson": true,
