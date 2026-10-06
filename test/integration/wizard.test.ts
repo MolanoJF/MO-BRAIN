@@ -30,6 +30,10 @@ const jsonPackWrites: { name: string; manifest: object }[] = [];
 const opsOrder: string[] = [];
 const scaffolds: { sourceId: string; entries: { dir: string; readme: string }[] }[] = [];
 let scaffoldAt = -1;
+// Task 3: overridden by the visible-packs test below to exercise the full
+// bundled + managed pack lineup; null keeps every other test's single-pack
+// default (`Bundled packs:\n  gbrain-base-v2\n`).
+let schemaListOverride: string | null = null;
 
 mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async (
@@ -100,7 +104,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
       exitCode: 0,
       argv: ['gbrain', ...op.split('.')],
       stdout: op === 'schema.list'
-        ? 'Bundled packs:\n  gbrain-base-v2\n'
+        ? (schemaListOverride ?? 'Bundled packs:\n  gbrain-base-v2\n')
         : op === 'schema.active'
           ? 'Active pack: gbrain-base-v2 v2.0.0\nSource: home-config\n'
           : 'ok',
@@ -230,7 +234,7 @@ describe('wizard', () => {
     expect(brain?.lifecycle).toBe('provider-configured');
   });
 
-  // Zones spec D6: the pack is stored at bootstrap, so choosing a search mode
+  // Spec P6: the pack is stored at bootstrap, so choosing a search mode
   // is the last decision before the private Space — there is no Schema step.
   test('the search-mode step records the choice and passes the stored pack', async () => {
     const res = await call('/api/wizard/search-mode', { mode: 'conservative' });
@@ -239,7 +243,7 @@ describe('wizard', () => {
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.searchMode).toBe('conservative');
     expect(brain?.lifecycle).toBe('schema-selected');
-    expect(brain?.schemaPack).toBe('gbrain-base-v2');
+    expect(brain?.schemaPack).toBe('mobrain-personal');
   });
 
   test('a legacy brain with no stored pack still stops at the Schema step', async () => {
@@ -519,4 +523,20 @@ describe('wizard', () => {
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(privateIds);
   });
+});
+
+// Spec P6/P7: the wizard's pack list is the same visible-packs filter as the
+// Schema admin page — every bundled pack except gbrain-base-v2 hidden, the
+// managed pack shown.
+test('GET /wizard/schema-packs hides every bundled pack except gbrain-base-v2', async () => {
+  schemaListOverride = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n  gbrain-investor\n\n' +
+    'Installed packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
+  try {
+    const res = await call('/api/wizard/schema-packs');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { packs: string[] };
+    expect(body.packs).toEqual(['gbrain-base-v2', 'mobrain-personal']);
+  } finally {
+    schemaListOverride = null;
+  }
 });

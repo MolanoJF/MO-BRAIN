@@ -80,6 +80,12 @@ export function packSummary(detail: PackDetail): string {
   return detail.extends ? `${base} · extends ${detail.extends}` : base;
 }
 
+/** Bundled packs are forked; Mobrain's own pack is customized through a layer. */
+export function editLabel(d: Pick<PackDetail, 'bundled' | 'managed'>): string {
+  if (d.bundled) return 'Fork to edit';
+  return d.managed ? 'Customize' : 'Edit';
+}
+
 /** One page type's label: `thesis (concept) — investing/theses/, theses/`. */
 export function pageTypeLabel(pageType: PackPageType): string {
   const primitive = pageType.primitive ? ` (${pageType.primitive})` : '';
@@ -205,7 +211,11 @@ export function Schema() {
         )}
         {builder?.mode === 'new' && <AgentSkillCard />}
         {builder?.mode === 'edit' && (
-          <PackEditor name={builder.name} onSaved={() => { void loadPacks(); }} />
+          <PackEditor
+            name={builder.name}
+            onSaved={() => { void loadPacks(); }}
+            onOpen={(n) => setBuilder({ mode: 'edit', name: n })}
+          />
         )}
 
         {packsError && <div className="text-[length:var(--control-font)] text-danger">{packsError}</div>}
@@ -235,7 +245,7 @@ export function Schema() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-[length:var(--control-font)] text-muted">{packSummary(d)}</div>
                     <Button disabled={busy} onClick={() => setBuilder({ mode: 'edit', name: d.name })}>
-                      {d.bundled ? 'Fork to edit' : 'Edit'}
+                      {editLabel(d)}
                     </Button>
                   </div>
                 )}

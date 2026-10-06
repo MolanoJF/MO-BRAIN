@@ -35,6 +35,13 @@ gbrain metafile. `schema sync` stays additive: it fills blank types and never re
 packs remain read-only; fork one to edit it. The S7 authoring probes that pinned this behaviour at
 gbrain 0.50.5.0 are in [`docs/schema-pack-findings.md`](docs/schema-pack-findings.md).
 
+`mobrain-personal` is the default schema pack for new brains; the Schema page lists only
+`mobrain-personal` and `gbrain-base-v2`; edits to `mobrain-personal` go into an auto-created
+`my-personal` layer. Live-verified on the dev stack (S8 live in
+[`docs/schema-pack-findings.md`](docs/schema-pack-findings.md)): seeded at `gbrain-ops` boot
+(`written` then `unchanged` on restart), `gbrain schema validate` reports 20 page types / 21 link
+verbs, and the active pack is left unchanged across the deploy (no auto-migration).
+
 ## [1.0.0] — 2026-09-19
 
 Mobrain 1.0.0 is the first **self-host GA** release: a team can install the product on a clean host with

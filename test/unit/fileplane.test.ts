@@ -18,7 +18,7 @@ process.env.GBRAIN_HOME = MODULE_HOME;
 
 const {
   mergeConfigJson, takeGrantCredentialsFile, packPath, SCHEMA_PACK_DIR,
-  writeSchemaPackJson, removeSchemaPack,
+  writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedManagedPacks,
 } = await import('../../src/ops/fileplane.ts');
 
 afterAll(async () => {
@@ -116,6 +116,12 @@ test('a user pack is written as <name>/pack.yaml, the only shape gbrain discover
   expect(packPath('hr-policies')).not.toBe(join(SCHEMA_PACK_DIR, 'hr-policies.yaml'));
 });
 
+describe('schema pack yaml', () => {
+  test('M4: refuses to write the managed pack name', async () => {
+    await expect(writeSchemaPack('mobrain-personal', 'name: x\n', { sql: fakeSql })).rejects.toThrow(/managed/);
+  });
+});
+
 describe('schema pack json', () => {
   test('writes pack.json and removes a stale pack.yaml sibling', async () => {
     const dir = join(SCHEMA_PACK_DIR, 'legal-ops');
@@ -134,5 +140,43 @@ describe('schema pack json', () => {
     expect((await removeSchemaPack('zz-gone', { sql: fakeSql })).removed).toBe(true);
     expect(existsSync(join(SCHEMA_PACK_DIR, 'zz-gone'))).toBe(false);
     expect((await removeSchemaPack('zz-gone', { sql: fakeSql })).removed).toBe(false);
+  });
+});
+
+describe('seedManagedPacks', () => {
+  const src = async (version: string) => {
+    const dir = await mkdtemp(join(tmpdir(), 'bs-packs-src-'));
+    await writeFile(join(dir, 'mobrain-personal.json'),
+      JSON.stringify({ name: 'mobrain-personal', version, api_version: 'gbrain-schema-pack-v1' }));
+    return dir;
+  };
+  const target = () => join(SCHEMA_PACK_DIR, 'mobrain-personal', 'pack.json');
+
+  test('writes an absent managed pack', async () => {
+    await rm(join(SCHEMA_PACK_DIR, 'mobrain-personal'), { recursive: true, force: true });
+    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.0.0') });
+    expect(r).toEqual([{ name: 'mobrain-personal', action: 'written' }]);
+    expect(JSON.parse(await readFile(target(), 'utf8')).version).toBe('1.0.0');
+  });
+
+  test('leaves the same version untouched', async () => {
+    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.0.0') });
+    expect(r).toEqual([{ name: 'mobrain-personal', action: 'unchanged' }]);
+  });
+
+  test('overwrites when the shipped version moves', async () => {
+    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.1.0') });
+    expect(r[0]!.action).toBe('written');
+    expect(JSON.parse(await readFile(target(), 'utf8')).version).toBe('1.1.0');
+  });
+
+  test('the API writers refuse a managed name', async () => {
+    await expect(writeSchemaPackJson('mobrain-personal', {}, { sql: fakeSql })).rejects.toThrow(/managed/);
+  });
+
+  test('the shipped manifest is the default source', async () => {
+    await rm(join(SCHEMA_PACK_DIR, 'mobrain-personal'), { recursive: true, force: true });
+    await seedManagedPacks({ sql: fakeSql });
+    expect(JSON.parse(await readFile(target(), 'utf8')).name).toBe('mobrain-personal');
   });
 });

@@ -1,9 +1,10 @@
 import { test, expect, describe } from 'bun:test';
 import {
   activeSummary, divergenceWarning, canApply, syncSummary, ADDITIVE_NOTICE,
-  packSummary, pageTypeLabel, inheritanceNote,
+  packSummary, pageTypeLabel, inheritanceNote, editLabel,
 } from '../../src/console/pages/Schema.tsx';
-import type { PackDetail, PackPageType } from '../../src/console/api.ts';
+import { MANAGED_EDIT_NOTE, afterSave } from '../../src/console/pages/SchemaBuilder.tsx';
+import type { PackDetail, PackMutateResult, PackPageType } from '../../src/console/api.ts';
 
 const ACTIVE = {
   pack: 'gbrain-base-v2', version: '1.2.0', source: 'home-config',
@@ -132,6 +133,7 @@ const detail = (over: Partial<PackDetail> = {}): PackDetail => ({
   description: null,
   extends: null,
   bundled: false,
+  managed: false,
   pageTypes: [],
   linkVerbs: [],
   linkTypes: [],
@@ -207,5 +209,47 @@ describe('the inheritance note', () => {
   test('an inherited pack with no resolved name still says it inherits', () => {
     const note = inheritanceNote(true, null);
     expect(note).toMatch(/inherits the brain default/i);
+  });
+});
+
+describe('edit affordances', () => {
+  test('bundled packs fork, managed and user packs edit', () => {
+    expect(editLabel({ bundled: true, managed: false })).toBe('Fork to edit');
+    expect(editLabel({ bundled: false, managed: true })).toBe('Customize');
+    expect(editLabel({ bundled: false, managed: false })).toBe('Edit');
+  });
+
+  test('the managed note says where edits go and that updates keep arriving', () => {
+    expect(MANAGED_EDIT_NOTE).toContain('my-personal');
+    expect(MANAGED_EDIT_NOTE).toMatch(/updates/i);
+  });
+});
+
+const mutateResult = (over: Partial<PackMutateResult> = {}): PackMutateResult => ({
+  ok: true, batchId: 'b1', applied: 1, error: null, lint: null, scaffolded: [],
+  pack: 'mobrain-personal', activated: true, activeError: null,
+  ...over,
+});
+
+describe('afterSave — never a silent green', () => {
+  test('a same-pack save with no activation error opens nothing and reports no error', () => {
+    const r = mutateResult({ pack: 'hr-policies' });
+    expect(afterSave(r, 'hr-policies')).toEqual({ error: null, openPack: null });
+  });
+
+  test('a redirect to the layer surfaces its own activation error rather than staying silent', () => {
+    // The exact bug this must not regress into: `pack !== name` used to return
+    // before `activeError` was ever looked at, so a redirect + activation
+    // failure showed only the green "Saved" banner.
+    const r = mutateResult({ pack: 'my-personal', activeError: 'Could not activate my-personal' });
+    expect(afterSave(r, 'mobrain-personal')).toEqual({
+      error: 'Could not activate my-personal',
+      openPack: 'my-personal',
+    });
+  });
+
+  test('a redirect with no activation error still opens the layer', () => {
+    const r = mutateResult({ pack: 'my-personal' });
+    expect(afterSave(r, 'mobrain-personal')).toEqual({ error: null, openPack: 'my-personal' });
   });
 });

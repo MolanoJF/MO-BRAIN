@@ -94,13 +94,13 @@ describe('single-admin bootstrap', () => {
     expect(b?.lifecycle).toBe('uninitialized');
   });
 
-  // Zones spec D6: every install starts as ONE person's brain on gbrain's
-  // recommended default pack. Company mode is a later settings change.
-  test('the org starts in personal mode on gbrain-base-v2', async () => {
+  // Spec P6: every install starts as ONE person's brain on Mobrain's own
+  // personal pack. Company mode is a later settings change.
+  test('the org starts in personal mode on mobrain-personal', async () => {
     const [o] = await getDb().select().from(schema.organizations);
     expect(o?.brainMode).toBe('personal');
     const [b] = await getDb().select().from(schema.brains);
-    expect(b?.schemaPack).toBe('gbrain-base-v2');
+    expect(b?.schemaPack).toBe('mobrain-personal');
   });
 
   test('a brain name defaults from the email', async () => {

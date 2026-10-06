@@ -13,7 +13,7 @@ import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { extractReceiptJson } from '../contracts/json.ts';
 import {
   patchConfig, writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedSpaceRepo,
-  takeGrantCredentialsFile, readSupervisorAuditTail, deleteCredentialDelivery,
+  takeGrantCredentialsFile, readSupervisorAuditTail, deleteCredentialDelivery, seedManagedPacks,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
 import { pauseBrainWriters, resumeBrainWriters } from './writerGate.ts';
@@ -73,6 +73,14 @@ function runGbrain(
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+// Spec §4.2: shipped packs must be on disk before the wizard's `gbrain init`
+// can name one. A failure is loud, never fatal: the brain still serves.
+try {
+  for (const r of await seedManagedPacks({ sql })) console.log(`schema pack ${r.name}: ${r.action}`);
+} catch (e) {
+  console.error('seeding managed schema packs failed', e);
+}
 
 Bun.serve({
   port: PORT,

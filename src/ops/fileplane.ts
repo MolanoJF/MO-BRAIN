@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { spawn } from 'node:child_process';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
+import { BUNDLED_PACKS, MANAGED_PACKS, isManagedPack } from '../contracts/packs.ts';
 
 const GBRAIN_HOME = process.env.GBRAIN_HOME ?? '/srv/gbrain-home';
 // gbrain's configDir() always appends `.gbrain` under GBRAIN_HOME
@@ -204,7 +205,7 @@ export function packPath(name: string): string {
 
 /** Write a user schema pack manifest. 0644: gbrain reads it as another user. */
 export async function writeSchemaPack(name: string, yaml: string, opts: { sql: SQL }): Promise<void> {
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error(`invalid schema pack name: ${name}`);
+  assertUserPackName(name);
   await writeFilePlane(packPath(name), () => yaml, { ...opts, mode: 0o644 });
   // The loader takes the first existing of pack.yaml / pack.yml / pack.json
   // (load-active.ts; MEASURED docs/schema-pack-findings.md S7 step 4), so a
@@ -213,13 +214,13 @@ export async function writeSchemaPack(name: string, yaml: string, opts: { sql: S
     .catch((e) => { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; });
 }
 
-const BUNDLED = new Set(['gbrain-base', 'gbrain-base-v2', 'gbrain-recommended',
-  'gbrain-creator', 'gbrain-investor', 'gbrain-engineer', 'gbrain-everything']);
+const BUNDLED = new Set<string>(BUNDLED_PACKS);
 const PACK_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 function assertUserPackName(name: string): void {
   if (!PACK_NAME_RE.test(name)) throw new Error(`invalid schema pack name: ${name}`);
   if (BUNDLED.has(name)) throw new Error(`${name} is a bundled pack and cannot be written`);
+  if (isManagedPack(name)) throw new Error(`${name} is a Mobrain-managed pack and cannot be written`);
 }
 
 /**
@@ -281,4 +282,31 @@ export async function seedSpaceRepo(sourceId: string, opts: { sql: SQL }): Promi
     }
   });
   return dir;
+}
+
+/**
+ * Mobrain's shipped packs (spec §4.2). Written at ops boot, before any
+ * `gbrain init` can name them, and rewritten only when the shipped version
+ * moves, so a restart never churns the file plane. Bypasses
+ * assertUserPackName on purpose: this is the only writer of managed names.
+ */
+export async function seedManagedPacks(
+  opts: { sql: SQL; sourceDir?: string },
+): Promise<{ name: string; action: 'written' | 'unchanged' }[]> {
+  const sourceDir = opts.sourceDir ?? join(import.meta.dir, 'packs');
+  const out: { name: string; action: 'written' | 'unchanged' }[] = [];
+  for (const name of MANAGED_PACKS) {
+    const shipped = JSON.parse(await readFile(join(sourceDir, `${name}.json`), 'utf8')) as { version?: string };
+    const dest = join(SCHEMA_PACK_DIR, name, 'pack.json');
+    const current = await readFile(dest, 'utf8')
+      .then((t) => (JSON.parse(t) as { version?: string }).version ?? null)
+      .catch(() => null);
+    if (current === shipped.version) { out.push({ name, action: 'unchanged' }); continue; }
+    await writeFilePlane(dest, () => JSON.stringify(shipped, null, 2) + '\n', { ...opts, mode: 0o644 });
+    for (const sibling of ['pack.yaml', 'pack.yml']) {
+      await unlink(join(SCHEMA_PACK_DIR, name, sibling)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+    }
+    out.push({ name, action: 'written' });
+  }
+  return out;
 }

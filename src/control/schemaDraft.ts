@@ -15,10 +15,8 @@ const TYPE_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const VERB_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 export const PRIMITIVES = ['entity', 'media', 'temporal', 'annotation', 'concept'] as const;
 export type Primitive = typeof PRIMITIVES[number];
-export const BUNDLED_PACKS = [
-  'gbrain-base', 'gbrain-base-v2', 'gbrain-recommended',
-  'gbrain-creator', 'gbrain-investor', 'gbrain-engineer', 'gbrain-everything',
-] as const;
+export { BUNDLED_PACKS } from '../contracts/packs.ts';
+import { BUNDLED_PACKS, MANAGED_PACKS, LAYER_PACK } from '../contracts/packs.ts';
 
 export type DraftPageType = {
   name: string; primitive: Primitive; folder: string; description: string;
@@ -44,6 +42,9 @@ export function validateDraft(input: unknown): { ok: true; draft: PackDraft } | 
   const name = str(o.name);
   if (!PACK_NAME.test(name)) errors.push('name must be lowercase letters, digits and hyphens');
   if ((BUNDLED_PACKS as readonly string[]).includes(name)) errors.push(`${name} is a bundled pack name`);
+  if ((MANAGED_PACKS as readonly string[]).includes(name) || name === LAYER_PACK) {
+    errors.push(`${name} is reserved by Mobrain`);
+  }
   const ext = o.extends === null || o.extends === undefined || o.extends === '' ? null : str(o.extends);
   if (ext !== null && !PACK_NAME.test(ext)) errors.push(`extends ${ext} is not a pack name`);
   if (ext === name) errors.push('a pack cannot extend itself');

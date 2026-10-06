@@ -153,6 +153,8 @@ export type PackDetail = {
   extends: string | null;
   /** A bundled pack is read-only: gbrain refuses to mutate it (PACK_READONLY). */
   bundled: boolean;
+  /** Shipped by Mobrain, seeded at ops boot, read-only to every API. */
+  managed: boolean;
   pageTypes: PackPageType[];
   linkVerbs: string[];
   linkTypes: { name: string; inverse: string | null; pageType: string | null; targetType: string | null }[];
@@ -207,6 +209,10 @@ export type PackMutateResult = {
   error: string | null;
   lint: SchemaLint | null;
   scaffolded: ScaffoldResult[];
+  /** The pack actually mutated — `my-personal` when the request targeted a managed pack. */
+  pack: string;
+  activated: boolean;
+  activeError: string | null;
 };
 
 export type PackRemoveResult = { ok: boolean; removed: boolean };

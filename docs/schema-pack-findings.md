@@ -1026,3 +1026,328 @@ product, matching Task 10's stated policy).
   show 1 page type instead of 27.
 - **`config get schema_pack` is not a readback** (inverted shadowing note, S2) — read the tier with
   `schema active`, and the per-source *intent* with `config get schema_pack.source.<id>`.
+
+---
+
+## S8 — mobrain-personal probes (2026-09-27, gbrain 0.50.5.0)
+
+All commands run **2026-09-27** against `mobrain-local-gbrain-ops-1` (`gbrain 0.50.5.0`), inside
+scratch `GBRAIN_HOME`s created with `mktemp -d` in the container (never `/srv/gbrain-home`, never the
+live brain's Postgres). The manifest under test was copied in via `docker cp` to
+`/tmp/mp.json` and installed at `$H/.gbrain/schema-packs/mobrain-personal/pack.json`. P8.1–P8.3b
+used one scratch home (`/tmp/tmp.PKjSdTATnk`); P8.4 was independently re-run in a second, fresh
+scratch home (`/tmp/tmp.QkEQc5zE5s`) to obtain and quote its verbatim output. Both scratch homes
+were `rm -rf`'d at the end of their sessions (MEASURED: `REMOVED` both times).
+
+- **P8.1 validate + lint** — **MEASURED**.
+
+  ```
+  $ GBRAIN_HOME=$H gbrain schema validate mobrain-personal
+  ✓ mobrain-personal v1.0.0: valid manifest
+    Path: $H/.gbrain/schema-packs/mobrain-personal/pack.json
+    Page types: 20
+    Link verbs: 21
+    Takes kinds: 4
+  # exit 0
+  ```
+
+  `gbrain schema lint mobrain-personal --json | grep -c '"severity": "error"'` → `0` (0 errors).
+  Full lint JSON, `warnings` array quoted verbatim (re-run in a second, fresh scratch home to
+  confirm reproducibility; `"ok": true`, `"errors": []`, exactly **8** entries, all rule
+  `alias_references_undeclared_type`):
+
+  ```json
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'event' aliases 'calendar-event' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "event",
+    "hint": "add a page_type for 'calendar-event' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'journal' aliases 'diary' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "journal",
+    "hint": "add a page_type for 'diary' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'source' aliases 'media' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "source",
+    "hint": "add a page_type for 'media' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-extraction' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-extraction' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-manual' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-manual' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'atom-lore' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'atom-lore' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'content-atom' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'content-atom' OR remove the alias"
+  },
+  {
+    "rule": "alias_references_undeclared_type", "severity": "warning",
+    "message": "type 'atom' aliases 'lore' which is not a declared page_type in this pack",
+    "pack": "mobrain-personal", "type": "atom",
+    "hint": "add a page_type for 'lore' OR remove the alias"
+  }
+  ```
+
+  No error-severity warnings, matching the pre-check claimed in the brief.
+
+- **P8.2 `gbrain init` with a user-installed pack** — **MEASURED**. `gbrain init --help` lists a
+  DB-free engine: `--pglite` (embedded, zero-config, the default). Ran, in the same scratch
+  `$H`, against the same installed `mobrain-personal` pack, never touching the live brain's
+  Postgres (the container's `GBRAIN_DATABASE_URL`/`CONTROL_DATABASE_URL` env vars point at the live
+  `postgres:5432` server and were never read by this init):
+
+  ```
+  $ GBRAIN_HOME=$H gbrain init --pglite --schema-pack mobrain-personal --non-interactive --no-embedding
+  ... (skill/memory-writeback onboarding prose) ...
+  # exit 0
+
+  $ cat $H/.gbrain/config.json
+  { "engine": "pglite", "database_path": "$H/.gbrain/brain.pglite",
+    "embedding_disabled": true, "schema_pack": "mobrain-personal", ... }
+
+  $ GBRAIN_HOME=$H gbrain schema active
+  Active pack: mobrain-personal v1.0.0
+  Source: home-config
+  Pack identity: mobrain-personal@1.0.0+1cd16fde
+  Page types: 20
+  Link verbs: 21
+  Takes kinds: fact, take, bet, hunch
+  # exit 0
+  ```
+
+  `config.json`'s `"engine": "pglite"` with a local `database_path` under `$H` confirms the init used
+  the embedded PGLite engine, not the live Postgres — this is the MEASURED fact.
+
+  **Reasoning, not measurement:** `gbrain doctor --json`'s top-level `"engine":"postgres"` field
+  (quoted verbatim under P8.4 below, alongside `"db_url_source":null`) looks like it names the live
+  Postgres server, but it does not — PGLite's own wire-protocol/dialect is Postgres-compatible, so
+  gbrain's generic `engine` label reads `"postgres"` even when the backing store is the embedded
+  PGLite file at `$H/.gbrain/brain.pglite`, which is what `config.json` (quoted above) actually
+  points at. `db_url_source: null` and the absence of any `database_url` key in `config.json` are
+  the corroborating measured facts for this inference.
+
+- **P8.3 layer resolution** — **MEASURED**. Child pack `my-personal` (`extends: "mobrain-personal"`,
+  empty own `page_types`/`link_types`) installed at
+  `$H/.gbrain/schema-packs/my-personal/pack.json`:
+
+  ```
+  $ GBRAIN_HOME=$H GBRAIN_SCHEMA_PACK=my-personal gbrain schema show --json | grep -c '"primitive"'
+  20
+  ```
+
+  Effective type count of `my-personal` extends `mobrain-personal`: **20** (expected 20 — matches).
+
+- **P8.3b removing an inherited type from the layer** — **MEASURED**. Exact `schema.mutate` argv
+  from `src/contracts/registry.ts` (`'schema.mutate'`: `argv: ['call', 'schema_apply_mutations']`),
+  run against the layer with the brief's payload:
+
+  ```
+  $ GBRAIN_HOME=$H gbrain call schema_apply_mutations \
+      '{"pack":"my-personal","mutations":[{"op":"remove_type","name":"idea"}]}'
+  {
+    "error": "mutation_failed",
+    "code": "TYPE_NOT_FOUND",
+    "message": "type 'idea' is not declared in pack 'my-personal'",
+    "batch_id": "batch-1790538860050-bbtcok",
+    "mutations_applied": 0,
+    "pack_unchanged": true,
+    "failed_at_index": 0
+  }
+  # exit 0
+  ```
+
+  gbrain's JSON answer is `TYPE_NOT_FOUND`, not a permission/authorization error: `remove_type`
+  operates only on the pack's own *raw* declarations, and `idea` isn't declared in `my-personal`
+  raw (it's inherited from `mobrain-personal`), so the mutation is rejected before it can touch
+  anything. **Consequence for the console: "refuse inherited edits" confirmed** — a layer's
+  `schema.mutate` can never remove (or otherwise target) a type it only sees through `extends`; the
+  console must not offer "remove/edit inherited type" as an action on a layer pack, and any UI that
+  surfaces this error should say the type belongs to the parent pack, not "type not found."
+
+- **P8.4 doctor under mobrain-personal** — **MEASURED: none.** Re-run in a **second, fresh scratch
+  `GBRAIN_HOME`** (`/tmp/tmp.QkEQc5zE5s`, `mktemp -d` inside `mobrain-local-gbrain-ops-1`, distinct
+  from P8.1–P8.3's home) after installing the same manifest and running the same
+  `gbrain init --pglite --schema-pack mobrain-personal --non-interactive --no-embedding` (exit 0):
+
+  ```
+  $ GBRAIN_HOME=$H GBRAIN_SCHEMA_PACK=mobrain-personal gbrain doctor --json 2>&1 | head -60
+  # exit 0   (30163-byte JSON body written to /tmp/doctor.out)
+  ```
+
+  Grepped the full JSON body verbatim for the specific claims below (exact commands and output):
+
+  ```
+  $ grep -o '{"name":"type_proliferation"[^}]*}' doctor.out
+  {"name":"type_proliferation","status":"ok","message":"0 distinct typed values (pack declares 20)","category":"meta"}
+
+  $ grep -o '.\{60\}media-ingest.\{60\}' doctor.out
+  idea-lineage","ingest","maintain","measure-before-you-fix","media-ingest","meeting-ingestion","minion-orchestrator","perplexity-rese
+
+  $ grep -o '.\{60\}bare-tweet.\{60\}' doctor.out
+  e":"integrity","status":"ok","message":"Sampled 0 pages; no bare-tweet phrases or external links.","category":"brain"},{"name":"js
+
+  $ grep -oE '\b(media|email|diary|deal|yc|tweet|slack|civic|social-digest)\b' doctor.out | sort | uniq -c
+        1 media
+        1 tweet
+
+  $ grep -o '"engine":"[a-z]*","db_url_source":[a-z]*' doctor.out
+  "engine":"postgres","db_url_source":null
+  ```
+
+  This confirms, byte-for-byte: `type_proliferation` really does say
+  `"0 distinct typed values (pack declares 20)"`; the whole-word scan for every dropped/investor
+  type name across the entire doctor payload turns up exactly two hits (`media`, `tweet`), and both
+  are the named false positives — `media` only inside the built-in skill id `media-ingest` (a
+  "not yet installed" skill suggestion, `skill_currency` check), and `tweet` only inside the
+  hardcoded, pack-agnostic `integrity` check's message "no bare-tweet phrases or external links".
+  Neither is a check naming a page type. No check named `email`, `diary`, `deal`, `yc`, `slack`,
+  `civic`, or `social-digest` at all. **No check named a dropped type as unknown/orphaned.**
+
+- **Shared frontmatter field** — `area` declared on five page types (`goal`, `project`, `event`,
+  `health_record`, `finance_record`) validates (P8.1: exit 0, 0 errors).
+
+### S8 live — live dev-stack verification (2026-09-27, Task 6, no brain reset)
+
+Run against the **live** `mobrain-local` dev stack (not a scratch home), from
+`.worktrees/personal-pack` on `feat/mobrain-personal-pack`. `.env` was copied in from the main
+checkout (git-ignored, never printed). No `gbrain init`, `down`, `-v`, or volume removal was run at
+any point; `pg-data`, `gbrain-home` and `brain-repos` volumes were never touched.
+
+**Redeploy.** `bash scripts/redeploy.sh --full` failed three times in a row with the same BuildKit
+error, unrelated to this branch's code:
+
+```
+#19 exporting to image
+#19 ERROR: failed to copy: httpReadSeeker: failed open: server message: insufficient_scope: authorization failed
+```
+
+This is a local BuildKit/containerd content-store bug on this Windows host: the Dockerfile's
+unnamespaced `FROM mobrain/gbrain-base:${GBRAIN_VERSION}` normalizes to `docker.io/mobrain/gbrain-base`
+during BuildKit's export/unpack step, which then tries to verify the layer against `docker.io`
+(a repository that does not exist there — confirmed separately: `docker pull
+docker.io/mobrain/gbrain-base:0.50.5.0` → `pull access denied: repository does not exist`) and gets
+an auth rejection instead. `docker builder prune -f` (safe: build cache only, no volumes) and
+re-tagging the local alias from a fresh `docker pull ghcr.io/molioros/gbrain-base:0.50.5.0` did not
+fix it. **Workaround used:** `DOCKER_BUILDKIT=0 docker compose --env-file .env -f
+compose/docker-compose.yml -f compose/docker-compose.dev.yml -f compose/docker-compose.build.yml
+build --build-arg GBRAIN_VERSION=0.50.5.0 control-plane` (the legacy, non-BuildKit builder) —
+`Successfully built ... Successfully tagged ghcr.io/molioros/control-plane:ee6cfb2...` (exit 0) —
+followed by `docker compose ... up -d --force-recreate control-plane scheduler gbrain-ops`, which is
+the same two steps `--full` runs internally. **This is a redeploy-tooling/environment finding, not a
+schema-pack finding**; the shipped code under `src/ops` and `src/control` is unaffected. Data
+integrity after the forced recreate (which also recreated `postgres` for config-hash reasons):
+`control` and `gbrain` databases both present, `gbrain` has 69 tables in `public` — **MEASURED: no
+data loss**.
+
+**Step 2 — seeding.**
+
+```
+$ docker logs mobrain-local-gbrain-ops-1 2>&1 | grep "schema pack"
+schema pack mobrain-personal: written
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema list
+Bundled packs:
+  gbrain-base
+  gbrain-recommended
+  gbrain-creator
+  gbrain-investor
+  gbrain-engineer
+  gbrain-everything
+  gbrain-base-v2
+
+Installed packs (~/.gbrain/schema-packs/):
+  mobrain-personal
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema validate mobrain-personal
+✓ mobrain-personal v1.0.0: valid manifest
+  Path: /srv/gbrain-home/.gbrain/schema-packs/mobrain-personal/pack.json
+  Page types: 20
+  Link verbs: 21
+  Takes kinds: 4
+```
+
+```
+$ docker exec -e GBRAIN_SCHEMA_PACK=mobrain-personal mobrain-local-gbrain-ops-1 gbrain schema show --json | grep -c '"primitive"'
+20
+```
+
+```
+$ docker exec mobrain-local-gbrain-ops-1 gbrain schema active
+Active pack: gbrain-base-v2 v1.2.0
+Source: home-config
+Pack identity: gbrain-base-v2@1.2.0+1a2aee67
+Page types: 19
+Link verbs: 17
+Takes kinds: fact, take, bet, hunch
+```
+
+Active pack recorded **before** the deploy (same command, run before `redeploy.sh`) was identical —
+`gbrain-base-v2 v1.2.0` — confirming **no auto-migration** (spec P9) across the redeploy.
+
+Restarted `gbrain-ops` a second time and re-grepped:
+
+```
+$ docker compose ... restart gbrain-ops
+$ docker logs mobrain-local-gbrain-ops-1 2>&1 | grep "schema pack"
+schema pack mobrain-personal: written
+schema pack mobrain-personal: unchanged
+```
+
+The second line (from the restart) is `unchanged`, as expected.
+
+**Step 3 — console API.** No credentials for the owner account were available and no account was
+created (per the task's hard rules), so `/api/schema/packs` could not be hit with an authenticated
+session. Two things **were** measured directly:
+
+```
+$ curl -sk https://localhost/api/health
+{"ok":true,"components":{"controlDb":"ok","ops":"ok"},"gbrainVersion":"0.50.5.0",...}
+
+$ curl -sk -o /dev/null -w "%{http_code}\n" https://localhost/api/schema/packs
+401
+```
+
+confirming the redeployed control plane is live and the route's `admin` guard rejects an
+unauthenticated request, as designed. As the **equivalent read from inside the control-plane
+container** (per the task's Step-3 fallback), the shipped `visiblePackNames` function
+(`src/contracts/packs.ts`) — the exact function `/api/schema/packs`'s handler calls — was invoked
+directly, inside the running `control-plane` container, against the real bundled+installed pack list
+and the real active pack observed above:
+
+```
+$ docker exec mobrain-local-control-plane-1 sh -c 'cd /app && bun -e "
+import { visiblePackNames } from \"./src/contracts/packs.ts\";
+const bundled = [\"gbrain-base\",\"gbrain-base-v2\",\"gbrain-recommended\",\"gbrain-creator\",\"gbrain-investor\",\"gbrain-engineer\",\"gbrain-everything\"];
+const installed = [\"mobrain-personal\"];
+console.log(JSON.stringify(visiblePackNames([...bundled, ...installed], \"gbrain-base-v2\")));
+"'
+["gbrain-base-v2","mobrain-personal"]
+```
+
+**MEASURED** (via the in-container function call, not the live HTTP call): the console's pack list
+resolves to exactly `gbrain-base-v2` and `mobrain-personal`. **UNVERIFIED**: the actual
+authenticated `/api/schema/packs` HTTP response body — no owner session was available, and none was
+created, per the task's constraints.
