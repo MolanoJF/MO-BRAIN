@@ -404,6 +404,34 @@ wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
   return c.json({ ok: true, lifecycle: 'sources-added', sourceId: result.sourceId });
 }));
 
+/**
+ * Scaffold the chosen pack's folders into every Space, retrying while any Space
+ * reports an error (or none came back although Spaces exist). Create-only and
+ * idempotent, so a retry can never duplicate or overwrite. Returns the last
+ * attempt's results; callers surface any remaining `error`.
+ */
+export async function scaffoldWithRetry(
+  orgId: string, userId: string, gbrainVersion: string, expectedSpaces: number,
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<ScaffoldResult[]> {
+  const attempts = opts.attempts ?? 3;
+  const delayMs = opts.delayMs ?? 2_000;
+  let results: ScaffoldResult[] = [];
+  for (let i = 0; i < attempts; i++) {
+    results = await scaffoldSpaces(orgId, userId, {
+      resolveSourcePacks, effectivePack: (p) => effectivePack(gbrainVersion, p),
+    }).catch((e): ScaffoldResult[] => [
+      { sourceId: '*', pack: null, created: [], skipped: [], error: String(e?.message ?? e) },
+    ]);
+    if (results.length === 0 && expectedSpaces > 0) {
+      results = [{ sourceId: '*', pack: null, created: [], skipped: [], error: 'no Spaces resolved to scaffold' }];
+    }
+    if (results.every((r) => r.error === null)) return results;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return results;
+}
+
 /** Step 5 — init, config, sync, doctor. The brain becomes real here. */
 wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   const brain = await loadBrain(orgId);
@@ -458,10 +486,12 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   // The chosen pack's folders, one README per page type, before the first
   // sync so a teammate's first page lands in a folder that already explains
   // itself. README.md is a gbrain metafile, so sync never imports it (S7).
-  // A scaffold failure is reported, never fatal: the brain is still usable.
-  const scaffold = await scaffoldSpaces(orgId, userId, {
-    resolveSourcePacks, effectivePack: (p) => effectivePack(brain.gbrainVersion ?? '', p),
-  }).catch((e) => [{ sourceId: '*', pack: null, created: [], skipped: [], error: String(e?.message ?? e) }]);
+  // Retried, because this is the first thing to touch the repos and the
+  // ops/pack plane right after `init` rewrote the brain schema, and a single
+  // transient failure here used to leave a Space with only its seed README and
+  // no sign anything had gone wrong. Still never fatal: the brain is usable
+  // without folders, and the Schema page's "Create folders" is the manual retry.
+  const scaffold = await scaffoldWithRetry(orgId, userId, brain.gbrainVersion ?? '', spaces.length);
   if (brain.searchMode) await run('search-mode', 'config.set', { key: 'search.mode', value: brain.searchMode });
   await run('sync', 'sync', { all: true });
   await run('embed', 'embed', { stale: true });
@@ -482,6 +512,9 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     schemaPackRequested: brain.schemaPack ?? null,
     schemaPackResolved: active.pack,
     schemaPackSource: active.source,
+    scaffold: scaffold.map((r) => ({
+      sourceId: r.sourceId, pack: r.pack, created: r.created.length, skipped: r.skipped.length, error: r.error,
+    })),
   });
 
   if (ok) {

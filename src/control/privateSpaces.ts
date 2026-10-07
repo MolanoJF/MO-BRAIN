@@ -101,6 +101,30 @@ async function registerPrivateSpaceSource(
   }
 }
 
+/**
+ * Folders for a private Space this call just registered, from the pack the
+ * Space resolves — the same scaffold the wizard's `/finish` and the Schema page
+ * run, so an invited member's Space is not the one Space with only a seed
+ * README. Create-only and idempotent. Non-fatal by design (a Space without
+ * folders is usable); the outcome goes to the audit row. `routes/schema.ts` is
+ * imported lazily because it sits above this module in the import graph.
+ */
+async function scaffoldPrivateSpace(orgId: string, actor: string, sourceId: string): Promise<string | null> {
+  try {
+    const [{ scaffoldSpaces }, { resolveSourcePacks, effectivePack }] = await Promise.all([
+      import('./scaffold.ts'), import('./routes/schema.ts'),
+    ]);
+    const [brain] = await getDb().select({ gbrainVersion: schema.brains.gbrainVersion }).from(schema.brains)
+      .where(eq(schema.brains.organizationId, orgId));
+    const [r] = await scaffoldSpaces(orgId, actor, {
+      resolveSourcePacks, effectivePack: (p) => effectivePack(brain?.gbrainVersion ?? '', p),
+    }, [sourceId]);
+    return r?.error ?? (r ? null : 'space did not resolve');
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
   await getDb().insert(schema.auditLog)
@@ -193,6 +217,7 @@ export async function provisionPrivateSpace(
   // `sources.add` or an id-collision recovery while the list was unreadable —
   // and is idempotent, so a repeat cannot double-count.
   let syncOk: boolean | null = null;
+  let scaffoldError: string | null | undefined;
   const registered = await isSourceRegistered(space.sourceId);
   if (registered !== true) {
     const ensured = await registerPrivateSpaceSource(space);
@@ -200,6 +225,7 @@ export async function provisionPrivateSpace(
       return { ok: false, error: 'private_space_source_failed', status: 502 };
     }
     syncOk = ensured.syncOk;
+    scaffoldError = await scaffoldPrivateSpace(orgId, actor, space.sourceId);
   }
 
   // `privateSpace: true` is derived inside connections.ts from the write Space's
@@ -218,6 +244,7 @@ export async function provisionPrivateSpace(
     sourceId: space.sourceId,
     connectionId: provisioned.connectionId,
     ...(syncOk === null ? {} : { syncOk }),
+    ...(scaffoldError === undefined ? {} : { scaffoldError }),
   });
 
   return { ok: true, spaceId: space.id, sourceId: space.sourceId, connectionId: provisioned.connectionId };
