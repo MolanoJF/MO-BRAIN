@@ -261,4 +261,33 @@ else
   echo "FAIL: the /admin note is duplicated into the mode branches or missing"; fail=1
 fi
 
+echo "--- INSTALL_MODE=tailscale writes loopback ports and a public URL carrying the serve port"
+# MOBRAIN_FAKE_TS_DNSNAME pins the tailnet name; PREFLIGHT_FAKE_TAILSCALE and
+# the faked ports keep this independent of the host's real Tailscale state.
+TSENV="INSTALL_MODE=tailscale MOBRAIN_FAKE_TS_DNSNAME=host.tail1234.ts.net PREFLIGHT_FAKE_TAILSCALE=ok PREFLIGHT_FAKE_PORT_18080=free PREFLIGHT_FAKE_PORT_18443=free MOBRAIN_SKIP_UP=1"
+env $TSENV TAILSCALE_HTTPS_PORT=8443 MOBRAIN_ENV_PATH="$work/.env.ts" bash scripts/install.sh >/dev/null 2>&1
+if grep -q '^DOMAIN=host.tail1234.ts.net$' "$work/.env.ts" && \
+   grep -q '^MOBRAIN_PUBLIC_URL=https://host.tail1234.ts.net:8443$' "$work/.env.ts" && \
+   grep -q '^MOBRAIN_BIND_ADDR=127.0.0.1$' "$work/.env.ts" && \
+   grep -q '^MOBRAIN_TLS_MODE=internal$' "$work/.env.ts" && \
+   grep -q '^TAILSCALE_HTTPS_PORT=8443$' "$work/.env.ts"; then
+  echo "PASS: tailscale mode written"
+else
+  echo "FAIL: tailscale mode .env wrong"; fail=1
+fi
+
+echo "--- tailscale mode on 443 leaves the public URL without a port"
+env $TSENV MOBRAIN_ENV_PATH="$work/.env.ts443" bash scripts/install.sh >/dev/null 2>&1
+if grep -q '^MOBRAIN_PUBLIC_URL=https://host.tail1234.ts.net$' "$work/.env.ts443"; then echo "PASS: no :443 suffix"; else echo "FAIL: public URL wrong on 443"; fail=1; fi
+
+echo "--- tailscale mode rejects a serve port tailscale does not allow"
+if env $TSENV TAILSCALE_HTTPS_PORT=9000 MOBRAIN_ENV_PATH="$work/.env.ts9000" bash scripts/install.sh >/dev/null 2>&1; then
+  echo "FAIL: accepted TAILSCALE_HTTPS_PORT=9000"; fail=1
+else echo "PASS: rejected TAILSCALE_HTTPS_PORT=9000"; fi
+
+echo "--- other modes write none of the tailscale keys"
+if grep -q 'MOBRAIN_BIND_ADDR\|MOBRAIN_PUBLIC_URL' "$work/.env.internal"; then
+  echo "FAIL: a non-tailscale .env carries tailscale keys"; fail=1
+else echo "PASS: no tailscale keys outside tailscale mode"; fi
+
 exit $fail

@@ -6,6 +6,13 @@ provenance — every `U*`, `P*` and `F*` — is in [`docs/slice-5-findings.md`](
 
 ## [Unreleased]
 
+**Tailscale install mode.** `INSTALL_MODE=tailscale bash scripts/install.sh` installs a tailnet-only
+brain: Caddy on loopback high ports, fronted by `tailscale serve` with the host's real tailnet
+certificate. New preflight refusals 18 (Tailscale missing/not running) and 19 (serve port already
+mapped). `compose/docker-compose.yml` now reads `MOBRAIN_BIND_ADDR`, `MOBRAIN_HTTP_PORT`,
+`MOBRAIN_HTTPS_PORT` and `MOBRAIN_PUBLIC_URL`, all defaulting to the previous behaviour, and the
+Caddyfile sets `default_sni`. See `docs/runbooks/install.md`.
+
 The three images now publish to `ghcr.io/molioros/{gbrain-base,control-plane,agent-runner}` (the
 MoliorOS org namespace) instead of the personal `ghcr.io/molanojf` namespace. Existing installs that
 pulled `ghcr.io/molanojf/*` keep working, but should set `IMAGE_NAMESPACE=molioros` (or re-run the

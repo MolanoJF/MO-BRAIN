@@ -61,6 +61,26 @@ lan_ip() {
   printf '%s' "${ip:-localhost}"
 }
 
+# INSTALL_MODE=tailscale: the brain is reachable only on the operator's tailnet.
+# `tailscale serve` terminates TLS (a real tailnet certificate, so no browser
+# warning) and proxies to Caddy on loopback high ports; Caddy keeps its own
+# local-CA certificate behind it. Nothing binds 80/443, so it coexists with
+# anything else on the host, including another Tailscale Serve mapping on 443.
+# TAILSCALE_HTTPS_PORT is the tailnet-facing port (tailscale serve allows only
+# 443, 8443 and 10000); MOBRAIN_LOOPBACK_HTTPS_PORT/_HTTP_PORT are Caddy's.
+# MOBRAIN_FAKE_TS_DNSNAME is TEST-ONLY, same convention as MOBRAIN_FAKE_LAN_IP.
+ts_dnsname() {
+  local name=""
+  if [ -n "${MOBRAIN_FAKE_TS_DNSNAME:-}" ]; then printf '%s' "$MOBRAIN_FAKE_TS_DNSNAME"; return; fi
+  command -v tailscale >/dev/null 2>&1 || return 0
+  if command -v jq >/dev/null 2>&1; then
+    name="$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null || true)"
+  elif command -v python3 >/dev/null 2>&1; then
+    name="$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["Self"]["DNSName"])' 2>/dev/null || true)"
+  fi
+  printf '%s' "${name%.}"
+}
+
 # Two installs, one question. A person with a domain answers it; a person who
 # just wants their own machine on their own network presses Enter and is never
 # asked about DNS, certificates or a cloud account. Same escape hatch as
@@ -118,8 +138,32 @@ case "$INSTALL_MODE" in
     DOMAIN="$(lan_ip)"
     echo "No domain given; installing for this machine only, reachable at https://${DOMAIN} on your network." >&2
     ;;
+  tailscale)
+    if [ -n "$MOBRAIN_TLS_MODE" ] && [ "$MOBRAIN_TLS_MODE" != "internal" ]; then
+      echo "INSTALL_MODE=tailscale always uses MOBRAIN_TLS_MODE=internal; got '${MOBRAIN_TLS_MODE}'." >&2
+      exit 2
+    fi
+    MOBRAIN_TLS_MODE=internal
+    TAILSCALE_HTTPS_PORT="${TAILSCALE_HTTPS_PORT:-443}"
+    case "$TAILSCALE_HTTPS_PORT" in
+      443 | 8443 | 10000) ;;
+      *) echo "TAILSCALE_HTTPS_PORT must be 443, 8443 or 10000 (the ports tailscale serve allows), got '${TAILSCALE_HTTPS_PORT}'." >&2; exit 2 ;;
+    esac
+    MOBRAIN_BIND_ADDR=127.0.0.1
+    MOBRAIN_HTTPS_PORT="${MOBRAIN_LOOPBACK_HTTPS_PORT:-18443}"
+    MOBRAIN_HTTP_PORT="${MOBRAIN_LOOPBACK_HTTP_PORT:-18080}"
+    DOMAIN="${DOMAIN:-$(ts_dnsname)}"
+    if [ -z "$DOMAIN" ]; then
+      echo "INSTALL_MODE=tailscale could not read this machine's tailnet name. Is Tailscale installed and logged in (tailscale status)?" >&2
+      echo "Or set DOMAIN to this machine's MagicDNS name (e.g. host.tailnet-name.ts.net)." >&2
+      exit 2
+    fi
+    MOBRAIN_PUBLIC_URL="https://${DOMAIN}"
+    [ "$TAILSCALE_HTTPS_PORT" = "443" ] || MOBRAIN_PUBLIC_URL="${MOBRAIN_PUBLIC_URL}:${TAILSCALE_HTTPS_PORT}"
+    echo "Installing for your tailnet only, reachable at ${MOBRAIN_PUBLIC_URL}." >&2
+    ;;
   *)
-    echo "INSTALL_MODE must be 'local' or 'domain', got '${INSTALL_MODE}'." >&2
+    echo "INSTALL_MODE must be 'local', 'domain' or 'tailscale', got '${INSTALL_MODE}'." >&2
     exit 2
     ;;
 esac
@@ -142,6 +186,8 @@ esac
 # Exported so preflight reasons about the install that is actually happening:
 # its DNS check needs all three to decide between refusing and skipping.
 export INSTALL_MODE DOMAIN MOBRAIN_TLS_MODE
+# Preflight checks Caddy's loopback ports and the serve port, not 80/443.
+[ "$INSTALL_MODE" != "tailscale" ] || export TAILSCALE_HTTPS_PORT MOBRAIN_HTTPS_PORT MOBRAIN_HTTP_PORT
 
 # Preflight BEFORE any secret is generated: a host that cannot run the stack
 # must not end up holding an ENCRYPTION_KEY it will never use. Preflight also
@@ -172,6 +218,20 @@ case "$ENABLE_RUNNER" in
   [yY] | [yY][eE][sS]) RUNNER_TOKEN="$(gen)" ;;
 esac
 
+# Tailscale mode only: Caddy on loopback, and the one URL everything else
+# (PUBLIC_URL, gbrain --public-url) derives from. Empty in every other mode,
+# which leaves the compose defaults (0.0.0.0:80/443, https://${DOMAIN}) alone.
+TS_ENV_BLOCK=""
+if [ "$INSTALL_MODE" = "tailscale" ]; then
+  TS_ENV_BLOCK="# INSTALL_MODE=tailscale: Caddy on loopback only; tailscale serve fronts it.
+MOBRAIN_INSTALL_MODE=tailscale
+MOBRAIN_PUBLIC_URL=${MOBRAIN_PUBLIC_URL}
+MOBRAIN_BIND_ADDR=${MOBRAIN_BIND_ADDR}
+MOBRAIN_HTTPS_PORT=${MOBRAIN_HTTPS_PORT}
+MOBRAIN_HTTP_PORT=${MOBRAIN_HTTP_PORT}
+TAILSCALE_HTTPS_PORT=${TAILSCALE_HTTPS_PORT}"
+fi
+
 umask 077
 cat > "$ENV_PATH" <<EOF
 DOMAIN=${DOMAIN}
@@ -197,6 +257,7 @@ APP_VERSION=${APP_VERSION}
 MOBRAIN_VERSION=${APP_VERSION}
 BRAINSTAND_VERSION=${APP_VERSION}
 WORKER_CONCURRENCY=2
+${TS_ENV_BLOCK}
 
 POSTGRES_PASSWORD=$(gen)
 OPS_RPC_TOKEN=$(gen)
@@ -243,7 +304,25 @@ if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; t
 fi
 docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml up -d --wait
 
-if [ "$INSTALL_MODE" = "local" ]; then
+if [ "$INSTALL_MODE" = "tailscale" ]; then
+  # Tailnet-only (serve, not funnel). A failure here leaves a healthy stack, so
+  # it is a warning with the exact command, not an abort.
+  SERVE_CMD="tailscale serve --bg --https=${TAILSCALE_HTTPS_PORT} https+insecure://127.0.0.1:${MOBRAIN_HTTPS_PORT}"
+  if [ "${MOBRAIN_SKIP_SERVE:-0}" = "1" ]; then
+    echo "Skipping tailscale serve (MOBRAIN_SKIP_SERVE=1). Run: ${SERVE_CMD}"
+  elif $SERVE_CMD; then
+    echo "tailscale serve is mapping ${MOBRAIN_PUBLIC_URL} -> Caddy (tailnet only)."
+  else
+    echo "WARNING: could not configure tailscale serve (it may need root or operator rights: sudo tailscale set --operator=\$USER)." >&2
+    echo "The stack is up; expose it with: ${SERVE_CMD}" >&2
+  fi
+  cat <<EOF
+
+Stack is up. Open ${MOBRAIN_PUBLIC_URL} from any device on your tailnet and
+create your first admin. The certificate is a real tailnet one, so there is no
+browser warning. To stop exposing it: tailscale serve --https=${TAILSCALE_HTTPS_PORT} off
+EOF
+elif [ "$INSTALL_MODE" = "local" ]; then
   cat <<EOF
 
 Stack is up. Open https://${DOMAIN} from any device on your network and create
@@ -261,7 +340,7 @@ fi
 
 cat <<EOF
 
-Note: https://${DOMAIN}/admin is deliberately NOT routed — gbrain's embedded
+Note: ${MOBRAIN_PUBLIC_URL:-https://${DOMAIN}}/admin is deliberately NOT routed — gbrain's embedded
 admin SPA is a second control plane with god rights over the same brain.
 See docs/runbooks/break-glass.md for the recovery path.
 EOF

@@ -40,6 +40,8 @@ DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash sc
 
 Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
 
+**On a Tailscale tailnet?** `INSTALL_MODE=tailscale bash scripts/install.sh` installs tailnet-only, behind `tailscale serve`, with a real certificate and without touching ports 80/443. See [`docs/runbooks/install.md`](docs/runbooks/install.md#tailscale-install-tailnet-only-real-certificate).
+
 ### What preflight enforces
 
 `scripts/preflight.sh` runs before the installer generates a single secret. It refuses to continue, with one exit code per reason, unless:

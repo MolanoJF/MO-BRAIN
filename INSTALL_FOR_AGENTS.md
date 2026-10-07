@@ -26,6 +26,10 @@ You cannot self-serve these — get them from the person who asked you to instal
   browsers/clients will show an untrusted-certificate warning until they separately distribute and
   trust Caddy's local CA — this is a materially different security posture from a public cert, not
   cosmetic. See `docs/runbooks/install.md`'s "Private-network install (no public DNS)" section.
+- **Whether the host is on Tailscale and the brain only needs tailnet access.** If so, use
+  `INSTALL_MODE=tailscale` (see `docs/runbooks/install.md`, "Tailscale install"): no public DNS, no
+  80/443, a real certificate, and it creates the `tailscale serve` mapping for you. If another
+  mapping already holds the port, preflight exits 19; set `TAILSCALE_HTTPS_PORT=8443`.
 - **Whether this host will ever run more than one Mobrain instance, or already has one running.**
   See §4 — this matters more than it looks like it should, even though the installer now defends
   against the worst case on its own.
@@ -155,6 +159,8 @@ the cause:
 | 15 | `DOMAIN` doesn't resolve to this host | Point its A/AAAA record here, or use `MOBRAIN_TLS_MODE=internal` for a real private-network install (see §1) |
 | 16 | Pinned images can't be pulled | Registry unreachable/private (see §6), or build locally |
 | 17 | `COMPOSE_PROJECT_NAME` already has containers on this host | Choose a different `COMPOSE_PROJECT_NAME` (see §4), or confirm with the user before removing the existing project |
+| 18 | `INSTALL_MODE=tailscale`: Tailscale missing or not running | Install it / `tailscale up` |
+| 19 | `INSTALL_MODE=tailscale`: serve port already mapped | `TAILSCALE_HTTPS_PORT=8443` (or 10000), or `tailscale serve --https=<port> off` |
 
 `SKIP_PREFLIGHT=1` exists but is for the installer's own tests, not for you — don't set it.
 

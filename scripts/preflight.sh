@@ -15,6 +15,9 @@
 #   15  $DOMAIN does not resolve to one of this host's addresses
 #   16  the pinned images cannot be pulled
 #   17  COMPOSE_PROJECT_NAME already names a project with containers on this host
+#   18  INSTALL_MODE=tailscale: Tailscale is missing, or not running/logged in
+#   19  INSTALL_MODE=tailscale: the tailnet-facing serve port is already mapped
+#       (a TCP port busy on loopback for Caddy is exit 14, as for 80/443)
 #
 # Every check reads the real host unless the matching PREFLIGHT_FAKE_* variable
 # is set. Those variables are TEST-ONLY: they exist so the refusals can be
@@ -27,6 +30,8 @@
 #   PREFLIGHT_FAKE_DNS=nxdomain
 #   PREFLIGHT_FAKE_PULL=missing
 #   PREFLIGHT_FAKE_PROJECT_EXISTS=1
+#   PREFLIGHT_FAKE_TAILSCALE=missing   /  PREFLIGHT_FAKE_SERVE_PORT=busy
+#   PREFLIGHT_FAKE_PORT_<n>=busy|free also applies to tailscale mode's loopback ports
 # PREFLIGHT_SKIP_DNS=1 skips the DNS check outright; it prints a warning
 # rather than passing silently. INSTALL_MODE=local (scripts/install.sh) implies
 # the same skip, and so does MOBRAIN_TLS_MODE=internal: a domain that will
@@ -158,8 +163,12 @@ port_busy() {
 }
 
 check_ports() {
-  local p fakevar fakeval
-  for p in 80 443; do
+  local p fakevar fakeval ports="80 443"
+  # tailscale mode never binds 80/443: Caddy sits on loopback high ports.
+  if [ "${INSTALL_MODE:-}" = "tailscale" ]; then
+    ports="${MOBRAIN_HTTP_PORT:-18080} ${MOBRAIN_HTTPS_PORT:-18443}"
+  fi
+  for p in $ports; do
     fakevar="PREFLIGHT_FAKE_PORT_${p}"
     fakeval="${!fakevar:-}"
     if [ -n "$fakeval" ]; then
@@ -203,6 +212,10 @@ check_dns() {
   # INSTALL_MODE=local (scripts/install.sh): there is no public name to check.
   # DOMAIN here is this host's own LAN address, or `localhost` — resolving it
   # publicly is not merely unnecessary, it is meaningless.
+  if [ "${INSTALL_MODE:-domain}" = "tailscale" ]; then
+    warn "skipping the DNS check (INSTALL_MODE=tailscale); ${domain:-this machine} is a MagicDNS name resolved by Tailscale, not public DNS."
+    return
+  fi
   if [ "${INSTALL_MODE:-domain}" = "local" ]; then
     warn "skipping the DNS check (INSTALL_MODE=local); this brain is reachable at ${domain:-this machine} on your own network and has no public name to resolve."
     return
@@ -259,6 +272,35 @@ check_project_identity() {
   fi
 }
 
+# tailscale mode: `tailscale serve` is what makes the brain reachable, so the
+# daemon must be up and the serve port must not already carry a mapping (a
+# second --bg serve on the same port would silently replace the first).
+check_tailscale() {
+  [ "${INSTALL_MODE:-}" = "tailscale" ] || return 0
+  local port="${TAILSCALE_HTTPS_PORT:-443}" state="" status
+  if [ "${PREFLIGHT_FAKE_TAILSCALE:-}" = "missing" ] || ! command -v tailscale >/dev/null 2>&1; then
+    refuse 18 "Tailscale is not installed; install it (https://tailscale.com/download), run 'tailscale up', and re-run."
+  fi
+  if [ -z "${PREFLIGHT_FAKE_TAILSCALE:-}" ]; then
+    status="$(tailscale status --json 2>/dev/null || true)"
+    if command -v jq >/dev/null 2>&1; then
+      state="$(printf '%s' "$status" | jq -r '.BackendState // empty' 2>/dev/null || true)"
+    else
+      state="$(printf '%s' "$status" | grep -o '"BackendState": *"[A-Za-z]*"' | head -n1 | sed 's/.*: *"//; s/"//')"
+    fi
+    [ "$state" = "Running" ] ||
+      refuse 18 "Tailscale is not running and logged in (state: ${state:-unknown}); run 'tailscale up' and re-run."
+  fi
+  if [ "${PREFLIGHT_FAKE_SERVE_PORT:-}" = "busy" ]; then
+    refuse 19 "tailscale serve already maps port ${port}; set TAILSCALE_HTTPS_PORT to a free one of 443, 8443 or 10000, or run 'tailscale serve --https=${port} off' first."
+  fi
+  if [ -z "${PREFLIGHT_FAKE_SERVE_PORT:-}" ] && [ -z "${PREFLIGHT_FAKE_TAILSCALE:-}" ]; then
+    if tailscale serve status --json 2>/dev/null | grep -qE "\"${port}\": *\{|:${port}\""; then
+      refuse 19 "tailscale serve already maps port ${port}; set TAILSCALE_HTTPS_PORT to a free one of 443, 8443 or 10000, or run 'tailscale serve --https=${port} off' first."
+    fi
+  fi
+}
+
 check_images() {
   if [ -n "${PREFLIGHT_FAKE_PULL:-}" ]; then
     refuse 16 "the pinned Mobrain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
@@ -277,6 +319,7 @@ check_compose
 check_ram
 check_disk
 check_project_identity
+check_tailscale
 check_ports
 check_dns
 check_images

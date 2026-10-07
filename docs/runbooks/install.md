@@ -171,6 +171,30 @@ This does two things: it tells `compose/Caddyfile`'s main site to issue from Cad
 
 **The tradeoff is real, not cosmetic.** Caddy's local CA is self-signed and known to nobody but this Caddy instance. Every browser and API client that talks to `https://<DOMAIN>` will show an untrusted-certificate warning (or fail closed, for a client that doesn't let you click through) until you separately distribute that CA's root certificate and have each client trust it. `PREFLIGHT_SKIP_DNS=1` on its own does none of this — it only silences preflight's DNS check, leaving Caddy still attempting (and endlessly failing) public ACME, so the stack reports healthy via `docker compose --wait` while HTTPS never actually works and the browser-only first-admin step has nothing to load. Use `MOBRAIN_TLS_MODE=internal`, not a bare DNS skip, for a real private-network install.
 
+## Tailscale install (tailnet-only, real certificate)
+
+If the host is on a [Tailscale](https://tailscale.com) tailnet and the brain only needs to be reachable from it, use **tailscale mode**. It is the best fit for a host that already runs other services on 80/443 (or other `tailscale serve` mappings), and unlike local mode it gives browsers a real certificate, so there is no warning.
+
+```bash
+INSTALL_MODE=tailscale ENABLE_RUNNER=n bash scripts/install.sh
+```
+
+How it works: Caddy binds **loopback only** (`127.0.0.1:18443` / `:18080`, never 80/443), and the installer runs `tailscale serve --bg --https=<port> https+insecure://127.0.0.1:18443` so Tailscale terminates TLS with the host's tailnet certificate. This is `serve`, not `funnel`: nothing is exposed to the public internet. `DOMAIN` is read from `tailscale status` (this host's MagicDNS name); set `DOMAIN` yourself to override.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TAILSCALE_HTTPS_PORT` | `443` | The tailnet-facing port. `tailscale serve` only allows `443`, `8443` or `10000`. Anything other than 443 appears in the URL (`https://host.tailnet.ts.net:8443`) and is carried into `PUBLIC_URL` and gbrain's `--public-url`. |
+| `MOBRAIN_LOOPBACK_HTTPS_PORT` / `MOBRAIN_LOOPBACK_HTTP_PORT` | `18443` / `18080` | Caddy's loopback ports. |
+| `MOBRAIN_SKIP_SERVE=1` | unset | Write the `.env` and start the stack but do not touch `tailscale serve`; the installer prints the command to run. |
+
+Preflight in this mode checks Tailscale instead of ports 80/443 and the DNS record: exit **18** means Tailscale is missing or not running/logged in, exit **19** means the serve port already carries a mapping (pick another of 443/8443/10000, or turn the old one off), and exit **14** now refers to Caddy's loopback ports. The installer refuses nothing on a host whose 80/443 are busy.
+
+Requirements: MagicDNS and HTTPS certificates enabled for the tailnet (admin console → DNS), and the installing user allowed to run `tailscale serve` (`sudo tailscale set --operator=$USER` once). If the serve step fails the stack is still up and the installer prints the exact command.
+
+Under the hood the mode is just env vars in the generated `.env` (`MOBRAIN_BIND_ADDR`, `MOBRAIN_HTTPS_PORT`, `MOBRAIN_HTTP_PORT`, `MOBRAIN_PUBLIC_URL`), which `compose/docker-compose.yml` reads with defaults equal to the stock behaviour, so the same compose file serves every mode. Caddy sets `default_sni` to `DOMAIN` because Tailscale Serve dials its backend by IP, which would otherwise fail the TLS handshake (a 502 from the serve side).
+
+To undo: `tailscale serve --https=<port> off`, then `docker compose down` as usual.
+
 ## Create the first admin
 
 In domain mode:

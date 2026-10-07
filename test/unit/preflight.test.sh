@@ -24,6 +24,13 @@ expect_code 14 "PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=busy bash sc
 expect_code 15 "DOMAIN=nx.invalid PREFLIGHT_FAKE_DNS=nxdomain PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh"
 expect_code 17 "PREFLIGHT_FAKE_PROJECT_EXISTS=1 bash scripts/preflight.sh"
 
+# tailscale install mode: its own two refusals, and 80/443 are not its ports.
+TS='INSTALL_MODE=tailscale DOMAIN=host.test.ts.net PREFLIGHT_FAKE_PORT_18080=free PREFLIGHT_FAKE_PORT_18443=free'
+expect_code 18 "$TS PREFLIGHT_FAKE_TAILSCALE=missing bash scripts/preflight.sh"
+expect_code 19 "$TS PREFLIGHT_FAKE_SERVE_PORT=busy PREFLIGHT_FAKE_TAILSCALE=ok bash scripts/preflight.sh"
+expect_code 14 "INSTALL_MODE=tailscale PREFLIGHT_FAKE_TAILSCALE=ok PREFLIGHT_FAKE_PORT_18080=free PREFLIGHT_FAKE_PORT_18443=busy bash scripts/preflight.sh"
+expect_code 0 "$TS PREFLIGHT_FAKE_TAILSCALE=ok PREFLIGHT_FAKE_PORT_80=busy PREFLIGHT_FAKE_PORT_443=busy bash scripts/preflight.sh"
+
 # And the project-identity refusal names the actual project, not just "exit 17".
 out=$(PREFLIGHT_FAKE_PROJECT_EXISTS=1 COMPOSE_PROJECT_NAME=already-running bash scripts/preflight.sh 2>&1 || true)
 echo "$out" | grep -q "already-running" || fail "the project-identity refusal does not name the colliding project"
