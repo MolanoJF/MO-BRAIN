@@ -163,6 +163,22 @@ export async function gitScaffold(req: {
 }
 
 /**
+ * Point a Space's `origin` at `url` and hand git the token (a credential-store
+ * file beside gbrain's home, never in the repo or the URL). Returns the
+ * token-free URL and the branch to push.
+ */
+export async function gitSetRemote(req: {
+  sourceId: string; url: string; token: string; username?: string;
+}): Promise<{ url: string; branch: string | null }> {
+  return post('/git/set-remote', req, 60_000);
+}
+
+/** Drop a Space's `origin`, credential helper and token file. Idempotent. */
+export async function gitClearRemote(sourceId: string): Promise<{ removed: boolean }> {
+  return post('/git/clear-remote', { sourceId }, 60_000);
+}
+
+/**
  * D10 steps 1+2 — the range comes back as ONE new commit signed by `actor`.
  * `nothing_to_revert` and `conflict` are RESULTS, not thrown errors: they are
  * refusals the console renders as choices, and only the latter's `detail` is

@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
@@ -575,6 +575,100 @@ export async function scaffoldFolders(
     const commit = await git(cwd, commitArgs(req.actor, req.message));
     if (commit.exitCode !== 0) throw new Error(`git commit failed for ${req.sourceId}: ${gitFailure(commit)}`);
     return { created, skipped, sha: await resolveCommit(cwd, 'HEAD') };
+  });
+}
+
+/**
+ * Where a Space's remote access token lives: one `git credential-store` file
+ * per Space, outside the repo (a token inside the work tree would be committed
+ * and pushed). The repo's own config points its credential helper at it, so the
+ * remote URL stays token-free — it is what gets shown, stored and logged.
+ */
+const REMOTE_CREDS_DIR = process.env.REMOTE_CREDS_DIR
+  ?? join(process.env.GBRAIN_HOME ?? '/srv/gbrain-home', 'remote-credentials');
+
+/**
+ * A remote URL we will accept: https only (the token travels in a credential
+ * helper, which is HTTP-only here), no embedded credentials, no query or
+ * fragment, a dotted host (refuses `localhost` and single-label internal
+ * names) and a repo path. Returns the normalised URL, or throws by name.
+ */
+export function validateRemoteUrl(raw: string): { url: string; host: string } {
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { throw new Error('remote url is not a valid URL'); }
+  if (u.protocol !== 'https:') throw new Error('remote url must be https://');
+  if (u.username || u.password) throw new Error('remote url must not contain credentials; pass the token separately');
+  if (u.search || u.hash) throw new Error('remote url must not have a query or fragment');
+  if (!u.hostname.includes('.')) throw new Error('remote url host must be a fully-qualified name');
+  if (u.pathname.replace(/\//g, '') === '') throw new Error('remote url must name a repository');
+  return { url: u.toString(), host: u.host };
+}
+
+/** A token is opaque, but it ends up on one line of a credential file. */
+const REMOTE_TOKEN_RE = /^[\x21-\x7e]{1,512}$/;
+
+export type SetRemoteRequest = { sourceId: string; url: string; token: string; username?: string };
+
+/**
+ * Point a Space repo's `origin` at a remote and give git the token to use.
+ * Idempotent: an existing `origin` is re-pointed, never duplicated. Under the
+ * repo lock, and it only edits repo config + the credential file — it does not
+ * touch the work tree or push (the control plane pushes through `gbrain
+ * sources push`, which owns the secret scan and the private-remote check).
+ */
+export async function setRemote(
+  req: SetRemoteRequest,
+  opts: { sql: SQL; root?: string; credsDir?: string },
+): Promise<{ url: string; branch: string | null }> {
+  if (!SOURCE_ID_RE.test(req.sourceId)) throw new Error(`invalid sourceId: ${req.sourceId}`);
+  const { url, host } = validateRemoteUrl(req.url);
+  if (!REMOTE_TOKEN_RE.test(req.token)) throw new Error('token must be 1-512 printable characters, no whitespace');
+  const username = req.username ?? 'x-access-token';
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(username)) throw new Error('invalid remote username');
+
+  const cwd = join(opts.root ?? REPOS_ROOT, req.sourceId);
+  const credsDir = opts.credsDir ?? REMOTE_CREDS_DIR;
+  const credFile = join(credsDir, req.sourceId);
+
+  return withRepoLock(opts.sql, req.sourceId, async () => {
+    const top = await git(cwd, ['rev-parse', '--show-toplevel']);
+    if (top.exitCode !== 0) throw new Error(`${req.sourceId} has no repo: ${gitFailure(top)}`);
+
+    await mkdir(credsDir, { recursive: true, mode: 0o700 });
+    await writeFile(
+      credFile,
+      `https://${encodeURIComponent(username)}:${encodeURIComponent(req.token)}@${host}\n`,
+      { encoding: 'utf8', mode: 0o600 },
+    );
+
+    const had = await git(cwd, ['remote', 'get-url', 'origin']);
+    const set = await git(cwd, ['remote', had.exitCode === 0 ? 'set-url' : 'add', 'origin', url]);
+    if (set.exitCode !== 0) throw new Error(`git remote failed for ${req.sourceId}: ${gitFailure(set)}`);
+
+    // Replace any helper list so the Space's token is the one git offers, and
+    // never fall through to an interactive prompt on a bad token.
+    await git(cwd, ['config', '--local', '--unset-all', 'credential.helper']);
+    const helper = await git(cwd, ['config', '--local', '--add', 'credential.helper', `store --file=${credFile}`]);
+    if (helper.exitCode !== 0) throw new Error(`git config failed for ${req.sourceId}: ${gitFailure(helper)}`);
+
+    const branch = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    return { url, branch: branch.exitCode === 0 ? branch.stdout.trim() : null };
+  });
+}
+
+/** Undo `setRemote`: drop `origin`, the credential helper and the token file. Idempotent. */
+export async function clearRemote(
+  req: { sourceId: string },
+  opts: { sql: SQL; root?: string; credsDir?: string },
+): Promise<{ removed: boolean }> {
+  if (!SOURCE_ID_RE.test(req.sourceId)) throw new Error(`invalid sourceId: ${req.sourceId}`);
+  const cwd = join(opts.root ?? REPOS_ROOT, req.sourceId);
+  const credFile = join(opts.credsDir ?? REMOTE_CREDS_DIR, req.sourceId);
+  return withRepoLock(opts.sql, req.sourceId, async () => {
+    const r = await git(cwd, ['remote', 'remove', 'origin']);
+    await git(cwd, ['config', '--local', '--unset-all', 'credential.helper']);
+    await rm(credFile, { force: true });
+    return { removed: r.exitCode === 0 };
   });
 }
 

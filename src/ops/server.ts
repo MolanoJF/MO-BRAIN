@@ -19,8 +19,8 @@ import { resetBrainSchema } from './brainSchema.ts';
 import { pauseBrainWriters, resumeBrainWriters } from './writerGate.ts';
 import { readBrainUsage } from './usage.ts';
 import {
-  commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
-  revertRange, scaffoldFolders,
+  clearRemote, commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
+  revertRange, scaffoldFolders, setRemote,
 } from './git.ts';
 import type { ScaffoldRequest } from './git.ts';
 import { writeReport } from './reports.ts';
@@ -286,6 +286,26 @@ Bun.serve({
       // before the lock, so a traversing path never reaches a repo.
       if (url.pathname === '/git/scaffold') {
         return json(await scaffoldFolders(body as ScaffoldRequest, { sql }));
+      }
+
+      // Space remote: repo config + credential file only. The token arrives in
+      // the body and is never echoed back; the push itself is `sources.push`.
+      if (url.pathname === '/git/set-remote') {
+        const { sourceId, url: remoteUrl, token, username } = body as {
+          sourceId?: unknown; url?: unknown; token?: unknown; username?: unknown;
+        };
+        if (typeof sourceId !== 'string' || typeof remoteUrl !== 'string' || typeof token !== 'string') {
+          return json({ error: 'sourceId, url and token required' }, 400);
+        }
+        return json(await setRemote(
+          { sourceId, url: remoteUrl, token, ...(typeof username === 'string' ? { username } : {}) },
+          { sql },
+        ));
+      }
+      if (url.pathname === '/git/clear-remote') {
+        const { sourceId } = body as { sourceId?: unknown };
+        if (typeof sourceId !== 'string' || !sourceId) return json({ error: 'sourceId required' }, 400);
+        return json(await clearRemote({ sourceId }, { sql }));
       }
 
       // D10 steps 1+2: the revert and the commit that signs it are ONE locked

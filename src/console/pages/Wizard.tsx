@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
-import { api, type PackCreateResult } from '../api.ts';
+import { api, sourcesApi, type PackCreateResult } from '../api.ts';
+import { RemotePanel } from '../RemotePanel.tsx';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
 import { NewPackPanel } from './SchemaBuilder.tsx';
@@ -22,15 +23,24 @@ type SearchMode = {
   measuredCost: number | null; measuredAt: string | null; measuredOn: string | null;
   description: string;
 };
+type ScaffoldReport = { sourceId: string; created: string[]; error: string | null }[];
+
+/** Folder problems from `/wizard/finish`, as sentences. Empty when every Space was scaffolded. */
+export function scaffoldProblems(scaffold: ScaffoldReport | undefined): string[] {
+  return (scaffold ?? []).filter((r) => r.error !== null)
+    .map((r) => `${r.sourceId === '*' ? 'Your Spaces' : r.sourceId}: ${r.error}`);
+}
+
 type State = {
   lifecycle: string; nextStep: string | null; searchModes: SearchMode[];
-  spaces: { sourceId: string; name: string }[]; isolationNotice: string;
+  spaces: { sourceId: string; name: string; gitRemote: string | null }[]; isolationNotice: string;
 };
 
 export function Wizard({ onReady }: { onReady: () => void }) {
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [folderProblems, setFolderProblems] = useState<string[]>([]);
 
   const load = async () => setState(await api.get<State>('/wizard/state'));
   useEffect(() => { void load(); }, []);
@@ -110,6 +120,38 @@ export function Wizard({ onReady }: { onReady: () => void }) {
         <SpaceStep busy={busy} onSubmit={() => step('/wizard/private-space', {})} />
       )}
 
+      {folderProblems.length > 0 && (
+        <Notice tone="warning" layout="stack">
+          <p className="font-medium">Your brain is ready, but its folders were not created.</p>
+          {folderProblems.map((p) => <p key={p} className="text-sm font-mono">{p}</p>)}
+          <p className="text-sm">Open Schema and choose Create folders to retry. Nothing else is affected.</p>
+          <Button variant="primary" onClick={onReady}>Continue</Button>
+        </Notice>
+      )}
+
+      {state.nextStep === 'ready' && state.spaces[0] && (
+        <section className="space-y-3">
+          <h2 className="font-medium">Keep a copy off this server (optional)</h2>
+          <p className="text-sm text-muted">
+            Your space is a git repository on this server. Connect it to a GitHub repo now, or skip
+            this and do it later from My brain. Nothing is pushed until setup finishes; then use
+            Push now on My brain.
+          </p>
+          <RemotePanel
+            sourceId={state.spaces[0].sourceId}
+            gitRemote={state.spaces[0].gitRemote}
+            busy={busy}
+            pushOnConnect={false}
+            api={{
+              set: (body) => sourcesApi.setRemote(state.spaces[0]!.sourceId, body),
+              push: () => sourcesApi.pushRemote(state.spaces[0]!.sourceId),
+              clear: () => sourcesApi.clearRemote(state.spaces[0]!.sourceId),
+            }}
+            onChanged={load}
+          />
+        </section>
+      )}
+
       {state.nextStep === 'ready' && (
         <section className="space-y-3">
           <h2 className="font-medium">Finish setup</h2>
@@ -118,7 +160,18 @@ export function Wizard({ onReady }: { onReady: () => void }) {
             then runs a health check. This takes several minutes.
           </p>
           <Button variant="primary" disabled={busy}
-                  onClick={async () => { await step('/wizard/finish', {}); onReady(); }}>
+                  onClick={async () => {
+                    setBusy(true); setError(null);
+                    try {
+                      const r = await api.post<{ scaffold?: ScaffoldReport }>('/wizard/finish', {});
+                      const problems = scaffoldProblems(r.scaffold);
+                      // The brain is ready either way; folders are the one thing worth
+                      // stopping to say, because nothing else would.
+                      if (problems.length > 0) { setFolderProblems(problems); await load(); return; }
+                      await load(); onReady();
+                    } catch (e) { setError(e instanceof Error ? e.message : 'Step failed'); }
+                    finally { setBusy(false); }
+                  }}>
             {busy ? 'Running…' : 'Finish setup'}
           </Button>
         </section>
