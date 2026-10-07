@@ -23,6 +23,17 @@ export type ChecklistItemSpec = {
   prompt: string;
   /** Why this is a decision and not a step — quote upstream where possible. */
   why: string;
+  /**
+   * Absent means false. When true, `run` leaves the writers down after the
+   * gate and does not enter `completed` until `resume-writers`.
+   */
+  blocksResume?: true;
+  /**
+   * Allowlisted ops RPC applied when the admin declines. Absent means a
+   * decline still blocks writer resume — there is no opt-out to apply.
+   * `params` values are strings passed as RPC fields, never a shell string.
+   */
+  declineOp?: { op: string; params: Record<string, string> };
 };
 
 /** Provenance of the exact upstream file version that was hand-translated. */

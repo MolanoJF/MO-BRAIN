@@ -105,7 +105,7 @@ files carry is not the number to design around.
 | `swapped` | `.env` pin moved, four images built, `gbrain-ops` recreated at the new tag. |
 | `migrated` | `apply-migrations` and `post-upgrade` both exited 0. |
 | `playbooks_applied` | Deterministic steps ran; checklist items opened; ledger rows journaled. |
-| `gated_ok` | Per-check doctor parity holds (D5). |
+| `gated_ok` | Per-check doctor parity holds (D5). `gated_ok` plus `writers: held` means the schema jump succeeded and writers are down on purpose. The next command is `resume-writers`, not `rollback`. |
 | `completed` | Done; writers resumed and the stack is healthy. |
 | `failed` | Failed **before** the swap; the only mutation was stopped services, and `resume` puts them back. |
 | `rolling_back` | Failed **after** the swap; the snapshot is the only way back. |
@@ -114,7 +114,9 @@ files carry is not the number to design around.
 
 `status` classifies a dead run from the journal alone and tells you whether to resume or roll back; a
 run that died before `swapped` can be resumed, a run that died at or after `swapped` requires a
-rollback.
+rollback. The exception is `gated_ok` with `writers: held`: that is not a failed close. The next
+command is `bun run scripts/upgrade.ts resume-writers --run <runId>`, not `rollback`. Rollback
+remains the way back if the admin rejects the jump itself.
 
 ## How to roll back
 
@@ -147,8 +149,13 @@ Some versions ship judgement residue a human must decide — never a step code c
 opened as `upgrade_checklist_items` in state `pending` and surface as **`awaiting_admin_decision`** on
 the version's `playbook_ledger` row.
 
-- A pending item **keeps the banner up and blocks nothing else**. The upgrade is complete; the decision
-  is not.
+- A pending item **keeps the banner up**. An item without `blocksResume` blocks nothing else: the
+  upgrade is complete and the decision is not. An item with `blocksResume: true` is different — the
+  schema jump succeeded, but `agent-runner`, `scheduler`, `gbrain-worker`, and `gbrain-serve` stay
+  down on purpose until the item is acknowledged, or declined with its quoted opt-out. The journal
+  records that as `gated_ok` plus `writers: held`. The next command is
+  `bun run scripts/upgrade.ts resume-writers --run <runId>`, not `rollback`. Rollback remains the way
+  back if the admin rejects the jump itself. A decline with no opt-out does not release the writers.
 - It **survives control-plane restarts** (it lives in the control database, not in memory).
 - An **admin** clears it at `/upgrades` or `POST /api/upgrades/checklist/:itemId/ack`
   (accepts `acknowledged|declined|deferred`; a deferral records the actor and keeps the item `pending`).
@@ -167,7 +174,10 @@ swapping it (D2). The authority is the journal:
    last state event.
 2. `bun run scripts/upgrade.ts status --run <runId>` gives the same classification.
 3. Before `swapped` → resume with `run` (services are restarted; nothing was mutated beyond stopping).
-4. At or after `swapped` → `rollback --run <runId>`.
+4. At or after `swapped` → `rollback --run <runId>`, unless the last state is `gated_ok` with
+   `writers: held`. That hold means the jump succeeded and writers are down on purpose. Decide the
+   checklist, then `bun run scripts/upgrade.ts resume-writers --run <runId>`. Rollback remains the way
+   back if the admin rejects the jump itself.
 5. When the control plane does return, the reconciler imports the journal into the console
    (`upgrade_runs` / `upgrade_events` / `playbook_ledger` / `upgrade_checklist_items`), idempotent on
    `(runId, seq)`. Nothing is lost because nothing was only in memory.
@@ -250,7 +260,8 @@ the JSON lists each failed Connection. Re-run after fixing (idempotent).
    `''`. The banner offers; a human selects.
 4. **Nothing auto-upgrades.** `check-update` is deliberately not schedulable, and the self-upgrade mode
    is `off` everywhere.
-5. **A pending checklist item keeps the banner up and blocks nothing else.**
+5. **A pending checklist item keeps the banner up.** One without `blocksResume` blocks nothing else.
+   One with `blocksResume` keeps the writers down until `resume-writers`; that hold is not a rollback.
 6. **A snapshot nobody verified is not a backup.** Every snapshot this lane takes is checksum-verified
    before the swap, and the rollback re-verifies before restoring.
 7. **If a gate run aborts mid-leg, the brain can be left fixtured.** The Slice 3.5 exit gate's C2 installs
