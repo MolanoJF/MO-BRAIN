@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ApiError, myConnectionApi, type MyConnection } from '../api.ts';
 import { Button, Card, Notice } from '../ui/index.tsx';
+import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
+
+const myRemoteApi: RemoteApi = {
+  set: (body) => myConnectionApi.setRemote(body),
+  push: () => myConnectionApi.pushRemote(),
+  clear: () => myConnectionApi.clearRemote(),
+};
 
 export function toggleRead(current: string[], id: string): string[] {
   return current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
@@ -52,6 +59,10 @@ export function MyBrain() {
           Your private Space (<span className="font-mono">{data.space.sourceId}</span>). Only you can see it —
           admins included.
         </p>
+      </Card>
+      <Card>
+        <RemotePanel sourceId={data.space.sourceId} gitRemote={data.space.gitRemote} busy={busy}
+                     api={myRemoteApi} onChanged={load} />
       </Card>
       <Card>
         <h2 className="font-medium">What your agent can read</h2>

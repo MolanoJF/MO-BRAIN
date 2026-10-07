@@ -27,6 +27,7 @@ import { wiringSnippet } from '../harness.ts';
 import { deleteCredentialJournal, takeGrantCredentials } from '../opsClient.ts';
 import { privateSpaceRefusal, provisionPrivateSpace } from '../privateSpaces.ts';
 import { readSecret, storeSecret } from '../secrets.ts';
+import { connectRemote, disconnectRemote, pushRemote } from '../spaceRemoteOps.ts';
 
 export const myConnectionRoutes = new Hono();
 
@@ -81,10 +82,35 @@ myConnectionRoutes.get('/my/connection', guard(async (c, caller) => {
     ? (connection!.readSpaceIds as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
   return c.json({
-    space: { id: space.id, sourceId: space.sourceId, name: space.name },
+    space: { id: space.id, sourceId: space.sourceId, name: space.name, gitRemote: space.gitRemote ?? null },
     connection: connection ? { id: connection.id, state: connection.state, readSpaceIds: reads } : null,
     readable: await readable(caller),
   });
+}));
+
+/**
+ * The member's own private Space and its git remote. A member can only ever
+ * reach the Space they OWN (`mine`), so this needs no per-Space check.
+ */
+myConnectionRoutes.put('/my/space/remote', guard(async (c, caller) => {
+  const { space } = await mine(caller);
+  if (!space) return c.json({ error: 'no_private_space' }, 404);
+  const r = await connectRemote(caller, space, await c.req.json().catch(() => ({})));
+  return c.json(r.body, r.status as any);
+}));
+
+myConnectionRoutes.post('/my/space/remote/push', guard(async (c, caller) => {
+  const { space } = await mine(caller);
+  if (!space) return c.json({ error: 'no_private_space' }, 404);
+  const r = await pushRemote(caller, space);
+  return c.json(r.body, r.status as any);
+}));
+
+myConnectionRoutes.delete('/my/space/remote', guard(async (c, caller) => {
+  const { space } = await mine(caller);
+  if (!space) return c.json({ error: 'no_private_space' }, 404);
+  const r = await disconnectRemote(caller, space);
+  return c.json(r.body, r.status as any);
 }));
 
 myConnectionRoutes.put('/my/connection', guard(async (c, caller) => {

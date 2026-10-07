@@ -27,6 +27,7 @@ const source = (over: Partial<SourceSummary> = {}): SourceSummary => ({
   lastSyncAt: '2026-09-17T06:12:52.152Z',
   federated: true,
   inGbrain: true,
+  gitRemote: null,
   ...over,
 });
 

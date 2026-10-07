@@ -5,6 +5,7 @@ import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { callerFor } from '../zone.ts';
 import { callOps } from '../opsClient.ts';
+import { connectRemote, disconnectRemote, pushRemote } from '../spaceRemoteOps.ts';
 import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
 import { resolveSourcePacks } from './schema.ts';
 import { requireCapability } from '../capabilities.ts';
@@ -32,7 +33,7 @@ type GbrainSource = {
 
 type SpaceRow = {
   id: string; sourceId: string; name: string; kind: string;
-  ownerMembershipId: string | null;
+  ownerMembershipId: string | null; gitRemote: string | null;
 };
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
@@ -59,6 +60,7 @@ async function spaceFor(orgId: string, sourceId: string): Promise<SpaceRow | nul
     name: schema.spaces.name,
     kind: schema.spaces.kind,
     ownerMembershipId: schema.spaces.ownerMembershipId,
+    gitRemote: schema.spaces.gitRemote,
   }).from(schema.spaces).where(and(
     eq(schema.spaces.organizationId, orgId),
     eq(schema.spaces.sourceId, sourceId),
@@ -109,6 +111,9 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
     callOps<{ sources: GbrainSource[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 }),
   ]);
   const packResolved = packResolvedAll.filter((s) => !hidden.has(s.sourceId));
+  const remotes = new Map((await getDb().select({
+    sourceId: schema.spaces.sourceId, gitRemote: schema.spaces.gitRemote,
+  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId))).map((r) => [r.sourceId, r.gitRemote]));
 
   // A failed `sources.list` is NOT an empty brain: rows keep `pageCount: null`,
   // never 0, and the payload says the list could not be read.
@@ -132,6 +137,7 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
       lastSyncAt: g?.last_sync_at ?? null,
       federated: g?.federated ?? null,
       inGbrain: g !== undefined,
+      gitRemote: remotes.get(s.sourceId) ?? null,
     };
   });
 
@@ -172,6 +178,38 @@ sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, ctx) => {
   await getDb().update(schema.spaces).set({ name }).where(eq(schema.spaces.id, space.id));
   await audit(orgId, userId, 'source.rename', sourceId, { name });
   return c.json({ ok: true, sourceId, name });
+}));
+
+/* Git remote for a Space — logic in `../spaceRemoteOps.ts`, shared with the
+ * member's own `/api/my/space/remote`. Admin-only here, and the Space must be
+ * visible to the caller (never another member's private Space). */
+
+async function ownedSpace(c: any, ctx: { userId: string; orgId: string; role: Role }) {
+  const caller = await callerFor(ctx);
+  const sourceId = c.req.param('sourceId') ?? '';
+  const space = await spaceFor(caller.orgId, sourceId);
+  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) return null;
+  return space;
+}
+
+const respond = (c: any, r: { status: number; body: object }) => c.json(r.body, r.status);
+
+sourceRoutes.put('/sources/:sourceId/remote', guard('admin', async (c, ctx) => {
+  const space = await ownedSpace(c, ctx);
+  if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
+  return respond(c, await connectRemote(ctx, space, await c.req.json().catch(() => ({}))));
+}));
+
+sourceRoutes.post('/sources/:sourceId/remote/push', guard('admin', async (c, ctx) => {
+  const space = await ownedSpace(c, ctx);
+  if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
+  return respond(c, await pushRemote(ctx, space));
+}));
+
+sourceRoutes.delete('/sources/:sourceId/remote', guard('admin', async (c, ctx) => {
+  const space = await ownedSpace(c, ctx);
+  if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
+  return respond(c, await disconnectRemote(ctx, space));
 }));
 
 sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, ctx) => {

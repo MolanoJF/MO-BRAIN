@@ -90,7 +90,7 @@ wizard.get('/state', guard(async (c, { orgId }) => {
     searchMode: brain.searchMode,
     embeddingModel: brain.embeddingModel,
     schemaPack: brain.schemaPack,
-    spaces: spaces.map((s) => ({ sourceId: s.sourceId, name: s.name, kind: s.kind })),
+    spaces: spaces.map((s) => ({ sourceId: s.sourceId, name: s.name, kind: s.kind, gitRemote: s.gitRemote ?? null })),
     isolationNotice: ISOLATION_NOTICE,
   });
 }));

@@ -5,6 +5,7 @@ import {
 } from '../api.ts';
 import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
 import { useOrg } from '../OrgContext.tsx';
+import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
 import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
 
 /* -------------------------------------------------------------------------
@@ -109,6 +110,15 @@ function reason(e: unknown): string {
   if (e instanceof Error && e.message !== '') return e.message;
   return 'Request failed';
 }
+
+export { REMOTE_NOTICE, canSetRemote, pushText, remoteError } from '../RemotePanel.tsx';
+
+/** Admin route for one Source's remote. */
+const adminRemoteApi = (sourceId: string): RemoteApi => ({
+  set: (body) => sourcesApi.setRemote(sourceId, body),
+  push: () => sourcesApi.pushRemote(sourceId),
+  clear: () => sourcesApi.clearRemote(sourceId),
+});
 
 export function Sources() {
   const { org } = useOrg();
@@ -279,6 +289,9 @@ export function Sources() {
                   ? <PackTypesView detail={detail} />
                   : <Empty>No resolved details for {src.pack ?? 'this pack'}.</Empty>
               )}
+
+              <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} busy={busy !== null}
+                           api={adminRemoteApi(src.sourceId)} onChanged={load} />
 
               <div className="flex flex-wrap gap-2">
                 <Button disabled={busy !== null} onClick={() => void backfill(src)}>

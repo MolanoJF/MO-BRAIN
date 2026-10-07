@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'bun:test';
 import {
-  classifyLock, commitArgs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, revertRange,
+  classifyLock, clearRemote, commitArgs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile,
+  revertRange, setRemote, validateRemoteUrl,
 } from '../../src/ops/git.ts';
 import type { GitRange, RangeCommit, RevertRequest, TreeProbe } from '../../src/ops/git.ts';
 import { attributeCommits, captureHeads, diffForRun } from '../../src/agent/diff.ts';
@@ -747,5 +748,39 @@ describe('purgeCandidates', () => {
       .toEqual([{ path: 'src/core/chunkers/code.ts', slug: null }]);
     expect(purgeCandidates([{ status: 'D', path: 'notes/🗂️ emoji.md' }]))
       .toEqual([{ path: 'notes/🗂️ emoji.md', slug: null }]);
+  });
+});
+
+describe('validateRemoteUrl', () => {
+  test('accepts an https repo URL and keeps it token-free', () => {
+    expect(validateRemoteUrl('https://github.com/acme/brain.git ')).toEqual({
+      url: 'https://github.com/acme/brain.git', host: 'github.com',
+    });
+  });
+
+  test('refuses everything that could smuggle a credential or reach an internal host', () => {
+    for (const bad of [
+      'git@github.com:acme/brain.git', 'http://github.com/acme/brain.git', 'file:///srv/brain-repos/x',
+      'https://user:pw@github.com/acme/brain.git', 'https://x-access-token@github.com/acme/brain.git',
+      'https://github.com/acme/brain.git?token=1', 'https://github.com/acme/brain.git#x',
+      'https://localhost/acme/brain.git', 'https://gbrain-ops/acme/brain.git', 'https://github.com/', 'nonsense',
+    ]) {
+      expect(() => validateRemoteUrl(bad), bad).toThrow();
+    }
+  });
+});
+
+describe('setRemote / clearRemote guards', () => {
+  const REQ = { sourceId: 'my-space', url: 'https://github.com/acme/brain.git', token: 'ghp_abc123' };
+
+  // A request that fails validation must never reach the lock: the dummy sql is the proof.
+  test('refuses a bad source id, URL or token before taking the repo lock', async () => {
+    const o = { sql: {} as never };
+    await expect(setRemote({ ...REQ, sourceId: '../etc' }, o)).rejects.toThrow(/invalid sourceId/);
+    await expect(setRemote({ ...REQ, url: 'http://github.com/a/b' }, o)).rejects.toThrow(/https/);
+    await expect(setRemote({ ...REQ, token: 'has space' }, o)).rejects.toThrow(/token/);
+    await expect(setRemote({ ...REQ, token: '' }, o)).rejects.toThrow(/token/);
+    await expect(setRemote({ ...REQ, username: 'a b' }, o)).rejects.toThrow(/username/);
+    await expect(clearRemote({ sourceId: '../etc' }, o)).rejects.toThrow(/invalid sourceId/);
   });
 });

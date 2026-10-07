@@ -309,7 +309,16 @@ export type SourceSummary = {
   lastSyncAt: string | null;
   federated: boolean | null;
   inGbrain: boolean;
+  /** Token-free https URL of the Space's git remote, or null when it has none. */
+  gitRemote: string | null;
 };
+
+/** What the push after connecting (or "Push now") did. `detail` is gbrain's own refusal text. */
+export type SpacePush = { pushed: boolean; exitCode: number; detail?: string };
+
+export type SetRemoteBody =
+  | { mode: 'url'; url: string; token: string; push?: boolean }
+  | { mode: 'github'; name: string; owner?: string; token: string; push?: boolean };
 
 export type RemoveSourceResult = {
   ok: true;
@@ -327,6 +336,16 @@ export const sourcesApi = {
     api.patch<{ ok: true; sourceId: string; name: string }>(
       `/sources/${encodeURIComponent(sourceId)}`, { name },
     ),
+  setRemote: (sourceId: string, body: SetRemoteBody) =>
+    api.put<{ ok: true; sourceId: string; remote: string; created: string | null; push: SpacePush | null }>(
+      `/sources/${encodeURIComponent(sourceId)}/remote`, body,
+    ),
+  pushRemote: (sourceId: string) =>
+    api.post<{ ok: true; sourceId: string; remote: string; push: SpacePush }>(
+      `/sources/${encodeURIComponent(sourceId)}/remote/push`, {},
+    ),
+  clearRemote: (sourceId: string) =>
+    api.delete<{ ok: true; sourceId: string }>(`/sources/${encodeURIComponent(sourceId)}/remote`),
   remove: (sourceId: string, body: { mode: 'archive' | 'remove'; confirm?: boolean }) =>
     api.delete<RemoveSourceResult>(`/sources/${encodeURIComponent(sourceId)}`, body),
 };
@@ -894,7 +913,7 @@ export const orgApi = {
 };
 
 export type MyConnection = {
-  space: { id: string; sourceId: string; name: string };
+  space: { id: string; sourceId: string; name: string; gitRemote: string | null };
   connection: { id: string; state: string; readSpaceIds: string[] } | null;
   readable: Array<{ id: string; sourceId: string; name: string }>;
 };
@@ -902,6 +921,13 @@ export type MyConnection = {
 export const myConnectionApi = {
   get: () => api.get<MyConnection>('/my/connection'),
   setReads: (readSpaceIds: string[]) => api.put<{ ok: true; readSpaceIds: string[] }>('/my/connection', { readSpaceIds }),
+  /** The member's own private Space's git remote — same shapes as `sourcesApi`. */
+  setRemote: (body: SetRemoteBody) =>
+    api.put<{ ok: true; sourceId: string; remote: string; created: string | null; push: SpacePush | null }>(
+      '/my/space/remote', body,
+    ),
+  pushRemote: () => api.post<{ ok: true; sourceId: string; remote: string; push: SpacePush }>('/my/space/remote/push'),
+  clearRemote: () => api.delete<{ ok: true; sourceId: string }>('/my/space/remote'),
 };
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
-import { api, type PackCreateResult } from '../api.ts';
+import { api, sourcesApi, type PackCreateResult } from '../api.ts';
+import { RemotePanel } from '../RemotePanel.tsx';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
 import { NewPackPanel } from './SchemaBuilder.tsx';
@@ -24,7 +25,7 @@ type SearchMode = {
 };
 type State = {
   lifecycle: string; nextStep: string | null; searchModes: SearchMode[];
-  spaces: { sourceId: string; name: string }[]; isolationNotice: string;
+  spaces: { sourceId: string; name: string; gitRemote: string | null }[]; isolationNotice: string;
 };
 
 export function Wizard({ onReady }: { onReady: () => void }) {
@@ -108,6 +109,29 @@ export function Wizard({ onReady }: { onReady: () => void }) {
 
       {state.nextStep === 'sources-added' && (
         <SpaceStep busy={busy} onSubmit={() => step('/wizard/private-space', {})} />
+      )}
+
+      {state.nextStep === 'ready' && state.spaces[0] && (
+        <section className="space-y-3">
+          <h2 className="font-medium">Keep a copy off this server (optional)</h2>
+          <p className="text-sm text-muted">
+            Your space is a git repository on this server. Connect it to a GitHub repo now, or skip
+            this and do it later from My brain. Nothing is pushed until setup finishes; then use
+            Push now on My brain.
+          </p>
+          <RemotePanel
+            sourceId={state.spaces[0].sourceId}
+            gitRemote={state.spaces[0].gitRemote}
+            busy={busy}
+            pushOnConnect={false}
+            api={{
+              set: (body) => sourcesApi.setRemote(state.spaces[0]!.sourceId, body),
+              push: () => sourcesApi.pushRemote(state.spaces[0]!.sourceId),
+              clear: () => sourcesApi.clearRemote(state.spaces[0]!.sourceId),
+            }}
+            onChanged={load}
+          />
+        </section>
       )}
 
       {state.nextStep === 'ready' && (
