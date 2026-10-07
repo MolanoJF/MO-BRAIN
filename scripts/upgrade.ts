@@ -9,6 +9,7 @@ import { captureCapability, type CapabilitySnapshot } from '../src/contracts/cap
 import { scrubOutput } from '../src/docker/host.ts';
 import type { RepoStatus } from '../src/ops/git.ts';
 import { appendEvent, openJournal, readJournal, type Journal } from '../src/upgrade/journal.ts';
+import { schemaStepJournal, schemaStepParams } from '../src/upgrade/schema-step.ts';
 import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
   SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
@@ -534,19 +535,16 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     // 5. Schema. Exit codes only (U3). gbrain-ops is the only live gbrain
     //    process, so post-upgrade's lock-free config.json rewrite has nobody to
     //    race (U4) and still runs behind ops' advisory lock (S3).
-    const migrateExit = (await opsRpc(ctx, 'applyMigrations', { yes: true, nonInteractive: true })).exitCode;
+    //    schemaStepParams skips the Phase F autopilot install (0.60.104.0's
+    //    `--yes` alone would authorize one) and schemaStepJournal records the
+    //    exit code and nothing else — no migration count is claimed for this
+    //    delta, because nothing here read upstream's migration files.
+    const migrateExit = (await opsRpc(ctx, 'applyMigrations', schemaStepParams())).exitCode;
+    await appendEvent(journal, { step: 'schema', ...schemaStepJournal(migrateExit) });
     if (migrateExit !== 0) {
       // U3: exit codes are 0/1/2 and there is no --json. We record the CODE and
       // never parse the prose (G3). The failure is upstream's, at upstream's
       // migration number, raised by the conditions the fixture created.
-      await appendEvent(journal, {
-        step: 'schema', message: `apply-migrations exited ${migrateExit}`,
-        data: {
-          exitCode: migrateExit, outcome: 'failed',
-          evidence: 'apply-migrations refused to complete; docs/slice-3.5-findings.md records the '
-            + 'fixtured collision and the observed exit code',
-        },
-      });
       throw new Error(`apply-migrations exited ${migrateExit}`);
     }
     const postExit = (await opsRpc(ctx, 'postUpgrade', {})).exitCode;
@@ -567,21 +565,10 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       );
     }
     const addedKeys = guard.keys.filter((k) => !before.configKeys.includes(k));
-    // The schema step's own durable record: U3 exit code, U10's honest no-op
-    // outcome, and the evidence for WHY nothing was pending.
-    await appendEvent(journal, {
-      step: 'schema', message: 'no migrations were pending on this delta',
-      data: {
-        exitCode: 0, outcome: 'no_migrations_pending',
-        evidence: 'migrate.ts is byte-identical at 0.50.0.0 and 0.50.5.0, so apply-migrations exited '
-          + '0 with nothing to apply; this delta ships zero schema migrations',
-      },
-    });
     await enter('migrated',
-      'apply-migrations and post-upgrade both exited 0. On the 0.50.0.0 -> 0.50.5.0 delta upstream ' +
-      'ships zero schema migrations (U10), so "nothing applied" is the expected result; a non-zero ' +
-      'exit or a surprise here is a finding for docs/slice-3.5-findings.md, not something to wave ' +
-      'through.',
+      'apply-migrations and post-upgrade both exited 0; no migration count is claimed for this ' +
+      'delta (U3/G3: the exit code is the whole record). A non-zero exit or a surprise here is a ' +
+      'finding for docs/slice-3.5-findings.md, not something to wave through.',
       { applyExit: 0, postExit: 0, selfUpgradeMode: guard.mode, configKeysAdded: addedKeys });
 
     // 6. Playbooks. Deterministic steps run; checklist items are OPENED as

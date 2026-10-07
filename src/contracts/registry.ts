@@ -449,6 +449,15 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     params: [
       { name: 'yes', flag: '--yes', kind: 'flag' },
       { name: 'nonInteractive', flag: '--non-interactive', kind: 'flag' },
+      /** MEASURED at 0.60.104.0: at this target `--yes` ALONE authorizes
+       *  upstream's Phase F autopilot install (a crontab line written from
+       *  inside the container — a silent no-op or a duplicate scheduler).
+       *  This flag is the SKIP, not an install, so it passes the
+       *  autopilot-install lint rule by construction. The schema step passes
+       *  it on every call (src/upgrade/schema-step.ts), and compose sets
+       *  GBRAIN_NO_AUTOPILOT_INSTALL=1 beside GBRAIN_SELF_UPGRADE_MODE for
+       *  any other in-container invocation. */
+      { name: 'noAutopilotInstall', flag: '--no-autopilot-install', kind: 'flag' },
     ],
     supportsJson: false,
     supportsDryRun: false,
