@@ -3,7 +3,7 @@
 #
 # G1: the version is an exact semver ARG. A moving ref in an image build is
 # non-reproducible by construction — never default this to latest-stable.
-FROM oven/bun:1.3.13
+FROM oven/bun:1.4.2
 
 ARG GBRAIN_VERSION
 RUN test -n "$GBRAIN_VERSION" || (echo "GBRAIN_VERSION build-arg is required" >&2; exit 1)
