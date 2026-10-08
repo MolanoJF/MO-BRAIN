@@ -160,8 +160,11 @@ describe('playbooksFor', () => {
   });
 
   test('blocksResume is only on the files that require an ask-first hold', () => {
-    const expected = new Set(['0.60.26.0', '0.60.45.0', '0.60.57.0', '0.60.99.0', '0.60.102.0']);
+    const expected = new Set([
+      '0.60.26.0', '0.60.36.0', '0.60.45.0', '0.60.57.0', '0.60.99.0', '0.60.102.0',
+    ]);
     const declineKey: Record<string, string> = {
+      '0.60.36.0': 'takes.auto_embed',
       '0.60.45.0': 'auto_chronicle',
       '0.60.99.0': 'fences.normalize',
       '0.60.102.0': 'fences.repair.enabled',

@@ -12,11 +12,13 @@ import type { ChecklistItemSpec, PlaybookSpec } from './types.ts';
  * is the run. The verify `gbrain remember` write is not a lane step and is not
  * invented here.
  *
- * Takes are now embedded by the cycle's embed phase, and two dream/atom
- * defaults call models. The file says ask before `gbrain embed --stale` and
- * names the opt-out keys. It does not say to ask before the next maintenance
- * run. Those items do not block writer resume. No declineOp is attached,
- * because a declineOp is applied only to settle a blocksResume item.
+ * Step 4 asks before embedding takes. The cycle's embed phase embeds them
+ * and re-embeds existing take vectors, which calls the embedding provider.
+ * That is a paid default resumed maintenance would start. blocksResume, with
+ * declineOp `config.set` of `takes.auto_embed` to `false`, the opt-out the
+ * file names. Step 5 names two other defaults and their off switches, but
+ * does not say ask first, so those keys are not declineOps and do not hold
+ * writers.
  *
  * Numbered: 1 lane schema, plus revision_backfill_pending; 2 exit 10; 3 legacy
  * token grants; 4 ask before embedding takes; 5 know the other paid defaults;
@@ -61,20 +63,34 @@ const checklist: ChecklistItemSpec[] = [
       'change is a checklist item. No step rescopes a token.',
   },
   {
-    key: 'v60360-take-embed-and-defaults',
+    key: 'v60360-take-embed',
     prompt:
-      'Tell the user takes are now embedded with pages by `gbrain embed --stale` and the cycle\'s ' +
-      'embed phase, and existing take vectors are re-embedded once. That can cost money. Doctor ' +
-      '`fact_take_vectors` counts what is missing. Ask before `gbrain embed --stale`. The opt-out is ' +
-      '`gbrain config set takes.auto_embed false`. Also tell them dream reads imported ' +
-      '`type: conversation` pages when a corpus directory is set (`dream.synthesize.conversation_pages ' +
-      'false` turns it off) and connector atom extraction is on again ' +
-      '(`cycle.extract_atoms.connector_pages false`). Do not set those keys from this upgrade.',
+      'Before writers resume, tell the user takes are now embedded with pages by `gbrain embed ' +
+      '--stale` and the cycle\'s embed phase, and existing take vectors are re-embedded once so they ' +
+      'record their model and claim. That calls the embedding provider and can cost money. Doctor ' +
+      '`fact_take_vectors` counts what is missing. Ask before `gbrain embed --stale`. Acknowledge to ' +
+      'let the cycle embed takes. Decline applies `gbrain config set takes.auto_embed false`.',
     why:
-      'Upstream steps 4 and 5: "Ask before embedding takes" and "Both call the configured models." ' +
-      'The file names the opt-out keys and does not say to ask before the next maintenance run, so ' +
-      'this item does not set blocksResume and does not invent a declineOp. Setting the keys would ' +
-      'change operator defaults.',
+      'Upstream step 4: "Ask before embedding takes." Takes "are now embedded with pages by ' +
+      '`gbrain embed --stale` and the cycle\'s embed phase", and "existing take vectors are ' +
+      're-embedded once". That is a paid default resumed maintenance would start. The file names ' +
+      'the opt-out: `gbrain config set takes.auto_embed false`. That is allowlisted `config.set`. ' +
+      'No other key is invented.',
+    blocksResume: true,
+    declineOp: { op: 'config.set', params: { key: 'takes.auto_embed', value: 'false' } },
+  },
+  {
+    key: 'v60360-other-paid-defaults',
+    prompt:
+      'Tell the user what else is on by default. Dream reads imported `type: conversation` pages ' +
+      'when a corpus directory is set. Atom extraction of connector email and meeting pages is on ' +
+      'again. Both call the configured models. The file names `dream.synthesize.conversation_pages ' +
+      'false` and `cycle.extract_atoms.connector_pages false` as off switches. Do not set those keys ' +
+      'from this upgrade: those sentences do not say ask first.',
+    why:
+      'Upstream step 5: "Know what else is on by default." It names the off switches and says both ' +
+      'call the configured models. It does not say to ask before the next maintenance run, so this ' +
+      'item does not block writer resume and does not invent a declineOp for those keys.',
   },
   {
     key: 'v60360-doctor-and-links',
