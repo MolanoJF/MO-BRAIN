@@ -1,4 +1,5 @@
 import { v0_50_2_0 } from './v0.50.2.0.ts';
+import frozenReleases from './released-0.60.104.0.json' with { type: 'json' };
 import type { PlaybookSpec } from './types.ts';
 
 export type { ChecklistItemSpec, PlaybookSpec, PlaybookStep, UpstreamSkillRef } from './types.ts';
@@ -36,7 +37,31 @@ export type ReleasedVersion = { version: string; evidence: string };
  * 0.49.0.0 is included as a real release that we deliberately did NOT write a
  * playbook for: it is the row that makes the "a version in range with no entry"
  * throw observable, and it is why the throw's error names a real version.
+ *
+ * Versions strictly after 0.50.5.0 and at or before 0.60.104.0 are the GitHub
+ * releases frozen in released-0.60.104.0.json. A file-absent tag also has a
+ * noPlaybookRequired spec. A tag whose migration file is in the v0.60.104.0
+ * tree is listed here and has no PlaybookSpec yet, so playbooksFor throws.
  */
+
+type FrozenRelease = {
+  version: string;
+  publishedAt: string;
+  migrationFile: boolean;
+};
+
+const AFTER_PIN: readonly FrozenRelease[] = frozenReleases.afterPin;
+
+function releaseEvidence(row: FrozenRelease): string {
+  const file = `skills/migrations/v${row.version}.md`;
+  const presence = row.migrationFile
+    ? `${file} is present in the v0.60.104.0 tree`
+    : `${file} is absent from the v0.60.104.0 tree`;
+  return (
+    `GitHub release v${row.version} of garrytan/gbrain, publishedAt ${row.publishedAt}. ${presence}.`
+  );
+}
+
 export const RELEASED_VERSIONS: readonly ReleasedVersion[] = [
   {
     version: '0.49.0.0',
@@ -76,6 +101,10 @@ export const RELEASED_VERSIONS: readonly ReleasedVersion[] = [
       '(OAuth scope ceiling, transcript redaction, .env guardrail, bunfig preload lockdown). No ' +
       'skills/migrations/v0.50.5.0.md exists.',
   },
+  ...AFTER_PIN.map((row) => ({
+    version: row.version,
+    evidence: releaseEvidence(row),
+  })),
 ];
 
 /**
@@ -132,6 +161,11 @@ export const PLAYBOOKS: readonly PlaybookSpec[] = [
       'security-hardening wave whose risk is configuration (the .env guardrail quarantine), probed ' +
       'by Task 1 and gated by Task 11, not a migration step.',
   },
+  ...AFTER_PIN.filter((row) => !row.migrationFile).map((row): PlaybookSpec => ({
+    version: row.version,
+    noPlaybookRequired: true,
+    evidence: releaseEvidence(row),
+  })),
 ];
 
 const BY_VERSION = new Map(PLAYBOOKS.map((s) => [s.version, s]));

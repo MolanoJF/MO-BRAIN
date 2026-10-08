@@ -1,0 +1,525 @@
+{
+  "target": "0.60.104.0",
+  "afterPin": [
+    {
+      "version": "0.51.0.0",
+      "publishedAt": "2026-09-17T13:47:14Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.51.3.0",
+      "publishedAt": "2026-09-21T16:35:29Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.51.4.0",
+      "publishedAt": "2026-09-21T19:11:17Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.51.6.0",
+      "publishedAt": "2026-09-21T20:18:41Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.51.7.0",
+      "publishedAt": "2026-09-22T18:17:16Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.51.8.0",
+      "publishedAt": "2026-09-22T19:38:49Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.52.1.0",
+      "publishedAt": "2026-09-22T23:41:08Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.52.2.0",
+      "publishedAt": "2026-09-23T00:55:54Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.53.0.0",
+      "publishedAt": "2026-09-23T12:53:29Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.54.1.0",
+      "publishedAt": "2026-09-23T18:57:13Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.54.1.1",
+      "publishedAt": "2026-09-24T05:58:09Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.56.1.0",
+      "publishedAt": "2026-09-24T14:58:17Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.56.2.0",
+      "publishedAt": "2026-09-24T17:25:49Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.57.0.0",
+      "publishedAt": "2026-09-24T23:55:26Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.57.1.0",
+      "publishedAt": "2026-09-25T16:17:01Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.58.0.0",
+      "publishedAt": "2026-09-25T20:48:38Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.58.1.0",
+      "publishedAt": "2026-09-25T22:37:13Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.0.0",
+      "publishedAt": "2026-09-26T23:00:35Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.59.2.0",
+      "publishedAt": "2026-09-28T15:46:43Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.59.3.0",
+      "publishedAt": "2026-09-28T17:20:12Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.5.0",
+      "publishedAt": "2026-09-28T22:51:36Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.8.0",
+      "publishedAt": "2026-09-28T23:04:12Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.10.0",
+      "publishedAt": "2026-09-28T23:32:25Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.59.11.0",
+      "publishedAt": "2026-09-29T00:18:59Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.13.0",
+      "publishedAt": "2026-09-29T02:31:53Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.17.0",
+      "publishedAt": "2026-09-29T04:30:47Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.18.0",
+      "publishedAt": "2026-09-29T05:02:06Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.59.20.0",
+      "publishedAt": "2026-09-29T13:10:59Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.5.0",
+      "publishedAt": "2026-09-29T14:27:12Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.6.0",
+      "publishedAt": "2026-09-29T15:26:36Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.8.0",
+      "publishedAt": "2026-09-29T18:00:46Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.10.0",
+      "publishedAt": "2026-09-29T18:41:54Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.11.0",
+      "publishedAt": "2026-09-30T05:34:28Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.12.0",
+      "publishedAt": "2026-09-30T15:32:13Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.13.0",
+      "publishedAt": "2026-09-30T16:04:47Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.15.0",
+      "publishedAt": "2026-09-30T17:29:54Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.16.0",
+      "publishedAt": "2026-09-30T19:33:31Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.17.0",
+      "publishedAt": "2026-09-30T20:49:26Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.20.0",
+      "publishedAt": "2026-09-30T23:42:53Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.21.0",
+      "publishedAt": "2026-10-01T00:05:33Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.22.0",
+      "publishedAt": "2026-10-01T00:25:09Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.23.0",
+      "publishedAt": "2026-10-01T00:47:17Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.25.0",
+      "publishedAt": "2026-10-01T01:24:17Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.26.0",
+      "publishedAt": "2026-10-01T16:47:18Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.27.0",
+      "publishedAt": "2026-10-01T20:25:20Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.28.0",
+      "publishedAt": "2026-10-02T14:06:06Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.30.0",
+      "publishedAt": "2026-10-02T14:45:45Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.31.0",
+      "publishedAt": "2026-10-02T15:58:16Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.32.0",
+      "publishedAt": "2026-10-02T22:41:00Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.35.0",
+      "publishedAt": "2026-10-03T14:58:31Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.36.0",
+      "publishedAt": "2026-10-03T18:53:57Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.37.0",
+      "publishedAt": "2026-10-03T19:42:51Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.38.0",
+      "publishedAt": "2026-10-04T01:23:20Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.39.0",
+      "publishedAt": "2026-10-04T01:42:40Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.40.0",
+      "publishedAt": "2026-10-04T02:17:23Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.41.0",
+      "publishedAt": "2026-10-04T02:53:42Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.44.0",
+      "publishedAt": "2026-10-04T05:29:15Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.45.0",
+      "publishedAt": "2026-10-04T06:07:12Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.46.0",
+      "publishedAt": "2026-10-04T15:01:34Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.47.0",
+      "publishedAt": "2026-10-04T15:35:42Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.48.0",
+      "publishedAt": "2026-10-04T16:07:00Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.49.0",
+      "publishedAt": "2026-10-05T00:11:09Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.52.0",
+      "publishedAt": "2026-10-05T01:07:01Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.53.0",
+      "publishedAt": "2026-10-05T02:19:49Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.57.0",
+      "publishedAt": "2026-10-05T04:08:06Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.58.0",
+      "publishedAt": "2026-10-05T04:58:34Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.59.0",
+      "publishedAt": "2026-10-05T05:29:17Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.60.0",
+      "publishedAt": "2026-10-05T05:46:32Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.61.0",
+      "publishedAt": "2026-10-05T06:15:03Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.62.0",
+      "publishedAt": "2026-10-05T06:50:36Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.63.0",
+      "publishedAt": "2026-10-05T08:00:56Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.64.0",
+      "publishedAt": "2026-10-05T08:22:38Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.65.0",
+      "publishedAt": "2026-10-05T14:12:43Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.67.0",
+      "publishedAt": "2026-10-05T16:49:58Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.68.0",
+      "publishedAt": "2026-10-05T17:36:04Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.69.0",
+      "publishedAt": "2026-10-05T18:19:40Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.71.0",
+      "publishedAt": "2026-10-05T21:35:48Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.72.0",
+      "publishedAt": "2026-10-05T22:00:10Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.73.0",
+      "publishedAt": "2026-10-05T22:28:54Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.74.0",
+      "publishedAt": "2026-10-06T01:06:12Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.75.0",
+      "publishedAt": "2026-10-06T01:45:56Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.76.0",
+      "publishedAt": "2026-10-06T02:04:41Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.77.0",
+      "publishedAt": "2026-10-06T02:33:26Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.79.0",
+      "publishedAt": "2026-10-06T04:35:39Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.80.0",
+      "publishedAt": "2026-10-06T05:11:27Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.81.0",
+      "publishedAt": "2026-10-06T05:36:03Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.82.0",
+      "publishedAt": "2026-10-06T05:57:09Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.83.0",
+      "publishedAt": "2026-10-06T07:44:27Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.84.0",
+      "publishedAt": "2026-10-06T08:07:13Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.85.0",
+      "publishedAt": "2026-10-06T09:11:43Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.86.0",
+      "publishedAt": "2026-10-06T10:08:26Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.89.0",
+      "publishedAt": "2026-10-06T13:00:09Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.90.0",
+      "publishedAt": "2026-10-06T13:20:43Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.91.0",
+      "publishedAt": "2026-10-06T13:44:21Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.92.0",
+      "publishedAt": "2026-10-06T14:16:08Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.93.0",
+      "publishedAt": "2026-10-06T15:12:32Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.94.0",
+      "publishedAt": "2026-10-06T15:43:59Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.96.0",
+      "publishedAt": "2026-10-06T19:09:23Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.98.0",
+      "publishedAt": "2026-10-06T23:56:10Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.99.0",
+      "publishedAt": "2026-10-07T00:33:52Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.100.0",
+      "publishedAt": "2026-10-07T01:06:56Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.102.0",
+      "publishedAt": "2026-10-07T03:01:31Z",
+      "migrationFile": true
+    },
+    {
+      "version": "0.60.103.0",
+      "publishedAt": "2026-10-07T19:49:41Z",
+      "migrationFile": false
+    },
+    {
+      "version": "0.60.104.0",
+      "publishedAt": "2026-10-07T20:19:08Z",
+      "migrationFile": false
+    }
+  ]
+}
