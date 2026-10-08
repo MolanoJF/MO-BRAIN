@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, statfs, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { OPERATIONS } from '../src/contracts/registry.ts';
 import { verifyRuntimePin as verifyPinRuntime, writePin, type CallOps } from '../src/contracts/pin.ts';
-import { captureCapability, type CapabilitySnapshot } from '../src/contracts/capability.ts';
+import { captureCapability, type CapabilityExec, type CapabilitySnapshot } from '../src/contracts/capability.ts';
 import { scrubOutput } from '../src/docker/host.ts';
 import type { RepoStatus } from '../src/ops/git.ts';
 import { appendEvent, openJournal, readJournal, type Journal } from '../src/upgrade/journal.ts';
@@ -622,7 +622,10 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       await deps.resume(ctx);
     }
     // The TO pin's capability. On a hold, gbrain-serve stays down on purpose, so
-    // do not wait out the settle loop for a process this run refused to start.
+    // this probe does not wait. It is a placeholder: resumeWriters recaptures
+    // capability-to.json with the settle loop once serve is up and appends a
+    // new capability event. Reconcile imports that later seq; overwriting this
+    // file alone would leave the dead snapshot as the imported row.
     await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
       waitForServe: !holdWriters,
     });
@@ -846,10 +849,10 @@ const CAPABILITY_SERVE_URL = process.env.CAPABILITY_SERVE_URL ?? 'http://gbrain-
  */
 async function captureCapabilityForRun(
   ctx: UpgradeContext, version: string, file: string,
-  opts: { waitForServe?: boolean } = {},
+  opts: { waitForServe?: boolean; exec?: CapabilityExec } = {},
 ): Promise<CapabilitySnapshot> {
-  const exec = (service: string, argv: string[]) =>
-    shCapture([...ctx.compose, 'exec', '-T', service, ...argv], 300_000);
+  const exec: CapabilityExec = opts.exec ?? ((service, argv) =>
+    shCapture([...ctx.compose, 'exec', '-T', service, ...argv], 300_000));
   let snap = await captureCapability({ serveBaseUrl: CAPABILITY_SERVE_URL, exec });
   // gbrain-serve may still be settling after a resume; retry so the snapshot
   // carries a real well-known reply rather than a null one. A hold leaves
@@ -1089,6 +1092,12 @@ export type ResumeWritersDeps = {
   journalRoot?: string;
   /** Injected by the unit test so it does not start Docker. */
   resume?: (services: readonly string[]) => Promise<void>;
+  /**
+   * Replaces compose exec for the post-resume capability recapture. The unit
+   * test injects it so the settle loop and the new journal event run without
+   * Docker. Absent on a host call means the real exec.
+   */
+  captureExec?: CapabilityExec;
   /** Ops RPC for a declined item's declineOp. No shell string. */
   applyOptOut?: (op: string, params: Record<string, string>) => Promise<void>;
   /**
@@ -1163,6 +1172,28 @@ function appliedOptOutKeys(events: ReadonlyArray<{ step: string; data?: unknown 
     if (typeof key === 'string' && key !== '') keys.add(key);
   }
   return keys;
+}
+
+function heldTargetVersion(events: ReadonlyArray<{ step: string; data?: unknown }>): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const data = recordData(events[i]!.data);
+    if (events[i]!.step === 'capability' && data?.file === 'capability-to.json' && typeof data.version === 'string') {
+      return data.version;
+    }
+  }
+  return process.env.GBRAIN_VERSION ?? '0.50.5.0';
+}
+
+/** Settle-loop recapture. Writes capability-to.json, then appends a new capability seq. */
+async function recaptureHeldCapability(
+  runId: string, journalRoot: string, version: string, exec?: CapabilityExec,
+): Promise<void> {
+  const ctx: UpgradeContext = {
+    ...hostContext(runId),
+    upgradeDir: join(journalRoot, runId),
+    journal: await openJournal(journalRoot, runId),
+  };
+  await captureCapabilityForRun(ctx, version, 'capability-to.json', exec ? { exec } : {});
 }
 
 function hostContext(runId: string): UpgradeContext {
@@ -1267,6 +1298,14 @@ export async function resumeWriters(
   const services = [...HELD_WRITER_SERVICES];
   if (deps.resume) await deps.resume(services);
   else await resumeAtCurrentPin(hostContext(runId), services);
+  // Writers, including gbrain-serve, are up. Recapture with the settle loop
+  // and a new seq: the hold-time capability-to.json has a null well-known,
+  // and reconcile will not re-import that seq if we only overwrite the file.
+  // A unit test injects resume and must also inject captureExec; otherwise
+  // this would start Docker. The host CLI injects neither.
+  if (deps.captureExec || !deps.resume) {
+    await recaptureHeldCapability(runId, journalRoot, heldTargetVersion(events), deps.captureExec);
+  }
   await appendEvent(await openJournal(journalRoot, runId), {
     step: 'completed',
     message: `resumed held writers for ${runId}`,

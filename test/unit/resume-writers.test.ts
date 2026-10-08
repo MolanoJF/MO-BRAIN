@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendEvent, openJournal, readJournal } from '../../src/upgrade/journal.ts';
@@ -103,6 +103,71 @@ describe('resumeWriters', () => {
     const steps = (await readJournal(root, 'run-hold')).map((e) => e.step);
     expect(steps).toContain('checklist_opt_out');
     expect(steps.at(-1)).toBe('completed');
+  });
+});
+
+describe('resumeWriters capability recapture', () => {
+  test('recaptures capability-to after the writers are up and appends a new capability event', async () => {
+    const root = await holdJournal({
+      key: 'auto-chronicle', blocksResume: true, state: 'acknowledged',
+    });
+    const journal = await openJournal(root, 'run-hold');
+    const dead = await appendEvent(journal, {
+      step: 'capability',
+      message: 'capability captured for 0.60.104.0',
+      data: { version: '0.60.104.0', file: 'capability-to.json' },
+    });
+    const snapPath = join(root, 'run-hold', 'capability-to.json');
+    await writeFile(snapPath, `${JSON.stringify({
+      gbrainVersion: '0.60.104.0', capturedAt: '2026-01-01T00:00:00.000Z',
+      tools: null, wellKnown: null, schemaPacks: null,
+    })}\n`);
+
+    const order: string[] = [];
+    let wellKnownProbes = 0;
+    await resumeWriters('run-hold', {
+      journalRoot: root,
+      resume: async () => { order.push('resume'); },
+      captureExec: async (_service, argv) => {
+        order.push('capture');
+        if (argv[0] === 'bun') {
+          wellKnownProbes += 1;
+          // First probe misses, so the existing settle loop must retry.
+          if (wellKnownProbes === 1) return { exitCode: 0, stdout: '' };
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              profiles: { starter: true },
+              adapters: [{ id: 'claude', label: 'Claude', connection: 'stdio', modes: ['starter'] }],
+            }),
+          };
+        }
+        if (argv.includes('--version')) return { exitCode: 0, stdout: 'gbrain 0.60.104.0\n' };
+        if (argv.includes('--tools-json')) return { exitCode: 0, stdout: '{}' };
+        return { exitCode: 0, stdout: 'Bundled packs:\n  gbrain-base\n' };
+      },
+    });
+
+    expect(order[0]).toBe('resume');
+    expect(order.indexOf('resume')).toBeLessThan(order.indexOf('capture'));
+    expect(wellKnownProbes).toBeGreaterThan(1);
+    const events = await readJournal(root, 'run-hold');
+    const caps = events.filter((e) => e.step === 'capability');
+    expect(caps.length).toBe(2);
+    expect(caps[1]!.seq).toBeGreaterThan(dead.seq);
+    expect(caps[1]!.data).toEqual({ version: '0.60.104.0', file: 'capability-to.json' });
+    expect(events.at(-1)?.step).toBe('completed');
+    const snap = JSON.parse(await Bun.file(snapPath).text()) as { wellKnown: { adapters: Array<{ id: string }> } | null };
+    expect(snap.wellKnown?.adapters.map((a) => a.id)).toEqual(['claude']);
+
+    order.length = 0;
+    await resumeWriters('run-hold', {
+      journalRoot: root,
+      resume: async () => { order.push('resume'); },
+      captureExec: async () => { order.push('capture'); return { exitCode: 0, stdout: '' }; },
+    });
+    expect(order).toEqual([]);
+    expect((await readJournal(root, 'run-hold')).filter((e) => e.step === 'capability')).toHaveLength(2);
   });
 });
 
