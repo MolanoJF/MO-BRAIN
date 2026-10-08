@@ -2,7 +2,7 @@ import { test, expect, describe } from 'bun:test';
 import type { RepoStatus } from '../../src/ops/git.ts';
 import {
   PreflightRefusal, SNAPSHOT_SLACK, UsageError,
-  parseArgs, preflight, type PreflightDeps, type UpgradeContext,
+  composeArgv, parseArgs, preflight, type PreflightDeps, type UpgradeContext,
 } from '../../scripts/upgrade.ts';
 
 function fakeCtx(over: Partial<UpgradeContext> = {}): UpgradeContext {
@@ -48,6 +48,25 @@ async function refusalCode(run: () => Promise<unknown>): Promise<string> {
   }
   throw new Error('expected preflight to refuse');
 }
+
+describe('composeArgv', () => {
+  const exists = (path: string) => path === '.env' || path === 'compose/docker-compose.dev.yml';
+
+  test('the default is the base file only', () => {
+    expect(composeArgv({}, exists)).toEqual([
+      'docker', 'compose', '--env-file', '.env', '-f', 'compose/docker-compose.yml',
+    ]);
+  });
+
+  test('MOBRAIN_COMPOSE_FILES appends host overrides and refuses a missing file', () => {
+    expect(composeArgv({ MOBRAIN_COMPOSE_FILES: 'compose/docker-compose.dev.yml' }, exists)).toEqual([
+      'docker', 'compose', '--env-file', '.env', '-f', 'compose/docker-compose.yml',
+      '-f', 'compose/docker-compose.dev.yml',
+    ]);
+    expect(() => composeArgv({ MOBRAIN_COMPOSE_FILES: 'compose/missing.yml' }, exists))
+      .toThrow('missing file');
+  });
+});
 
 describe('parseArgs', () => {
   test('plan requires an explicit target', () => {

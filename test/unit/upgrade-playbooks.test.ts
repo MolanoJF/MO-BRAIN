@@ -159,6 +159,18 @@ describe('playbooksFor', () => {
     expect(versionsOf(specs)).toEqual(frozenReleases.afterPin.map((row) => row.version));
   });
 
+  test('playbooksFor to 0.60.115.0 includes the nine file-absent releases after 0.60.104.0', () => {
+    const specs = playbooksFor('0.60.104.0', '0.60.115.0');
+    expect(versionsOf(specs)).toEqual([
+      '0.60.106.0', '0.60.107.0', '0.60.108.0', '0.60.110.0', '0.60.111.0',
+      '0.60.112.0', '0.60.113.0', '0.60.114.0', '0.60.115.0',
+    ]);
+    for (const spec of specs) {
+      expect('noPlaybookRequired' in spec && spec.noPlaybookRequired).toBe(true);
+      expect(spec.evidence).toContain('absent from the v0.60.115.0 tree');
+    }
+  });
+
   test('blocksResume is only on the files that require an ask-first hold', () => {
     const expected = new Set([
       '0.60.26.0', '0.60.36.0', '0.60.45.0', '0.60.57.0', '0.60.99.0', '0.60.102.0',

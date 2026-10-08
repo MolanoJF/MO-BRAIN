@@ -91,6 +91,30 @@ type FrozenRelease = {
 
 const AFTER_PIN: readonly FrozenRelease[] = frozenReleases.afterPin;
 
+/**
+ * GitHub releases after the 0.60.104.0 freeze, through the latest tag
+ * v0.60.115.0 (2026-10-08). Each migration file was requested at that tag and
+ * returned 404. 0.60.105.0 and 0.60.109.0 were not released.
+ */
+const AFTER_104: readonly { version: string; publishedAt: string }[] = [
+  { version: '0.60.106.0', publishedAt: '2026-10-08T01:59:11Z' },
+  { version: '0.60.107.0', publishedAt: '2026-10-08T05:37:50Z' },
+  { version: '0.60.108.0', publishedAt: '2026-10-08T06:42:37Z' },
+  { version: '0.60.110.0', publishedAt: '2026-10-08T12:18:04Z' },
+  { version: '0.60.111.0', publishedAt: '2026-10-08T16:39:04Z' },
+  { version: '0.60.112.0', publishedAt: '2026-10-08T17:21:52Z' },
+  { version: '0.60.113.0', publishedAt: '2026-10-08T17:45:02Z' },
+  { version: '0.60.114.0', publishedAt: '2026-10-08T18:47:07Z' },
+  { version: '0.60.115.0', publishedAt: '2026-10-08T19:07:20Z' },
+];
+
+function absentAfter104(row: { version: string; publishedAt: string }): string {
+  return (
+    `GitHub release v${row.version} of garrytan/gbrain, publishedAt ${row.publishedAt}. ` +
+    `skills/migrations/v${row.version}.md is absent from the v0.60.115.0 tree.`
+  );
+}
+
 function releaseEvidence(row: FrozenRelease): string {
   const file = `skills/migrations/v${row.version}.md`;
   const presence = row.migrationFile
@@ -143,6 +167,10 @@ export const RELEASED_VERSIONS: readonly ReleasedVersion[] = [
   ...AFTER_PIN.map((row) => ({
     version: row.version,
     evidence: releaseEvidence(row),
+  })),
+  ...AFTER_104.map((row) => ({
+    version: row.version,
+    evidence: absentAfter104(row),
   })),
 ];
 
@@ -204,6 +232,11 @@ export const PLAYBOOKS: readonly PlaybookSpec[] = [
     version: row.version,
     noPlaybookRequired: true,
     evidence: releaseEvidence(row),
+  })),
+  ...AFTER_104.map((row): PlaybookSpec => ({
+    version: row.version,
+    noPlaybookRequired: true,
+    evidence: absentAfter104(row),
   })),
   v0_51_0_0,
   v0_51_7_0,

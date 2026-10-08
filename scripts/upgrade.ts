@@ -39,11 +39,29 @@ const VERSION_RE = /^\d+\.\d+\.\d+\.\d+$/;
 
 // Same prefix as scripts/backup.ts:21-25. Project dir stays compose/ so
 // ./Caddyfile and ./initdb resolve.
-const COMPOSE = [
-  'docker', 'compose',
-  ...(existsSync('.env') ? ['--env-file', '.env'] as const : []),
-  '-f', 'compose/docker-compose.yml',
-];
+/** Host overrides (dev ports, local.yml) stay out of the default. Set
+ *  MOBRAIN_COMPOSE_FILES to a comma-separated list when the running project
+ *  was started with more than the base file. */
+export function composeArgv(
+  env: Record<string, string | undefined> = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string[] {
+  const extra = (env.MOBRAIN_COMPOSE_FILES ?? '')
+    .split(',')
+    .map((file) => file.trim())
+    .filter((file) => file.length > 0);
+  for (const file of extra) {
+    if (!exists(file)) throw new Error(`MOBRAIN_COMPOSE_FILES names a missing file: ${file}`);
+  }
+  return [
+    'docker', 'compose',
+    ...(exists('.env') ? ['--env-file', '.env'] : []),
+    '-f', 'compose/docker-compose.yml',
+    ...extra.flatMap((file) => ['-f', file]),
+  ];
+}
+
+const COMPOSE = composeArgv();
 
 export class UsageError extends Error {}
 
