@@ -212,10 +212,10 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 | [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
 | [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
 
-**Support policy in one line:** we support exactly the pinned gbrain (`0.60.104.0`) and harness (`2.1.274`);
-upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
-tag; the drift check runs on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and
-non-promises.
+**Support policy in one line:** the source pin is gbrain `0.60.104.0` and harness `2.1.274`. GHCR and
+`scripts/install.sh` still publish and default to `0.50.5.0` until the next release. Upgrades are host-driven
+and deterministic; we target a supported upgrade within **30 days** of an upstream tag; the drift check runs
+on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and non-promises.
 
 ---
 
@@ -259,7 +259,7 @@ non-promises.
 | | |
 |---|---|
 | Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
-| Branch | `main` at `578bbaa`, tracking `origin/main`. Slices 0–5 are merged. The post-1.0.0 work in the section above is on this same branch. |
+| Branch | `main`, tracking `origin/main`. PR #8 (`Support gbrain 0.60.104.0`) is merged. |
 | Upgrade record | [`docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`](docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md) and [`docs/gbrain-0.60.104.0-upgrade-run.md`](docs/gbrain-0.60.104.0-upgrade-run.md) |
 | Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
 | gbrain pin | `v0.60.104.0` (exact, never a moving tag) |

@@ -27,7 +27,7 @@ Either way the one command runs the preflight below, asks whether to enable the 
 The images are registry-qualified and exactly pinned:
 
 ```text
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:0.60.104.0
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:0.50.5.0
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-1.0.0}
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   # only with the runner
 ```
@@ -38,7 +38,7 @@ ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   #
 DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
 ```
 
-Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
+Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. The images above are what GHCR publishes today (`gbrain-base:0.50.5.0`). The source pin in `.env.example` is `0.60.104.0`; that tag is not published yet, and `scripts/install.sh` still defaults to `0.50.5.0`. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
 
 **On a Tailscale tailnet?** `INSTALL_MODE=tailscale bash scripts/install.sh` installs tailnet-only, behind `tailscale serve`, with a real certificate and without touching ports 80/443. See [`docs/runbooks/install.md`](docs/runbooks/install.md#tailscale-install-tailnet-only-real-certificate).
 
@@ -79,7 +79,7 @@ When on, the runner is fenced to one internal network with no route out and its 
 | Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 
-Exact semver, never `latest` or `latest-stable`. The contract suite runs on demand via `stack.yml` — including before every release, since `release.yml` calls it — against the pinned version or a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.
+Exact semver, never `latest` or `latest-stable`. The source pin above is what the upgrade lane builds. GHCR and `scripts/install.sh` still use `0.50.5.0` until the next release publishes `0.60.104.0`. The contract suite runs on demand via `stack.yml` — including before every release, since `release.yml` calls it — against the pinned version or a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.
 
 ## Built on gbrain
 

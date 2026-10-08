@@ -75,13 +75,13 @@ const checklist: ChecklistItemSpec[] = [
   {
     key: 'v60280-other-actions',
     prompt:
-      'Several brains on one host need `gbrain autopilot --install` per brain, default brain last, ' +
+      'Several brains on one host need autopilot `--install` per brain, default brain last, ' +
       'until `job.needs_reinstall` is null. This lane does not install autopilot. For a provider-key ' +
       'warning, either remove the environment variable and restart that process, or `gbrain config ' +
       'unset` the config key if the environment key is intended. If an inline harness token was ' +
       'exposed, follow the receipt\'s `if_exposed` command, then reconnect with `--fresh-token`.',
     why:
-      'Upstream step 3 names `gbrain autopilot --install`, which this product must not run in a ' +
+      'Upstream step 3 names autopilot `--install`, which this product must not run in a ' +
       'container, and an exposed-token reconnect. Both are operator actions on hosts and secrets ' +
       'UpgradeContext does not hold. No step installs autopilot or unsets a key.',
   },

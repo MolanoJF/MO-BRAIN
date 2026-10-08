@@ -1,7 +1,7 @@
 import { test, expect, describe, afterEach } from 'bun:test';
 import {
   bannerFor, stepStatus, stepTone, failedStep, rolledBack, runDuration, driftText,
-  pendingChecklist, planCommand, runCommand, stepLabel, UPGRADE_STEPS,
+  checklistNotice, declineDoesNotSettle, pendingChecklist, planCommand, runCommand, stepLabel, UPGRADE_STEPS,
   type StepStatus,
 } from '../../src/console/pages/Upgrades.tsx';
 import { api, upgradeApi } from '../../src/console/api.ts';
@@ -110,6 +110,37 @@ describe('the blocking checklist — honesty rule 8', () => {
 
   test('a run/ledger state is never mistaken for an undecided checklist item', () => {
     expect(pendingChecklist([item('x', 'awaiting_admin_decision')])).toEqual([]);
+  });
+
+  test('a writer hold names the host resume command and does not claim the checklist blocks nothing', () => {
+    const events = [{
+      id: '1', runId: 'run-hold', seq: 8, at: '2026-10-08T00:00:00Z', type: 'state_changed',
+      data: { to: 'gated_ok', writers: 'held', reason: 'blocks_resume' },
+    }];
+    const notice = checklistNotice('run-hold', events);
+    expect(notice).toContain('bun run scripts/upgrade.ts resume-writers --run run-hold');
+    expect(notice).toMatch(/writers are held/i);
+    expect(notice).toMatch(/decline does not settle/i);
+    expect(notice).not.toMatch(/block nothing else/i);
+  });
+
+  test('a pending item with no hold still blocks nothing else', () => {
+    expect(checklistNotice('run-1', [])).toMatch(/block nothing else/i);
+  });
+
+  test('decline does not settle a blocksResume item that has no opt-out', () => {
+    const events = [{
+      id: '1', runId: 'run-hold', seq: 7, at: '2026-10-08T00:00:00Z', type: 'playbooks_applied',
+      data: {
+        checklist: [
+          { key: 'v60260-typesafe', blocksResume: true, state: 'pending' },
+          { key: 'v60450-chronicle', blocksResume: true, declineOp: { op: 'config.set', params: { key: 'auto_chronicle', value: 'false' } } },
+        ],
+      },
+    }];
+    expect(declineDoesNotSettle(events, 'v60260-typesafe')).toBe(true);
+    expect(declineDoesNotSettle(events, 'v60450-chronicle')).toBe(false);
+    expect(declineDoesNotSettle(events, 'missing')).toBe(false);
   });
 });
 

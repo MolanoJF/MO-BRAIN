@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, test } from 'bun:test';
-import { scoreDoctorGate } from '../../scripts/upgrade.ts';
+import { composePsHasContainer, scoreDoctorGate, workerDownForGate } from '../../scripts/upgrade.ts';
 import type { DoctorBaseline } from '../../src/upgrade/types.ts';
 
 function report(checks: DoctorBaseline['checks']): DoctorBaseline {
@@ -25,6 +26,26 @@ describe('scoreDoctorGate', () => {
 
     const notHeld = scoreDoctorGate(before, after, { holdActive: false, workerDown: true });
     expect(notHeld.regressed.map((c) => c.name)).toEqual(['supervisor']);
+  });
+
+  test('a hold excuses supervisor only when the worker was observed stopped', () => {
+    expect(workerDownForGate(true, false)).toBe(true);
+    expect(workerDownForGate(true, true)).toBe(false);
+    expect(workerDownForGate(true, null)).toBe(false);
+    expect(workerDownForGate(false, false)).toBe(false);
+  });
+
+  test('compose ps -q is a running container only when a line is non-empty', () => {
+    expect(composePsHasContainer('abc123\n')).toBe(true);
+    expect(composePsHasContainer('\n')).toBe(false);
+    expect(composePsHasContainer('')).toBe(false);
+  });
+
+  test('the production gate probes gbrain-worker instead of assuming the hold stopped it', async () => {
+    const src = await readFile(new URL('../../scripts/upgrade.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/workerDown:\s*holdWriters/);
+    expect(src).toContain('workerDownForGate');
+    expect(src).toContain("'ps', '-q', '--status', 'running', 'gbrain-worker'");
   });
 
   test('any other previously-ok check that is not ok still fails the gate during a hold', () => {

@@ -119,6 +119,51 @@ export function pendingChecklist(items: ChecklistItemRow[]): ChecklistItemRow[] 
   return items.filter((i) => i.state === 'pending');
 }
 
+/** Printed by the host lane and named here because the console cannot start containers. */
+export const RESUME_WRITERS_COMMAND = 'bun run scripts/upgrade.ts resume-writers --run';
+
+export function writersHeld(events: UpgradeEventRow[]): boolean {
+  return events.some((e) => {
+    const data = e.data;
+    return !!data && typeof data === 'object' && (data as { writers?: string }).writers === 'held';
+  });
+}
+
+/**
+ * A pending checklist used to block nothing. A blocksResume hold leaves four
+ * writers down, and Acknowledge/Decline in this page do not run resume-writers.
+ */
+export function checklistNotice(runId: string, events: UpgradeEventRow[]): string {
+  if (!writersHeld(events)) {
+    return 'These persist until acknowledged or declined and block nothing else while they wait.';
+  }
+  return (
+    'Writers are held. agent-runner, scheduler, gbrain-worker, and gbrain-serve stay down until ' +
+    `you run \`${RESUME_WRITERS_COMMAND} ${runId}\` on the host. Acknowledge and Decline here do not ` +
+    'start them. Decline does not settle a hold when the item has no opt-out.'
+  );
+}
+
+type JournalChecklistItem = { key?: string; blocksResume?: boolean; declineOp?: unknown };
+
+function journalChecklist(events: UpgradeEventRow[]): JournalChecklistItem[] {
+  const out: JournalChecklistItem[] = [];
+  for (const event of events) {
+    const data = event.data as { checklist?: unknown } | null;
+    if (!data || !Array.isArray(data.checklist)) continue;
+    for (const raw of data.checklist) {
+      if (raw && typeof raw === 'object') out.push(raw as JournalChecklistItem);
+    }
+  }
+  return out;
+}
+
+/** Decline records the decision and still leaves writers down when there is no opt-out. */
+export function declineDoesNotSettle(events: UpgradeEventRow[], itemKey: string): boolean {
+  return journalChecklist(events).some((item) =>
+    item.key === itemKey && item.blocksResume === true && item.declineOp == null);
+}
+
 /** The exact host command this page names in place of a "start" button (D1). */
 export function planCommand(toVersion: string): string {
   return `bun run scripts/upgrade.ts plan --to ${toVersion}`;
@@ -248,7 +293,7 @@ export function Upgrades() {
         <Notice layout="stack">
           <h2 className="m-0 text-[length:var(--section-font)] font-medium">Awaiting your decision</h2>
           <p className="text-xs">
-            These persist until acknowledged or declined and block nothing else while they wait.
+            {checklistNotice(openRun.run.id, openRun.events)}
           </p>
           {/* `w-full` on the row, not on a wrapper around the whole list. The
               stack gives each child `fit-content`, which is the full width for a
@@ -266,6 +311,11 @@ export function Upgrades() {
                 <Button disabled={busy} onClick={decide(item.id, 'ack')}>Acknowledge</Button>
                 <Button disabled={busy} onClick={decide(item.id, 'decline')}>Decline</Button>
               </div>
+              {declineDoesNotSettle(openRun.events, item.itemKey) && (
+                <div>
+                  Decline records the decision and does not settle this hold. Writers stay down until it is acknowledged.
+                </div>
+              )}
             </div>
           ))}
         </Notice>

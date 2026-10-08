@@ -455,6 +455,17 @@ export type UpgradeReport = {
  * The exception does not apply when the worker is up, and it never excuses
  * any other previously-ok check.
  */
+/** A hold excuses supervisor ok→warn only when compose observed the worker stopped.
+ *  A running worker, or a probe that failed, is not that excuse. */
+export function workerDownForGate(holdWriters: boolean, workerRunning: boolean | null): boolean {
+  return holdWriters && workerRunning === false;
+}
+
+/** `compose ps -q` prints one container id per running match, and nothing when none are. */
+export function composePsHasContainer(stdout: string): boolean {
+  return stdout.split('\n').some((line) => line.trim().length > 0);
+}
+
 export function scoreDoctorGate(
   baseline: DoctorBaseline,
   after: DoctorBaseline,
@@ -466,6 +477,16 @@ export function scoreDoctorGate(
   const now = after.checks.find((c) => c.name === 'supervisor');
   if (was?.status !== 'ok' || now?.status !== 'warn') return parity;
   return { ...parity, regressed: parity.regressed.filter((c) => c.name !== 'supervisor') };
+}
+
+/** True when gbrain-worker is running, false when compose shows it stopped, null when the probe failed. */
+async function gbrainWorkerRunning(ctx: UpgradeContext): Promise<boolean | null> {
+  const r = await shCapture(
+    [...ctx.compose, 'ps', '-q', '--status', 'running', 'gbrain-worker'],
+    30_000,
+  );
+  if (r.exitCode !== 0) return null;
+  return composePsHasContainer(r.stdout);
 }
 
 /** The supervisor check reads a DB lock the worker takes after start. Wait
@@ -659,9 +680,10 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       waitForServe: !holdWriters,
     });
     const after = await deps.captureDoctorAfter(ctx);
+    const workerRunning = holdWriters ? await gbrainWorkerRunning(ctx) : false;
     const parity = scoreDoctorGate(pre.baseline, after, {
       holdActive: holdWriters,
-      workerDown: holdWriters,
+      workerDown: workerDownForGate(holdWriters, workerRunning),
     });
     await appendEvent(journal, {
       step: 'gate', message: 'doctor parity computed per check (D5)',

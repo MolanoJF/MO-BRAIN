@@ -6,10 +6,13 @@ Mobrain supports exactly one gbrain version per release:
 
 | | |
 |---|---|
-| **Supported gbrain version** | **`0.60.104.0`** (the pin in `.env` and the image build `ARG`) |
+| **Supported gbrain version** | **`0.60.104.0`** (the pin in `.env.example` and the image build `ARG`) |
+| **Published installer pin** | **`0.50.5.0`** until the next Mobrain release publishes `gbrain-base:0.60.104.0` |
 | **Supported harness version** (agent runner only) | **`2.1.274`** |
 
-"Supported" has a concrete meaning here. A version is supported when Mobrain's contract suite runs green against it (pinned-current), its deterministic upgrade playbook exists, and the images at its exact tag are the ones the installer pulls. Exact semver only — never a moving tag, never a range. A version that is not the supported pin is not supported, regardless of where upstream is.
+"Supported" has a concrete meaning here. A version is supported when Mobrain's contract suite runs green against it (pinned-current) and its deterministic upgrade playbook exists. Exact semver only — never a moving tag, never a range. A version that is not the supported pin is not supported, regardless of where upstream is.
+
+The published GHCR images and `scripts/install.sh`'s default are still `0.50.5.0`. A fresh install does not pull `0.60.104.0`; that tag is not on GHCR until the next release. An existing install reaches `0.60.104.0` through the host upgrade lane, which builds the image locally.
 
 ## How upgrades land
 
