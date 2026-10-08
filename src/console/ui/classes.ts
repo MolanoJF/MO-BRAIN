@@ -8,12 +8,14 @@
  * (`AppShell.tsx`) already follow. `ui/index.tsx` is a thin wrapper over what
  * is here and holds no styling decisions of its own.
  *
- * The specs are qm's, from `qm/plugins/admin/public/admin-components.css`.
- * qm writes them as semantic CSS rules because qm has no Tailwind; this repo
- * does, so the same computed values are assembled as utilities here instead of
- * as a second stylesheet. Utilities that reference a token by name
- * (`bg-surface`, `border-border`) resolve through the `@theme inline` bridge in
- * `styles/tokens.css`, so every one of them re-paints under `:root.dark`.
+ * The structure is qm's, from `qm/plugins/admin/public/admin-components.css`.
+ * qm writes it as semantic CSS rules because qm has no Tailwind; this repo
+ * does, so the same shapes are assembled as utilities here instead of as a
+ * second stylesheet. Utilities that reference a token by name (`bg-surface`,
+ * `min-h-[var(--control-height)]`) resolve through `styles/tokens.css`, so every
+ * one of them re-paints under `:root.dark`, and the values are the active
+ * theme's: MOLIOR by default, qm when its theme file is imported. The
+ * comments below quote qm's numbers because qm is where they were measured.
  *
  * Two rules this module keeps, and why:
  *
@@ -87,16 +89,25 @@ export function toneClass(tone: Tone): string {
  * var(--control-height)`, `padding: 6px 12px`, `1px solid var(--border)`,
  * `border-radius: var(--control-radius)`, `13px/500`, `line-height: 18px`.
  *
- * `--spacing` is 4px, so `px-3 py-1.5` is exactly qm's `6px 12px`. Colours are
- * deliberately absent — see rule 2 in the module comment. `inline-flex` and the
- * `gap-2` (qm's `--control-gap`) are the one addition: qm's admin buttons are
- * label-only, and an icon beside a label needs a row box to sit in.
+ * Height, radius and font size are tokens, so MOLIOR's 44px control reads the
+ * same class qm's 32px one does. The horizontal padding is `px-4` because the
+ * brand's field spec uses 16px and a button beside a field should share it.
+ * The transition names its properties, and does not use the bare `transition`
+ * utility: that default includes `outline-color` and `box-shadow`, so a focus
+ * ring would fade in from the text colour instead of appearing at once. Its
+ * duration and easing are tokens too: qm sets the duration to zero, so its
+ * controls still do not animate.
+ *
+ * Colours are deliberately absent — see rule 2 in the module comment. `inline-flex`
+ * and the `gap-2` (qm's `--control-gap`) are the one addition: qm's admin buttons
+ * are label-only, and an icon beside a label needs a row box to sit in.
  */
 const BUTTON_CHROME =
   'inline-flex items-center gap-2 ' +
-  'min-h-[var(--control-height)] px-3 py-1.5 ' +
+  'min-h-[var(--control-height)] px-4 py-1.5 ' +
   'rounded-[var(--control-radius)] border shadow-none ' +
   'text-[length:var(--control-font)] font-medium leading-[18px] ' +
+  'transition-[color,background-color,border-color,scale] duration-[var(--duration)] ease-[var(--ease)] ' +
   'disabled:cursor-not-allowed';
 
 /**
@@ -107,7 +118,12 @@ const BUTTON_CHROME =
 const BUTTON_VARIANT: Record<ButtonVariant, string> = {
   // qm's default button: the surface colour, not the page colour, so a button
   // on a card still reads as a control rather than as part of the card.
-  secondary: 'bg-surface text-text border-border enabled:hover:bg-subtle disabled:opacity-45',
+  // The hover lifts it: the border goes to ink and the button grows by
+  // `--hover-scale`, which is 1.01 in MOLIOR and 1 in qm.
+  secondary:
+    'bg-surface text-text border-border ' +
+    'enabled:hover:bg-subtle enabled:hover:border-text enabled:hover:scale-[var(--hover-scale)] ' +
+    'disabled:opacity-45',
 
   // `button.primary` (`admin-components.css:66-78`). Its disabled state is the
   // one qm overrides away from the shared `opacity: 0.45`: a 45%-faded solid
@@ -148,8 +164,10 @@ export function buttonClass(variant: ButtonVariant, extra?: string, layout: Butt
 }
 
 /**
- * A settings-nav row: full width, left-aligned, borderless, and quiet until it
- * is the current one.
+ * A settings-nav row: full width, left-aligned, and quiet until it is the
+ * current one. The only border is a 2px bar on the left edge: the accent when
+ * the row is current, transparent otherwise. The bar keeps its width in both
+ * states, so the label does not shift when the selection moves.
  *
  * This is `.nav-item` from `styles.css`, ported class for class — it is the
  * last shape in the console that `buttonClass` genuinely cannot express.
@@ -168,11 +186,11 @@ export function buttonClass(variant: ButtonVariant, extra?: string, layout: Butt
  */
 export function navItemClass(active = false): string {
   return (
-    'block w-full px-2 py-1.5 text-left rounded-[4px] ' +
+    'block w-full px-2 py-1.5 text-left rounded-[var(--control-radius)] border-l-2 ' +
     'focus-visible:outline-offset-[-2px] ' +
     (active
-      ? 'bg-surface text-cta'
-      : 'bg-transparent text-text enabled:hover:bg-surface')
+      ? 'bg-selected-surface border-accent text-text'
+      : 'bg-transparent border-transparent text-text enabled:hover:bg-surface')
   );
 }
 
@@ -186,18 +204,20 @@ export function navItemClass(active = false): string {
 export type LinkSurface = 'page' | 'notice';
 
 /**
- * `page` is the ordinary case: CTA-coloured, underlined on hover.
+ * `page` is the ordinary case: CTA-coloured and underlined all the time. In
+ * MOLIOR the CTA is the text colour, so a link there would otherwise be plain
+ * text; the underline is what makes it a link without relying on colour.
  *
  * `notice` exists because `text-cta` is NOT safe on every surface. Inside a
- * warning `Notice` the background is `--warn-surface`, which in dark mode is an
- * olive fill, and `--cta` there is a dark navy that all but disappears against
- * it. So a link on that surface inherits the notice's own copy colour
- * (`--warn-text`, which the notice already guarantees is legible) and carries a
- * permanent underline instead — the one affordance that survives both themes
- * without depending on a colour pairing nobody checked.
+ * warning `Notice` the background is `--warn-surface`, and in some themes the
+ * CTA colour all but disappears against it (qm's dark navy on its olive dark
+ * fill is the case that was measured). So a link on that surface inherits the
+ * notice's own copy colour (`--warn-text`, which the notice already guarantees
+ * is legible) and carries a permanent underline — the one affordance that
+ * survives every theme without depending on a colour pairing nobody checked.
  */
 const LINK_SURFACE: Record<LinkSurface, string> = {
-  page: 'text-cta hover:underline',
+  page: 'text-cta underline',
   notice: 'text-current underline',
 };
 
@@ -209,7 +229,8 @@ export function linkClass(surface: LinkSurface = 'page', extra?: string): string
 /**
  * qm's badge (`admin-components.css:213-224`): a pill whose fill and border are
  * both mixed out of its own `color`, so a tone only ever has to set one
- * property and the fill can never drift out of step with the text.
+ * property and the fill can never drift out of step with the text. The pill is
+ * `--radius-pill`, so it is a pill in qm and a 2px square in MOLIOR.
  *
  * Knowing deviation: `bg-current/7` and `border-current/14` mix in oklab, where
  * qm's `color-mix(in srgb, currentColor 7%, transparent)` mixes in sRGB. At 7%
@@ -219,7 +240,7 @@ export function linkClass(surface: LinkSurface = 'page', extra?: string): string
  */
 export function badgeClass(tone: Tone): string {
   return (
-    'inline-flex items-center px-[9px] py-[3px] rounded-full border ' +
+    'inline-flex items-center px-[9px] py-[3px] rounded-[var(--radius-pill)] border ' +
     'text-xs font-normal leading-[1.4] bg-current/7 border-current/14 ' +
     toneClass(tone)
   );
@@ -230,17 +251,24 @@ export function badgeClass(tone: Tone): string {
  * 10px`, `13px/400`, the same border, radius and surface as a button, and
  * `:disabled` dropping to the subtle background with muted text.
  *
+ * MOLIOR's field is the page colour rather than the card's, with 16px across and
+ * the shared control height. Its focus is the border turning ink, with no ring:
+ * that is the brand's field spec, and the reason styles.css switches the global
+ * focus ring off for fields.
+ *
  * `invalid` swaps the border to `--danger` rather than adding a second border
- * colour, per rule 2. Callers pair it with `aria-invalid`, which is what
- * actually tells a screen reader; the colour alone never is.
+ * colour, per rule 2. An invalid field keeps the danger border when focused, so
+ * the error does not turn into a black border the moment someone clicks in.
+ * Callers pair it with `aria-invalid`, which is what actually tells a screen
+ * reader; the colour alone never is.
  */
 export function fieldClass(invalid = false): string {
   return (
-    'w-full min-h-[var(--control-height)] px-2.5 py-1.5 ' +
-    'rounded-[var(--control-radius)] border shadow-none bg-surface text-text ' +
+    'w-full min-h-[var(--control-height)] px-4 py-1.5 ' +
+    'rounded-[var(--control-radius)] border shadow-none bg-bg text-text ' +
     'text-[length:var(--control-font)] font-normal leading-[18px] ' +
     'disabled:bg-subtle disabled:text-muted disabled:cursor-not-allowed ' +
-    (invalid ? 'border-danger' : 'border-border')
+    (invalid ? 'border-danger' : 'border-border focus:border-text')
   );
 }
 
@@ -302,11 +330,17 @@ export type ColumnAlign = 'left' | 'right' | 'center';
 /**
  * qm styles bare `th`/`td` globally; this repo cannot, so the same declarations
  * ride as descendant variants on the table itself.
+ *
+ * Header cells carry the eyebrow's three label declarations (`eyebrowClass`), so
+ * in MOLIOR a column header is a small mono capital and in qm it is the plain
+ * muted text it always was. Both come from the same tokens.
  */
 const TABLE_CHROME =
   'w-full border-collapse text-[length:var(--control-font)] ' +
   '[&_th]:px-3 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-xs [&_th]:font-normal ' +
   '[&_th]:leading-[1.4] [&_th]:text-muted [&_th]:border-b [&_th]:border-border ' +
+  '[&_th]:[font-family:var(--label-font)] [&_th]:[text-transform:var(--label-transform)] ' +
+  '[&_th]:[letter-spacing:var(--label-tracking)] ' +
   '[&_td]:p-3 [&_td]:leading-[1.4] [&_td]:border-b [&_td]:border-border';
 
 /**
@@ -374,6 +408,58 @@ export function tableClass(align?: readonly ColumnAlign[]): string {
     .map((a, i) => (a === 'right' ? COLUMN_RIGHT[i]! : a === 'center' ? COLUMN_CENTER[i]! : ''))
     .filter((s) => s.length > 0);
   return overrides.length === 0 ? TABLE_CHROME : `${TABLE_CHROME} ${overrides.join(' ')}`;
+}
+
+/* ------------------------------------------------- Headings, labels, progress */
+
+/**
+ * The page's `h1`. Its face and size are tokens, so MOLIOR's light 30px display
+ * heading and qm's semibold 20px come from this one string. No colour: the
+ * heading inherits the page's, as the `h1`s it replaced did.
+ */
+export function pageTitleClass(): string {
+  return 'm-0 text-[length:var(--heading-size)] [font-weight:var(--heading-weight)] leading-[1.15] tracking-[-0.02em]';
+}
+
+/**
+ * A heading inside a page or a notice (`h2`). It is sized on the Tailwind scale
+ * and weighted by the same token as the page title. No colour, so a heading
+ * inside a danger notice keeps the notice's colour.
+ */
+export function sectionTitleClass(): string {
+  return 'm-0 text-lg [font-weight:var(--heading-weight)] leading-[1.4]';
+}
+
+/**
+ * A large figure, for a metric. Tabular figures so a column of them lines up.
+ * No colour, for the same reason as the titles.
+ */
+export function metricClass(): string {
+  return 'text-[length:var(--metric-size)] [font-weight:var(--heading-weight)] leading-none tracking-[-0.02em] tabular-nums';
+}
+
+/**
+ * The uppercase micro-label: a small, muted line that names a thing. In MOLIOR
+ * it is mono and capitalised with wide tracking; in qm it is the body face in
+ * plain muted text. Table headers use the same three label declarations (see
+ * `TABLE_CHROME`), so a label and a column header are one style by construction.
+ */
+export function eyebrowClass(): string {
+  return (
+    'text-xs font-normal leading-[1.4] text-muted ' +
+    '[font-family:var(--label-font)] [text-transform:var(--label-transform)] ' +
+    '[letter-spacing:var(--label-tracking)]'
+  );
+}
+
+/** The track a progress bar sits in: a 2px hairline, not a bar. */
+export function progressTrackClass(): string {
+  return 'block h-[2px] w-full overflow-hidden bg-border';
+}
+
+/** The filled part of a progress track, in the accent. */
+export function progressFillClass(): string {
+  return 'block h-full bg-accent';
 }
 
 /* ----------------------------------------------------- The two-click confirm */

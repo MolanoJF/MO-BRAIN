@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
-import { Button, Icon, Input, Notice } from '../ui/index.tsx';
+import { Button, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
 
 /**
  * A sign-in refusal an operator can act on.
@@ -82,7 +82,7 @@ export function SignIn({ onDone }: { onDone: () => void }) {
   return (
     <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
       <form onSubmit={submit} className="space-y-4">
-        <h1 className="text-xl font-semibold">Sign in</h1>
+        <PageTitle>Sign in</PageTitle>
         <p className="text-sm text-muted">
           This brain is already set up. Sign in with your own account to reach the console.
         </p>

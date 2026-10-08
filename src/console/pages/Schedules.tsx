@@ -8,7 +8,7 @@ import { SCHEDULER_COMMANDS } from '../../scheduler/commands.ts';
 import { snapToSlot, footprintsCollide } from '../../scheduler/stagger.ts';
 import { MODEL_PRICING, PRICED_AT, rateFor } from '../../gateway/pricing.ts';
 import {
-  Badge, Button, Card, ConfirmButton, Empty, Field, Input, Notice, Select, Textarea, Toolbar,
+  Badge, Button, Card, ConfirmButton, Empty, Field, Input, Notice, PageTitle, Select, Textarea, Toolbar,
   toneClass, type Tone,
 } from '../ui/index.tsx';
 
@@ -1021,7 +1021,7 @@ export function Schedules() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Schedules</h1>
+        <PageTitle>Schedules</PageTitle>
         <p className="text-sm text-muted">
           Every schedule runs as a Connection, never as a Member. The Connection decides the
           Source that is synced, where the report lands, and whose name is on the commit.

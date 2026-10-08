@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { CircleAlert, Monitor, Moon, RefreshCw, Sun, Trash2 } from 'lucide-react';
 import {
-  Badge, Button, Card, ConfirmButton, Dialog, Empty, Field, Icon, IconButton,
-  Input, Link, NavItem, Notice, Select, Spinner, Table, TableWrap, Textarea, Toolbar,
-  type ButtonVariant, type Tone,
+  Badge, Button, Card, ConfirmButton, Dialog, Empty, Eyebrow, Field, Icon, IconButton,
+  Input, Link, Metric, NavItem, Notice, PageTitle, ProgressBar, Select, SectionTitle, Spinner,
+  Table, TableWrap, Textarea, Toolbar, type ButtonVariant, type Tone,
 } from '../ui/index.tsx';
 import { setTheme, storedTheme, type ThemeChoice } from '../theme.ts';
 
@@ -21,9 +21,9 @@ import { setTheme, storedTheme, type ThemeChoice } from '../theme.ts';
  */
 
 /**
- * qm's `DESIGN_TOKENS` (`admin/ui/design.ts:11-23`), verbatim, including the
- * descriptions — they are the vocabulary, and paraphrasing them is how two
- * people end up using `--subtle` for two different jobs.
+ * qm's `DESIGN_TOKENS` (`admin/ui/design.ts:11-23`), with the roles MOLIOR added
+ * (accent, selected surface, focus). The descriptions are the vocabulary, and
+ * paraphrasing them is how two people end up using `--subtle` for two jobs.
  */
 const DESIGN_TOKENS: ReadonlyArray<readonly [string, string]> = [
   ['--bg', 'Page behind every surface'],
@@ -32,7 +32,11 @@ const DESIGN_TOKENS: ReadonlyArray<readonly [string, string]> = [
   ['--border', 'Every hairline and divider'],
   ['--text', 'Primary copy'],
   ['--muted', 'Secondary copy and hints'],
-  ['--cta', 'Primary actions and selected controls'],
+  ['--cta', 'Primary actions'],
+  ['--accent', 'Selection, progress and the spinner. Never a button fill'],
+  ['--accent-foreground', 'Text sitting on the accent'],
+  ['--selected-surface', 'The active row or card'],
+  ['--focus', 'The keyboard focus ring'],
   ['--ok', 'Confirmed and healthy'],
   ['--warn', 'Needs attention'],
   ['--danger', 'Destructive and failed'],
@@ -92,7 +96,7 @@ export function DesignSystem() {
   return (
     <div className="mx-auto w-full max-w-[var(--maxw)] p-6">
       <header className="mb-[var(--section-gap)]">
-        <h1 className="m-0 text-[22px] font-medium leading-[1.4] tracking-[-0.025em] text-text">Design system</h1>
+        <PageTitle>Design system</PageTitle>
         <p className="mt-1 max-w-[70ch] text-[length:var(--control-font)] leading-[1.5] text-muted">
           Every primitive, variant and tone, rendered from the exported components in{' '}
           <code className="font-mono">src/console/ui</code>. Switch themes here and confirm each specimen still
@@ -137,7 +141,28 @@ export function DesignSystem() {
         </TableWrap>
       </Section>
 
-      <Section title="Buttons" blurb="One 32px control height, one radius, one 13px label. Primary is the only filled variant; destructive actions are red text on the standard chrome, never a red fill.">
+      <Section title="Type" blurb="The headings, labels and figures the pages are built from. Each one reads a token, so a theme changes them together.">
+        <Spec label="PageTitle" note="h1, one per page; --heading-size and --heading-weight">
+          <PageTitle>Runs</PageTitle>
+        </Spec>
+        <Spec label="SectionTitle" note="h2 inside a page or a notice; it keeps the colour it sits in">
+          <SectionTitle>Rollups</SectionTitle>
+        </Spec>
+        <Spec label="Eyebrow" note="the uppercase label; table headers are set in the same style">
+          <Eyebrow>Per member</Eyebrow>
+        </Spec>
+        <Spec label="Metric" note="a large figure, with tabular numerals so a column lines up">
+          <Metric>$12.40</Metric>
+          <Metric>1,284</Metric>
+        </Spec>
+        <Spec label="ProgressBar" note="a 2px hairline track with the accent fill; the value is announced">
+          <div className="w-64">
+            <ProgressBar value={60} label="Example progress" />
+          </div>
+        </Spec>
+      </Section>
+
+      <Section title="Buttons" blurb="One control height, one radius and one label size, all set by the theme. Primary is the only filled variant; destructive actions are red text on the standard chrome, never a red fill.">
         <Spec label="Variants" note="primary / secondary / danger / link">
           {VARIANTS.map((v) => (
             <Button key={v} variant={v}>{v}</Button>
@@ -186,7 +211,7 @@ export function DesignSystem() {
         </Spec>
       </Section>
 
-      <Section title="Fields" blurb="Inputs share the button's height, border, radius and surface, so a control row lines up whatever it is made of. Invalid sets the border and aria-invalid from one prop.">
+      <Section title="Fields" blurb="Inputs share the button's height, border and radius, so a control row lines up whatever it is made of. Focus turns the border ink; invalid sets the border and aria-invalid from one prop.">
         <Spec label="Input">
           <Field label="Source name" hint="Shown in the switcher." id="ds-name">
             <Input id="ds-name" defaultValue="my-brain" />
@@ -215,7 +240,7 @@ export function DesignSystem() {
         </Spec>
       </Section>
 
-      <Section title="Cards, notices and empties" blurb="A card is a surface with a hairline and a 24px vertical rhythm. A notice is the standing warning those 21 border-warning call sites are really made of.">
+      <Section title="Cards, notices and empties" blurb="A card is a surface with a hairline and 24px of inset. A notice is the standing warning those 21 border-warning call sites are really made of.">
         <Spec label="Card">
           <Card
             title="Schedule"
@@ -268,12 +293,12 @@ export function DesignSystem() {
             ))}
           </nav>
         </Spec>
-        <Spec label="Link" note='surface="page" is CTA-coloured and underlines on hover'>
+        <Spec label="Link" note='surface="page" is CTA-coloured and always underlined'>
           <Link href="#" onClick={(e) => e.preventDefault()}>Open Schedules to acknowledge →</Link>
         </Spec>
         <Spec
           label={'Link surface="notice"'}
-          note="--cta is a dark navy that all but disappears on the dark theme's olive --warn-surface, so a link there inherits the notice's own copy colour and keeps a permanent underline"
+          note="In some themes --cta loses contrast on --warn-surface, so a link there inherits the notice's own copy colour and keeps a permanent underline"
         >
           <Notice layout="stack" className="w-full">
             <p>Two links on the same fill. Switch to dark above and compare them.</p>
@@ -287,7 +312,7 @@ export function DesignSystem() {
         </Spec>
       </Section>
 
-      <Section title="Tables" blurb="12px muted headers, 13px cells, hairline rows, and a wrapper that scrolls sideways without stealing the browser's back gesture.">
+      <Section title="Tables" blurb="Eyebrow headers, control-size cells, hairline rows, and a wrapper that scrolls sideways without stealing the browser's back gesture.">
         <TableWrap>
           <Table>
             <thead>

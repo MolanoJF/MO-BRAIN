@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
-import { Button, Icon, Input, Notice } from '../ui/index.tsx';
+import { Button, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
 
 /**
  * The fresh-install path, and ONLY that. D1: this form used to be the whole of
@@ -72,7 +72,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
   if (googleSession) {
     return (
       <form onSubmit={submitForSession} className="mx-auto mt-16 max-w-md space-y-4 p-6">
-        <h1 className="text-xl font-semibold">Name this brain&apos;s organization</h1>
+        <PageTitle>Name this brain&apos;s organization</PageTitle>
         <p className="text-sm text-muted">
           Signed in as {googleSession.email}. This name is shown to everyone you invite later.
         </p>
@@ -94,7 +94,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
   return (
     <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
       <form onSubmit={submit} className="space-y-4">
-        <h1 className="text-xl font-semibold">Create your account</h1>
+        <PageTitle>Create your account</PageTitle>
         <p className="text-sm text-muted">
           This sets up your own private brain. You can turn it into a company brain later in Settings.
         </p>

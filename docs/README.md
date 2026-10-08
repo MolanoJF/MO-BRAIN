@@ -11,6 +11,7 @@ Operator procedure and the version promise. History is in [`archive/`](archive/)
 | [Scheduler](runbooks/scheduler.md) | Pause, diagnose, alerts |
 | [Break-glass](runbooks/break-glass.md) | Operate when the console is down |
 | [CI](runbooks/ci.md) | What runs when, and the Actions budget |
+| [Design system](runbooks/design-system.md) | Where the console's look is set, adding a theme, fonts |
 | [Skill catalog sync](runbooks/skill-catalog-sync.md) | Curate and ship the catalog |
 | [Support policy](support-policy.md) | The supported gbrain pin, and what is not promised |
 

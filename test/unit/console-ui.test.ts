@@ -2,8 +2,9 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, fieldClass, linkClass,
-  navItemClass, noticeClass, tableClass, toneClass, TABLE_MAX_COLUMNS,
+  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, eyebrowClass, fieldClass, linkClass,
+  metricClass, navItemClass, noticeClass, pageTitleClass, progressFillClass, progressTrackClass,
+  sectionTitleClass, tableClass, toneClass, TABLE_MAX_COLUMNS,
   type ButtonLayout, type ButtonVariant, type ColumnAlign, type LinkSurface,
   type NoticeLayout, type Tone,
 } from '../../src/console/ui/classes.ts';
@@ -24,6 +25,10 @@ const VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'danger', 'l
 const LAYOUTS: readonly ButtonLayout[] = ['center', 'between', 'start'];
 const SURFACES: readonly LinkSurface[] = ['page', 'notice'];
 const NOTICE_LAYOUTS: readonly NoticeLayout[] = ['row', 'stack'];
+
+/** The class names in a string that are not scoped to a state. Variants
+ *  (`hover:`, `focus:`, `enabled:`) never conflict with the bare utility. */
+const bare = (cls: string): string[] => cls.split(/\s+/).filter((t) => t.length > 0 && !t.includes(':'));
 
 describe('toneClass: the mapping that replaces three copies of TONE_CLASS', () => {
   test('every tone gets a class, and no two tones share one', () => {
@@ -95,6 +100,33 @@ describe('buttonClass: one control height, one filled variant', () => {
     expect(buttonClass('secondary')).toContain('disabled:opacity-45');
   });
 
+  test('secondary lifts on hover: the border goes to ink and the button grows by --hover-scale', () => {
+    // The brand's hover. Both halves are enabled-scoped, so a disabled button
+    // does not lift and read as clickable.
+    expect(buttonClass('secondary')).toContain('enabled:hover:border-text');
+    expect(buttonClass('secondary')).toContain('enabled:hover:scale-[var(--hover-scale)]');
+    expect(buttonClass('primary')).not.toContain('scale-');
+  });
+
+  test('every filled or outlined variant moves on the brand easing and duration', () => {
+    // One easing and one duration for every control, so a row of buttons
+    // settles together. Both are tokens: qm sets the duration to zero.
+    for (const v of VARIANTS.filter((x) => x !== 'link')) {
+      expect(buttonClass(v)).toContain('ease-[var(--ease)]');
+      expect(buttonClass(v)).toContain('duration-[var(--duration)]');
+    }
+  });
+
+  test('the transition names its properties, so a focus ring never fades in', () => {
+    // The bare `transition` utility animates outline-color and box-shadow too. A
+    // focus ring that faded in from the text colour would read as a black ring
+    // for the first 280ms, and the ring is meant to be yellow at once.
+    for (const v of VARIANTS.filter((x) => x !== 'link')) {
+      expect(bare(buttonClass(v))).not.toContain('transition');
+      expect(buttonClass(v)).toContain('transition-[color,background-color,border-color,scale]');
+    }
+  });
+
   test('extra classes are appended, not substituted', () => {
     const cls = buttonClass('primary', 'w-full');
     expect(cls).toContain('w-full');
@@ -139,16 +171,33 @@ describe('navItemClass: the shape buttonClass genuinely cannot take', () => {
       expect(cls).toContain('w-full');
       expect(cls).toContain('text-left');
       expect(cls).not.toContain('justify-center');
-      // Borderless: `.nav-item` drew no border, and a bordered rail row reads
-      // as a stack of buttons rather than as a list.
-      expect(cls.split(/\s+/).filter((t) => /^border/.test(t))).toEqual([]);
+      // No box around the row: a bordered rail row reads as a stack of buttons
+      // rather than as a list. The one border is the 2px bar on the left edge,
+      // and nothing else may be drawn.
+      const borders = bare(cls).filter((t) => t.startsWith('border'));
+      expect(borders).toContain('border-l-2');
+      expect(borders.filter((t) => !['border-l-2', 'border-accent', 'border-transparent'].includes(t))).toEqual([]);
     }
   });
 
-  test('active is the surface/CTA pair `.nav-item.active` painted, and inactive is neither', () => {
-    expect(navItemClass(true)).toContain('bg-surface');
-    expect(navItemClass(true)).toContain('text-cta');
-    expect(navItemClass(false)).not.toContain('text-cta');
+  test('active is the selected surface with the accent bar, and inactive is neither', () => {
+    expect(navItemClass(true)).toContain('bg-selected-surface');
+    expect(navItemClass(true)).toContain('border-accent');
+    expect(navItemClass(true)).toContain('text-text');
+    expect(navItemClass(false)).not.toContain('bg-selected-surface');
+    expect(navItemClass(false)).not.toContain('border-accent');
+  });
+
+  test('the bar is the same width in both states, so the label does not move', () => {
+    // A bar that appeared only on the current row would push its label two
+    // pixels right every time the selection changed.
+    expect(bare(navItemClass(true))).toContain('border-l-2');
+    expect(bare(navItemClass(false))).toContain('border-l-2');
+    expect(bare(navItemClass(false))).toContain('border-transparent');
+  });
+
+  test('the corner is the control radius, not a pixel literal', () => {
+    expect(navItemClass(false)).toContain('rounded-[var(--control-radius)]');
   });
 
   test('active and inactive each set exactly one background and one text colour', () => {
@@ -185,9 +234,11 @@ describe('linkClass: an anchor is not a button, and text-cta is not safe everywh
     for (const s of SURFACES) expect(linkClass(s)).not.toContain('enabled:');
   });
 
-  test('a page link is CTA-coloured and underlines on hover', () => {
+  test('a page link is CTA-coloured and underlined all the time', () => {
+    // In MOLIOR the CTA is the text colour, so on a page a link is recognisable
+    // only by its underline. That underline cannot wait for a hover.
     expect(linkClass('page')).toContain('text-cta');
-    expect(linkClass('page')).toContain('hover:underline');
+    expect(bare(linkClass('page'))).toContain('underline');
   });
 
   test('a link on a notice never paints itself text-cta', () => {
@@ -335,10 +386,13 @@ describe('the two-click confirm: the first press never deletes anything', () => 
 });
 
 describe('badgeClass: the fill is mixed out of the tone, so the two cannot disagree', () => {
-  test('every tone keeps the pill shape and derives its fill from currentColor', () => {
+  test('every tone takes its corner from the pill token and derives its fill from currentColor', () => {
+    // The corner is a token so the same badge is a pill in qm and a 2px square
+    // in MOLIOR. A literal `rounded-full` would stay a pill under both.
     for (const t of TONES) {
       const cls = badgeClass(t);
-      expect(cls).toContain('rounded-full');
+      expect(cls).toContain('rounded-[var(--radius-pill)]');
+      expect(cls).not.toContain('rounded-full');
       expect(cls).toContain('bg-current/7');
       expect(cls).toContain('border-current/14');
       expect(cls).toContain(toneClass(t));
@@ -367,6 +421,72 @@ describe('fieldClass: invalid moves the border, and only the border', () => {
   test('a field shares the button control height, so a control row lines up', () => {
     expect(fieldClass()).toContain('min-h-[var(--control-height)]');
     expect(buttonClass('secondary')).toContain('min-h-[var(--control-height)]');
+  });
+
+  test('focus turns a valid field\'s border ink, and never adds a ring', () => {
+    // The brand's field spec: the border carries the focus signal. styles.css
+    // switches the global ring off for fields, so this is the only indication.
+    expect(fieldClass()).toContain('focus:border-text');
+    expect(fieldClass()).not.toContain('focus:outline');
+  });
+
+  test('an invalid field keeps its danger border when it is focused', () => {
+    // Otherwise the error turns into a black border the moment someone clicks in
+    // to fix it, and the field looks valid while it is still wrong.
+    expect(fieldClass(true)).not.toContain('focus:border-text');
+    expect(fieldClass(true)).toContain('border-danger');
+  });
+
+  test('a field is the page colour, so it reads as an inset against a card', () => {
+    expect(fieldClass()).toContain('bg-bg');
+    expect(fieldClass()).not.toContain('bg-surface');
+  });
+});
+
+describe('headings, labels and figures: each reads a token and carries no colour of its own', () => {
+  /** A text colour utility: `text-` that is neither a size nor a length. */
+  const colourUtilities = (cls: string): string[] =>
+    bare(cls).filter((t) => t.startsWith('text-') && !t.startsWith('text-[length') && t !== 'text-lg' && t !== 'text-xs');
+
+  test('the page title takes its face from the heading tokens', () => {
+    expect(pageTitleClass()).toContain('text-[length:var(--heading-size)]');
+    expect(pageTitleClass()).toContain('[font-weight:var(--heading-weight)]');
+    expect(colourUtilities(pageTitleClass())).toEqual([]);
+  });
+
+  test('a section title is the heading weight, and inherits its colour', () => {
+    // It sits inside a danger notice on the Runs page. A colour of its own
+    // would paint its title differently from the paragraph under it.
+    expect(sectionTitleClass()).toContain('[font-weight:var(--heading-weight)]');
+    expect(colourUtilities(sectionTitleClass())).toEqual([]);
+  });
+
+  test('a metric is the metric size, in tabular figures, and inherits its colour', () => {
+    expect(metricClass()).toContain('text-[length:var(--metric-size)]');
+    expect(metricClass()).toContain('tabular-nums');
+    expect(colourUtilities(metricClass())).toEqual([]);
+  });
+
+  test('the eyebrow is the three label declarations, muted', () => {
+    expect(eyebrowClass()).toContain('[font-family:var(--label-font)]');
+    expect(eyebrowClass()).toContain('[text-transform:var(--label-transform)]');
+    expect(eyebrowClass()).toContain('[letter-spacing:var(--label-tracking)]');
+    expect(eyebrowClass()).toContain('text-muted');
+  });
+
+  test('a table header is the eyebrow style, so a column label and a label match', () => {
+    // The header rule is a descendant variant, so it is checked as text: every
+    // declaration the eyebrow carries must be present on `th` in the table.
+    const table = tableClass();
+    expect(table).toContain('[&_th]:[font-family:var(--label-font)]');
+    expect(table).toContain('[&_th]:[text-transform:var(--label-transform)]');
+    expect(table).toContain('[&_th]:[letter-spacing:var(--label-tracking)]');
+  });
+
+  test('a progress track is a 2px hairline, and its fill is the accent', () => {
+    expect(progressTrackClass()).toContain('h-[2px]');
+    expect(progressTrackClass()).toContain('bg-border');
+    expect(progressFillClass()).toContain('bg-accent');
   });
 });
 

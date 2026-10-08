@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.ts';
 import { GrantsCard } from './GrantsCard.tsx';
 import { autoInstall, connectionClass, wiringSnippet } from '../../control/harness.ts';
-import { Button, Card, Empty, Field, Input, Notice, Select, Table, TableWrap } from '../ui/index.tsx';
+import { Button, Card, Empty, Field, Input, Notice, PageTitle, Select, Table, TableWrap } from '../ui/index.tsx';
 
 /**
  * Access = a member's link to Sources (the row) plus the permissions that
@@ -229,7 +229,7 @@ export function Access() {
     <div className="max-w-4xl space-y-8">
       <GrantsCard members={members} spaces={spaces.filter((s) => !s.ownerMembershipId)} />
       <header>
-        <h1 className="text-xl font-semibold">Access</h1>
+        <PageTitle>Access</PageTitle>
         <p className="text-sm text-muted">
           A member's link to Sources, and the permissions it grants. A Connection is one write Source —
           two write Sources are two Connections, never one row with two writes.

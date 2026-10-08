@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
-import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
+import { Button, Card, Empty, Input, Notice, PageTitle, Select } from '../ui/index.tsx';
 
 type Role = 'owner' | 'admin' | 'member' | 'viewer';
 const INVITE_ROLES: Array<'admin' | 'member' | 'viewer'> = ['admin', 'member', 'viewer'];
@@ -110,7 +110,7 @@ export function Members() {
   return (
     <div className="max-w-2xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Members</h1>
+        <PageTitle>Members</PageTitle>
         <p className="text-sm text-muted">Invite by email. The claim URL is shown once.</p>
       </header>
 

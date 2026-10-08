@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { api } from '../api.ts';
 import { wiringSnippet } from '../../control/harness.ts';
-import { Button, Card, Icon, Input, Notice } from '../ui/index.tsx';
+import { Button, Card, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
 
 /**
  * The credential blocks are `<pre>`, and they borrowed `.field` purely for its
@@ -102,7 +102,7 @@ export function Claim({ token }: { token: string }) {
   if (result) {
     return (
       <div className="mx-auto mt-16 max-w-2xl space-y-6 p-6">
-        <h1 className="text-xl font-semibold">You're in</h1>
+        <PageTitle>You're in</PageTitle>
         {result.account === 'existing' && (
           <Notice>You already had an account with this email. Sign in with your existing password.</Notice>
         )}
@@ -129,7 +129,7 @@ export function Claim({ token }: { token: string }) {
 
   return (
     <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Create your account</h1>
+      <PageTitle>Create your account</PageTitle>
       <p className="text-sm text-muted">
         You've been invited to a company brain. You'll get your own private Source that only you can see,
         plus access to the company Sources your admin shares with you.

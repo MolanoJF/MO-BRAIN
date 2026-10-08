@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { spendApi, type SpendReport, type SpendRow } from '../api.ts';
-import { Card, Empty, Table, TableWrap } from '../ui/index.tsx';
+import { Card, Empty, Metric, PageTitle, SectionTitle, Table, TableWrap } from '../ui/index.tsx';
 
 /**
  * The cost page (D8, D9). The ORDER of the four sections is the argument:
@@ -138,7 +138,7 @@ export function Spend() {
   return (
     <div className="max-w-3xl space-y-6">
       <header>
-        <h1 className="text-xl font-semibold">Spend</h1>
+        <PageTitle>Spend</PageTitle>
         <p className="text-sm text-muted">
           What this deployment metered over the last {num(report.windowDays)} day(s), and what gbrain's own
           ledger recorded — two figures, never one.
@@ -194,7 +194,7 @@ export function Spend() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Card className="space-y-1">
             <div className="text-sm text-muted">Ours — agent-runner model calls through our gateway</div>
-            <div className="text-2xl font-semibold">{usdText(ours.totalUsd)}</div>
+            <Metric>{usdText(ours.totalUsd)}</Metric>
             <div className="text-xs text-muted">over the last {num(report.windowDays)} day(s)</div>
           </Card>
           <Card className="space-y-1">
@@ -203,7 +203,7 @@ export function Spend() {
             </div>
             {brain !== null ? (
               <>
-                <div className="text-2xl font-semibold">{money(brain.totals.costUsd)}</div>
+                <Metric>{money(brain.totals.costUsd)}</Metric>
                 <div className="text-xs text-muted">
                   over the last {num(brain.windowDays)} day(s), {num(brain.totals.calls)} call(s)
                 </div>
@@ -217,7 +217,7 @@ export function Spend() {
 
       {/* Section 3 — three tables. `unattributed` is its own row (D9). */}
       <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Rollups</h2>
+        <SectionTitle>Rollups</SectionTitle>
         <SpendTable
           title="Per member"
           unitLabel="runs"
@@ -240,7 +240,7 @@ export function Spend() {
 
       {/* Section 4 — shown even at zero. */}
       <Card title="Unpriced calls" className="space-y-2">
-        <div className="text-2xl font-semibold">{num(ours.unpricedRuns)}</div>
+        <Metric>{num(ours.unpricedRuns)}</Metric>
         <p className="text-sm">
           A metered call we could not price adds no dollar amount to any total and is counted here instead —
           it is never silently zeroed. A count of zero means every metered call in this window had a rate in

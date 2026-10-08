@@ -3,7 +3,7 @@ import { CircleAlert } from 'lucide-react';
 import { api, sourcesApi, type PackCreateResult } from '../api.ts';
 import { RemotePanel } from '../RemotePanel.tsx';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
-import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
+import { Button, Empty, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
 import { NewPackPanel } from './SchemaBuilder.tsx';
 
 /**
@@ -60,7 +60,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
   return (
     <div className="max-w-2xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Set up your personal brain</h1>
+        <PageTitle>Set up your personal brain</PageTitle>
         <p className="text-sm text-muted">Stage: <span className="font-mono">{state.lifecycle}</span></p>
       </header>
 
