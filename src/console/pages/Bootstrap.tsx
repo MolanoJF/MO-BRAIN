@@ -105,9 +105,9 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
                onChange={(e) => setOrgName(e.target.value)} />
         <Input type="email" placeholder="Email" value={email}
                onChange={(e) => setEmail(e.target.value)} required />
-        <Input type="password" placeholder="Password (12+ characters)"
+        <Input type="password" placeholder="Password (8+ characters)"
                value={password} onChange={(e) => setPassword(e.target.value)}
-               minLength={12} required />
+               minLength={8} required />
         {error && (
           <Notice tone="danger">
             <Icon glyph={CircleAlert} size={16} />

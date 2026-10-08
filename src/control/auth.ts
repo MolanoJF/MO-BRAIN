@@ -37,7 +37,7 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.PUBLIC_URL ?? 'http://localhost:3150',
   basePath: '/api/auth',
-  emailAndPassword: { enabled: true, minPasswordLength: 12 },
+  emailAndPassword: { enabled: true, minPasswordLength: 8 },
   ...(googleConfigured
     ? { socialProviders: { google: { clientId: googleClientId!, clientSecret: googleClientSecret! } } }
     : {}),

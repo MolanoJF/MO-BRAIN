@@ -46,14 +46,20 @@ describe('invite accounts', () => {
 });
 
 describe('claiming sets a real login', () => {
-  test('a too-short password is refused and does NOT burn the link', async () => {
+  test('a 7-character password is refused and does NOT burn the link', async () => {
     const { token } = await invite('il-short@example.test');
-    const bad = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-short@example.test', password: 'short' });
+    const bad = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-short@example.test', password: '1234567' });
     expect(bad.status).toBe(400);
     expect((await bad.json() as { error: string }).error).toBe('password_too_short');
 
     const good = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-short@example.test', password: PASS });
     expect(good.status).toBe(200);
+  });
+
+  test('an 8-character password claims the account', async () => {
+    const { token } = await invite('il-eight@example.test');
+    const res = await hit('POST', `/api/claim/${token}`, undefined, { email: 'il-eight@example.test', password: '12345678' });
+    expect(res.status).toBe(200);
   });
 
   test('a too-long password is refused and does NOT burn the link', async () => {

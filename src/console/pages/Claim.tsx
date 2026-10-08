@@ -49,7 +49,7 @@ export function normalizeClaimEmail(email: string): string {
 
 /** Client-side mirror of the server's rule; the server re-checks before burning the link. */
 export function claimFormError(password: string, confirm: string): string | null {
-  if (password.length < 12) return 'Use at least 12 characters.';
+  if (password.length < 8) return 'Use at least 8 characters.';
   if (password.length > CLAIM_PASSWORD_MAX) return `Use at most ${CLAIM_PASSWORD_MAX} characters.`;
   if (password !== confirm) return 'Passwords do not match.';
   return null;
@@ -136,7 +136,7 @@ export function Claim({ token }: { token: string }) {
       </p>
       <Input type="email" placeholder="The email this invite was sent to" value={email}
              onChange={(e) => setEmail(e.target.value)} />
-      <Input type="password" placeholder="Choose a password (12+ characters)" value={password}
+      <Input type="password" placeholder="Choose a password (8+ characters)" value={password}
              onChange={(e) => setPassword(e.target.value)} />
       <Input type="password" placeholder="Confirm password" value={confirm}
              onChange={(e) => setConfirm(e.target.value)} />

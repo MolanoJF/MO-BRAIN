@@ -1,9 +1,10 @@
 import { test, expect } from 'bun:test';
 import { claimFormError, normalizeClaimEmail } from '../../src/console/pages/Claim.tsx';
 
-test('the password must be 12+ characters and confirmed', () => {
-  expect(claimFormError('', '')).toBe('Use at least 12 characters.');
-  expect(claimFormError('short', 'short')).toBe('Use at least 12 characters.');
+test('the password must be 8+ characters and confirmed', () => {
+  expect(claimFormError('', '')).toBe('Use at least 8 characters.');
+  expect(claimFormError('1234567', '1234567')).toBe('Use at least 8 characters.');
+  expect(claimFormError('12345678', '12345678')).toBeNull();
   expect(claimFormError('long-enough-pass', 'long-enough-pasS')).toBe('Passwords do not match.');
   expect(claimFormError('long-enough-pass', 'long-enough-pass')).toBeNull();
   expect(claimFormError('x'.repeat(128), 'x'.repeat(128))).toBeNull();
