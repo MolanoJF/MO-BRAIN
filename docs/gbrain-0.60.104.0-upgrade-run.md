@@ -58,3 +58,11 @@ Digest parity was not equal. The only differing part was `filePlane`: 4 items be
 - `.gbrain/persistence/fc528619-3cb7-4d1c-b57f-b7cccd70881c.stdio.json`
 
 No `--force`, no `--acknowledge-no-backup`, and no SQL fix were used. The upgrade was not run a third time.
+
+Volume restore now deletes paths the archive does not contain, then the same command was run again on this run only:
+
+```text
+bun run scripts/upgrade.ts rollback --run run-e5782832-82df-440d-937d-2ccc7d289a60
+```
+
+Exit **0**. `method: snapshot-restore`, `ranUpstreamDownMigrations: false`, `pin: 0.50.5.0`, `pinVerified: true`, `parity.equal: true`. The running binary and the pin file are `0.50.5.0`. `filePlane` no longer differs. The three `.gbrain/persistence` files were removed because they were absent from the snapshot archive. No third `upgrade.ts run`.

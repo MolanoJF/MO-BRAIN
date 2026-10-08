@@ -14,7 +14,7 @@ import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
   SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
 } from '../src/upgrade/snapshot.ts';
-import { QUIESCE_ORDER, composeModel, quiesce, restoreLane, stopServices } from '../src/upgrade/quiesce.ts';
+import { QUIESCE_ORDER, composeModel, quiesce, restoreLane } from '../src/upgrade/quiesce.ts';
 import { hasPlaybook, playbooksFor, type ChecklistItemSpec, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
 import {
   canTransition, resumeFrom, RESUME_WRITERS_COMMAND, TRANSITIONS, type UpgradeRunState,
@@ -450,32 +450,22 @@ export type UpgradeReport = {
 };
 
 /**
- * Doctor parity is scored only after the baseline writers are back, including
- * gbrain-worker. compareDoctor is not filtered: a supervisor that is warn
- * while that worker is up is still a regression. A blocksResume hold stops
- * writers only after a passing gate, so a held-down supervisor is never the
- * thing the gate scores.
+ * compareDoctor, plus the one hold exception. A blocksResume hold leaves
+ * gbrain-worker down, so supervisor ok→warn is that hold, not a regression.
+ * The exception does not apply when the worker is up, and it never excuses
+ * any other previously-ok check.
  */
-export async function resumeBaselineThenGate(input: {
-  resumeBaseline: () => Promise<void>;
-  captureDoctor: () => Promise<DoctorBaseline>;
-  baseline: DoctorBaseline;
-  holdWriters: boolean;
-  stopHeld: () => Promise<void>;
-  recordGate: (parity: DoctorParity) => Promise<void>;
-}): Promise<{ parity: DoctorParity; held: boolean }> {
-  await input.resumeBaseline();
-  const after = await input.captureDoctor();
-  const parity = compareDoctor(input.baseline, after);
-  await input.recordGate(parity);
-  if (parity.regressed.length > 0 || !parity.schemaVersionOk) {
-    return { parity, held: false };
-  }
-  if (input.holdWriters) {
-    await input.stopHeld();
-    return { parity, held: true };
-  }
-  return { parity, held: false };
+export function scoreDoctorGate(
+  baseline: DoctorBaseline,
+  after: DoctorBaseline,
+  opts: { holdActive: boolean; workerDown: boolean },
+): DoctorParity {
+  const parity = compareDoctor(baseline, after);
+  if (!opts.holdActive || !opts.workerDown) return parity;
+  const was = baseline.checks.find((c) => c.name === 'supervisor');
+  const now = after.checks.find((c) => c.name === 'supervisor');
+  if (was?.status !== 'ok' || now?.status !== 'warn') return parity;
+  return { ...parity, regressed: parity.regressed.filter((c) => c.name !== 'supervisor') };
 }
 
 /** The supervisor check reads a DB lock the worker takes after start. Wait
@@ -650,33 +640,33 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     await enter('playbooks_applied', `${ledger.length} version(s) recorded`, { ledger, checklist });
     const holdWriters = checklist.some((item) => item.blocksResume === true);
 
-    // 7. Bring the baseline writers back, score doctor parity while they are
-    //    up, and only then hold. A stopped supervisor must not be scored as a
-    //    regression. compareDoctor is not filtered.
-    const scored = await resumeBaselineThenGate({
-      resumeBaseline: async () => {
-        // gbrain-ops is already the new image (recreated at the swap).
-        await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
-        await deps.resume(ctx);
-        // Serve is up for this capture. resumeWriters still recaptures after
-        // a hold, because the hold that follows a passing gate stops serve.
-        await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
-          waitForServe: true,
-        });
-        await waitForBaselineSupervisor(ctx, pre.baseline);
-      },
-      captureDoctor: () => deps.captureDoctorAfter(ctx),
-      baseline: pre.baseline,
-      holdWriters,
-      stopHeld: async () => { await stopServices(ctx, HELD_WRITER_SERVICES); },
-      recordGate: async (parity) => {
-        await appendEvent(journal, {
-          step: 'gate', message: 'doctor parity computed per check (D5)',
-          data: { parity },
-        });
-      },
+    // 7. Gate. A blocksResume hold resumes only gbrain-ops and control-plane.
+    //    The four writers stay down until a checklist ack; starting them here
+    //    would run paid defaults before that ack. supervisor ok→warn is that
+    //    hold, and only while the worker stays down. compareDoctor is not
+    //    filtered when the worker is up.
+    if (holdWriters) {
+      await deps.recreate(ctx, ['control-plane']);
+      await deps.resume(ctx, ['gbrain-ops', 'control-plane']);
+    } else {
+      await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
+      await deps.resume(ctx);
+      await waitForBaselineSupervisor(ctx, pre.baseline);
+    }
+    // Serve stays down on a hold, so this probe does not wait. resumeWriters
+    // recaptures capability-to.json once serve is up.
+    await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
+      waitForServe: !holdWriters,
     });
-    const parity = scored.parity;
+    const after = await deps.captureDoctorAfter(ctx);
+    const parity = scoreDoctorGate(pre.baseline, after, {
+      holdActive: holdWriters,
+      workerDown: holdWriters,
+    });
+    await appendEvent(journal, {
+      step: 'gate', message: 'doctor parity computed per check (D5)',
+      data: { parity },
+    });
     if (parity.regressed.length > 0 || !parity.schemaVersionOk) {
       throw new Error(
         `doctor parity gate failed: regressed=[${parity.regressed.map((c) => c.name).join(', ')}] ` +
@@ -688,7 +678,7 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       newChecks: parity.newChecks.map((c) => c.name),
       status: parity.status, healthScore: parity.healthScore,
     };
-    if (scored.held) {
+    if (holdWriters) {
       await enter('gated_ok', 'doctor parity holds per check (D5); writers held', {
         ...gateData, writers: 'held', reason: 'blocks_resume',
       });
