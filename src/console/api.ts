@@ -912,6 +912,18 @@ export const orgApi = {
     api.patch<{ ok: true; brainMode: string }>('/org/mode', name ? { mode, name } : { mode }),
 };
 
+export type SearchModeInfo = {
+  id: string; label: string; relativeCost: number;
+  measuredCost: number | null; measuredAt: string | null; measuredOn: string | null;
+  description: string;
+};
+
+export const brainApi = {
+  getSearchMode: () =>
+    api.get<{ mode: string | null; modes: SearchModeInfo[]; lifecycle: string }>('/brain/search-mode'),
+  setSearchMode: (mode: string) => api.patch<{ ok: true; mode: string }>('/brain/search-mode', { mode }),
+};
+
 export type MyConnection = {
   space: { id: string; sourceId: string; name: string; gitRemote: string | null };
   connection: { id: string; state: string; readSpaceIds: string[] } | null;

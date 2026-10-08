@@ -6,7 +6,9 @@ import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
 import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson, pauseBrainWriters, resumeBrainWriters } from '../opsClient.ts';
 import { provisionPrivateSpace, privateSpaceSourceId, gbrainSourceName } from '../privateSpaces.ts';
-import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER } from '../lifecycle.ts';
+import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER, DEFAULT_SEARCH_MODE } from '../lifecycle.ts';
+import { DEFAULT_SCHEMA_PACK } from '../bootstrap.ts';
+import { verifyOpenAiKey } from '../providerCheck.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
 import { parseSchemaActiveProse } from '../../contracts/capability.ts';
@@ -115,16 +117,30 @@ wizard.get('/state', guard(async (c, { orgId }) => {
  * gbrain-ops, and confirm the key name actually appears.
  */
 wizard.post('/provider', guard(async (c, { userId, orgId }) => {
-  const { provider, apiKey, embeddingModel } = await c.req.json();
+  const { provider, apiKey, embeddingModel, verify } = await c.req.json();
   if (!provider || !apiKey || !embeddingModel) {
     return c.json({ error: 'provider, apiKey and embeddingModel are required' }, 400);
   }
   const brain = await loadBrain(orgId);
+  // Re-runnable until the brain is ready, so Back from the Ready card can
+  // replace the key. Only the first run moves the lifecycle.
+  if (brain.lifecycle === 'ready') return c.json({ error: 'cannot change the provider key once the brain is ready' }, 409);
   const keyName = `${provider}_api_key`;
+
+  // Checked before anything is stored. The key is never logged or echoed.
+  if (verify === true && provider === 'openai') {
+    const check = await verifyOpenAiKey(apiKey);
+    if (!check.ok) return c.json({ error: check.error }, check.status);
+  }
 
   await storeSecret(orgId, keyName, apiKey);
   await patchFilePlaneConfig({ [keyName]: apiKey });
-  await advance(brain.id, brain.lifecycle as Lifecycle, 'provider-configured', { embeddingModel });
+  if (brain.lifecycle === 'uninitialized') {
+    await advance(brain.id, 'uninitialized', 'provider-configured', { embeddingModel });
+  } else {
+    await getDb().update(schema.brains).set({ embeddingModel, updatedAt: new Date() })
+      .where(eq(schema.brains.id, brain.id));
+  }
   await audit(orgId, userId, 'wizard.provider', keyName, { provider, embeddingModel });
 
   // Never echo the key.
@@ -373,10 +389,18 @@ wizard.post('/space', guard(async (c, { userId, orgId }) => {
  * added later from the Sources page. No Connection is created here — `/finish`
  * provisions it, once the brain is real.
  */
-wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
+export type EnsurePrivateSpaceResult =
+  | { ok: true; sourceId: string }
+  | { ok: false; status: 400 | 403 | 409; body: Record<string, unknown> };
+
+/** Create (or find) the member's own private Space and move the lifecycle to
+ *  `sources-added`. Idempotent. */
+export async function ensurePrivateSpace(
+  { userId, orgId }: { userId: string; orgId: string },
+): Promise<EnsurePrivateSpaceResult> {
   const [membership] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
     .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.organizationId, orgId)));
-  if (!membership) return c.json({ error: 'not a member' }, 403);
+  if (!membership) return { ok: false, status: 403, body: { error: 'not a member' } };
 
   const sourceId = privateSpaceSourceId(membership.id);
   const [space] = await getDb().select().from(schema.spaces).where(and(
@@ -386,13 +410,13 @@ wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
 
   if (space) {
     if (space.ownerMembershipId !== membership.id) {
-      return c.json({ error: `${sourceId} is already a Space owned by another member` }, 409);
+      return { ok: false, status: 409, body: { error: `${sourceId} is already a Space owned by another member` } };
     }
     const brain = await loadBrain(orgId);
     if (canAdvance(brain.lifecycle as Lifecycle, 'sources-added')) {
       await advance(brain.id, brain.lifecycle as Lifecycle, 'sources-added');
     }
-    return c.json({ ok: true, lifecycle: 'sources-added', sourceId });
+    return { ok: true, sourceId };
   }
 
   const result = await addSpaceSource(
@@ -400,8 +424,60 @@ wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
     { sourceId, name: 'My Space', ownerMembershipId: membership.id },
     'wizard.privateSpace',
   );
+  if (!result.ok) return result;
+  return { ok: true, sourceId: result.sourceId };
+}
+
+wizard.post('/private-space', guard(async (c, { userId, orgId }) => {
+  const result = await ensurePrivateSpace({ userId, orgId });
   if (!result.ok) return c.json(result.body, result.status);
   return c.json({ ok: true, lifecycle: 'sources-added', sourceId: result.sourceId });
+}));
+
+/**
+ * One call from `provider-configured` to `sources-added` with defaults: the
+ * stored search mode (else Balanced), the stored schema pack (else the default
+ * pack, checked against gbrain's list), and the member's private Space. Each leg
+ * is skipped once the lifecycle is past it, so a retry resumes.
+ */
+wizard.post('/prepare', guard(async (c, { userId, orgId }) => {
+  let brain = await loadBrain(orgId);
+  const from = brain.lifecycle as Lifecycle;
+  if (from === 'uninitialized' || from === 'ready') {
+    return c.json({ error: `cannot prepare from ${from}` }, 409);
+  }
+
+  if (from === 'provider-configured') {
+    const searchMode = brain.searchMode ?? DEFAULT_SEARCH_MODE;
+    await advance(brain.id, from, 'mode-selected', { searchMode });
+    brain = await loadBrain(orgId);
+  }
+
+  if (brain.lifecycle === 'mode-selected') {
+    let pack = brain.schemaPack;
+    if (!pack) {
+      const known = await listSchemaPacks();
+      if (!known.includes(DEFAULT_SCHEMA_PACK)) {
+        return c.json({ error: `unknown schema pack ${DEFAULT_SCHEMA_PACK}`, packs: known }, 400);
+      }
+      pack = DEFAULT_SCHEMA_PACK;
+    }
+    await advance(brain.id, 'mode-selected', 'schema-selected', { schemaPack: pack });
+    brain = await loadBrain(orgId);
+  }
+
+  const space = await ensurePrivateSpace({ userId, orgId });
+  if (!space.ok) return c.json(space.body, space.status);
+  const sourceId = space.sourceId;
+  brain = await loadBrain(orgId);
+
+  await audit(orgId, userId, 'wizard.prepare', brain.id, {
+    searchMode: brain.searchMode, schemaPack: brain.schemaPack, sourceId,
+  });
+  return c.json({
+    ok: true, lifecycle: 'sources-added',
+    searchMode: brain.searchMode, schemaPack: brain.schemaPack, sourceId,
+  });
 }));
 
 /**

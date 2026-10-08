@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
-import { Button, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
+import { Button, Icon, Input, Notice } from '../ui/index.tsx';
+import { OnboardingCard } from '../onboarding/OnboardingCard.tsx';
 
 /**
  * The fresh-install path, and ONLY that. D1: this form used to be the whole of
@@ -71,36 +72,30 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
 
   if (googleSession) {
     return (
-      <form onSubmit={submitForSession} className="mx-auto mt-16 max-w-md space-y-4 p-6">
-        <PageTitle>Name this brain&apos;s organization</PageTitle>
-        <p className="text-sm text-muted">
-          Signed in as {googleSession.email}. This name is shown to everyone you invite later.
-        </p>
-        <Input placeholder="Organization name" value={orgName}
-               onChange={(e) => setOrgName(e.target.value)} required />
-        {error && (
-          <Notice tone="danger">
-            <Icon glyph={CircleAlert} size={16} />
-            <span>{error}</span>
-          </Notice>
-        )}
-        <Button variant="primary" type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create organization'}
-        </Button>
-      </form>
+      <OnboardingCard step={1} title="Name this brain's organization"
+        subtitle={`Signed in as ${googleSession.email}. This name is shown to everyone you invite later.`}>
+        <form onSubmit={submitForSession} className="space-y-4">
+          <Input placeholder="Organization name" value={orgName}
+                 onChange={(e) => setOrgName(e.target.value)} required />
+          {error && (
+            <Notice tone="danger">
+              <Icon glyph={CircleAlert} size={16} />
+              <span>{error}</span>
+            </Notice>
+          )}
+          <Button variant="primary" type="submit" disabled={busy}>
+            {busy ? 'Creating…' : 'Create organization'}
+          </Button>
+        </form>
+      </OnboardingCard>
     );
   }
 
   return (
-    <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
+    <OnboardingCard step={1} title="Create your account"
+      subtitle="This sets up your own private brain. You can turn it into a company brain later in Settings.">
       <form onSubmit={submit} className="space-y-4">
-        <PageTitle>Create your account</PageTitle>
-        <p className="text-sm text-muted">
-          This sets up your own private brain. You can turn it into a company brain later in Settings.
-        </p>
-        {/* `Input`, not `Field`. `Field` renders a visible `<label>`, and these
-            three controls have only ever had placeholders; writing label text
-            for them would be new copy, and this phase changes none. */}
+        {/* `Input`, not `Field`: these controls have only ever had placeholders. */}
         <Input placeholder="Name your brain (optional)" value={orgName}
                onChange={(e) => setOrgName(e.target.value)} />
         <Input type="email" placeholder="Email" value={email}
@@ -114,23 +109,21 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
             <span>{error}</span>
           </Notice>
         )}
-        {/* `type="submit"` is not decoration. This button was a bare `<button>`
-            inside a `<form>`, where the implicit type IS submit; `Button`
-            defaults to `type="button"` so that a control in a table row cannot
-            submit a form it happens to sit in. Without this the form would stop
-            submitting — on click AND on Enter in any field. */}
+        {/* `Button` defaults to type="button"; the submit must be spelled out. */}
         <Button variant="primary" type="submit" disabled={busy}>
           {busy ? 'Creating…' : 'Create account'}
         </Button>
       </form>
       {googleAvailable && (
         <>
-          <div className="text-center text-xs text-muted">or</div>
+          <div className="flex items-center gap-3 text-xs text-muted">
+            <span className="h-px flex-1 bg-border" />or<span className="h-px flex-1 bg-border" />
+          </div>
           <Button variant="secondary" onClick={() => void continueWithGoogle()} disabled={busy}>
             Continue with Google
           </Button>
         </>
       )}
-    </div>
+    </OnboardingCard>
   );
 }

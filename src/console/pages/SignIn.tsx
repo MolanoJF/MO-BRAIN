@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { api, ApiError } from '../api.ts';
-import { Button, Icon, Input, Notice, PageTitle } from '../ui/index.tsx';
+import { Button, Icon, Input, Notice } from '../ui/index.tsx';
+import { OnboardingCard } from '../onboarding/OnboardingCard.tsx';
 
 /**
  * A sign-in refusal an operator can act on.
@@ -80,15 +81,10 @@ export function SignIn({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
+    <OnboardingCard title="Sign in"
+      subtitle="This brain is already set up. Sign in with your own account to reach the console.">
       <form onSubmit={submit} className="space-y-4">
-        <PageTitle>Sign in</PageTitle>
-        <p className="text-sm text-muted">
-          This brain is already set up. Sign in with your own account to reach the console.
-        </p>
-        {/* `autoComplete` survives the move verbatim. A password manager that
-            stops recognising this form is a support ticket that looks like a
-            restyle bug and is not one. */}
+        {/* `autoComplete` stays: password managers key off it. */}
         <Input type="email" placeholder="Email" value={email}
                onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
         <Input type="password" placeholder="Password" value={password}
@@ -99,20 +95,21 @@ export function SignIn({ onDone }: { onDone: () => void }) {
             <span>{error}</span>
           </Notice>
         )}
-        {/* See Bootstrap.tsx: `Button` defaults to `type="button"`, so the
-            implicit submit this form relied on has to be spelled out. */}
+        {/* See Bootstrap.tsx: the submit type has to be spelled out. */}
         <Button variant="primary" type="submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
       {googleAvailable && (
         <>
-          <div className="text-center text-xs text-muted">or</div>
+          <div className="flex items-center gap-3 text-xs text-muted">
+            <span className="h-px flex-1 bg-border" />or<span className="h-px flex-1 bg-border" />
+          </div>
           <Button variant="secondary" onClick={() => void continueWithGoogle()} disabled={busy}>
             Continue with Google
           </Button>
         </>
       )}
-    </div>
+    </OnboardingCard>
   );
 }
