@@ -14,12 +14,12 @@ import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
   SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
 } from '../src/upgrade/snapshot.ts';
-import { QUIESCE_ORDER, composeModel, quiesce, restoreLane } from '../src/upgrade/quiesce.ts';
+import { QUIESCE_ORDER, composeModel, quiesce, restoreLane, stopServices } from '../src/upgrade/quiesce.ts';
 import { hasPlaybook, playbooksFor, type ChecklistItemSpec, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
 import {
   canTransition, resumeFrom, RESUME_WRITERS_COMMAND, TRANSITIONS, type UpgradeRunState,
 } from '../src/upgrade/state.ts';
-import { compareDigests, compareDoctor, rollback, stateDigest, type StateDigest } from '../src/upgrade/digest.ts';
+import { compareDigests, compareDoctor, rollback, stateDigest, type DoctorParity, type StateDigest } from '../src/upgrade/digest.ts';
 import type {
   DoctorBaseline, DoctorCheckSummary, SnapshotManifest, UpgradeContext,
 } from '../src/upgrade/types.ts';
@@ -449,6 +449,48 @@ export type UpgradeReport = {
   state: UpgradeRunState; ok: boolean; rolledBack: boolean; notes: string[];
 };
 
+/**
+ * Doctor parity is scored only after the baseline writers are back, including
+ * gbrain-worker. compareDoctor is not filtered: a supervisor that is warn
+ * while that worker is up is still a regression. A blocksResume hold stops
+ * writers only after a passing gate, so a held-down supervisor is never the
+ * thing the gate scores.
+ */
+export async function resumeBaselineThenGate(input: {
+  resumeBaseline: () => Promise<void>;
+  captureDoctor: () => Promise<DoctorBaseline>;
+  baseline: DoctorBaseline;
+  holdWriters: boolean;
+  stopHeld: () => Promise<void>;
+  recordGate: (parity: DoctorParity) => Promise<void>;
+}): Promise<{ parity: DoctorParity; held: boolean }> {
+  await input.resumeBaseline();
+  const after = await input.captureDoctor();
+  const parity = compareDoctor(input.baseline, after);
+  await input.recordGate(parity);
+  if (parity.regressed.length > 0 || !parity.schemaVersionOk) {
+    return { parity, held: false };
+  }
+  if (input.holdWriters) {
+    await input.stopHeld();
+    return { parity, held: true };
+  }
+  return { parity, held: false };
+}
+
+/** The supervisor check reads a DB lock the worker takes after start. Wait
+ *  only when the baseline scored it ok, so the gate sees that same writer up.
+ *  A timeout does not skip the check: doctor still runs and compareDoctor
+ *  still scores whatever it finds. */
+async function waitForBaselineSupervisor(ctx: UpgradeContext, baseline: DoctorBaseline): Promise<void> {
+  if (baseline.checks.find((c) => c.name === 'supervisor')?.status !== 'ok') return;
+  for (let i = 0; i < 30; i += 1) {
+    const r = await opsRpc(ctx, 'jobs.supervisorStatus', {}, 30_000);
+    if (r.exitCode === 0) return;
+    await Bun.sleep(2_000);
+  }
+}
+
 /** A dry run has no journal; a real run must never be handed a context without one. */
 function requireJournal(ctx: UpgradeContext): Journal {
   if (!ctx.journal) {
@@ -608,33 +650,33 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     await enter('playbooks_applied', `${ledger.length} version(s) recorded`, { ledger, checklist });
     const holdWriters = checklist.some((item) => item.blocksResume === true);
 
-    // 7. Resume, then gate. The writers come back here, not at the swap —
-    //    unless a blocksResume item says to ask before they start.
-    if (holdWriters) {
-      // gbrain-ops is already the new image (recreated at the swap). control-plane
-      // was stopped in quiesce and has to come back so the console can show the
-      // checklist. Recreating serve/worker would start the writers this hold
-      // exists to keep down.
-      await deps.recreate(ctx, ['control-plane']);
-      await deps.resume(ctx, ['gbrain-ops', 'control-plane']);
-    } else {
-      await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
-      await deps.resume(ctx);
-    }
-    // The TO pin's capability. On a hold, gbrain-serve stays down on purpose, so
-    // this probe does not wait. It is a placeholder: resumeWriters recaptures
-    // capability-to.json with the settle loop once serve is up and appends a
-    // new capability event. Reconcile imports that later seq; overwriting this
-    // file alone would leave the dead snapshot as the imported row.
-    await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
-      waitForServe: !holdWriters,
+    // 7. Bring the baseline writers back, score doctor parity while they are
+    //    up, and only then hold. A stopped supervisor must not be scored as a
+    //    regression. compareDoctor is not filtered.
+    const scored = await resumeBaselineThenGate({
+      resumeBaseline: async () => {
+        // gbrain-ops is already the new image (recreated at the swap).
+        await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
+        await deps.resume(ctx);
+        // Serve is up for this capture. resumeWriters still recaptures after
+        // a hold, because the hold that follows a passing gate stops serve.
+        await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
+          waitForServe: true,
+        });
+        await waitForBaselineSupervisor(ctx, pre.baseline);
+      },
+      captureDoctor: () => deps.captureDoctorAfter(ctx),
+      baseline: pre.baseline,
+      holdWriters,
+      stopHeld: async () => { await stopServices(ctx, HELD_WRITER_SERVICES); },
+      recordGate: async (parity) => {
+        await appendEvent(journal, {
+          step: 'gate', message: 'doctor parity computed per check (D5)',
+          data: { parity },
+        });
+      },
     });
-    const after = await deps.captureDoctorAfter(ctx);
-    const parity = compareDoctor(pre.baseline, after);
-    await appendEvent(journal, {
-      step: 'gate', message: 'doctor parity computed per check (D5)',
-      data: { parity },
-    });
+    const parity = scored.parity;
     if (parity.regressed.length > 0 || !parity.schemaVersionOk) {
       throw new Error(
         `doctor parity gate failed: regressed=[${parity.regressed.map((c) => c.name).join(', ')}] ` +
@@ -644,9 +686,9 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     const gateData = {
       regressed: [], resolved: parity.resolved.map((c) => c.name),
       newChecks: parity.newChecks.map((c) => c.name),
-      status: after.status, healthScore: after.healthScore,
+      status: parity.status, healthScore: parity.healthScore,
     };
-    if (holdWriters) {
+    if (scored.held) {
       await enter('gated_ok', 'doctor parity holds per check (D5); writers held', {
         ...gateData, writers: 'held', reason: 'blocks_resume',
       });

@@ -371,6 +371,28 @@ export async function quiesce(ctx: QuiesceContext): Promise<QuiesceEvidence> {
 }
 
 /**
+ * Stop a subset of the quiesce lane after a passing doctor gate. The gate
+ * has to see the same writers the baseline saw; this is the hold that follows
+ * that score, not a reason to leave them down during it. A service the
+ * project does not have is skipped, same as quiesce (`drainLane`).
+ */
+export async function stopServices(
+  ctx: QuiesceContext, services: readonly string[],
+): Promise<string[]> {
+  const compose = composeArgv(ctx);
+  const lane = drainLane(await composeModel(compose), services);
+  const stopped: string[] = [];
+  for (const svc of lane) {
+    // drainLane only returns QUIESCE_ORDER members, which are the grace keys.
+    const grace = STOP_GRACE_S[svc as (typeof QUIESCE_ORDER)[number]];
+    const r = await sh([...compose, 'stop', '-t', String(grace), svc], (grace + 30) * 1000);
+    if (r.exitCode !== 0) throw new Error(`stop: stopping ${svc} failed: ${r.stderr}`);
+    stopped.push(svc);
+  }
+  return stopped;
+}
+
+/**
  * Bring services back up. `services` defaults to everything, but a caller
  * may resume exactly one — a first-class operation, not a special case.
  * `up -d`, not `start`: a pin swap changes the image tag a stopped
