@@ -9,7 +9,12 @@ import { parse } from 'yaml';
 // shapes out of .github/workflows for good.
 const DIR = join(import.meta.dir, '..', '..', '.github', 'workflows');
 
-type Job = { 'timeout-minutes'?: number; uses?: string; needs?: string | string[] };
+type Job = {
+  'timeout-minutes'?: number;
+  uses?: string;
+  needs?: string | string[];
+  with?: { gbrain_version?: string };
+};
 type Workflow = {
   on: string | string[] | Record<string, unknown>;
   concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
@@ -80,6 +85,7 @@ describe('workflow budget rules', () => {
   test('release.yml publishes only after the stack suite passes', () => {
     const { jobs } = workflows()['release.yml']!;
     expect(jobs.stack!.uses).toBe('./.github/workflows/stack.yml');
+    expect(jobs.stack!.with?.gbrain_version).toBe('0.50.5.0');
     expect([jobs.publish!.needs].flat()).toContain('stack');
   });
 });
