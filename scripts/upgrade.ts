@@ -1252,17 +1252,20 @@ function hostContext(runId: string): UpgradeContext {
   };
 }
 
-/** Ack state for one run. runId is an argv field, never interpolated into a shell. */
+/** Ack state for one run. runId is an argv field, never interpolated into a shell.
+ *
+ *  `:'run_id'` is psql metasyntax. `psql -c` sends the string to the server
+ *  without interpolating it (measured on psql 16.15: syntax error at `:`),
+ *  so the query is fed on stdin, where that substitution runs. */
 async function checklistStates(runId: string): Promise<Array<{ key: string; state: string }>> {
   if (!/^[A-Za-z0-9_-]+$/.test(runId)) {
     throw new Error(`refusing checklist query for run id '${runId}'`);
   }
-  const r = await shCapture([
+  const r = await feedString([
     ...COMPOSE, 'exec', '-T', 'postgres', 'psql', '-U', 'gbrain', '-d', 'control',
-    '-v', `run_id=${runId}`, '-tAc',
-    "select coalesce(json_agg(json_build_object('key', item_key, 'state', state)), '[]') " +
-    "from upgrade_checklist_items where run_id = :'run_id'",
-  ], 30_000);
+    '-v', 'ON_ERROR_STOP=1', '-v', `run_id=${runId}`, '-tA',
+  ], "select coalesce(json_agg(json_build_object('key', item_key, 'state', state)), '[]') " +
+    "from upgrade_checklist_items where run_id = :'run_id';\n", 30_000);
   if (r.exitCode !== 0) throw new Error(`checklist state query failed: ${r.stderr}`);
   return JSON.parse(r.stdout.trim() || '[]') as Array<{ key: string; state: string }>;
 }
