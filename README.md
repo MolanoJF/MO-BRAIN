@@ -79,7 +79,7 @@ When on, the runner is fenced to one internal network with no route out and its 
 | Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 
-Exact semver, never `latest` or `latest-stable`. The source pin above is what the upgrade lane builds. GHCR and `scripts/install.sh` still use `0.50.5.0` until the next release publishes `0.60.104.0`. The contract suite runs on demand via `stack.yml` — including before every release, since `release.yml` calls it — against the pinned version or a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.
+Exact semver, never `latest` or `latest-stable`. The source pin above is what the upgrade lane builds. GHCR still publishes `0.50.5.0` until the next release; `scripts/install.sh` defaults to the `0.60.115.0` pin and builds it locally when that pull misses. The contract suite runs on demand via `stack.yml` — including before every release, since `release.yml` calls it — against the pinned version or a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.
 
 ## Built on gbrain
 
