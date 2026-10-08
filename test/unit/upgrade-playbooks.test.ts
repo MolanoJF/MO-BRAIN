@@ -166,7 +166,9 @@ describe('playbooksFor', () => {
       '0.60.112.0', '0.60.113.0', '0.60.114.0', '0.60.115.0',
     ]);
     for (const spec of specs) {
-      expect('noPlaybookRequired' in spec && spec.noPlaybookRequired).toBe(true);
+      if (!('noPlaybookRequired' in spec) || !spec.noPlaybookRequired) {
+        throw new Error(`expected ${spec.version} to carry no playbook`);
+      }
       expect(spec.evidence).toContain('absent from the v0.60.115.0 tree');
     }
   });
