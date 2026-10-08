@@ -10,6 +10,7 @@ const versionsOf = (specs: readonly { version: string }[]) => specs.map((s) => s
 const TRANSLATED_MIGRATION_FILES: readonly string[] = [
   '0.51.0.0',
   '0.51.7.0',
+  '0.51.8.0',
 ];
 
 /** Spec list: migration files present in the v0.60.104.0 tree after the pin. */
