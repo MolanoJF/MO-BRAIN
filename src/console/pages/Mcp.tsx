@@ -13,7 +13,7 @@ const REISSUE_COPY =
   'The previous paste stops working. A schedule tied to the old connection is paused.';
 
 const EMPTY = {
-  no_private_space: 'You do not have a private Space yet. Ask an admin to retry provisioning it.',
+  no_private_space: 'You do not have a private Source yet. Ask an admin to retry provisioning it.',
   no_private_connection: 'You do not have a private connection yet, so there is nothing to paste.',
   connection_pending: 'Finish claiming your invite first. A connection that is still pending is not shown.',
   credentials_unavailable: 'This connection was issued before its secret was kept.',
@@ -157,7 +157,7 @@ export function Mcp() {
       {view.kind === 'ready' && !posting && (
         <Card
           title="Connect your agent"
-          subtitle="Paste these into the agent that should use your private Space."
+          subtitle="Paste these into the agent that should use your private Source."
         >
           <div className="space-y-4">
             <PasteBlock label="Endpoint" text={view.paste.endpoint} />

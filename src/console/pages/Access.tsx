@@ -95,8 +95,8 @@ function previewExitCode(serverPreview: unknown): number | null {
 }
 
 const privateSpaceError = (error: string): string =>
-  error === 'already_provisioned' ? 'You already have a private space.'
-    : error === 'private_spaces_disabled' ? 'Private spaces are turned off for this organization.'
+  error === 'already_provisioned' ? 'You already have a private Source.'
+    : error === 'private_spaces_disabled' ? 'Private Sources are turned off for this organization.'
       : error;
 
 export function Access() {
@@ -148,7 +148,7 @@ export function Access() {
     setSpaceBusy(true); setSpaceMsg(null);
     try {
       const r = await api.post<{ ok: true; spaceId: string; sourceId: string; connectionId: string }>('/private-space');
-      setSpaceMsg({ ok: true, text: `Private space ready (${r.sourceId}).` });
+      setSpaceMsg({ ok: true, text: `Private Source ready (${r.sourceId}).` });
     } catch (e) {
       setSpaceMsg({ ok: false, text: privateSpaceError(e instanceof Error ? e.message : 'Request failed') });
     } finally { setSpaceBusy(false); }
@@ -445,17 +445,17 @@ export function Access() {
       )}
 
       <section className="space-y-3">
-        <h2 className="font-medium">My private space</h2>
+        <h2 className="font-medium">My private Source</h2>
         <Card className="space-y-2">
           {privateSpacesEnabled === false ? (
             <p className="text-sm text-muted">
-              Private spaces are turned off for this organization.
+              Private Sources are turned off for this organization.
             </p>
           ) : (
             <Button variant="primary"
                     disabled={spaceBusy || privateSpacesEnabled === null}
                     onClick={() => void createMySpace()}>
-              {spaceBusy ? 'Creating…' : 'Create my private space'}
+              {spaceBusy ? 'Creating…' : 'Create my private Source'}
             </Button>
           )}
           {spaceMsg && (

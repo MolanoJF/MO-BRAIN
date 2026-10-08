@@ -80,7 +80,7 @@ export function editsToMutations(before: EditState, after: EditState): PackMutat
  * given — sync only fills a blank one (S3). Saying both is the point.
  */
 export const ADDITIVE_BUILDER_NOTICE =
-  'Adding a type creates its folder in every Space using this pack. Existing pages keep their type; ' +
+  'Adding a type creates its folder in every Source using this pack. Existing pages keep their type; ' +
   'Sync fills in pages that have none.';
 
 /**
@@ -136,7 +136,7 @@ function LintView({ lint }: { lint: SchemaLint }) {
  * carries its own error and must not be hidden behind a sibling's success.
  */
 export function ScaffoldResults({ results }: { results: ScaffoldResult[] }) {
-  if (results.length === 0) return <Empty>No Spaces to scaffold.</Empty>;
+  if (results.length === 0) return <Empty>No Sources to scaffold.</Empty>;
   return (
     <div className="mt-3 space-y-1">
       <h3 className="text-xs font-semibold text-muted">Folders</h3>
@@ -510,7 +510,7 @@ export function PackEditor({ name, onSaved, onOpen }: {
   const deleteReason = usedBy.brain
     ? `The brain resolves ${name}; apply another pack before deleting it.`
     : usedBy.sources.length > 0
-      ? `Used by ${usedBy.sources.join(', ')}; clear those Space overrides before deleting it.`
+      ? `Used by ${usedBy.sources.join(', ')}; clear those Source overrides before deleting it.`
       : null;
 
   const ownTypeNames = new Set(rows.map((r) => r.name));

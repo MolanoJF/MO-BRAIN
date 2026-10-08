@@ -28,7 +28,7 @@ function reason(e: unknown): string {
 export type RemoteMode = 'url' | 'github';
 
 export const REMOTE_NOTICE =
-  'The access token is stored encrypted and used only to push this Space. Mobrain refuses to push ' +
+  'The access token is stored encrypted and used only to push this Source. Mobrain refuses to push ' +
   'to a remote it cannot verify is private, and blocks a push when a secret scan finds credentials.';
 
 const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
@@ -124,7 +124,7 @@ export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, pushOnC
       ) : (
         <>
           <p className="text-xs text-muted">
-            This Space's history lives only on this server. Give it a git remote to keep a copy elsewhere.
+            This Source's history lives only on this server. Give it a git remote to keep a copy elsewhere.
           </p>
           <div className="flex gap-2">
             <Button variant={mode === 'github' ? 'primary' : undefined} disabled={off}

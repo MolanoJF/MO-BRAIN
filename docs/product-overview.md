@@ -47,7 +47,7 @@ the seatbelts, and the maintenance schedule.
                    ┌───────────▼────────────────▼───┐   └───────┬─────────┘
                    │   gbrain-serve / gbrain-worker   │           │
                    │   the actual brain: Postgres +   │◀──────────┘
-                   │   embeddings + git-backed Spaces │   (via the gateway,
+                   │   embeddings + git-backed Sources │   (via the gateway,
                    └───────────────────────────────────┘    never directly)
 
    Everything above sits behind Caddy, the only service that publishes
@@ -56,7 +56,7 @@ the seatbelts, and the maintenance schedule.
 
 Two databases: a `control` Postgres (Mobrain's own state — users, orgs, connections,
 schedules, spend, audit log) and a `gbrain` Postgres (the actual knowledge store — pages,
-embeddings, Spaces). Mobrain never reads gbrain's tables directly; it only talks to gbrain
+embeddings, Sources). Mobrain never reads gbrain's tables directly; it only talks to gbrain
 through the ops RPC or the CLI.
 
 ---
@@ -67,12 +67,14 @@ through the ops RPC or the CLI.
 |---|---|
 | **Organization** | One org per deployment — Mobrain is **not multi-tenant**. One brain, one org, one host. |
 | **Member** | A person with an email/password account and a role: `owner`, `admin`, `member`, or `viewer`. |
-| **Space** | A boundary inside the brain, backed by a git repo (`source_id`). Read access can *federate* across Spaces; write access is per-Space. This is the only isolation axis gbrain offers. |
-| **Connection** | The credential that lets *one member's agent* (Claude, or any MCP client) talk to the brain — a compiled, scoped MCP profile: which Space it can write to, which Spaces it can read, which tools it gets. |
+| **Source** | A boundary inside the brain, backed by a git repo (`source_id`). Read access can *federate* across Sources; write access is per-Source. This is the only isolation axis gbrain offers. |
+| **Connection** | The credential that lets *one member's agent* (Claude, or any MCP client) talk to the brain — a compiled, scoped MCP profile: which Source it can write to, which Sources it can read, which tools it gets. |
 | **Schedule** | A recurring job (sync, dream, doctor, a git push, or — if the runner is on — an unattended agent prompt), run by the `scheduler` service. |
 | **Agent runner** | An optional, off-by-default container that actually executes a scheduled AI agent prompt against the brain, using the org's own API key. |
 | **Spend** | Metered token/dollar usage, attributed per member and per org, read from gbrain's own usage ledger. |
 | **Upgrade** | A deterministic, host-driven, snapshot-first version bump of the pinned gbrain binary — never automatic, never agent-driven. |
+
+> **One name.** The console and this document call it a **Source**. It is stored internally as a `spaces` row in Mobrain's own database (`space_id`, `space_grants`), and it is 1:1 with a gbrain *source* (`source_id`). Those internal identifiers are the only place the word "Space" still appears.
 
 ---
 
@@ -120,7 +122,7 @@ search mode, see the isolation notice, add sources).
 The sidebar has three parts, top to bottom:
 
 - **Account box** — the signed-in email, a settings gear, and sign-out.
-- **Source switcher** — which Source (a Space, 1:1 with a gbrain source) the editor and
+- **Source switcher** — which Source (1:1 with a gbrain source; stored internally as a `spaces` row) the editor and
   file tree are currently pointed at.
 - **File tree** — collapsible, scoped to the current Source, the same markdown/other split
   and read/write behavior Stage 1–2 always had.
@@ -168,7 +170,7 @@ blocks it (see F22 below), removes them cleanly. All admin actions land in an ap
 A **Connection** is the compiled, per-member MCP profile that lets *your* Claude (or any MCP
 client) read and write the brain safely:
 
-- **One write Space, many read Spaces.** You write to exactly one Space; you can read across
+- **One write Source, many read Sources.** You write to exactly one Source; you can read across
   several via `federated_read`.
 - **Compiled, previewable, diffable.** Before you commit a Connection, the console shows you
   the *compiled* profile (`sourceId`, `federatedRead`, bound tool-name slug prefixes,
@@ -179,9 +181,9 @@ client) read and write the brain safely:
   outright deletion doesn't yet — a revoked Connection survives, inert, until its member is
   offboarded. Tracked as a known gap (F22 / task #2 in the backlog), not an oversight.
 
-### 5.3 Spaces and search
+### 5.3 Sources and search
 
-Spaces are gbrain's isolation primitive — each is a git-backed repo of pages. The setup wizard
+Sources are gbrain's isolation primitive — each is a git-backed repo of pages. The setup wizard
 lets an org pick a **search mode** (`conservative | balanced | tokenmax` — the pinned binary's
 real vocabulary, not upstream's older `fast`/`thorough` naming) and shows each mode's relative
 cost. Whether the *measured* cost multiplier is shown depends on whether it's actually been
@@ -199,7 +201,7 @@ replicas are safe) runs jobs every 15 seconds of tick time. Presets:
 | `nightly-dream` | daily 02:05 | Model-assisted synthesis (costs money, capped at $10) |
 | `weekly-health` | Mondays 06:10 | Full-brain `doctor --remediate` (needs an admin Connection) |
 | `autopilot-tripwire` | daily 07:05 | Alerts if gbrain's own autopilot scheduler is ever installed — a second scheduler on the brain (needs an admin Connection; silent when healthy) |
-| `push-reconcile` | daily 04:15 | Push local changes back to the Space's git remote |
+| `push-reconcile` | daily 04:15 | Push local changes back to the Source's git remote |
 | `morning-briefing` | daily 08:05 | Releases anything held over quiet hours |
 | `nightly-agent-briefing` | daily 03:05 | Runs a Claude Code prompt against the brain — **only if the agent runner is on** |
 
@@ -256,7 +258,7 @@ by `scripts/backup.ts` / `scripts/restore.ts`. One backup = one archive with:
 - `control-<stamp>.sql` — full dump of Mobrain's own state
 - `secrets-<stamp>.sql` — just the encrypted `secrets` table (so restore can rehydrate
   credentials without a full control-DB restore)
-- `brain-repos-<stamp>.tar` — the Spaces' actual git repositories
+- `brain-repos-<stamp>.tar` — the Sources' actual git repositories
 - `manifest.json` — checksums, a `quiesced` state (`verified / unverified / failed`), and a
   warning
 
@@ -304,7 +306,7 @@ A schema pack is the brain's ontology: which page types exist, which folders the
 
 **Only an admin writes.** Every authoring route — create, fork, mutate, apply, delete, scaffold — sits behind the `admin` role, and the admin lane is deliberately never granted to an agent. A pack is *created* where it lands, not activated, and applying it is a separate admin action that ends with a gbrain readback (`schema active`) rather than a claim of success. Edits to an existing pack run through gbrain's atomic, lint-gated mutation batch, so a failed batch changes nothing and the console says so. Bundled packs can't be mutated; a fork is the way to edit one.
 
-**Folders are scaffolded automatically.** gbrain never creates directories from a pack, so Mobrain does: when a brain is finished in the wizard, when a pack is applied, when a Space joins a ready brain, and when a mutation adds a type, every Space that resolves the pack gets one `README.md` per page type — naming the type, its primitive, its prefixes and its link verbs. It is create-only and idempotent (an existing file is never overwritten), makes one commit per Space, and because `README.md` is a gbrain metafile the scaffold is never indexed as a page.
+**Folders are scaffolded automatically.** gbrain never creates directories from a pack, so Mobrain does: when a brain is finished in the wizard, when a pack is applied, when a Source joins a ready brain, and when a mutation adds a type, every Source that resolves the pack gets one `README.md` per page type — naming the type, its primitive, its prefixes and its link verbs. It is create-only and idempotent (an existing file is never overwritten), makes one commit per Source, and because `README.md` is a gbrain metafile the scaffold is never indexed as a page.
 
 **Sync is additive.** After a pack change, `schema sync` fills blank types only; it never reclassifies, deletes or unembeds an existing page. Existing pages keep the types they already have.
 

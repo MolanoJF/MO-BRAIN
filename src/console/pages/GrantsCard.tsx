@@ -51,7 +51,7 @@ export function GrantsCard({ members, spaces }: { members: Member[]; spaces: Spa
       </p>
       {error && <Notice tone="danger">{error}</Notice>}
       {grantees.length === 0 || spaces.length === 0 ? (
-        <p className="text-sm text-muted">No members or company Spaces yet.</p>
+        <p className="text-sm text-muted">No members or company Sources yet.</p>
       ) : (
         <table className="text-sm">
           <thead>

@@ -28,7 +28,7 @@ type ScaffoldReport = { sourceId: string; created: string[]; error: string | nul
 /** Folder problems from `/wizard/finish`, as sentences. Empty when every Space was scaffolded. */
 export function scaffoldProblems(scaffold: ScaffoldReport | undefined): string[] {
   return (scaffold ?? []).filter((r) => r.error !== null)
-    .map((r) => `${r.sourceId === '*' ? 'Your Spaces' : r.sourceId}: ${r.error}`);
+    .map((r) => `${r.sourceId === '*' ? 'Your Sources' : r.sourceId}: ${r.error}`);
 }
 
 type State = {
@@ -133,7 +133,7 @@ export function Wizard({ onReady }: { onReady: () => void }) {
         <section className="space-y-3">
           <h2 className="font-medium">Keep a copy off this server (optional)</h2>
           <p className="text-sm text-muted">
-            Your space is a git repository on this server. Connect it to a GitHub repo now, or skip
+            Your Source is a git repository on this server. Connect it to a GitHub repo now, or skip
             this and do it later from My brain. Nothing is pushed until setup finishes; then use
             Push now on My brain.
           </p>
@@ -249,9 +249,9 @@ function SchemaStep({ busy, onSubmit, onDone }: {
 function SpaceStep({ busy, onSubmit }: { busy: boolean; onSubmit: () => void }) {
   return (
     <section className="space-y-3">
-      <h2 className="font-medium">Create your private space</h2>
+      <h2 className="font-medium">Create your private Source</h2>
       <p className="text-sm text-muted">
-        This is your private space — only you can access it. You can add shared Spaces
+        This is your private Source — only you can access it. You can add shared Sources
         and invite members later.
       </p>
       <Button variant="primary" disabled={busy} onClick={() => onSubmit()}>
