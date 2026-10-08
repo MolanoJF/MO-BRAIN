@@ -43,7 +43,7 @@ export function validateDraft(input: unknown): { ok: true; draft: PackDraft } | 
   if (!PACK_NAME.test(name)) errors.push('name must be lowercase letters, digits and hyphens');
   if ((BUNDLED_PACKS as readonly string[]).includes(name)) errors.push(`${name} is a bundled pack name`);
   if ((MANAGED_PACKS as readonly string[]).includes(name) || name === LAYER_PACK) {
-    errors.push(`${name} is reserved by Mobrain`);
+    errors.push(`${name} is reserved by Mo-brain`);
   }
   const ext = o.extends === null || o.extends === undefined || o.extends === '' ? null : str(o.extends);
   if (ext !== null && !PACK_NAME.test(ext)) errors.push(`extends ${ext} is not a pack name`);

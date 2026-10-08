@@ -3,7 +3,7 @@
  * The 90-minute company-brain tutorial, unattended.
  * Covers docs/tutorials/company-brain.md Parts 2-5 and 11-12 — the parts that
  * are automatable today. Parts 6-10 (crons, skills, Slack, human onboarding)
- * are what brainstand replaces in Slices 2-4.
+ * are what Mo-brain owns in production.
  *
  * Every gbrain invocation goes through the typed exec layer: argv arrays,
  * never shell strings (G2), with secrets redacted out of the report (S3c).

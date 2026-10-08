@@ -44,7 +44,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 /**
  * `autopilot --status --json`'s AutopilotStatusReport, OBSERVED from the
  * pinned gbrain (docs/archive/autopilot-status-findings.md): exactly these keys, and
- * on a Mobrain stack `installed:false, state:'not_installed'`.
+ * on a Mo-brain stack `installed:false, state:'not_installed'`.
  */
 const AUTOPILOT_STATUS_KEYS = [
   'installed', 'install_target', 'state', 'disabled_reason', 'paused_reason',
@@ -187,7 +187,7 @@ export const SCHEDULER_COMMANDS: Record<string, SchedulerCommand> = {
   },
 
   /**
-   * A TRIPWIRE, not a health gate. Mobrain never installs gbrain's autopilot
+   * A TRIPWIRE, not a health gate. Mo-brain never installs gbrain's autopilot
    * (this scheduler replaces it), so the only healthy answer is
    * not_installed, and ANY install — even a `fresh` one that exits 0 — is a
    * second scheduler on this brain. Brain-wide because the probe reads the

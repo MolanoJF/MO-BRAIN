@@ -1,12 +1,12 @@
 # Handoff — read this first
 
-**Mobrain 1.0.0 is the tagged release.** `main` has moved since that tag. Nothing since `v1.0.0` has been tagged or published. Published digests are in [`CHANGELOG.md`](CHANGELOG.md).
+**Mo-brain 1.0.0 is the tagged release.** `main` has moved since that tag. Nothing since `v1.0.0` has been tagged or published. Published digests are in [`CHANGELOG.md`](CHANGELOG.md).
 
 **Next product slice:** hosted sandboxes (zones §5.4). Brainstorm before a plan. Open questions: who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud stays deferred. Pricing waits on a search-mode cost measurement on a real corpus. This file wins over any older note that names Slice 6 as next.
 
 ## What this project is
 
-**Mobrain** wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with `scripts/install.sh` and operates from a web console. It was codenamed `brainstand` through Slices 0–4 and renamed in Slice 5. Three frozen crypto strings keep their original bytes because they are key-derivation domain separators, not product names.
+**Mo-brain** wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with `scripts/install.sh` and operates from a web console. Human-facing name: **Mo-brain**. Technical ids: `mobrain` / `MOBRAIN_*`. (Earlier internal codename `brainstand` is fully retired — no live installs carried it forward.) HKDF domain separators are `mobrain-kek-v1` and `mobrain-gateway-token-*`; those bytes are frozen once secrets exist (D3).
 
 **gbrain is a pinned upstream dependency, driven only through its published contracts. Never forked.** Its CLI is the control lane, its HTTP MCP is the data lane, and a small file plane covers what `config set` refuses. If you are editing gbrain's source or reading its tables directly, stop.
 

@@ -385,7 +385,7 @@ finish. Three limits are stated rather than hidden:
   it reads the after-head. That is what makes the range real, and it is why the author of a commit in
   these Spaces is one of **our** writers and never gbrain.
 - **A commit written by another of our writers is reported, not assumed away.** `live-sync`, a
-  member's own agent, or another Mobrain job can commit in the same Space during the window.
+  member's own agent, or another Mo-brain job can commit in the same Space during the window.
   `attributeCommits` sets `concurrentWriters: true`, lists `foreignAuthors`, and the console says
   *"2 of 5 commits in this range were not written by this run"* — never presenting them as the agent's
   work. Revert then needs `?confirm=concurrent`. (We cannot stamp our own run id on commits made by
@@ -640,7 +640,7 @@ disabling it does not change how quiesce runs.
 
 ## Provenance
 
-Run on the live dev stack (`brainstand-*-1`, gbrain `0.50.5.0`, `DOMAIN=localhost`, runner lane
+Run on the live dev stack (`mobrain-*-1`, gbrain `0.50.5.0`, `DOMAIN=localhost`, runner lane
 enabled) on **2026-09-17**, by the agent that wrote this file. Executed here:
 
 - the compose profile renderings — `config --services`, `config --profiles`, the `--profile runner`
@@ -648,7 +648,7 @@ enabled) on **2026-09-17**, by the agent that wrote this file. Executed here:
 - the CA-export trap, twice over: a throwaway project (`runbookprobe`) for
   `up -d --no-deps agent-runner` (exit 1, then `down -v` and the leftover volume removed) and a
   throwaway empty volume for the bare `volume-subpath` mount failure;
-- `docker run … ls -l` against `brainstand_runner-ca` to read the exported file's mode and size;
+- `docker run … ls -l` against `mobrain_runner-ca` to read the exported file's mode and size;
 - the `RUNNER_TOKEN` interpolation check — `config --format json` with and without an empty child-env
   override, printing only empty/non-empty and lengths, never a value;
 - the internal claim probes from inside `control-plane` (empty bearer, absent header, bogus bearer);

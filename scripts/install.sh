@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Mobrain self-host installer. The compose IS the deployment; this script
+# Mo-brain self-host installer. The compose IS the deployment; this script
 # only prompts for a domain, generates secrets, writes .env and brings the
 # stack up. The console owns everything after `up`.
 set -euo pipefail
 
-# `MOBRAIN_*` are the current names; the legacy `BRAINSTAND_*` spelling keeps
-# working for one release, because .env files in the wild already use it.
-ENV_PATH="${MOBRAIN_ENV_PATH:-${BRAINSTAND_ENV_PATH:-.env}}"
+ENV_PATH="${MOBRAIN_ENV_PATH:-.env}"
 GBRAIN_VERSION="${GBRAIN_VERSION:-0.60.115.0}"
 # The product's app version (the published `control-plane` image tag).
-# APP_VERSION is the canonical name; the legacy aliases written below name the
-# same value so an older .env reader still resolves the released tag (D3 rename).
+# APP_VERSION is canonical; MOBRAIN_VERSION is written into .env as the same value.
 APP_VERSION="${APP_VERSION:-1.0.0}"
 # G1: the second pinned dependency (D4). Required with no compose default, so
 # a deployment that never enables the runner still names a harness version.
@@ -23,16 +20,11 @@ if [ -e "$ENV_PATH" ]; then
   exit 1
 fi
 
-# compose/docker-compose.yml's own fallback (`${COMPOSE_PROJECT_NAME:-brainstand}`)
-# is frozen: every pre-1.0 deployment already has volumes named `brainstand_*`,
-# and changing that fallback would make Compose treat them as a different
-# project on their next `up`, orphaning live data. So the frozen default stays
-# put — instead, every NEW install (this script only ever writes .env once;
-# see the refusal above) picks its own name here, derived from the checkout's
-# absolute path so two unrelated checkouts on the same host land on different
-# projects by default and can never share containers or volumes. This is what
-# let a second install silently recreate a first install's live containers in
-# place with mismatched secrets — see docs/runbooks/install.md. An explicit
+# compose/docker-compose.yml falls back to `mobrain` when COMPOSE_PROJECT_NAME
+# is unset. Every NEW install (this script only ever writes .env once; see the
+# refusal above) picks its own name here, derived from the checkout's absolute
+# path so two unrelated checkouts on the same host land on different projects
+# by default and can never share containers or volumes. An explicit
 # COMPOSE_PROJECT_NAME always wins, and is exported before preflight runs so
 # its port-conflict check reasons about the name this install will actually use.
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}"
@@ -252,10 +244,7 @@ MOBRAIN_CADDY_TLS_DIRECTIVE=${CADDY_TLS_DIRECTIVE}
 GBRAIN_VERSION=${GBRAIN_VERSION}
 HARNESS_VERSION=${HARNESS_VERSION}
 APP_VERSION=${APP_VERSION}
-# Both names below are the legacy aliases older .env files already carry (D3
-# rename); APP_VERSION above is current, so all three name the released tag.
 MOBRAIN_VERSION=${APP_VERSION}
-BRAINSTAND_VERSION=${APP_VERSION}
 WORKER_CONCURRENCY=2
 ${TS_ENV_BLOCK}
 
@@ -288,7 +277,7 @@ if [ -n "$RUNNER_TOKEN" ]; then
   echo "Agent runner enabled: generated RUNNER_TOKEN and added COMPOSE_PROFILES=runner to $ENV_PATH."
 fi
 
-if [ "${MOBRAIN_SKIP_UP:-${BRAINSTAND_SKIP_UP:-0}}" = "1" ]; then
+if [ "${MOBRAIN_SKIP_UP:-0}" = "1" ]; then
   echo "Skipping docker compose up (MOBRAIN_SKIP_UP=1)."
   exit 0
 fi
@@ -297,7 +286,7 @@ fi
 # look for compose/.env and miss the secrets we just wrote at $ENV_PATH.
 echo "Pulling pinned images (${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros})…"
 if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; then
-  echo "Could not pull the pinned Mobrain images. Building them locally." >&2
+  echo "Could not pull the pinned Mo-brain images. Building them locally." >&2
   registry="${IMAGE_REGISTRY:-ghcr.io}"
   namespace="${IMAGE_NAMESPACE:-molioros}"
   docker build -f docker/gbrain-base.Dockerfile \

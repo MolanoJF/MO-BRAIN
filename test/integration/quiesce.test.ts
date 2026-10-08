@@ -10,7 +10,7 @@ const COMPOSE = [
   ...(existsSync('.env') ? ['--env-file', '.env'] as const : []),
   '-f', 'compose/docker-compose.yml',
 ];
-const SKIP_QUIESCE_INTEGRATION_ENV = 'BRAINSTAND_ALLOW_SKIP_QUIESCE_INTEGRATION';
+const SKIP_QUIESCE_INTEGRATION_ENV = 'MOBRAIN_ALLOW_SKIP_QUIESCE_INTEGRATION';
 
 /** Same shape as test/integration/backup.test.ts's probeBackupStack —
  *  quiesce needs the real stack up, not merely the Docker CLI present. */

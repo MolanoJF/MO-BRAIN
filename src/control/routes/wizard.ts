@@ -213,7 +213,7 @@ wizard.get('/schema-packs', guard(async (c) => {
  * `gbrain init --schema-pack`. It deliberately is not applied here: at this
  * point in the wizard the brain has not been init'd, and `init` writes
  * config.json's `schema_pack` itself (gbrain's own init default is still
- * `gbrain-base-v2`, which is why Mobrain always passes the pack explicitly —
+ * `gbrain-base-v2`, which is why Mo-brain always passes the pack explicitly —
  * it stores `mobrain-personal`), so a pre-init write would simply be stamped
  * over. See
  * docs/archive/schema-pack-findings.md S2.

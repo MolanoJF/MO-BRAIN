@@ -15,7 +15,7 @@ function deriveKek(salt: Buffer): Buffer {
   // FROZEN FOREVER (D3). This is an HKDF domain separator, not a product name.
   // Changing it makes every existing sealed secret permanently undecryptable.
   // `lint:forbidden`'s frozen-crypto-domain rule fails the build if you try.
-  return Buffer.from(hkdfSync('sha256', Buffer.from(master, 'utf8'), salt, Buffer.from('brainstand-kek-v1'), 32));
+  return Buffer.from(hkdfSync('sha256', Buffer.from(master, 'utf8'), salt, Buffer.from('mobrain-kek-v1'), 32));
 }
 
 function encrypt(key: Buffer, plaintext: Buffer): string {

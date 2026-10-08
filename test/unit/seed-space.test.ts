@@ -9,10 +9,10 @@ const CONTROL_DATABASE_URL =
   process.env.CONTROL_DATABASE_URL ?? 'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 
 const SCRATCH_PG_CMD =
-  'docker run -d --name bs-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
+  'docker run -d --name mobrain-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
   '-e POSTGRES_DB=control -p 5432:5432 pgvector/pgvector:pg16';
 
-const SKIP_ENV = 'BRAINSTAND_ALLOW_SKIP_SEED_SPACE';
+const SKIP_ENV = 'MOBRAIN_ALLOW_SKIP_SEED_SPACE';
 
 async function probePostgres(): Promise<boolean> {
   const probe = new SQL(CONTROL_DATABASE_URL, { connectionTimeout: 3, max: 1 });

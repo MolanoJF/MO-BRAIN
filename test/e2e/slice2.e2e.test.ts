@@ -7,7 +7,7 @@ import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { scrubOutput } from '../../src/docker/host.ts';
 import type { OperationSpec, ParamValues } from '../../src/contracts/types.ts';
 
-const SKIP_SLICE2_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE2_E2E';
+const SKIP_SLICE2_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE2_E2E';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 const ADMIN_EMAIL = 'admin@example.test';
@@ -499,8 +499,8 @@ describe('Slice 2 seam gate B', () => {
         'sh', '-c',
         `printf '${escaped}' > /srv/brain-repos/${s.sourceId}/${s.file} && ` +
         `cd /srv/brain-repos/${s.sourceId} && ` +
-        `git -c user.email=e2e@brainstand.local -c user.name=e2e ` +
-        `add -A && git -c user.email=e2e@brainstand.local -c user.name=e2e ` +
+        `git -c user.email=e2e@mobrain.local -c user.name=e2e ` +
+        `add -A && git -c user.email=e2e@mobrain.local -c user.name=e2e ` +
         `commit -qm e2e-${s.sourceId} || true`,
       ]);
       if (seed.exitCode !== 0) throw new Error(`seed ${s.sourceId} failed: ${seed.stderr}`);

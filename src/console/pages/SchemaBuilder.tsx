@@ -94,8 +94,8 @@ export function afterSave(r: PackMutateResult, name: string): { error: string | 
 }
 
 export const MANAGED_EDIT_NOTE =
-  'mobrain-personal is maintained by Mobrain. Your changes go into my-personal, layered on top, ' +
-  'so Mobrain updates still reach you. Types that come from mobrain-personal cannot be removed; add new ones instead.';
+  'mobrain-personal is maintained by Mo-brain. Your changes go into my-personal, layered on top, ' +
+  'so Mo-brain updates still reach you. Types that come from mobrain-personal cannot be removed; add new ones instead.';
 
 const PRIMITIVES = ['entity', 'media', 'temporal', 'annotation', 'concept'] as const;
 const splitList = (s: string): string[] => s.split(',').map((x) => x.trim()).filter(Boolean);

@@ -210,7 +210,7 @@ describe('dream change counting, against the observed CycleReport', () => {
 });
 
 describe('autopilot-status', () => {
-  // OBSERVED at 0.50.5.0 on a Mobrain stack.
+  // OBSERVED at 0.50.5.0 on a Mo-brain stack.
   const NOT_INSTALLED = {
     installed: false, install_target: null, state: 'not_installed', disabled_reason: null,
     paused_reason: null, heartbeat_age_seconds: null, stale_after_seconds: 1800, last_log: '',

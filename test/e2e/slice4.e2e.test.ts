@@ -58,7 +58,7 @@ import { runnerStateLabel, runnerStateTone } from '../../src/console/pages/Runs.
  * container recreate. No fake timer can advance another process's clock.
  */
 
-const SKIP_SLICE4_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE4_E2E';
+const SKIP_SLICE4_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE4_E2E';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 const ADMIN_EMAIL = 'admin@example.test';
@@ -81,7 +81,7 @@ process.env.CONTROL_DATABASE_URL ??=
  * a different bind SOURCE would move the upgrade journal out from under Gate C.
  * Same default, same directory, no drift.
  */
-const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'brainstand-upgrade-e2e');
+const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'mobrain-upgrade-e2e');
 process.env.UPGRADE_DIR = HOST_UPGRADE_DIR;
 
 const COMPOSE_ENV: Record<string, string> = {

@@ -38,7 +38,7 @@ export async function seedGitSource(id: string): Promise<void> {
   const dir = `/srv/brain-repos/${id}`;
   await composeExec('gbrain-ops', ['sh', '-c',
     `set -e; mkdir -p ${dir}; cd ${dir}; git init -q; echo "# ${id}" > README.md; git add -A; ` +
-    `git -c user.email=test@brainstand.local -c user.name=brainstand-test commit -q -m seed`,
+    `git -c user.email=test@mobrain.local -c user.name=mobrain-test commit -q -m seed`,
   ]);
 }
 
@@ -72,7 +72,7 @@ export async function seedGitSource(id: string): Promise<void> {
 // STACK_LOCK_STALE_MS, is BROKEN rather than deadlocking the suite. A live holder
 // can never be mistaken for stale: the longest leg that takes the lock runs
 // under a 600s `test()` timeout, and no single test may outlive it.
-const STACK_LOCK_DIR = join(tmpdir(), 'brainstand-stack-exclusion.lock');
+const STACK_LOCK_DIR = join(tmpdir(), 'mobrain-stack-exclusion.lock');
 const STACK_LOCK_STALE_MS = 30 * 60_000;
 const STACK_LOCK_WAIT_MS = 25 * 60_000;
 const STACK_LOCK_POLL_MS = 250;

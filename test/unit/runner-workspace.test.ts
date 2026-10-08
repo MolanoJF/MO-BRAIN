@@ -6,7 +6,7 @@
  * ephemeral by construction — it dies with the container, and it is never a bind
  * mount of `GBRAIN_HOME` or of a brain repo. There is no `/workspace` tmpfs.
  *
- * These tests use an explicit root under `.brainstand-tmp/slice4/` so they can
+ * These tests use an explicit root under `.mobrain-tmp/slice4/` so they can
  * run on the host (win32 here, Linux in the container) without writing to `/tmp`.
  */
 import { test, expect, describe, afterAll } from 'bun:test';
@@ -16,7 +16,7 @@ import {
   WORKSPACE_ROOT, workspacePath, createWorkspace, destroyWorkspace,
 } from '../../src/runner/workspace.ts';
 
-const ROOT = join(import.meta.dir, '..', '..', '.brainstand-tmp', 'slice4', 'Task8RunnerProcess', 'ws');
+const ROOT = join(import.meta.dir, '..', '..', '.mobrain-tmp', 'slice4', 'Task8RunnerProcess', 'ws');
 
 afterAll(async () => {
   await rm(ROOT, { recursive: true, force: true });

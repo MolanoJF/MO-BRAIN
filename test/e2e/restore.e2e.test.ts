@@ -10,7 +10,7 @@ import { runBackup } from '../../scripts/backup.ts';
 import { runRestore } from '../../scripts/restore.ts';
 import { callOps, opsHealthy, seedSpace } from '../../src/control/opsClient.ts';
 
-const SKIP_RESTORE_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_RESTORE_E2E';
+const SKIP_RESTORE_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_RESTORE_E2E';
 
 let dir: string;
 const KNOWN_SLUG = 'restore-probe';
@@ -128,8 +128,8 @@ beforeAll(async () => {
     'sh', '-c',
     `printf '# Restore probe\\n\\n${KNOWN_TEXT}\\n' > /srv/brain-repos/shared/${KNOWN_SLUG}.md && ` +
     `cd /srv/brain-repos/shared && ` +
-    `git -c user.email=restore@brainstand.local -c user.name=restore ` +
-    `add -A && git -c user.email=restore@brainstand.local -c user.name=restore ` +
+    `git -c user.email=restore@mobrain.local -c user.name=restore ` +
+    `add -A && git -c user.email=restore@mobrain.local -c user.name=restore ` +
     `commit -qm 'restore probe'`,
   ]);
   if (seed.exitCode !== 0) throw new Error(`seed probe failed: ${seed.stderr}`);

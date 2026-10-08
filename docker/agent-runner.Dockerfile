@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Mobrain agent-runner image: the model harness, exactly pinned, plus the
+# Mo-brain agent-runner image: the model harness, exactly pinned, plus the
 # runner's own entrypoint. No gbrain, no ops sidecar, no control-plane server.
 #
 # G1: HARNESS_VERSION is an exact semver ARG. A moving ref in an image build is

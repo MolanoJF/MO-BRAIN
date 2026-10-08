@@ -1136,11 +1136,11 @@ describe('A8 the token lane\'s registry operations (real binary at the pin)', ()
 
   test('the suite is not silently skipped when docker is unavailable', () => {
     if (dockerAvailable) return;
-    if (process.env.BRAINSTAND_ALLOW_SKIP_RUNNER_CONTRACT === '1') return;
+    if (process.env.MOBRAIN_ALLOW_SKIP_RUNNER_CONTRACT === '1') return;
     throw new Error(
       'docker compose is not usable, so the A8/A10 contract legs were skipped rather than run. '
         + 'Install/start Docker, then rerun:\n\n  bun test test/contract/runner.contract.test.ts\n\n'
-        + 'If skipping is genuinely intended, set BRAINSTAND_ALLOW_SKIP_RUNNER_CONTRACT=1.',
+        + 'If skipping is genuinely intended, set MOBRAIN_ALLOW_SKIP_RUNNER_CONTRACT=1.',
     );
   });
 
@@ -1268,7 +1268,7 @@ describe('A8 the token lane\'s registry operations (real binary at the pin)', ()
 describe('A8 the ops verb: /fileplane/delete-credential-journal', () => {
   // Only the directory this describe created is removed afterwards — GateA is shared scratch, and
   // an afterAll that wipes it takes other legs' fixtures with it.
-  const OPS_HOME = join(process.cwd(), '.brainstand-tmp', 'slice4', 'GateA', 'ops-verb');
+  const OPS_HOME = join(process.cwd(), '.mobrain-tmp', 'slice4', 'GateA', 'ops-verb');
   const OPS_PORT = '13191';
   const OPS_TOKEN = 'gate-a-token-not-a-real-secret';
   const BASE = `http://127.0.0.1:${OPS_PORT}`;

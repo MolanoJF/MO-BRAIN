@@ -31,7 +31,7 @@ import { claimNextRun, finishRun } from '../../src/scheduler/claim.ts';
 import { withLeadership } from '../../src/scheduler/leader.ts';
 import { materializeDue } from '../../src/scheduler/materialize.ts';
 
-const SKIP_SLICE3_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE3_E2E';
+const SKIP_SLICE3_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE3_E2E';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 const ADMIN_EMAIL = 'admin@example.test';
@@ -260,7 +260,7 @@ async function seedWriteSpaceCommit(): Promise<string> {
     `set -e; cd ${repo}; `
     + `printf '# gate b seed\\n\\nSeeded by the slice3 e2e gate ${RUN_ID}.\\n' > ${file}; `
     + `git add ${file}; `
-    + `git -c user.email=gate-b@brainstand.local -c user.name=gate-b commit -qm "gate-b seed ${RUN_ID}"`,
+    + `git -c user.email=gate-b@mobrain.local -c user.name=gate-b commit -qm "gate-b seed ${RUN_ID}"`,
   ]);
   if (r.exitCode !== 0) throw new Error(`seed commit failed: ${r.stderr || r.stdout}`);
   return file;
@@ -581,7 +581,7 @@ describe('Slice 3 seam gate B', () => {
 // scheduler: it is the shipped scheduler, the shipped schema and the shipped
 // constraints — only `now` is a parameter.
 //
-// WHICH DATABASE. Not the `bs-fp-pg` scratch DB the slice-0 integration suites
+// WHICH DATABASE. Not the `mobrain-fp-pg` scratch DB the slice-0 integration suites
 // talk to. B4 created `scheduleId` through the HTTP API against the RUNNING
 // stack, so Gate C must read THAT database or every assertion below is
 // meaningless. It has no published host port (`caddy is the only publisher` is

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mobrain install preflight.
+# Mo-brain install preflight.
 #
 # Runs before scripts/install.sh generates any secret: a host that cannot run
 # the stack must not end up holding an ENCRYPTION_KEY it will never use.
@@ -49,7 +49,7 @@ MIN_DISK_GB=20
 refuse() { local code="$1"; shift; echo "PREFLIGHT: $*" >&2; exit "$code"; }
 warn()   { echo "PREFLIGHT: $*" >&2; }
 
-ENV_PATH="${MOBRAIN_ENV_PATH:-${BRAINSTAND_ENV_PATH:-.env}}"
+ENV_PATH="${MOBRAIN_ENV_PATH:-.env}"
 
 check_docker() {
   if [ "${PREFLIGHT_FAKE_DOCKER:-}" = "missing" ]; then
@@ -78,7 +78,7 @@ check_compose() {
   case "$minor" in '' | *[!0-9]*) minor=0 ;; esac
   if [ "$major" -lt "$MIN_COMPOSE_MAJOR" ] ||
      { [ "$major" -eq "$MIN_COMPOSE_MAJOR" ] && [ "$minor" -lt "$MIN_COMPOSE_MINOR" ]; }; then
-    refuse 11 "Docker Compose ${v} is too old; Mobrain needs v${MIN_COMPOSE_MAJOR}.${MIN_COMPOSE_MINOR} or newer — upgrade the Compose plugin and re-run."
+    refuse 11 "Docker Compose ${v} is too old; Mo-brain needs v${MIN_COMPOSE_MAJOR}.${MIN_COMPOSE_MINOR} or newer — upgrade the Compose plugin and re-run."
   fi
 }
 
@@ -101,7 +101,7 @@ check_ram() {
   mb="$(ram_mb)"
   if [ -z "$mb" ]; then warn "could not measure memory; skipping the RAM check."; return; fi
   if [ "$mb" -lt "$MIN_RAM_MB" ]; then
-    refuse 12 "Mobrain needs at least ${MIN_RAM_MB} MB of memory; this host reports ${mb} MB — add RAM or move to a larger host before installing."
+    refuse 12 "Mo-brain needs at least ${MIN_RAM_MB} MB of memory; this host reports ${mb} MB — add RAM or move to a larger host before installing."
   fi
 }
 
@@ -122,11 +122,11 @@ check_disk() {
   gb="$(disk_gb)"
   if [ -z "$gb" ]; then warn "could not measure free disk; skipping the disk check."; return; fi
   if [ "$gb" -lt "$MIN_DISK_GB" ]; then
-    refuse 13 "Mobrain needs at least ${MIN_DISK_GB} GB free on the Docker data root; this host reports ${gb} GB — free space before installing."
+    refuse 13 "Mo-brain needs at least ${MIN_DISK_GB} GB free on the Docker data root; this host reports ${gb} GB — free space before installing."
   fi
 }
 
-project_name() { printf '%s' "${COMPOSE_PROJECT_NAME:-brainstand}"; }
+project_name() { printf '%s' "${COMPOSE_PROJECT_NAME:-mobrain}"; }
 
 # A port held by a container of THIS project is not a conflict — the stack is
 # already running. A port held by anything else is.
@@ -303,14 +303,14 @@ check_tailscale() {
 
 check_images() {
   if [ -n "${PREFLIGHT_FAKE_PULL:-}" ]; then
-    refuse 16 "the pinned Mobrain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
+    refuse 16 "the pinned Mo-brain images cannot be pulled; check ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros} credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
   fi
   if [ "${PREFLIGHT_SKIP_PULL:-1}" = "1" ]; then
     warn "skipping the image-pull check (PREFLIGHT_SKIP_PULL=1); the installer pulls the images itself."
     return 0
   fi
   if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull >/dev/null 2>&1; then
-    refuse 16 "the pinned Mobrain images cannot be pulled; on an air-gapped or registry-less host build them with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
+    refuse 16 "the pinned Mo-brain images cannot be pulled; on an air-gapped or registry-less host build them with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'."
   fi
 }
 

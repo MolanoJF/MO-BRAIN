@@ -9,9 +9,9 @@ echo "--- generates a .env with every required secret"
 # PREFLIGHT_SKIP_DNS: this case is about .env generation, not DNS; the host's
 # own preflight must still run (unlike SKIP_PREFLIGHT, which would hide it).
 # Ports are faked free: this suite may run on a dev host that already runs
-# another Mobrain stack on 80/443 (a real, correct refusal — see
+# another Mo-brain stack on 80/443 (a real, correct refusal — see
 # preflight.test.sh), which is not what these cases are about.
-DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env" bash scripts/install.sh >/dev/null 2>&1
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env" bash scripts/install.sh >/dev/null 2>&1
 for key in DOMAIN POSTGRES_PASSWORD OPS_RPC_TOKEN ENCRYPTION_KEY BETTER_AUTH_SECRET GBRAIN_VERSION; do
   if grep -q "^${key}=.\+" "$work/.env"; then echo "PASS: $key set"; else echo "FAIL: $key missing or empty"; fail=1; fi
 done
@@ -51,7 +51,7 @@ else
 fi
 
 echo "--- refuses to clobber an existing .env"
-if DOMAIN=brain.test BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env" bash scripts/install.sh >/dev/null 2>&1; then
+if DOMAIN=brain.test MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env" bash scripts/install.sh >/dev/null 2>&1; then
   echo "FAIL: overwrote an existing .env"; fail=1
 else echo "PASS: refused to overwrite"; fi
 
@@ -137,7 +137,7 @@ else
 fi
 
 echo "--- ENABLE_RUNNER=n skips the prompt and leaves the runner off"
-DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=n BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=n MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env3" bash scripts/install.sh </dev/null >/dev/null 2>&1
 if grep -q '^RUNNER_TOKEN=$' "$work/.env3" && ! grep -q '^COMPOSE_PROFILES=runner$' "$work/.env3"; then
   echo "PASS: runner left off"
 else
@@ -145,14 +145,14 @@ else
 fi
 
 echo "--- ENABLE_RUNNER=y skips the prompt and enables the runner"
-DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=y BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env4" bash scripts/install.sh </dev/null >/dev/null 2>&1
+DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free ENABLE_RUNNER=y MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env4" bash scripts/install.sh </dev/null >/dev/null 2>&1
 if grep -q '^RUNNER_TOKEN=.\+' "$work/.env4" && grep -q '^COMPOSE_PROFILES=runner$' "$work/.env4"; then
   echo "PASS: runner enabled"
 else
   echo "FAIL: ENABLE_RUNNER=y did not enable the runner"; fail=1
 fi
 
-# Parse the script source — BRAINSTAND_SKIP_UP must not skip this check.
+# Parse the script source — MOBRAIN_SKIP_UP must not skip this check.
 # Without --env-file, Compose loads .env from the project dir of the first -f
 # (compose/), so the secrets install.sh just wrote never reach interpolation.
 echo "--- compose up argv includes --env-file (parse script; no Docker)"
@@ -165,7 +165,7 @@ else
 fi
 
 # Parse the script source the way the --env-file case does, so a runtime
-# BRAINSTAND_SKIP_UP=1 cannot hide the ordering. Preflight must run before the
+# MOBRAIN_SKIP_UP=1 cannot hide the ordering. Preflight must run before the
 # first `$(gen)`: a host that cannot run the stack must never hold an
 # ENCRYPTION_KEY.
 echo "--- preflight precedes the first gen() call (parse script; no Docker)"
@@ -195,14 +195,14 @@ fi
 echo "--- COMPOSE_PROJECT_NAME: derived by default, deterministic, printed, and written to .env"
 rm -f "$work/.env3" "$work/.env4"
 out1=$(DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
-  BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env3" bash scripts/install.sh 2>&1)
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env3" bash scripts/install.sh 2>&1)
 name1=$(grep '^COMPOSE_PROJECT_NAME=' "$work/.env3" | cut -d= -f2)
 if [ -n "$name1" ]; then echo "PASS: COMPOSE_PROJECT_NAME written to .env ($name1)"; else echo "FAIL: COMPOSE_PROJECT_NAME missing from .env"; fail=1; fi
 if echo "$out1" | grep -qF "$name1"; then echo "PASS: chosen name printed, not silent"; else echo "FAIL: chosen name never printed"; fail=1; fi
 # Same checkout dir (this repo, run from the same cwd) -> same derived name,
 # so a re-run/upgrade of the same install always targets the same project.
 DOMAIN=brain.test PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
-  BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env4" bash scripts/install.sh >/dev/null 2>&1
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env4" bash scripts/install.sh >/dev/null 2>&1
 name2=$(grep '^COMPOSE_PROJECT_NAME=' "$work/.env4" | cut -d= -f2)
 if [ "$name1" = "$name2" ]; then echo "PASS: derived name is deterministic ($name1)"; else echo "FAIL: derived name changed ($name1 vs $name2)"; fail=1; fi
 
@@ -210,7 +210,7 @@ echo "--- COMPOSE_PROJECT_NAME: an explicit value always wins over the derived d
 rm -f "$work/.env5"
 DOMAIN=brain.test COMPOSE_PROJECT_NAME=my-custom-project PREFLIGHT_SKIP_DNS=1 \
   PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free \
-  BRAINSTAND_SKIP_UP=1 BRAINSTAND_ENV_PATH="$work/.env5" bash scripts/install.sh >/dev/null 2>&1
+  MOBRAIN_SKIP_UP=1 MOBRAIN_ENV_PATH="$work/.env5" bash scripts/install.sh >/dev/null 2>&1
 if grep -q '^COMPOSE_PROJECT_NAME=my-custom-project$' "$work/.env5"; then
   echo "PASS: explicit COMPOSE_PROJECT_NAME respected"
 else

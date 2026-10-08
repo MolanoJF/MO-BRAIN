@@ -1,6 +1,6 @@
-# Mobrain
+# Mo-brain
 
-**Mobrain is a self-hosted company brain.** It wraps [gbrain](https://github.com/garrytan/gbrain) — the CLI/MCP knowledge system — in a stack a team deploys on one host with a single command and then operates from a web console. Your people and your agents ask questions of a shared, permissioned corpus; admins manage members, Connections, sources, schedules, spend and upgrades from the console. The brain itself is gbrain's, pinned and upgraded, never forked.
+**Mo-brain is a self-hosted company brain.** It wraps [gbrain](https://github.com/garrytan/gbrain) — the CLI/MCP knowledge system — in a stack a team deploys on one host with a single command and then operates from a web console. Your people and your agents ask questions of a shared, permissioned corpus; admins manage members, Connections, sources, schedules, spend and upgrades from the console. The brain itself is gbrain's, pinned and upgraded, never forked.
 
 - **One host.** Docker Compose, one brain per deployment. No Kubernetes.
 - **gbrain stays upstream.** It is a pinned dependency driven only through its published contracts, never a vendored or patched copy.
@@ -8,13 +8,13 @@
 
 ## Install
 
-Mobrain is deployed from a checkout of this repository, on the host that will run it. From the repository root:
+Mo-brain is deployed from a checkout of this repository, on the host that will run it. From the repository root:
 
 ```bash
 bash scripts/install.sh
 ```
 
-It asks one question. **Leave the domain blank** and Mobrain installs for this machine only: it detects the host's LAN address, issues a certificate from Caddy's own local CA, and the brain is reachable at `https://<lan-ip>` from any device on your network. Your browser warns about that certificate once — it is a private CA, not a broken install.
+It asks one question. **Leave the domain blank** and Mo-brain installs for this machine only: it detects the host's LAN address, issues a certificate from Caddy's own local CA, and the brain is reachable at `https://<lan-ip>` from any device on your network. Your browser warns about that certificate once — it is a private CA, not a broken install.
 
 **Answer with a domain** you control and you get today's public path instead: Caddy obtains a real Let's Encrypt certificate, which needs that domain's A/AAAA record already pointing at this host.
 
@@ -32,7 +32,7 @@ ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERS
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   # only with the runner
 ```
 
-`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `molioros` (the product is **Mobrain**; GHCR images publish under the MoliorOS org namespace that owns the release). Both are plain environment variables, so an operator running their own registry sets them explicitly:
+`IMAGE_REGISTRY` defaults to `ghcr.io` and `IMAGE_NAMESPACE` defaults to `molioros` (the product is **Mo-brain**; GHCR images publish under the MoliorOS org namespace that owns the release). Both are plain environment variables, so an operator running their own registry sets them explicitly:
 
 ```bash
 DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
@@ -76,14 +76,14 @@ When on, the runner is fenced to one internal network with no route out and its 
 | Dependency | Pin | Where |
 |---|---|---|
 | gbrain | **0.60.115.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
-| Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
+| Mo-brain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 
 Exact semver, never `latest` or `latest-stable`. The source pin above is what the upgrade lane builds. GHCR still publishes `0.50.5.0` until the next release; `scripts/install.sh` defaults to the `0.60.115.0` pin and builds it locally when that pull misses. The contract suite runs on demand via `stack.yml` — including before every release, since `release.yml` calls it — against the pinned version or a pinned-next candidate; the [support policy](docs/support-policy.md) says what that buys you.
 
 ## Built on gbrain
 
-Mobrain is **not a fork** of gbrain and does not vendor its source. It pins gbrain as an upstream dependency and drives it through the contracts gbrain publishes — its CLI (argv arrays, never shell strings), its HTTP MCP data lane, and a small file plane for what `config set` refuses. If you want gbrain itself, without the console or the deployment, go to [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain).
+Mo-brain is **not a fork** of gbrain and does not vendor its source. It pins gbrain as an upstream dependency and drives it through the contracts gbrain publishes — its CLI (argv arrays, never shell strings), its HTTP MCP data lane, and a small file plane for what `config set` refuses. If you want gbrain itself, without the console or the deployment, go to [github.com/garrytan/gbrain](https://github.com/garrytan/gbrain).
 
 gbrain is MIT-licensed. Its copyright and licence text are reproduced here because "built on gbrain" is a claim about someone else's active project and the MIT terms require the notice to travel with the work:
 
@@ -111,12 +111,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-Mobrain's own licence is [MIT](LICENSE).
+Mo-brain's own licence is [MIT](LICENSE).
 
 ## What this is not
 
 - **Not a fork of gbrain.** No patches, no imports past its `exports` map, no direct table reads. Anything we need beyond the contracts is an upstream contribution, not a local edit.
-- **Not a replacement for gbrain's `/admin`.** gbrain ships an embedded admin SPA with god rights over the same brain; exposing it would be a second, unaudited control plane. Mobrain answers `404` for it and documents an SSH break-glass path instead ([`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md)).
+- **Not a replacement for gbrain's `/admin`.** gbrain ships an embedded admin SPA with god rights over the same brain; exposing it would be a second, unaudited control plane. Mo-brain answers `404` for it and documents an SSH break-glass path instead ([`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md)).
 - **Not multi-tenant.** One brain per deployment. gbrain is single-brain-per-`GBRAIN_HOME`; Space-level read isolation (`source_id` / `federated_read`) is the only isolation axis. A shared deployment with several organizations is not a supported shape.
 - **Not a managed service.** This is the self-host product. There is no signup, no billing, and no provisioner in this release.
 
@@ -136,4 +136,4 @@ Mobrain's own licence is [MIT](LICENSE).
 
 ## Licence
 
-[MIT](LICENSE) for Mobrain. gbrain is MIT, Copyright (c) 2026 Garry Tan; see [Built on gbrain](#built-on-gbrain).
+[MIT](LICENSE) for Mo-brain. gbrain is MIT, Copyright (c) 2026 Garry Tan; see [Built on gbrain](#built-on-gbrain).

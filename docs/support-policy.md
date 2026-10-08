@@ -2,21 +2,21 @@
 
 ## The supported version
 
-Mobrain supports exactly one gbrain version per release:
+Mo-brain supports exactly one gbrain version per release:
 
 | | |
 |---|---|
 | **Supported gbrain version** | **`0.60.115.0`** (the pin in `.env.example` and the image build `ARG`) |
-| **Published GHCR pin** | **`0.50.5.0`** until the next Mobrain release. A fresh install builds `0.60.115.0` locally when that pull misses. |
+| **Published GHCR pin** | **`0.50.5.0`** until the next Mo-brain release. A fresh install builds `0.60.115.0` locally when that pull misses. |
 | **Supported harness version** (agent runner only) | **`2.1.274`** |
 
-"Supported" has a concrete meaning here. A version is supported when Mobrain's contract suite runs green against it (pinned-current) and its deterministic upgrade playbook exists. Exact semver only — never a moving tag, never a range. A version that is not the supported pin is not supported, regardless of where upstream is.
+"Supported" has a concrete meaning here. A version is supported when Mo-brain's contract suite runs green against it (pinned-current) and its deterministic upgrade playbook exists. Exact semver only — never a moving tag, never a range. A version that is not the supported pin is not supported, regardless of where upstream is.
 
 The published GHCR images are still `0.50.5.0`. `scripts/install.sh` defaults to `0.60.115.0` and builds that pin locally when the registry pull misses. An existing install reaches it through the host upgrade lane, which builds the same image.
 
 ## How upgrades land
 
-Mobrain upgrades are **deterministic and host-driven**, never automatic and never agent-driven:
+Mo-brain upgrades are **deterministic and host-driven**, never automatic and never agent-driven:
 
 ```bash
 bun run scripts/upgrade.ts plan --to <exact-version>   # dry run, nothing touched
@@ -26,7 +26,7 @@ bun run scripts/upgrade.ts rollback --run <runId>       # one command back
 
 Each upgrade is snapshot-first (both databases plus both volumes, with zero writers), swaps images, applies migrations and post-upgrade steps, applies a hand-written playbook for the version, and gates on `doctor` parity. Rollback is a snapshot restore, because upstream ships no reverse migrations. See [`docs/runbooks/upgrade.md`](runbooks/upgrade.md).
 
-**Our cadence commitment: we target a supported Mobrain upgrade within 30 days of an upstream gbrain release tag.** That is a target for a small maintainer team at GA, not an SLA. The work between an upstream tag and our upgrade is not the downtime — the runbook's measured quiesce-and-swap window is about a minute on the `0.50.0.0 → 0.50.5.0` delta — it is authoring the version's deterministic playbook, extending the contract suite, and passing the upgrade gate. We would rather publish a supported upgrade late than promise one the lane cannot yet meet.
+**Our cadence commitment: we target a supported Mo-brain upgrade within 30 days of an upstream gbrain release tag.** That is a target for a small maintainer team at GA, not an SLA. The work between an upstream tag and our upgrade is not the downtime — the runbook's measured quiesce-and-swap window is about a minute on the `0.50.0.0 → 0.50.5.0` delta — it is authoring the version's deterministic playbook, extending the contract suite, and passing the upgrade gate. We would rather publish a supported upgrade late than promise one the lane cannot yet meet.
 
 Two things make the target honest:
 

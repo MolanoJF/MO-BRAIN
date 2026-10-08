@@ -87,7 +87,7 @@ export const SKILLS_NOTE = [
   'Skills: this Connection serves gbrain skills over MCP, so there is nothing to install.',
   'Ask your agent to call `list_skills`, then `get_skill` with a skill name, and follow what it returns.',
   "A skill whose tools show up under `unavailable_tools` is outside your role. Skip it.",
-  'In Mobrain, new agents are connected from the Connection page, not `gbrain connect`.',
+  'In Mo-brain, new agents are connected from the Connection page, not `gbrain connect`.',
 ].join('\n');
 
 /**

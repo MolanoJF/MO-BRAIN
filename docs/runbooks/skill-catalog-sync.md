@@ -1,6 +1,6 @@
 # Skill catalog sync
 
-Mobrain's member-facing skill catalog (`skills/`, mounted read-only into `gbrain-serve`/`gbrain-ops`
+Mo-brain's member-facing skill catalog (`skills/`, mounted read-only into `gbrain-serve`/`gbrain-ops`
 at `/opt/mobrain-skills`) is a small, curated subset of gbrain's built-in skills. gbrain deliberately
 never serves its own bundled catalog to remote MCP callers, so nothing here updates itself — new gbrain
 releases can ship skills members never see until an operator does this.

@@ -2,7 +2,7 @@
   "api_version": "gbrain-schema-pack-v1",
   "name": "mobrain-personal",
   "version": "1.0.0",
-  "description": "Mobrain's personal ontology for the professional self: people, time, direction, thinking, inputs and outputs, and life records.",
+  "description": "Mo-brain's personal ontology for the professional self: people, time, direction, thinking, inputs and outputs, and life records.",
   "gbrain_min_version": "0.50.5",
   "extends": null,
   "borrow_from": [],

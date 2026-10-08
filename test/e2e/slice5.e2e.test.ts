@@ -51,7 +51,7 @@ const SKIP_SLICE5_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE5_E2E';
 // The migration-collision fixture (C9) is test-only and refuses to run unless
 // this deployment is an e2e stack. slice35.e2e.test.ts's Gate C sets the same
 // guard before it applies the fixture.
-process.env.BRAINSTAND_E2E = '1';
+process.env.MOBRAIN_E2E = '1';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 const ADMIN_EMAIL = 'admin@example.test';
@@ -75,7 +75,7 @@ process.env.CONTROL_DATABASE_URL ??=
  * journal is shared with that file's Gate C and with Slice 4's, so a different
  * directory would hide the runs C9 rolls back.
  */
-const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'brainstand-upgrade-e2e');
+const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'mobrain-upgrade-e2e');
 process.env.UPGRADE_DIR = HOST_UPGRADE_DIR;
 
 const COMPOSE_ENV: Record<string, string> = {

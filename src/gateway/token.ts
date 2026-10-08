@@ -29,11 +29,11 @@ function tokenKey(): Buffer {
     // FROZEN FOREVER (D3). This is an HKDF domain separator, not a product name.
     // Changing it makes every existing sealed secret permanently undecryptable.
     // `lint:forbidden`'s frozen-crypto-domain rule fails the build if you try.
-    Buffer.from('brainstand-gateway-token-salt'),
+    Buffer.from('mobrain-gateway-token-salt'),
     // FROZEN FOREVER (D3). This is an HKDF domain separator, not a product name.
     // Changing it makes every existing sealed secret permanently undecryptable.
     // `lint:forbidden`'s frozen-crypto-domain rule fails the build if you try.
-    Buffer.from('brainstand-gateway-token-v1'),
+    Buffer.from('mobrain-gateway-token-v1'),
     32,
   ));
 }

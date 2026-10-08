@@ -8,7 +8,7 @@ const CONTROL_DATABASE_URL =
   process.env.CONTROL_DATABASE_URL ?? 'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 
 const SCRATCH_PG_CMD =
-  'docker run -d --name bs-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
+  'docker run -d --name mobrain-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
   '-e POSTGRES_DB=control -p 5432:5432 pgvector/pgvector:pg16';
 
 /**
@@ -34,7 +34,7 @@ async function probePostgres(): Promise<boolean> {
 const postgresAvailable = await probePostgres();
 const posix = process.platform !== 'win32';
 
-const SKIP_FILEPLANE_INTEGRATION_ENV = 'BRAINSTAND_ALLOW_SKIP_FILEPLANE_INTEGRATION';
+const SKIP_FILEPLANE_INTEGRATION_ENV = 'MOBRAIN_ALLOW_SKIP_FILEPLANE_INTEGRATION';
 
 let dir: string;
 let sql: SQL;

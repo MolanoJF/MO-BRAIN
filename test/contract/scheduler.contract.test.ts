@@ -261,7 +261,7 @@ async function ensureProbeSource(): Promise<void> {
   const seeded = await mainExec(['sh', '-c',
     `set -e; rm -rf ${dir}; mkdir -p ${dir}; cd ${dir}; git init -q; ` +
     `echo "# ${PROBE_SOURCE}" > README.md; git add -A; ` +
-    'git -c user.email=gate-a@brainstand.local -c user.name=gate-a commit -q -m seed',
+    'git -c user.email=gate-a@mobrain.local -c user.name=gate-a commit -q -m seed',
   ]);
   if (seeded.exitCode !== 0) throw new Error(`git seed failed (${seeded.exitCode}): ${seeded.stderr}`);
 
@@ -279,11 +279,11 @@ describe('Slice 3 seam gate A', () => {
 
   test('slice3 contract tests are not silently skipped', () => {
     if (dockerAvailable) return;
-    if (process.env.BRAINSTAND_ALLOW_SKIP_SLICE3_CONTRACT === '1') return;
+    if (process.env.MOBRAIN_ALLOW_SKIP_SLICE3_CONTRACT === '1') return;
     throw new Error(
       'docker compose is not usable, so the slice3 contract suite was skipped rather than run. '
         + 'Install/start Docker, then rerun:\n\n  bun test test/contract/scheduler.contract.test.ts\n\n'
-        + 'If skipping is genuinely intended, set BRAINSTAND_ALLOW_SKIP_SLICE3_CONTRACT=1.',
+        + 'If skipping is genuinely intended, set MOBRAIN_ALLOW_SKIP_SLICE3_CONTRACT=1.',
     );
   });
 
@@ -372,13 +372,13 @@ describe('Slice 3 seam gate A', () => {
   }, 900_000);
 
   test('A3b. the install verb is never reachable through the RPC', async () => {
-    // Mobrain's scheduler replaces gbrain's autopilot; only the read-only
+    // Mo-brain's scheduler replaces gbrain's autopilot; only the read-only
     // status probe is allowlisted.
     const r = await opsRpc('autopilot.install', {}, {});
     expect(r.error).toMatch(/unknown operation/);
   });
 
-  test('A10. autopilot --status --json reports not_installed on a Mobrain stack', async () => {
+  test('A10. autopilot --status --json reports not_installed on a Mo-brain stack', async () => {
     // The tripwire's baseline. OBSERVED 2026-09-22 against 0.50.5.0. If this
     // ever reads installed:true, a second scheduler is running on this brain.
     const r = await opsRpc('autopilot.status', {}, { json: true, timeoutMs: 60_000 });

@@ -71,9 +71,9 @@ const RESTORE_OPEN_LOOPS = `CREATE TABLE open_loops (
 )`;
 
 function guard(): void {
-  if (process.env.BRAINSTAND_E2E !== '1') {
+  if (process.env.MOBRAIN_E2E !== '1') {
     throw new Error(
-      'the migration-collision fixture is test-only and refuses to run unless BRAINSTAND_E2E=1',
+      'the migration-collision fixture is test-only and refuses to run unless MOBRAIN_E2E=1',
     );
   }
 }

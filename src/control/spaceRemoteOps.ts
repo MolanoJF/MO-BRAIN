@@ -58,7 +58,7 @@ export async function connectRemote(
     const owner = typeof body.owner === 'string' ? body.owner.trim() : '';
     try {
       const repo = await createGithubRepo({
-        token, name, ...(owner ? { owner } : {}), description: `Mobrain Space: ${space.name}`,
+        token, name, ...(owner ? { owner } : {}), description: `Mo-brain Space: ${space.name}`,
       });
       url = repo.cloneUrl;
       created = repo.fullName;

@@ -7,7 +7,7 @@
  * federatedRead lists all 25. Thresholds are constants (C5) so the
  * result cannot be rationalized after the run.
  *
- * Not on CI. Slice0 stack only — never the production `brainstand-*`
+ * Not on CI. Slice0 stack only — never the production `mobrain-*`
  * compose project. Does not `compose down -v`.
  */
 import { existsSync, readFileSync } from 'node:fs';

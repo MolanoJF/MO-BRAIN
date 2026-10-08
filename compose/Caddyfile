@@ -69,7 +69,7 @@
 # name the runner can dial. /etc/hosts inside the container maps `localhost`
 # to its own loopback and wins over Docker's embedded resolver, so
 # https://localhost/mcp hits the runner itself: measured from inside
-# brainstand-agent-runner-1, `localhost:443 -> ECONNREFUSED`, while `caddy`
+# mobrain-agent-runner-1, `localhost:443 -> ECONNREFUSED`, while `caddy`
 # resolves (Docker DNS) and Caddy's :443 answers it.
 #
 # `tls internal` is required, not cosmetic: `caddy` is a private name, so

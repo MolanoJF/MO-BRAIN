@@ -1,5 +1,5 @@
 /**
- * Which schema packs Mobrain shows, ships and protects (spec P6–P8).
+ * Which schema packs Mo-brain shows, ships and protects (spec P6–P8).
  *
  * gbrain's seven bundled packs stay on disk: `schema validate` with no name
  * hardcodes gbrain-base, and gbrain-everything extends gbrain-investor
@@ -12,7 +12,7 @@ export const BUNDLED_PACKS = [
 
 export const VISIBLE_BUNDLED_PACKS = ['gbrain-base-v2'] as const;
 
-/** Shipped by Mobrain, seeded at ops boot, read-only to every API. */
+/** Shipped by Mo-brain, seeded at ops boot, read-only to every API. */
 export const MANAGED_PACKS = ['mobrain-personal'] as const;
 
 /** Where a user's edits to the managed pack go (spec P8). */

@@ -1,6 +1,6 @@
 ---
 name: mobrain-schema-designer
-description: Design a custom Mobrain schema pack (the brain's ontology: page types, their folders, and the link verbs between them) from a team's requirements. Use when someone says "design our schema", "set up types for our brain", "what page types should we have", "custom ontology", or describes their domain (legal, research, sales, hiring) and wants the brain shaped around it. Produces a PackDraft JSON for an admin to import in the Mobrain console; it never changes the brain itself.
+description: Design a custom Mo-brain schema pack (the brain's ontology: page types, their folders, and the link verbs between them) from a team's requirements. Use when someone says "design our schema", "set up types for our brain", "what page types should we have", "custom ontology", or describes their domain (legal, research, sales, hiring) and wants the brain shaped around it. Produces a PackDraft JSON for an admin to import in the Mo-brain console; it never changes the brain itself.
 triggers:
   - "design our schema"
   - "set up types for our brain"
@@ -8,7 +8,7 @@ triggers:
   - "custom ontology"
 ---
 
-# Mobrain schema designer
+# Mo-brain schema designer
 
 You turn a team's requirements into a **PackDraft**: a JSON document an admin
 pastes into **Console → Schema → New pack → Import draft**. The console

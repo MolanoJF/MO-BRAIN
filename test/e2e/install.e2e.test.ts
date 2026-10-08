@@ -3,7 +3,7 @@
  * Gate A (D1) — the clean-host install proof.
  *
  * This is the only test in the repository that runs `scripts/install.sh` to
- * completion. Every other installer test sets BRAINSTAND_SKIP_UP=1, which is
+ * completion. Every other installer test sets MOBRAIN_SKIP_UP=1, which is
  * why the `up` leg was broken for five slices without a red suite.
  *
  * It must run where NO image of ours is present. A8 asserts that.
@@ -52,7 +52,7 @@ maybe('A2: the installer runs to completion and the stack reports healthy', asyn
   const r = Bun.spawnSync(['bash', 'scripts/install.sh'], {
     env: {
       ...process.env,
-      DOMAIN: 'localhost', BRAINSTAND_ENV_PATH: `${WORK}/.env`,
+      DOMAIN: 'localhost', MOBRAIN_ENV_PATH: `${WORK}/.env`,
       SKIP_PREFLIGHT: '0', PREFLIGHT_SKIP_DNS: '1',
     },
     stdin: new Blob(['n\n']),   // D12: the runner question, answered no.

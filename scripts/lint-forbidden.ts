@@ -63,11 +63,11 @@ const RULES: Rule[] = [
   {
     rule: 'frozen-crypto-domain',
     // D3: these three strings are HKDF domain separators, not names. Changing
-    // 'brainstand-kek-v1' makes every row in `secrets` permanently
+    // 'mobrain-kek-v1' makes every row in `secrets` permanently
     // undecryptable — both provider keys, with no recovery. Changing either
     // gateway-token string breaks every live token mid-run. They are frozen
-    // forever, including through the product rename.
-    re: /Buffer\.from\(\s*['"`](?!brainstand-(?:kek-v1|gateway-token-salt|gateway-token-v1)['"`])[\w-]*-(?:kek|gateway-token)-(?:v\d+|salt)['"`]/,
+    // forever once secrets exist.
+    re: /Buffer\.from\(\s*['"`](?!mobrain-(?:kek-v1|gateway-token-salt|gateway-token-v1)['"`])[\w-]*-(?:kek|gateway-token)-(?:v\d+|salt)['"`]/,
     why: 'D3: HKDF domain separators are frozen forever; renaming one destroys every stored secret or every live token',
   },
   {
@@ -84,7 +84,7 @@ const RULES: Rule[] = [
 // scratch directory for the subagent-driven-development process (ledgers,
 // task briefs, agent reports, review packages). It is never shipped, and
 // agent reports routinely quote the rules they are reporting about.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.brainstand-tmp', 'docs', '.superpowers']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.mobrain-tmp', 'docs', '.superpowers']);
 const EXTS = ['.ts', '.tsx', '.js', '.sh', '.yml', '.yaml', '.Dockerfile', '.md'];
 
 // Root-level HANDOFF.md is a planning document that lives outside docs/ by

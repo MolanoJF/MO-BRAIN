@@ -1,6 +1,6 @@
 # Backup and restore
 
-Mobrain's backup lane is a **host** operation (`scripts/backup.ts`), never an in-container one:
+Mo-brain's backup lane is a **host** operation (`scripts/backup.ts`), never an in-container one:
 the control-plane image has no Docker CLI and `POST /api/backup` returns `503` when it cannot
 invoke Compose. Restore is a host operation too (`scripts/restore.ts`). Both are driven from the
 Docker host, over the `compose exec` relay when no ops port is published.
@@ -68,7 +68,7 @@ so the host-side probe of `OPS_RPC_URL` (which defaults to the container name `g
 cannot succeed; `defaultOpsCaller()` falls back to the `compose exec` relay and the manifest records
 `quiesceLane: "relay"`. On the dev stack the override publishes `3140:3140`, the probe succeeds, and
 the lane is `http`. Measured this drill, production shape (base compose file only,
-`docker port brainstand-gbrain-ops-1` printed nothing):
+`docker port mobrain-gbrain-ops-1` printed nothing):
 
 ```
 "quiesced": "verified", "quiesceLane": "relay"      # 10.8 s wall clock

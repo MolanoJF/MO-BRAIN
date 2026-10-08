@@ -1,13 +1,13 @@
 # Install runbook: first install
 
-Mobrain is a self-hosted Docker Compose stack. This runbook takes you from a clean host to a running console with one admin. It assumes you have a checkout of this repository on the host that will run the stack.
+Mo-brain is a self-hosted Docker Compose stack. This runbook takes you from a clean host to a running console with one admin. It assumes you have a checkout of this repository on the host that will run the stack.
 
 ## Before you start
 
 - A host with **Docker Engine 24+** (or Docker Desktop) and the **Compose v2 plugin, v2.20 or newer**, with a reachable daemon.
 - **At least 4096 MB of RAM** and **20 GB free on the Docker data root**.
 - **Ports 80 and 443 free.** Caddy is the only service that publishes a host port; nothing else does.
-- **Either** a `DOMAIN` you control whose A/AAAA record already points at this host (Caddy obtains a real TLS certificate for it), **or** nothing at all — leave the domain blank and Mobrain installs against this host's own LAN address with a private certificate. (A port already held by *this* stack is not a conflict.)
+- **Either** a `DOMAIN` you control whose A/AAAA record already points at this host (Caddy obtains a real TLS certificate for it), **or** nothing at all — leave the domain blank and Mo-brain installs against this host's own LAN address with a private certificate. (A port already held by *this* stack is not a conflict.)
 
 The installer runs `scripts/preflight.sh` before it generates any secret, so a host that cannot run the stack never ends up holding an `ENCRYPTION_KEY` it cannot use.
 
@@ -53,7 +53,7 @@ If you can't set the env var for some reason, piping the answer over stdin still
 printf 'n\n' | DOMAIN=brain.acme-co.com bash scripts/install.sh
 ```
 
-To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molioros` (the product is **Mobrain**; GHCR images publish under the MoliorOS org namespace that owns the release):
+To point the installer at a different registry — a mirror, or your own namespace — set the two registry variables explicitly. They default to `ghcr.io` and `molioros` (the product is **Mo-brain**; GHCR images publish under the MoliorOS org namespace that owns the release):
 
 ```bash
 DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
@@ -83,9 +83,9 @@ Preflight refuses (exit 17, below) if the resolved name — derived or explicit 
 containers on this host, whether or not they are running: that is exactly how a second, unrelated
 install once silently recreated a first install's live containers in place, reattaching its
 Postgres volume under freshly generated secrets that didn't match what was already stored there.
-The pre-1.0 fallback baked into the compose file (`brainstand`, with no `COMPOSE_PROJECT_NAME` set)
+The compose-file fallback (`mobrain`, with no `COMPOSE_PROJECT_NAME` set)
 is left as-is on purpose: every deployment from before this behavior already has volumes named
-`brainstand_*`, and changing that fallback would make Compose treat them as a new, empty project on
+`mobrain_*`, and changing that fallback would make Compose treat them as a new, empty project on
 their next `up`.
 
 ## When preflight refuses
@@ -101,26 +101,26 @@ Install Docker, or start it. On a server, confirm your user can talk to the daem
 
 **Exit 11 — Docker Compose is older than v2.20.**
 ```text
-PREFLIGHT: Docker Compose 1.29.2 is too old; Mobrain needs v2.20 or newer — upgrade the Compose plugin and re-run.
+PREFLIGHT: Docker Compose 1.29.2 is too old; Mo-brain needs v2.20 or newer — upgrade the Compose plugin and re-run.
 PREFLIGHT: could not determine the Docker Compose version; install the Compose v2 plugin (floor v2.20) and re-run.
 ```
 Install or upgrade the Compose **v2 plugin** (`docker compose version`, not the legacy `docker-compose` v1 binary).
 
 **Exit 12 — host memory is below 4096 MB.**
 ```text
-PREFLIGHT: Mobrain needs at least 4096 MB of memory; this host reports 1024 MB — add RAM or move to a larger host before installing.
+PREFLIGHT: Mo-brain needs at least 4096 MB of memory; this host reports 1024 MB — add RAM or move to a larger host before installing.
 ```
 Add RAM or move to a larger host. (If the host cannot be measured at all, preflight warns and skips the check rather than refusing.)
 
 **Exit 13 — free space on the Docker data root is below 20 GB.**
 ```text
-PREFLIGHT: Mobrain needs at least 20 GB free on the Docker data root; this host reports 5 GB — free space before installing.
+PREFLIGHT: Mo-brain needs at least 20 GB free on the Docker data root; this host reports 5 GB — free space before installing.
 ```
 Free space where Docker stores images and volumes (`docker info` reports `DockerRootDir`). On Docker Desktop for Windows/macOS that path is inside the VM, so preflight falls back to the host filesystem.
 
 **Exit 17 — `COMPOSE_PROJECT_NAME` already has containers on this host.**
 ```text
-PREFLIGHT: a Compose project named 'brainstand' already has containers on this host (brainstand-caddy-1 brainstand-postgres-1 ...); installing here would recreate them in place with THIS install's freshly generated secrets, likely breaking whatever is already using them. Choose a different COMPOSE_PROJECT_NAME, or remove that project first if it's really yours to replace.
+PREFLIGHT: a Compose project named 'mobrain' already has containers on this host (mobrain-caddy-1 mobrain-postgres-1 ...); installing here would recreate them in place with THIS install's freshly generated secrets, likely breaking whatever is already using them. Choose a different COMPOSE_PROJECT_NAME, or remove that project first if it's really yours to replace.
 ```
 Either this is genuinely a second install (pick a different, unique `COMPOSE_PROJECT_NAME`, or unset it and let the installer derive one — see above), or the named project really is meant to be replaced (stop and remove it deliberately first, outside the installer).
 
@@ -128,7 +128,7 @@ Either this is genuinely a second install (pick a different, unique `COMPOSE_PRO
 ```text
 PREFLIGHT: port 443 is already in use; stop the process or container bound to 443 before installing.
 ```
-Stop whatever holds the port. A port held by a container of *this* Compose project (for example, an already-running Mobrain stack) is not treated as a conflict.
+Stop whatever holds the port. A port held by a container of *this* Compose project (for example, an already-running Mo-brain stack) is not treated as a conflict.
 
 **Exit 15 — `DOMAIN` does not resolve to this host.**
 ```text
@@ -138,9 +138,9 @@ Point the domain's DNS at this host first; Caddy needs it for the ACME challenge
 
 **Exit 16 — the pinned images cannot be pulled.**
 ```text
-PREFLIGHT: the pinned Mobrain images cannot be pulled; check ghcr.io/molioros credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
+PREFLIGHT: the pinned Mo-brain images cannot be pulled; check ghcr.io/molioros credentials, or build them locally with 'docker compose -f compose/docker-compose.yml -f compose/docker-compose.build.yml build'.
 ```
-The installer reports the same failure after its own pull attempt (`Could not pull the pinned Mobrain images.`). The registry is unreachable, or your credentials lack access. See the next section.
+The installer reports the same failure after its own pull attempt (`Could not pull the pinned Mo-brain images.`). The registry is unreachable, or your credentials lack access. See the next section.
 
 `SKIP_PREFLIGHT=1` skips the whole preflight — do not use it in production; it exists so installer unit tests can exercise the secret-generation path without a live daemon.
 
@@ -250,7 +250,7 @@ The installer generates four distinct secrets and writes them to the env file at
 | `ENCRYPTION_KEY` | the KEK for every sealed secret in the control DB |
 | `BETTER_AUTH_SECRET` | console sessions |
 
-`RUNNER_TOKEN` is written empty (runner off) or generated (runner on). Provider API keys such as `anthropic_api_key` and `openai_api_key` are **not** in `.env`; they are added later from the console and stored envelope-encrypted, under `ENCRYPTION_KEY`, in the control DB's `secrets` table. To use a different env file, set `MOBRAIN_ENV_PATH` (the legacy `BRAINSTAND_ENV_PATH` also works for one release) before running the installer.
+`RUNNER_TOKEN` is written empty (runner off) or generated (runner on). Provider API keys such as `anthropic_api_key` and `openai_api_key` are **not** in `.env`; they are added later from the console and stored envelope-encrypted, under `ENCRYPTION_KEY`, in the control DB's `secrets` table. To use a different env file, set `MOBRAIN_ENV_PATH` before running the installer.
 
 Never commit `.env`. It holds the keys to everything else.
 

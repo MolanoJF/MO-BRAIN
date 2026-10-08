@@ -1,6 +1,6 @@
-# Mobrain production stack. Caddy is the sole ingress; nothing else
+# Mo-brain production stack. Caddy is the sole ingress; nothing else
 # publishes a host port.
-name: ${COMPOSE_PROJECT_NAME:-brainstand}
+name: ${COMPOSE_PROJECT_NAME:-mobrain}
 
 x-gbrain-env: &gbrain-env
   GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain
@@ -75,7 +75,7 @@ services:
       # to Caddy's and the pre-auth rate limiter mis-buckets.
       GBRAIN_HTTP_TRUST_PROXY: "1"
       # Task 0: remote MCP callers resolve a host skills catalog from the
-      # operator, never gbrain's bundled dev catalog. Mobrain owns repo skills/.
+      # operator, never gbrain's bundled dev catalog. Mo-brain owns repo skills/.
       GBRAIN_SKILLS_DIR: /opt/mobrain-skills
     command: ["/opt/mobrain/gbrain-gated-entrypoint.sh", "gbrain", "serve", "--http", "--bind", "0.0.0.0", "--port", "3131",
               "--public-url", "${MOBRAIN_PUBLIC_URL:-https://${DOMAIN}}"]
@@ -104,7 +104,7 @@ services:
   # S2: the privilege boundary. Holds brain DB creds (required by V8) and RW
   # GBRAIN_HOME; exposes only the allowlisted RPC on the private network.
   gbrain-ops:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
     restart: unless-stopped
     environment:
       <<: *gbrain-env
@@ -121,7 +121,7 @@ services:
     networks: [brain-net, ops-net]
 
   control-plane:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
     restart: unless-stopped
     environment:
       # S2: control DB only. No GBRAIN_DATABASE_URL, no DATABASE_URL.
@@ -172,7 +172,7 @@ services:
   # no brain-repos. It reaches gbrain only through the allowlisted ops RPC (S2).
   # Replicas are safe: one wins the leader advisory lock, the rest are workers.
   scheduler:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-${BRAINSTAND_VERSION:-dev}}}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-${MOBRAIN_VERSION:-dev}}
     restart: unless-stopped
     environment:
       CONTROL_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/control

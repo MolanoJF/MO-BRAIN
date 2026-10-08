@@ -40,7 +40,7 @@ import {
  * until `beforeAll`.
  */
 
-const SKIP_SLICE35_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE35_E2E';
+const SKIP_SLICE35_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE35_E2E';
 
 /** The pin Gate C requires when it STARTS (B2/C1 assert it), and its target. */
 const FROM_PIN = '0.50.0.0';
@@ -65,7 +65,7 @@ process.env.CONTROL_DATABASE_URL ??=
  * whose `UPGRADE_DIR` interpolation selects the bind SOURCE. Must be set
  * before COMPOSE_ENV is built.
  */
-export const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'brainstand-upgrade-e2e');
+export const HOST_UPGRADE_DIR = process.env.UPGRADE_DIR ?? join(tmpdir(), 'mobrain-upgrade-e2e');
 process.env.UPGRADE_DIR = HOST_UPGRADE_DIR;
 
 const COMPOSE_ENV: Record<string, string> = {
@@ -645,7 +645,7 @@ describe('Slice 3.5 seam gate B', () => {
 // below and in the worker_done report.
 // ===========================================================================
 
-process.env.BRAINSTAND_E2E = '1';
+process.env.MOBRAIN_E2E = '1';
 
 const digestCtx: UpgradeContext = {
   runId: 'gate-c-digest', fromVersion: '0.50.0.0', toVersion: '0.50.5.0', dryRun: true,

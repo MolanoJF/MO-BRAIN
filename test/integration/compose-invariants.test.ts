@@ -20,7 +20,7 @@ const dockerAvailable = Bun.which('docker') !== null;
 // This guard converts that silent hole into a loud, deliberate one: it
 // always runs, and fails unless either Docker ran the real check, or a
 // human explicitly opted into skipping it.
-const SKIP_COMPOSE_DOCKER_CHECK_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPOSE_DOCKER_CHECK';
+const SKIP_COMPOSE_DOCKER_CHECK_ENV = 'MOBRAIN_ALLOW_SKIP_COMPOSE_DOCKER_CHECK';
 
 describe('compose invariants', () => {
   test('serve and the worker start through the pause-file gate', () => {

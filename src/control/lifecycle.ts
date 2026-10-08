@@ -3,7 +3,7 @@
  * cryptographic domain separators and the compose project name are frozen and
  * deliberately do NOT derive from it (D3/D4).
  */
-export const PRODUCT_NAME = 'Mobrain';
+export const PRODUCT_NAME = 'Mo-brain';
 
 export const LIFECYCLE_ORDER = [
   'uninitialized',

@@ -65,7 +65,7 @@ services:
   #
   # Caddy writes /data/caddy/pki/authorities/local/{root,intermediate}.crt as
   # root-owned mode 0600 inside a mode 0700 directory (verified in the running
-  # brainstand-caddy-1 container). The runner is uid 10001 with cap_drop ALL,
+  # mobrain-caddy-1 container). The runner is uid 10001 with cap_drop ALL,
   # so mounting that path straight out of the caddy-data volume yields
   # "Permission denied" — measured, not assumed. This one-shot runs as root,
   # copies root+intermediate into a dev-only volume as mode 0644, and exits;

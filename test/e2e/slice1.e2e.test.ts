@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { existsSync } from 'node:fs';
 
-const SKIP_SLICE1_E2E_ENV = 'BRAINSTAND_ALLOW_SKIP_SLICE1_E2E';
+const SKIP_SLICE1_E2E_ENV = 'MOBRAIN_ALLOW_SKIP_SLICE1_E2E';
 
 const BASE = process.env.E2E_BASE_URL ?? 'https://localhost:8443';
 // --env-file .env when present; project dir stays compose/ so volume paths resolve.
@@ -181,8 +181,8 @@ describe('Slice 1 exit gate', () => {
       'sh', '-c',
       `printf '# E2E probe\\n\\nThe end to end probe page.\\n' > /srv/brain-repos/shared/e2e-probe.md && ` +
       `cd /srv/brain-repos/shared && ` +
-      `git -c user.email=e2e@brainstand.local -c user.name=e2e ` +
-      `add -A && git -c user.email=e2e@brainstand.local -c user.name=e2e ` +
+      `git -c user.email=e2e@mobrain.local -c user.name=e2e ` +
+      `add -A && git -c user.email=e2e@mobrain.local -c user.name=e2e ` +
       `commit -qm e2e`,
     ]);
     if (seed.exitCode !== 0) throw new Error(`seed e2e-probe failed: ${seed.stderr}`);

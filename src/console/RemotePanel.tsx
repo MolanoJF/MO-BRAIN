@@ -21,14 +21,14 @@ function reason(e: unknown): string {
 
 /**
  * Git remote. The two ways to give a Space a home off the box: connect a repo
- * that already exists, or have Mobrain create a private GitHub repo. Validators
+ * that already exists, or have Mo-brain create a private GitHub repo. Validators
  * are pure so the copy and the gating are testable without a DOM; the server
  * re-checks everything (`src/ops/git.ts` `validateRemoteUrl`).
  */
 export type RemoteMode = 'url' | 'github';
 
 export const REMOTE_NOTICE =
-  'The access token is stored encrypted and used only to push this Source. Mobrain refuses to push ' +
+  'The access token is stored encrypted and used only to push this Source. Mo-brain refuses to push ' +
   'to a remote it cannot verify is private, and blocks a push when a secret scan finds credentials.';
 
 const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;

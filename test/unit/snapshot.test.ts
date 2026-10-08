@@ -54,7 +54,7 @@ afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 describe('SNAPSHOT_DATABASES / snapshotVolumes', () => {
   test('name exactly what D3 promises', () => {
     expect(SNAPSHOT_DATABASES).toEqual(['gbrain', 'control']);
-    expect(snapshotVolumes()).toEqual(['brainstand_brain-repos', 'brainstand_gbrain-home']);
+    expect(snapshotVolumes()).toEqual(['mobrain_brain-repos', 'mobrain_gbrain-home']);
   });
 });
 
@@ -69,10 +69,10 @@ describe('the exact argv for each artifact', () => {
 
   test('tarVolumeToFile uses a throwaway busybox container, never `compose exec` into a service', async () => {
     const runner = new FakeRunner();
-    await tarVolumeToFile(runner, 'brainstand_gbrain-home', dir, 'gbrain-home.tar');
+    await tarVolumeToFile(runner, 'mobrain_gbrain-home', dir, 'gbrain-home.tar');
     const tarArgv = [
       'docker', 'run', '--rm',
-      '-v', 'brainstand_gbrain-home:/src:ro', '-v', `${dir}:/out`,
+      '-v', 'mobrain_gbrain-home:/src:ro', '-v', `${dir}:/out`,
       'busybox', 'tar', 'cf', '/out/gbrain-home.tar', '-C', '/src', '.',
     ];
     // POSIX hosts hand the root-owned artifact back to the invoking user; a
@@ -218,10 +218,10 @@ async function hostTar(args: string[]): Promise<RunResult> {
 }
 
 describe('projectName / snapshotVolumes (D4)', () => {
-  test('defaults to the legacy project name so existing deployments keep their volumes', () => {
+  test('defaults to mobrain when COMPOSE_PROJECT_NAME is unset', () => {
     delete process.env.COMPOSE_PROJECT_NAME;
-    expect(projectName()).toBe('brainstand');
-    expect(snapshotVolumes()).toEqual(['brainstand_brain-repos', 'brainstand_gbrain-home']);
+    expect(projectName()).toBe('mobrain');
+    expect(snapshotVolumes()).toEqual(['mobrain_brain-repos', 'mobrain_gbrain-home']);
   });
 
   test('follows COMPOSE_PROJECT_NAME when the operator sets one', () => {

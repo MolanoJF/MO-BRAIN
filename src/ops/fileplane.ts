@@ -220,7 +220,7 @@ const PACK_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 function assertUserPackName(name: string): void {
   if (!PACK_NAME_RE.test(name)) throw new Error(`invalid schema pack name: ${name}`);
   if (BUNDLED.has(name)) throw new Error(`${name} is a bundled pack and cannot be written`);
-  if (isManagedPack(name)) throw new Error(`${name} is a Mobrain-managed pack and cannot be written`);
+  if (isManagedPack(name)) throw new Error(`${name} is a Mo-brain-managed pack and cannot be written`);
 }
 
 /**
@@ -285,7 +285,7 @@ export async function seedSpaceRepo(sourceId: string, opts: { sql: SQL }): Promi
 }
 
 /**
- * Mobrain's shipped packs (spec §4.2). Written at ops boot, before any
+ * Mo-brain's shipped packs (spec §4.2). Written at ops boot, before any
  * `gbrain init` can name them, and rewritten only when the shipped version
  * moves, so a restart never churns the file plane. Bypasses
  * assertUserPackName on purpose: this is the only writer of managed names.

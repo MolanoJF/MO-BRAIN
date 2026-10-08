@@ -28,7 +28,7 @@ const MCP_PORT = 3131;
 const MCP_URL = `http://${MCP_BIND}:${MCP_PORT}/mcp`;
 const ISSUER_URL = `http://${MCP_BIND}:${MCP_PORT}`;
 
-/** Integration-test control DB (bs-fp-pg). Slice0 postgres publishes no host port. */
+/** Integration-test control DB (mobrain-fp-pg). Slice0 postgres publishes no host port. */
 const CONTROL_DATABASE_URL =
   process.env.CONTROL_DATABASE_URL ?? 'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 
@@ -169,7 +169,7 @@ function grantParams(name: string, compiled: CompiledConnection, credentialsOut?
 
 /**
  * Slice0 has no control DB and no ops RPC. T5's audit_log lives on the
- * control plane (bs-fp-pg). Seed a real connection row, let revokeConnection
+ * control plane (mobrain-fp-pg). Seed a real connection row, let revokeConnection
  * write the audit row first, then prove the thin-client token dies via
  * auth.revokeClient in gbrain-ops. Never point OPS_RPC_URL at production :3140.
  */

@@ -1,6 +1,6 @@
-# Installing Mobrain — for coding agents
+# Installing Mo-brain — for coding agents
 
-This file is for an AI coding agent installing Mobrain on a user's behalf (Claude Code, or
+This file is for an AI coding agent installing Mo-brain on a user's behalf (Claude Code, or
 similar). If you're a human operator, read [`README.md`](README.md) and
 [`docs/runbooks/install.md`](docs/runbooks/install.md) instead — they're the narrative version of
 what's below.
@@ -16,7 +16,7 @@ You cannot self-serve these — get them from the person who asked you to instal
   what happens if you don't set it) Caddy always attempts a public Let's Encrypt certificate for
   whatever `DOMAIN` you give it, so you need a domain the user controls with its A/AAAA record
   already pointing at the target host, publicly reachable on 80/443. If the user instead wants
-  Mobrain reachable only on an internal network with no public DNS, set `MOBRAIN_TLS_MODE=internal`
+  Mo-brain reachable only on an internal network with no public DNS, set `MOBRAIN_TLS_MODE=internal`
   — this is a real, supported mode (`compose/Caddyfile`'s main site substitutes in `tls internal`
   and Caddy issues from its own local CA instead of public ACME), **not** the same thing as just
   setting `PREFLIGHT_SKIP_DNS=1` on its own: that flag alone only skips preflight's DNS check while
@@ -30,7 +30,7 @@ You cannot self-serve these — get them from the person who asked you to instal
   `INSTALL_MODE=tailscale` (see `docs/runbooks/install.md`, "Tailscale install"): no public DNS, no
   80/443, a real certificate, and it creates the `tailscale serve` mapping for you. If another
   mapping already holds the port, preflight exits 19; set `TAILSCALE_HTTPS_PORT=8443`.
-- **Whether this host will ever run more than one Mobrain instance, or already has one running.**
+- **Whether this host will ever run more than one Mo-brain instance, or already has one running.**
   See §4 — this matters more than it looks like it should, even though the installer now defends
   against the worst case on its own.
 - **Whether to enable the agent runner.** Default to declining (see §3) unless the user explicitly
@@ -97,9 +97,9 @@ which makes every secret already stored in that deployment's database permanentl
 This used to be a real footgun and is now fixed, but the history matters for judgment calls, so it
 stays documented here.
 
-`compose/docker-compose.yml` still hardcodes its Compose project name to `brainstand` when
+`compose/docker-compose.yml` still hardcodes its Compose project name to `mobrain` when
 `COMPOSE_PROJECT_NAME` isn't set — that fallback is now frozen on purpose, because every
-pre-existing Mobrain deployment already has volumes named `brainstand_*`, and changing it would
+pre-existing Mo-brain deployment already has volumes named `mobrain_*`, and changing it would
 make Compose treat that live data as belonging to a brand-new, empty project on its next `up`. What
 changed instead: `scripts/install.sh` no longer leaves `COMPOSE_PROJECT_NAME` unset for a new
 install. If you don't pass one, it derives a name deterministically from the checkout's absolute
@@ -108,7 +108,7 @@ chose** — so two unrelated checkouts on the same host now default to different
 collide by accident the way they used to.
 
 This was verified to have been actively dangerous before the fix: installing from a second,
-unrelated checkout on a host that already had a Mobrain instance running caused Compose to recreate
+unrelated checkout on a host that already had a Mo-brain instance running caused Compose to recreate
 the *existing* instance's live containers in place and reattach its Postgres volume — but with the
 new install's freshly-generated secrets, which didn't match the passwords already in that volume.
 Result: the pre-existing instance's `control-plane` and `scheduler` crash-looped on a Postgres auth
@@ -128,14 +128,14 @@ ENABLE_RUNNER=n DOMAIN=brain.example.com COMPOSE_PROJECT_NAME=mobrain-<something
 
 Either way (derived or explicit), this does not solve port conflicts (see next paragraph) — it only
 prevents container/volume name collisions between separate instances. If you don't know whether
-this host already runs Mobrain (or anything else), check first:
+this host already runs Mo-brain (or anything else), check first:
 
 ```bash
 docker ps --format '{{.Names}}\t{{.Ports}}' | grep -E ':80->|:443->'
 ```
 
 Caddy binds host ports 80 and 443 directly and they are not configurable in the shipped compose
-file — **only one Mobrain instance (or anything else on 80/443) can run per host**, no matter what
+file — **only one Mo-brain instance (or anything else on 80/443) can run per host**, no matter what
 `COMPOSE_PROJECT_NAME` you choose. If something already holds those ports, preflight will refuse
 cleanly with exit 14 before writing anything (verified) — that's expected, and the fix is a
 different host or freeing the port, not a different project name. If preflight instead refuses with
@@ -205,7 +205,7 @@ a sign something broke.
 
 Also worth telling the user explicitly: **back up `ENCRYPTION_KEY` from `.env` right now**, kept
 separately from any database backup. It's not recoverable, and it's the key to every other secret
-Mobrain stores.
+Mo-brain stores.
 
 ## Summary: the actual non-interactive recipe
 

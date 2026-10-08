@@ -17,10 +17,10 @@ const CONTROL_DATABASE_URL =
 process.env.CONTROL_DATABASE_URL ??= CONTROL_DATABASE_URL;
 
 const SCRATCH_PG_CMD =
-  'docker run -d --name bs-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
+  'docker run -d --name mobrain-fp-pg -e POSTGRES_USER=gbrain -e POSTGRES_PASSWORD=ci-not-a-real-secret ' +
   '-e POSTGRES_DB=control -p 5432:5432 pgvector/pgvector:pg16';
 
-const SKIP_ENV = 'BRAINSTAND_ALLOW_SKIP_SCHEDULER_MAIN';
+const SKIP_ENV = 'MOBRAIN_ALLOW_SKIP_SCHEDULER_MAIN';
 
 /**
  * The whole suite wants a Postgres, not a container: `tickOnce` takes the

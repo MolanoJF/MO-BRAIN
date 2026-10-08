@@ -7,7 +7,7 @@ import { tarVolumeToFile, untarFileIntoVolume } from '../../src/upgrade/snapshot
 import type { Runner, RunResult } from '../../src/upgrade/snapshot.ts';
 
 const dockerAvailable = Bun.which('docker') !== null;
-const SKIP_SNAPSHOT_DOCKER_CHECK_ENV = 'BRAINSTAND_ALLOW_SKIP_SNAPSHOT_DOCKER_CHECK';
+const SKIP_SNAPSHOT_DOCKER_CHECK_ENV = 'MOBRAIN_ALLOW_SKIP_SNAPSHOT_DOCKER_CHECK';
 
 async function run(argv: string[]): Promise<RunResult> {
   const p = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe' });

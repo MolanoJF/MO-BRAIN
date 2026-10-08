@@ -99,11 +99,11 @@ describe('attributeCommits', () => {
   test('a foreign author is counted, named, and never hidden', () => {
     const result = attributeCommits([
       at(),
-      at({ sha: SHA_B, author: 'Live Sync', email: 'sync@brainstand.test' }),
+      at({ sha: SHA_B, author: 'Live Sync', email: 'sync@mobrain.test' }),
     ], MEMBER);
     expect(result.concurrentWriters).toBe(true);
     expect(result.foreignCommitCount).toBe(1);
-    expect(result.foreignAuthors).toEqual(['Live Sync <sync@brainstand.test>']);
+    expect(result.foreignAuthors).toEqual(['Live Sync <sync@mobrain.test>']);
   });
 
   test('the member email matches case-insensitively', () => {
@@ -186,13 +186,13 @@ describe('diffForRun', () => {
       fetchRange: async () => range({
         commits: [
           at(),
-          at({ sha: SHA_B, author: 'Live Sync', email: 'sync@brainstand.test' }),
+          at({ sha: SHA_B, author: 'Live Sync', email: 'sync@mobrain.test' }),
         ],
       }),
     });
     expect(summary.concurrentWriters).toBe(true);
     expect(summary.write.foreignCommitCount).toBe(1);
-    expect(summary.write.foreignAuthors).toEqual(['Live Sync <sync@brainstand.test>']);
+    expect(summary.write.foreignAuthors).toEqual(['Live Sync <sync@mobrain.test>']);
   });
 
   test('identical heads are an empty range, and ask git nothing', async () => {
@@ -309,7 +309,7 @@ describe('revertRange sourceId', () => {
 const ADMIN = { name: 'Admin Human', email: 'admin@example.test' };
 const RUN_ID = 'run-revert-1';
 const AT = Date.parse('2026-09-17T12:00:00.000Z');
-const FOREIGN = at({ sha: SHA_B, author: 'Live Sync', email: 'sync@brainstand.test' });
+const FOREIGN = at({ sha: SHA_B, author: 'Live Sync', email: 'sync@mobrain.test' });
 
 const revertTarget = (over: Partial<RevertTarget> = {}): RevertTarget => ({
   runId: RUN_ID,
@@ -471,7 +471,7 @@ describe('revertRun', () => {
       runId: RUN_ID,
       sourceId: 'customers',
       foreignCommitCount: 1,
-      foreignAuthors: ['Live Sync <sync@brainstand.test>'],
+      foreignAuthors: ['Live Sync <sync@mobrain.test>'],
       commitCount: 2,
     });
     expect(r.detail).toMatch(/1 of 2 commits .* were not written by alice@example.test/);

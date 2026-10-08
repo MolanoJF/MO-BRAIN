@@ -272,7 +272,7 @@ function rangeRepo() {
 
     await writeFile(join(repo, 'extra.md'), '# extra\n');
     await run(['add', '-A']);
-    await commit('Live Sync', 'sync@brainstand.test', 'sync import');
+    await commit('Live Sync', 'sync@mobrain.test', 'sync import');
     const after = await run(['rev-parse', 'HEAD']);
 
     return { sourceId, before, mid, after };
@@ -326,7 +326,7 @@ describe('git range', () => {
     expect(body.commits.every((c) => HEAD_RE.test(c.sha))).toBe(true);
     expect(body.commits[0]).toMatchObject({ author: 'Alice Example', email: 'alice@example.test' });
     // The second commit is not ours — the range's authorship is reported as-is.
-    expect(body.commits[1]).toMatchObject({ author: 'Live Sync', email: 'sync@brainstand.test' });
+    expect(body.commits[1]).toMatchObject({ author: 'Live Sync', email: 'sync@mobrain.test' });
     expect(body.commits[0]?.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(body.files.map((f) => `${f.status} ${f.path}`).sort()).toEqual(['A extra.md', 'M page.md']);
   });

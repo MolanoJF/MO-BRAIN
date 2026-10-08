@@ -94,7 +94,7 @@ const dockerAvailable = Bun.which('docker') !== null;
 // these compiled tests. This guard converts that silent hole into a loud,
 // deliberate one: it always runs, and it fails unless either Docker ran the
 // real checks, or a human explicitly opted into skipping them.
-const SKIP_COMPILED_ROUTING_ENV = 'BRAINSTAND_ALLOW_SKIP_COMPILED_ROUTING';
+const SKIP_COMPILED_ROUTING_ENV = 'MOBRAIN_ALLOW_SKIP_COMPILED_ROUTING';
 
 function pathsEqual(a: string[] | undefined, b: string[]): boolean {
   return Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);

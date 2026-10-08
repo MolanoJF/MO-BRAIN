@@ -114,7 +114,7 @@ export const PRESETS: Record<string, Preset> = {
 
   /**
    * docs/guides/cron-schedule.md recommends `autopilot --status` daily at 7 AM
-   * as a health gate. In Mobrain it is a TRIPWIRE instead: autopilot is never
+   * as a health gate. In Mo-brain it is a TRIPWIRE instead: autopilot is never
    * installed here, so a healthy run is always "not installed" and writes no
    * report, and any install at all raises a pinned autopilot_installed alert
    * (docs/archive/autopilot-status-findings.md). Filesystem-only, so the timeout is
@@ -125,7 +125,7 @@ export const PRESETS: Record<string, Preset> = {
     title: 'Competing-scheduler tripwire',
     description:
       "Checks daily that gbrain's own autopilot scheduler was never installed on this brain. "
-      + 'Mobrain schedules everything itself, so an install means two schedulers are running '
+      + 'Mo-brain schedules everything itself, so an install means two schedulers are running '
       + 'the same jobs — that raises an alert. Silent when all is well. Needs an admin Connection.',
     kind: 'calendar',
     operation: 'autopilot-status',

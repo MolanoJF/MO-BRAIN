@@ -26,7 +26,7 @@ process.env.GBRAIN_MCP_TLS_INSECURE ??= '1';
 const { readBrainUsage } = await import('../../src/ops/usage.ts');
 const { callOps } = await import('../../src/control/opsClient.ts');
 
-const OPS_CONTAINER = `${process.env.COMPOSE_PROJECT_NAME ?? 'brainstand'}-gbrain-ops-1`;
+const OPS_CONTAINER = `${process.env.COMPOSE_PROJECT_NAME ?? 'mobrain'}-gbrain-ops-1`;
 
 /**
  * The real "list gbrain OAuth clients" reach the Slice 2/4 contract tests use

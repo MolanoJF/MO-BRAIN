@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mobrain dev redeploy — the tight loop for console work.
+# Mo-brain dev redeploy — the tight loop for console work.
 #
 # DEV STACK ONLY. Every invocation merges compose/docker-compose.dev.yml, which
 # publishes Caddy on 8080/8443 and exists nowhere in production. The production

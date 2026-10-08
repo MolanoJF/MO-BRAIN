@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Mobrain contributors
+Copyright (c) 2026 Mo-brain contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,8 @@ SOFTWARE.
 
 ---
 
-Mobrain is built on gbrain, which is distributed under the MIT License,
-Copyright (c) 2026 Garry Tan. Mobrain neither forks nor vendors gbrain; it
+Mo-brain is built on gbrain, which is distributed under the MIT License,
+Copyright (c) 2026 Garry Tan. Mo-brain neither forks nor vendors gbrain; it
 depends on gbrain as a pinned, separately licensed upstream artifact, and the
 required gbrain copyright and license text are reproduced in README.md under
 "Built on gbrain".

@@ -66,7 +66,7 @@ export async function createGithubRepo(args: {
       name: args.name,
       private: true,
       auto_init: false,
-      description: args.description ?? 'Mobrain Space',
+      description: args.description ?? 'Mo-brain Space',
     }),
   });
   if (!r.ok) throw new Error(`Could not create the repository. ${await failure(r)}`);

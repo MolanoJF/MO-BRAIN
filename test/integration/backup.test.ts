@@ -18,7 +18,7 @@ process.env.CONTROL_DATABASE_URL ??=
 // Host-side callOps (quiesce check) — container DNS name is unreachable here.
 process.env.OPS_RPC_URL ??= 'http://127.0.0.1:3140';
 
-const SKIP_BACKUP_INTEGRATION_ENV = 'BRAINSTAND_ALLOW_SKIP_BACKUP_INTEGRATION';
+const SKIP_BACKUP_INTEGRATION_ENV = 'MOBRAIN_ALLOW_SKIP_BACKUP_INTEGRATION';
 
 /**
  * Probed once at module load — ahead of every `test.skipIf` below.
@@ -179,7 +179,7 @@ describe('backup', () => {
     if (process.env[SKIP_BACKUP_INTEGRATION_ENV] === '1') return;
 
     throw new Error(
-      'Could not reach the brainstand compose stack (postgres + gbrain-ops running), ' +
+      'Could not reach the mobrain compose stack (postgres + gbrain-ops running), ' +
         'so the four-component backup integration tests were skipped rather than run. ' +
         'Bring the stack up, then rerun:\n\n' +
         '  bun run stack:up\n' +

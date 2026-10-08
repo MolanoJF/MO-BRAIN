@@ -80,7 +80,7 @@ export function packSummary(detail: PackDetail): string {
   return detail.extends ? `${base} · extends ${detail.extends}` : base;
 }
 
-/** Bundled packs are forked; Mobrain's own pack is customized through a layer. */
+/** Bundled packs are forked; Mo-brain's own pack is customized through a layer. */
 export function editLabel(d: Pick<PackDetail, 'bundled' | 'managed'>): string {
   if (d.bundled) return 'Fork to edit';
   return d.managed ? 'Customize' : 'Edit';

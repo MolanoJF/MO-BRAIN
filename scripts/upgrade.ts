@@ -972,7 +972,6 @@ function registryRef(name: string, tag: string): string {
 function controlPlaneTag(): string {
   return process.env.APP_VERSION
     ?? process.env.MOBRAIN_VERSION
-    ?? process.env.BRAINSTAND_VERSION
     ?? 'dev';
 }
 

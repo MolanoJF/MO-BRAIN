@@ -278,11 +278,11 @@ let manifestFromA8: SnapshotManifest;
 describe('Slice 3.5 seam gate A', () => {
   test('slice3.5 contract tests are not silently skipped', () => {
     if (dockerAvailable) return;
-    if (process.env.BRAINSTAND_ALLOW_SKIP_SLICE35_CONTRACT === '1') return;
+    if (process.env.MOBRAIN_ALLOW_SKIP_SLICE35_CONTRACT === '1') return;
     throw new Error(
       'docker compose is not usable, so the slice3.5 contract suite was skipped rather than run. '
         + 'Install/start Docker, then rerun:\n\n  bun test test/contract/upgrade.contract.test.ts\n\n'
-        + 'If skipping is genuinely intended, set BRAINSTAND_ALLOW_SKIP_SLICE35_CONTRACT=1.',
+        + 'If skipping is genuinely intended, set MOBRAIN_ALLOW_SKIP_SLICE35_CONTRACT=1.',
     );
   });
 

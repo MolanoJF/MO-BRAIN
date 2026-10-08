@@ -71,7 +71,7 @@ function fakeDeps(calls: string[]) {
   };
 }
 
-beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'brainstand-rollback-')); });
+beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'mobrain-rollback-')); });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
 describe('rollback', () => {

@@ -10,8 +10,8 @@ expect_code() {  # $1 expected  $2.. env assignments + command
 # check_project_identity() now reads real docker state, same as the RAM/disk/
 # port checks it sits next to. Those already run against a name no real
 # project on this host will ever hold; give it one too, instead of the
-# frozen `brainstand` default — a dev host that happens to run an actual
-# `brainstand` stack (this repo's own dev stack does) would otherwise fail
+# frozen `mobrain` default — a dev host that happens to run an actual
+# `mobrain` stack (this repo's own dev stack does) would otherwise fail
 # every case below on a real, unrelated collision, not the fake being tested.
 export COMPOSE_PROJECT_NAME="preflight-selftest-$$"
 
@@ -41,7 +41,7 @@ echo "$out" | grep -qi "memory" || fail "the RAM refusal does not name memory"
 echo "$out" | grep -qE "[0-9]+ ?(MB|GB)" || fail "the RAM refusal does not state the floor"
 
 # A clean host passes and says nothing alarming. Ports are faked free: this
-# suite's own dev host may genuinely run another Mobrain stack on 80/443 (a
+# suite's own dev host may genuinely run another Mo-brain stack on 80/443 (a
 # real, correct refusal from check_ports once the project name differs — see
 # above), which is not what this assertion is about.
 expect_code 0 "PREFLIGHT_SKIP_DNS=1 PREFLIGHT_FAKE_PORT_80=free PREFLIGHT_FAKE_PORT_443=free bash scripts/preflight.sh"

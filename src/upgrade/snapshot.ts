@@ -17,16 +17,14 @@ export const SNAPSHOT_DATABASES = ['gbrain', 'control'] as const;
  * D4 — the compose project name is DATA, not branding.
  *
  * Docker derives volume names from it (`<project>_<volume>`), so changing it
- * orphans an existing deployment's data. The default is therefore FROZEN at
- * the legacy value forever, whatever the product ends up being called, and the
- * variable exists so that (a) the rename in Task 4 cannot silently strand
- * anyone's brain, and (b) two stacks can be co-resident on one host.
+ * on a live host orphans that deployment's data. The default is `mobrain`.
+ * Set COMPOSE_PROJECT_NAME explicitly when two stacks share one host.
  */
-export const LEGACY_PROJECT_NAME = 'brainstand';
+export const DEFAULT_PROJECT_NAME = 'mobrain';
 
 export function projectName(): string {
   const raw = process.env.COMPOSE_PROJECT_NAME?.trim();
-  return raw && raw.length > 0 ? raw : LEGACY_PROJECT_NAME;
+  return raw && raw.length > 0 ? raw : DEFAULT_PROJECT_NAME;
 }
 
 const VOLUME_SUFFIXES = ['brain-repos', 'gbrain-home'] as const;
@@ -41,12 +39,8 @@ export function volumeLabel(volume: string): string {
 }
 
 const DB_ARTIFACT_NAME: Record<string, string> = { gbrain: 'brain-db', control: 'control-db' };
-const VOLUME_ARTIFACT_NAME: Record<string, string> = {
-  'brainstand_brain-repos': 'brain-repos',
-  'brainstand_gbrain-home': 'gbrain-home',
-};
 const artifactNameForDb = (db: string): string => DB_ARTIFACT_NAME[db] ?? db;
-const artifactNameForVolume = (volume: string): string => VOLUME_ARTIFACT_NAME[volume] ?? volume;
+const artifactNameForVolume = (volume: string): string => volumeLabel(volume);
 const sanitize = (s: string): string => s.replace(/[^a-zA-Z0-9._-]/g, '_');
 
 // Mirrors scripts/backup.ts:21-25 exactly — this is that file's successor.

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to **Mobrain**. Versions are the product's `APP_VERSION`; images publish from CI to
+Notable changes to **Mo-brain**. Versions are the product's `APP_VERSION`; images publish from CI to
 `ghcr.io/molanojf` (the only GHCR owner available; the product name is not a registry namespace). Full
 provenance — every `U*`, `P*` and `F*` — is in [`docs/slice-5-findings.md`](docs/slice-5-findings.md).
 
@@ -35,7 +35,7 @@ REST API is the only writer: it is admin-gated and audited (shape only, never a 
 writes a created pack as `pack.json` through gbrain's file plane, and it edits an existing pack only
 through gbrain's atomic, lint-gated mutation batch. A pack is created but not activated; applying it
 ends with a gbrain `schema active` readback rather than a claim of success. gbrain never created
-directories from a pack, so Mobrain now does: on wizard finish, on apply, when a Space joins a ready
+directories from a pack, so Mo-brain now does: on wizard finish, on apply, when a Space joins a ready
 brain, and when a mutation adds a type, every Space resolving the pack gets one `README.md` per page
 type — create-only, idempotent, one commit per Space, and never indexed because `README.md` is a
 gbrain metafile. `schema sync` stays additive: it fills blank types and never reclassifies. Bundled
@@ -51,7 +51,7 @@ verbs, and the active pack is left unchanged across the deploy (no auto-migratio
 
 ## [1.0.0] — 2026-09-19
 
-Mobrain 1.0.0 is the first **self-host GA** release: a team can install the product on a clean host with
+Mo-brain 1.0.0 is the first **self-host GA** release: a team can install the product on a clean host with
 `scripts/install.sh`, reach a healthy console, and operate it from the web console. gbrain is pinned and
 never forked (`0.50.5.0` via the exact build `ARG`), the agent harness is pinned at `2.1.274`, and the
 three images publish to GHCR at exact tags. This release closes Slice 5: the install is proven on a

@@ -98,7 +98,7 @@ describe('rule 1: every no-fallback var() names a property something defines', (
   });
 
   test('the TypeScript sources reference nothing undefined either', () => {
-    // qm scans only its CSS for references. Mobrain must scan the TS too:
+    // qm scans only its CSS for references. Mo-brain must scan the TS too:
     // `editor/theme.ts` builds a CodeMirror theme out of `var(--color-*)`
     // strings, and renaming `--color-accent` to `--color-cta` broke all 12 of
     // its references at once — invisibly, because a dead var() in CodeMirror

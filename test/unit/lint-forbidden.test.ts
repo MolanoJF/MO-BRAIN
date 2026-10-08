@@ -201,7 +201,7 @@ describe('frozen-crypto-domain (D3)', () => {
   });
 
   test('leaves the frozen values themselves alone', () => {
-    expect(scanText('src/control/secrets.ts', `Buffer.from('brainstand-kek-v1')`)).toEqual([]);
+    expect(scanText('src/control/secrets.ts', `Buffer.from('mobrain-kek-v1')`)).toEqual([]);
   });
 });
 

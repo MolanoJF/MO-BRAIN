@@ -94,7 +94,7 @@ describe('single-admin bootstrap', () => {
     expect(b?.lifecycle).toBe('uninitialized');
   });
 
-  // Spec P6: every install starts as ONE person's brain on Mobrain's own
+  // Spec P6: every install starts as ONE person's brain on Mo-brain's own
   // personal pack. Company mode is a later settings change.
   test('the org starts in personal mode on mobrain-personal', async () => {
     const [o] = await getDb().select().from(schema.organizations);
