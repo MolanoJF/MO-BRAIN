@@ -27,7 +27,7 @@ Either way the one command runs the preflight below, asks whether to enable the 
 The images are registry-qualified and exactly pinned:
 
 ```text
-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:0.50.5.0
+${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/gbrain-base:0.60.104.0
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/control-plane:${APP_VERSION:-1.0.0}
 ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   # only with the runner
 ```
@@ -75,7 +75,7 @@ When on, the runner is fenced to one internal network with no route out and its 
 
 | Dependency | Pin | Where |
 |---|---|---|
-| gbrain | **0.50.5.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
+| gbrain | **0.60.104.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
 | Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 

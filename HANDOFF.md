@@ -216,7 +216,7 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 | [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
 | [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
 
-**Support policy in one line:** we support exactly the pinned gbrain (`0.50.5.0`) and harness (`2.1.274`);
+**Support policy in one line:** we support exactly the pinned gbrain (`0.60.104.0`) and harness (`2.1.274`);
 upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
 tag; the drift check runs on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and
 non-promises.
@@ -270,7 +270,7 @@ non-promises.
 | Slice 4 plan | [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md) — historical |
 | Earlier findings | [`docs/slice-0-findings.md`](docs/slice-0-findings.md), [`docs/slice-2-findings.md`](docs/slice-2-findings.md), [`docs/slice-3-findings.md`](docs/slice-3-findings.md), [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md), [`docs/slice-4-findings.md`](docs/slice-4-findings.md) |
 | Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
-| gbrain pin | `v0.50.5.0` (exact, never a moving tag) |
+| gbrain pin | `v0.60.104.0` (exact, never a moving tag) |
 | Harness pin | `@anthropic-ai/claude-code@2.1.274` (exact; `HARNESS_VERSION` in `.env`) |
 | gbrain reference | `C:\Users\juanp\Desktop\gbrain` (read-only) |
 
