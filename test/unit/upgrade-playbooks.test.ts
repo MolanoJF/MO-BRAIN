@@ -12,6 +12,7 @@ const TRANSLATED_MIGRATION_FILES: readonly string[] = [
   '0.51.7.0',
   '0.51.8.0',
   '0.52.1.0',
+  '0.52.2.0',
 ];
 
 /** Spec list: migration files present in the v0.60.104.0 tree after the pin. */
