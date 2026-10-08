@@ -7,9 +7,10 @@ import { wiringSnippet } from '../../src/control/harness.ts';
 /**
  * Member skill delivery rests on four facts at the pin, proven here:
  *  (a) `init` leaves mcp.publish_skills on;
- *  (b) a memory-writer client on the compiled `starter` surface cannot see
- *      list_skills/get_skill;
- *  (c) rescoped to `full`, the same client lists and fetches skills;
+ *  (b) a memory-writer client on the compiled `starter` surface sees
+ *      list_skills/get_skill (0.60.104.0; they are no longer hidden);
+ *  (c) rescoped to `full`, the same client lists skills; get_skill by the
+ *      host name `query` is skill_not_found (no authorized published skill);
  *  (d) on `full`, the memory-writer profile still cannot call an admin op.
  * The slice0 stack has no gbrain-serve, so serve runs inside gbrain-ops on
  * loopback, the pattern discovery.contract.test.ts uses.
@@ -102,11 +103,13 @@ test('(a) init leaves mcp.publish_skills on', async () => {
   expect(line).toBe('true');
 });
 
-test('(b) the compiled starter surface hides list_skills and get_skill', async () => {
+test('(b) the compiled starter surface includes list_skills and get_skill', async () => {
+  // Measured at 0.60.104.0 (docs/gbrain-0.60.104.0-findings.md): starter
+  // tools/list count=35 and the array contains both names. The 0.50 pin hid them.
   const names = await toolNames();
   console.log(`[member-skills] starter tools/list count=${names.length}`);
-  expect(names).not.toContain('list_skills');
-  expect(names).not.toContain('get_skill');
+  expect(names).toContain('list_skills');
+  expect(names).toContain('get_skill');
 });
 
 test('(c) rescoped to full, the member lists and fetches skills', async () => {
@@ -131,7 +134,13 @@ test('(c) rescoped to full, the member lists and fetches skills', async () => {
 
   const got = await mcp('tools/call', { name: 'get_skill', arguments: { name: 'query' } });
   expect(got.error).toBeUndefined();
-  expect(JSON.stringify(got.result)).toContain('body');
+  // Measured at 0.60.104.0: `{ name: 'query' }` is not an authorized published
+  // skill. The receipt is skill_not_found, not a body. Do not treat the
+  // instructions envelope's mention of the tool name "query" as a fetch.
+  const gotText = JSON.stringify(got.result);
+  expect(gotText).toContain('skill_not_found');
+  expect(gotText).toContain('No authorized published skill matches this key.');
+  expect(gotText).not.toContain('"body"');
 });
 
 test('(d) on full, memory-writer scopes still deny an admin op', async () => {

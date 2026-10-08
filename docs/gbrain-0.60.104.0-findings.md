@@ -159,6 +159,19 @@ Name delta: 24 added, 0 removed. Added: `assemble_evidence`, `cancel_write_reque
 
 Parameter-key delta on the 136 shared names: one removal, `migrate_embeddings` parameter `force_sunset_target`. `rg force_sunset_target skills` found no match. No skill file names a removed tool or that removed parameter. Capture the new catalog; do not hand-edit it; do not reformat skills from this row.
 
+## Task 6 follow-up (measured, not guessed)
+
+Command, after the contract suite had `down -v`'d the scratch project and it was brought back with the same `up -d --wait`:
+
+```bash
+sudo -n env GBRAIN_VERSION=0.60.104.0 COMPOSE_PROJECT_NAME=brainstand-slice0-060 \
+  docker compose -f compose/docker-compose.slice0.yml exec -T \
+  -e GBRAIN_AUDIT_DIR=/srv/gbrain-home/.gbrain/audit gbrain-ops \
+  gbrain jobs supervisor start --detach --concurrency 2 --json
+```
+
+Start exit 0. After processing_state `ready`, `gbrain jobs supervisor status --json` field `workers` was a one-element array (`pid` 69). Then `gbrain jobs supervisor stop --json` exit 0. Top-level `reason` = `drained`, `drained` = true. `checks.workers_exited` = true, `checks.worker_drained` = true. The following `status --json` had `running` = false and `workers` = `[]` (the key is present; it is empty). Worker dir `/srv/gbrain-home/.gbrain/workers` was empty. Audit `supervisor-2026-W41.jsonl` contained `shutting_down` (`exit_code` 0, `reason` `SIGTERM`) then `stopped` (`exit_code` 0, `reason` `SIGTERM`, `drained` true, `worker_exit_code` 0). The suite's A7, after the deciding-event assertion was updated to `stopped`, failed next at `expect(proof.workers.length).toBeGreaterThan(0)` received 0. That matches this probe. Do not retune grace periods. The 0.50 "worker left alive" fact does not hold at this pin.
+
 ## What later tasks must not do
 
 - Do not add `--raw` to `config get`. The probed key printed `true`.

@@ -138,19 +138,25 @@ test('config.unset clears a per-source pack override written by config.set --for
 }, 120_000);
 
 // Grammar coverage only: the registry marks `id` required, so a true no-arg
-// call cannot be built by buildArgv. Run the bare verbs through composeExec and
-// assert gbrain's own usage refusal (exit 2). No source is fabricated.
-test('sources remove/archive/rename with no argument exit 2 with usage', async () => {
-  const cases = [
+// call cannot be built by buildArgv. Run the bare verbs through composeExec.
+// Measured at 0.60.104.0: remove and archive exit 1 invalid_params (an
+// explicit source ID is required); rename still exits 2 with usage. No
+// source is fabricated.
+test('sources remove/archive/rename with no argument refuse before mutating', async () => {
+  for (const [id, verb] of [
     ['sources.remove', 'remove'],
     ['sources.archive', 'archive'],
-    ['sources.rename', 'rename'],
-  ] as const;
-  for (const [id, verb] of cases) {
+  ] as const) {
     const spec = OPERATIONS[id]!;
     expect(spec.argv).toEqual(['sources', verb]);
     const r = await composeExec('gbrain-ops', ['gbrain', ...spec.argv]);
-    expect(r.exitCode).toBe(2);
-    expect(r.stdout + r.stderr).toMatch(/usage:/i);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/invalid_params/);
+    expect(r.stderr).toMatch(/An explicit valid source ID is required/);
   }
+  const rename = OPERATIONS['sources.rename']!;
+  expect(rename.argv).toEqual(['sources', 'rename']);
+  const renamed = await composeExec('gbrain-ops', ['gbrain', ...rename.argv]);
+  expect(renamed.exitCode).toBe(2);
+  expect(renamed.stderr).toMatch(/Usage: gbrain sources rename <id> <new-display-name>/);
 }, 120_000);

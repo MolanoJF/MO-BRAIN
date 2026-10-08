@@ -89,15 +89,18 @@ describe('scheduler operations against the pinned container', () => {
   }, 900_000);
 
   test('sources push on a repo with no origin fails loudly, never silently', async () => {
-    // seedGitSource creates a local repo with no remote. Upstream's runPush
-    // maps "not a git repo / no origin" to status 'error' -> exit 1.
+    // Measured at 0.60.104.0: exit is not 0, and the JSON receipt has no
+    // status or reason. The loud failure is code writer_coordinator_required.
+    // seedGitSource still creates a local repo with no remote.
     const r = await execOperation(OPERATIONS['sources.push']!, { id: PROBE_SOURCE },
       { json: true, timeoutMs: 300_000 });
     expect(r.exitCode).not.toBe(0);
-    const body = r.json as { status?: string; reason?: string } | null;
-    // The JSON receipt is printed BEFORE the non-zero exit, so it is readable.
-    expect(body?.status).toBeTruthy();
-    expect(['error', 'push_failed', 'pull_conflict']).toContain(body!.status!);
+    const body = r.json as { status?: string; reason?: string; code?: string; error?: string } | null;
+    expect(body).not.toBeNull();
+    expect(body?.status).toBeUndefined();
+    expect(body?.reason).toBeUndefined();
+    expect(body?.code).toBe('writer_coordinator_required');
+    expect(body?.error).toBe('writer_coordinator_required');
   }, 600_000);
 
   test('embed --stale --source scopes to one source and exits clean', async () => {
