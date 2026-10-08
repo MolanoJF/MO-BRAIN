@@ -646,7 +646,7 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     await enter('migrated',
       'apply-migrations and post-upgrade both exited 0; no migration count is claimed for this ' +
       'delta (U3/G3: the exit code is the whole record). A non-zero exit or a surprise here is a ' +
-      'finding for docs/slice-3.5-findings.md, not something to wave through.',
+      'finding for docs/archive/slice-3.5-findings.md, not something to wave through.',
       { applyExit: 0, postExit: 0, selfUpgradeMode: guard.mode, configKeysAdded: addedKeys });
 
     // 6. Playbooks. Deterministic steps run; checklist items are OPENED as

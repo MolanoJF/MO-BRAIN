@@ -89,7 +89,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
        * REQUIRED for the tier-3 key `schema_pack.source.<id>`: it is NOT in
        * gbrain's `KNOWN_CONFIG_KEY_PREFIXES`, so `config set` exits 1 with
        * `Unknown config key` unless `--force` is passed (MEASURED at 0.50.5.0;
-       * docs/schema-pack-findings.md S1 and S6 probe 1). With `--force` it
+       * docs/archive/schema-pack-findings.md S1 and S6 probe 1). With `--force` it
        * lands in the brain DB `config` table, not the file plane — which is
        * exactly the tier-3 plane the resolver reads.
        */
@@ -129,7 +129,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
    * Clears one key. This is how a per-source pack override is reset: it
    * removes the tier-3 key `schema_pack.source.<id>` from the brain DB
    * `config` table (S1), so the source falls back to the brain-wide pack.
-   * MEASURED grammar (docs/schema-pack-findings.md S6 probe 5):
+   * MEASURED grammar (docs/archive/schema-pack-findings.md S6 probe 5):
    *   `gbrain config unset <key> | --pattern <prefix>`
    * a no-arg call exits 1 with that usage line, and a missing key exits 1
    * with `Config key not found`. `--pattern <prefix>` exists but is not
@@ -418,7 +418,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
   },
 
   /**
-   * The tripwire probe (docs/autopilot-status-findings.md). OBSERVED at
+   * The tripwire probe (docs/archive/autopilot-status-findings.md). OBSERVED at
    * 0.50.5.0: `--status --json` prints one AutopilotStatusReport,
    * { installed, install_target, state, disabled_reason, paused_reason,
    *   heartbeat_age_seconds, stale_after_seconds, last_log },
@@ -505,7 +505,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
    * outranks the ~/.gbrain/config.json value we write (tier 6), and
    * `gbrain schema use` will report success while changing nothing in that
    * state (MEASURED). `gbrain config get schema_pack` cannot be used instead —
-   * its shadowing note is inverted. See docs/schema-pack-findings.md S2.
+   * its shadowing note is inverted. See docs/archive/schema-pack-findings.md S2.
    *
    * Reads DB config for tier 4, so: brain-db.
    */
@@ -524,7 +524,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
    * DELIBERATE: a positional pack name returns the *unresolved* manifest —
    * MEASURED at 0.50.5.0, `gbrain schema show <pack> --json` runs
    * `loadPackFromFile(path)` and never walks `extends`/`borrow_from`. Raw vs
-   * effective (docs/schema-pack-findings.md S4):
+   * effective (docs/archive/schema-pack-findings.md S4):
    *
    *   pack               | raw page types | effective
    *   gbrain-base        | 27             | 27
@@ -665,7 +665,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
    * Copies a pack's RAW manifest to `~/.gbrain/schema-packs/<to>/pack.json`
    * at version 0.0.1 (runForkCmd). The one way to make a bundled pack
    * editable: mutations refuse bundled packs with PACK_READONLY. MEASURED,
-   * docs/schema-pack-findings.md S7.
+   * docs/archive/schema-pack-findings.md S7.
    */
   'schema.fork': {
     id: 'schema.fork',
@@ -725,7 +725,7 @@ export const OPERATIONS: Record<string, OperationSpec> = {
 
   /**
    * Permanently delete a source. Per gbrain's own help this CASCADES pages,
-   * chunks and embeddings. MEASURED grammar (docs/schema-pack-findings.md S6
+   * chunks and embeddings. MEASURED grammar (docs/archive/schema-pack-findings.md S6
    * probe 6): `remove <id> [--yes] [--confirm-destructive] [--dry-run]
    * [--keep-storage]`, and the no-arg call prints exactly
    * `Usage: gbrain sources remove <id> [--yes] [--confirm-destructive] [--dry-run] [--keep-storage]`.

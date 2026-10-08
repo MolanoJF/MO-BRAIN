@@ -1,6 +1,8 @@
 # Agent rules for this repo
 
-Start with `HANDOFF.md`. CI rules (`docs/runbooks/ci.md`):
+Start with `HANDOFF.md`. Current procedure is `docs/runbooks/` and `docs/support-policy.md`. Do not read `docs/archive/` unless the user asks about history or a comment cites a measurement there.
+
+CI rules (`docs/runbooks/ci.md`):
 
 - GitHub Actions minutes are a shared, capped budget (Free plan, 2,000 min/month for the whole org).
 - Never iterate on a fix by pushing to a PR or to `main` and waiting for CI. Run the suite locally (`bun run test:unit`, `bun run test:contract:isolated`, …) until it is green, then push once.

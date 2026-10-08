@@ -117,7 +117,7 @@ export const PRESETS: Record<string, Preset> = {
    * as a health gate. In Mobrain it is a TRIPWIRE instead: autopilot is never
    * installed here, so a healthy run is always "not installed" and writes no
    * report, and any install at all raises a pinned autopilot_installed alert
-   * (docs/autopilot-status-findings.md). Filesystem-only, so the timeout is
+   * (docs/archive/autopilot-status-findings.md). Filesystem-only, so the timeout is
    * the DB floor's neighbourhood, not doctor's hour.
    */
   'autopilot-tripwire': {

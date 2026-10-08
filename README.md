@@ -132,6 +132,7 @@ Mobrain's own licence is [MIT](LICENSE).
 | [Break-glass](docs/runbooks/break-glass.md) | Operating the brain when the console is down |
 | [Security policy](SECURITY.md) | Reporting a vulnerability, and the trust boundaries |
 | [Support policy](docs/support-policy.md) | Which gbrain version is supported, and how upgrades land |
+| [Doc index](docs/README.md) | The same runbooks, plus where historical notes live (`docs/archive/`, not current procedure) |
 
 ## Licence
 

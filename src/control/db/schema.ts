@@ -110,7 +110,7 @@ export const brains = pgTable('brains', {
    * through a 7-tier chain in which a brain-DB-plane value (tier 4) silently
    * outranks the ~/.gbrain/config.json value we write (tier 6). Always read
    * the truth back with `gbrain schema active` and surface any divergence
-   * rather than trusting this column — see docs/schema-pack-findings.md S2.
+   * rather than trusting this column — see docs/archive/schema-pack-findings.md S2.
    */
   schemaPack: text('schema_pack'),
   lifecycle: text('lifecycle').notNull().default('uninitialized'),

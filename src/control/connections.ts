@@ -600,7 +600,7 @@ function rescopeParams(clientId: string, compiled: CompiledConnection): Record<s
  * mint. MEASURED: the full re-statement is rejected (`read_source_inactive`);
  * `{ id, surface }` alone works and leaves the mint-time scoping intact, so
  * D8 holds (both clients were compiled identically at mint). See
- * docs/member-skills-findings.md.
+ * docs/archive/member-skills-findings.md.
  */
 async function applySurface(clientId: string, compiled: CompiledConnection): Promise<void> {
   const r = await callOps('auth.rescopeClient', { id: clientId, surface: compiled.surface }, { json: true });

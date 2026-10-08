@@ -135,7 +135,7 @@ export const filesApi = {
  * inherited row it is the brain-wide tier (e.g. `'home-config'`). At
  * 0.50.5.0 gbrain offers no per-Space pack READBACK, so an override is the
  * STORED intent (`config get schema_pack.source.<id>`), not a resolved state —
- * see docs/schema-pack-findings.md S6 Gate 2.
+ * see docs/archive/schema-pack-findings.md S6 Gate 2.
  */
 export type PackPageType = {
   name: string;

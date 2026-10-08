@@ -1,291 +1,99 @@
 # Handoff — read this first
 
-**Mobrain 1.0.0 is the tagged release.** `main` has moved since that tag. Tip `578bbaa` (2026-09-23) is personal-and-company zones plus optional Google sign-in, on top of the console, schema, skills, and autopilot work that landed after the tag. Nothing since `v1.0.0` has been tagged or published. The published digests below are still the 1.0.0 artifacts.
+**Mobrain 1.0.0 is the tagged release.** `main` has moved since that tag. Nothing since `v1.0.0` has been tagged or published. Published digests are in [`CHANGELOG.md`](CHANGELOG.md).
 
-**Next product slice:** hosted sandboxes (zones §5.4). It needs its own brainstorm before a plan. The open questions are who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud (Slice 6) stays deferred; pricing still waits on a search-mode cost measurement on a real corpus. This file wins over any older note that names Slice 6 as next.
-
----
+**Next product slice:** hosted sandboxes (zones §5.4). Brainstorm before a plan. Open questions: who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud stays deferred. Pricing waits on a search-mode cost measurement on a real corpus. This file wins over any older note that names Slice 6 as next.
 
 ## What this project is
 
-**Mobrain** wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with one
-`scripts/install.sh` and operates from a web console. It was codenamed `brainstand` through Slices 0–4 and
-renamed in Slice 5's Task 4; the three frozen crypto strings keep their original bytes because they are
-key-derivation domain separators, not product names (D3).
+**Mobrain** wraps [gbrain](https://github.com/garrytan/gbrain) into a product a team deploys with `scripts/install.sh` and operates from a web console. It was codenamed `brainstand` through Slices 0–4 and renamed in Slice 5. Three frozen crypto strings keep their original bytes because they are key-derivation domain separators, not product names.
 
-The strategy rests on one bet: **gbrain is a pinned upstream dependency driven only through its published
-contracts. Never forked.** Its CLI is the control lane, its HTTP MCP is the data lane, and a small file
-plane covers what `config set` refuses. If you find yourself editing gbrain's source or reading its tables
-directly, stop.
+**gbrain is a pinned upstream dependency, driven only through its published contracts. Never forked.** Its CLI is the control lane, its HTTP MCP is the data lane, and a small file plane covers what `config set` refuses. If you are editing gbrain's source or reading its tables directly, stop.
 
-`C:\Users\juanp\Desktop\gbrain` is a **read-only reference checkout**. Read it freely. Never edit it.
+## Pins
 
----
-
-## What shipped in 1.0.0
-
-- **Install:** `scripts/install.sh` + `scripts/preflight.sh` (Docker/Compose version floors, RAM, disk,
-  ports 80/443, DNS for `$DOMAIN`); the console's wizard reaches `ready` on a clean host.
-- **Images published from CI to `ghcr.io/molioros`** (the MoliorOS org namespace; the product name is not
-  a registry namespace). Publishing is **tag/release-triggered**: the [`release` workflow](.github/workflows/release.yml)
-  runs on a `v*` tag or a manual dispatch and is the only publisher — an ordinary push to `main` does not
-  move the artifacts. The local `gh` OAuth token lacks `write:packages`, so CI owns every push — never
-  attempt a host-side `docker push`.
-- **Backup/restore:** the backup manifest's quiesce is three-state (`verified` / `unverified` / `failed`) and
-  a production-shaped stack proves it through the `compose exec` relay; restoring to a new `DOMAIN`
-  invalidates every grant, disables the affected schedules, and raises member-facing `connection_revoked`
-  alerts.
-- **Spend:** `GET /api/spend` states its own coverage before its totals, carries gbrain's `notCovered` list
-  verbatim, and never sums the two meters. Search-mode `measuredCost` stays `null` on this deployment
-  (P5), so no ratio is shown.
-- **Drift tripwire:** dispatch `stack.yml` with `gbrain_version` set to the new upstream tag and the
-  contract suite runs against it; a drift finding is news, not a broken build.
-- **Upgrades:** the host `scripts/upgrade.ts` lane still passes Slice 3.5's rollback gate on the renamed,
-  re-published stack (C9). An agent runner is never a path to an upgrade.
-- **Docs/licence:** `README.md`, `LICENSE` (MIT), `SECURITY.md`, `docs/support-policy.md`, plus the
-  install/backup-restore runbooks.
-- **Deliberately not in 1.0.0:** managed cloud, billing, any provisioner, any pricing page. The one
-  remaining open question is managed cloud (below).
-
-### The published digests (v1.0.0)
-
-These are the v1.0.0 digests as republished under the MoliorOS org namespace on 2026-10-05; the earlier personal-namespace digests are recorded in CHANGELOG.md.
-
-| Image | Tag | RepoDigest |
-|---|---|---|
-| `gbrain-base` | `0.50.5.0` | `ghcr.io/molioros/gbrain-base@sha256:4a11043b17857a2839680c5702147d601997a26fd2be3ccdbcc87bf2a89b3efe` |
-| `control-plane` | `1.0.0` | `ghcr.io/molioros/control-plane@sha256:d3a6ea37e08beed104a74570632b8d33cd63df46f467ec84b7d61394749ba10b` |
-| `agent-runner` | `2.1.274` | `ghcr.io/molioros/agent-runner@sha256:07372e94871d23b25ef85a01d179c4db37b2433b0028ebd56fc61dfcff5d1551` |
-
-Source of record: the `publish` job of the [`release` workflow](.github/workflows/release.yml), written
-into the [v1.0.0 GitHub Release](https://github.com/MoliorOS/MO-BRAIN/releases/tag/v1.0.0). Publishing is
-tag/release-triggered — an ordinary push to `main` does not rebuild or move these artifacts. They are
-verified from a fresh runner that did not build them by
-[`release-verify.yml`](.github/workflows/release-verify.yml) (dispatch it; it pulls all three by digest and
-starts them). [`CHANGELOG.md`](CHANGELOG.md) carries the same three digests.
-
-### The one remaining open question — managed cloud
-
-Managed cloud is deferred to a later slice. The substrate decision is recorded as **D12** in the Slice 5
-plan and is **not** to be re-argued: **one VM per tenant, created through a cloud provider API, installed by
-running this release's `install.sh` over SSH**, with the stack's own backup/restore and upgrade lanes
-operated per tenant. Rejected: a shared fleet with several compose projects per host, and Kubernetes.
-**Nothing in this repository builds a provisioner yet, and nothing else about the cloud slice is presumed.**
-Pricing is still unsettled — **Open Question 2** (the search-mode cost spread) must be measured on a
-populated corpus before pricing, and that is the deferred slice's first job.
-
----
+| | |
+|---|---|
+| Source pin | gbrain `0.60.115.0` (exact). `scripts/install.sh` defaults to this and builds it locally when the pull misses. |
+| Published GHCR `gbrain-base` | `0.50.5.0` until the next release |
+| Harness | `@anthropic-ai/claude-code@2.1.274` |
+| App release | `1.0.0` tagged; `main` is ahead and unpublished |
+| Policy | [`docs/support-policy.md`](docs/support-policy.md) |
 
 ## What landed on main after 1.0.0
 
-Not a release. All of this is on `main` at `578bbaa` and is not in the published `1.0.0` images.
+Not a release. Not in the published `1.0.0` images.
 
-- Local-first install: no domain, LAN address, internal TLS.
-- Console shell and design system, and editing a Space's markdown in the console.
-- Schema-pack management and custom packs, including folder scaffolding from the pack.
+- Local-first install (no domain, LAN address, internal TLS) and Tailscale install mode.
+- Console shell, design system, and Space markdown editing.
+- Schema-pack management and custom packs.
 - Private member Spaces, the autopilot tripwire, member agent skills over MCP, and Space git-bundle export.
-- **Zones 5.1–5.3** shipped: personal-and-company zones, privacy, personal-first, and invite login.
-- **Optional Google sign-in.** Email and password stay. The button exists only when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
+- Zones 5.1–5.3: personal-and-company zones, privacy, personal-first, invite login.
+- Optional Google sign-in when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. Email and password stay.
 
-Zones behavior a caller can rely on:
+Zones a caller can rely on:
 
 - A fresh install is a personal brain on schema pack `gbrain-base-v2`. The wizard has no mode step and skips the schema step when that pack is already stored.
 - Company mode is the owner's switch in Settings → General. Switching back to personal is allowed only while that owner is the only member and no invite is open.
 - Company Space access is an explicit `space_grants` row. Personal mode refuses invites, shared sources, and grants with `403 { error: "company_mode_required" }`.
-- An invite creates a placeholder account. The claim page is "Create your account" and sets a password only on that placeholder.
-- Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. The admin Spend page still collapses that member's personal automations to one row.
+- An invite creates a placeholder account. The claim page sets a password only on that placeholder.
+- Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. Admin Spend collapses that member's personal automations to one row.
 - The Space picker groups My Brain and Company. A member chooses which granted company Spaces their agent reads from the My Brain settings tab.
 
 **Not built:** hosted sandboxes (§5.4). Per-member budget caps were deferred with them.
 
----
+## Settled, do not re-argue
 
-## Live state on the dev stack (measured 2026-09-19)
+Managed cloud, when it is built: one VM per tenant, created through a cloud provider API, installed by running this release's `install.sh` over SSH. Rejected: a shared fleet with several compose projects per host, and Kubernetes. Nothing here builds a provisioner. Pricing is unsettled until search-mode cost is measured on a populated corpus.
 
-**Historical.** These measurements are from 2026-09-19, before zones and optional Google. This handoff pass did not re-measure the dev stack.
+## What not to do
 
-- **The stack is up** on the base + dev compose files: `caddy`, `postgres` (healthy), `gbrain-ops` and
-  `control-plane` and `scheduler` (all `ghcr.io/molioros/control-plane:dev`), `gbrain-serve`/`gbrain-worker`
-  (the pinned `gbrain-base`), and `agent-runner`. `docker port brainstand-gbrain-ops-1` reads
-  `3140/tcp -> 0.0.0.0:3140`.
-- **`GET /api/health` is 200**: `components: {controlDb:"ok", ops:"ok"}`, `pin: {declared:"0.50.5.0",
-  observed:"0.50.5.0", matches:true}`, and `runner: {state:"connected", version:"2.1.274"}`.
-- **The brain is thin:** 4 sources and 4 pages (the e2e family cycles the volumes with its own `down -v` and
-  the wizard re-provisions from scratch). A `slice3-probe` Space appears and disappears with
-  `test/contract`'s Gate A fixture; seeing it is not a defect.
-- **The dev stack runs local builds (`control-plane:dev`), not the released `1.0.0` tag.** The installer
-  pulls `control-plane:1.0.0`; the dev box deliberately runs `dev`.
-- **Both secrets are present** in the control DB's `secrets` table, envelope-encrypted:
-  `anthropic_api_key` and `openai_api_key` (verified by name only; never print the values). **The anthropic
-  row is a rotating host secret.** The stored value is the machine's Claude Code OAuth access token, so the
-  CLI's next refresh revokes it — every model call then answers `401 authentication_error` / `OAuth access
-  token has been revoked.` with nothing changed in this repository — and a restore or an upgrade rollback
-  can put back a `secrets` generation that predates a rotation. **Re-provision *after* a destructive cycle,
-  never before.** Procedure and record: `docs/runbooks/agent-runner.md`, "Rotating the Anthropic key".
-- **The D11 debt was cleared through product paths (Task 14, P7) — and a later destructive e2e cycle
-  restored it.** The release verification pass's own `test/e2e` runs restore control-DB snapshots from the
-  Slice 2/3 era, so the stack currently carries the **pre-Task-14** residue again, measured directly:
-  **1 organization, 10 memberships, 10 Connections (7 active / 3 revoked), 2 open alerts
-  (`overlap_killed_previous`, `connection_revoked`), 8 pending `upgrade_checklist_items` on `0.50.2.0`
-  (`awaiting_admin_decision`), and 5 schedules, all disabled.** This is expected from the destructive e2e
-  family, not a regression, and it is clearable through the product exactly as Task 14 proved: ack the
-  checklist at `/upgrades` (or `POST /api/upgrades/checklist/:itemId/ack`), ack alerts at `/schedules`, and
-  offboard residue members with `DELETE /api/members/:id`. No SQL is used to clear it.
-- **One required Connection-purge path does not exist (F22).** `POST /api/connections/:id/revoke` exists;
-  `DELETE /api/connections/:id` does not, so a revoked Connection survives until its member is offboarded
-  (which cascades) — and cannot be offboarded while a live schedule holds the member. Deferred to the next
-  hardening slice.
-- **A restore or a quiesce leaves the runner DOWN by design** (D12/D13): `restoreLane` deliberately does not
-  resume a service whose profile is inactive, and `agent-runner` drains on SIGTERM and exits 0. Bring it back
-  with the CA export first:
-  `docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml --profile runner up -d caddy-ca-export agent-runner`.
-- The `bs-fp-pg` scratch Postgres is still up on `localhost:5432` for host-run tests; `test/integration`
-  needs `CONTROL_DATABASE_URL` exported. Pausing the scheduler is `docker compose stop scheduler`.
+- Don't fork gbrain, import past its `exports` map, read its tables directly, or screen-scrape human-readable CLI output.
+- Don't run `gbrain autopilot --install` in a container — `lint:forbidden` catches it.
+- Don't invoke `gbrain` through a shell string. Argv arrays only.
+- Don't weaken a test or gate to make it pass.
+- Don't mount the Docker socket into the control plane.
+- Don't `git add .env`.
+- Don't `docker push` to GHCR from a host. Only the release workflow publishes, on a `v*` tag or a manual dispatch.
+- Never give `agent-runner` a database URL, `GBRAIN_HOME`, `OPS_RPC_TOKEN`, `ENCRYPTION_KEY`, or a provider key. Its credentials are `RUNNER_TOKEN` and the per-run gbrain token. It is a client of the control plane, never of the database.
+- Never mount the Docker socket into anything that touches agent output, and never mount a volume into the runner (`volumes: []`). Never publish a host port on the runner. Caddy is the only service that publishes host ports.
+- `runner-net` is `internal: true` with no default route. Never attach the runner to a second network, and never route `/api/runs/*` or `/api/gateway/*` through Caddy.
+- Bash is not a job class this product implements. Never `--no-deps` the runner up. Never edit a schedule's harness version to make a claim succeed. Never read the agent's closing message as the run's status, or a `costUsd` of `null` as zero.
+- Never revoke a Connection to pause agent runs, and never `docker compose down -v` to clean up a run. Revert is a new commit, not a wipe.
 
-### The console design system (branch `feat/console-shell-redesign`, HEAD `ffd64ca`; the branch is gone and `ffd64ca` is an ancestor of `main`)
+## Known gaps
 
-- **The console has a design system now**, ported from qm's admin kit (`C:\Users\juanp\Desktop\qm\plugins\admin`,
-  read-only). Tokens: `src/console/styles/tokens.css` — two tiers, and `@theme inline` (not `@theme`) is the
-  whole mechanism; plain `@theme` bakes literals into utilities and is why the console could never theme.
-  Primitives: `src/console/ui/classes.ts` (pure, tested) + `src/console/ui/index.tsx` (thin wrappers, 18
-  components). Theme runtime: `src/console/theme.ts`, light/dark/system, plus a pre-paint script in
-  `src/console/index.html`. The five composite classes (`.card`, `.field`, `.btn-primary`, `.nav-item`,
-  `.border-warning`) are gone; `styles.css` names zero colours.
-- **`/design-system` is the review surface** — every primitive, every tone, both themes, built from the real
-  exported components. This repo has no DOM harness, so it is the only way to eyeball the system.
-- **Verified in a browser** (dev stack, after `scripts/redeploy.sh`, via computed styles): the theme switch end
-  to end including `localStorage.theme` persistence, `Button` secondary/primary against qm's spec, `Badge`,
-  `th`/`td`, the control tokens, `--scrim` in both blocks, and `/design-system` in both themes.
-- **Still unverified in a browser:** the settings-modal mechanics (Esc, drag-select released past the card edge,
-  focus restore), the editor save / stale-save path, `ConfirmButton`'s controlled "Keep it" restoration, and the
-  nine settings tabs in light mode. Each has unit coverage for its decision and none for its rendering.
-- `test/unit/scheduler-main.test.ts` and `test/unit/seed-space.test.ts` fail here and are **environmental**:
-  `brainstand-postgres-1` publishes no host port (Caddy is the only service that does), so host-side
-  `localhost:5432` cannot connect by design. Neither touches the console.
-
----
+- `POST /api/connections/:id/revoke` exists. `DELETE /api/connections/:id` does not, so a revoked Connection survives until the member is offboarded.
+- A new contract file can still be answered by a sibling's process-global `mock.module`.
+- The host-side spend read still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`.
+- `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
+- Rotating the Anthropic key: [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md). Re-provision after a destructive cycle, never before.
 
 ## How to run
 
-Local stack (needs `.env` with `DOMAIN=localhost` and the secrets from `.env.example`):
+Dev stack (`.env` with `DOMAIN=localhost`). The dev override is required for host-run suites: it publishes `gbrain-ops` on `3140`.
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml up -d --wait
 ```
 
-The dev override is **not optional on this machine**: it publishes `gbrain-ops` on `3140:3140`, which every
-host-run suite reaches over `OPS_RPC_URL=http://127.0.0.1:3140`. A stack brought up from the base file alone
-leaves `test/contract` and `test/e2e` failing on `ConnectionRefused`.
-
-The runner lane is additionally switched on with:
+Runner profile:
 
 ```bash
 docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml --profile runner up -d caddy-ca-export agent-runner
 ```
 
-Clean-VM / production path is `scripts/install.sh` (passes `--env-file` so Compose interpolates the root
-`.env` it writes). Backup and restore are **host** operations (`scripts/backup.ts`, `scripts/restore.ts`);
-in-container `POST /api/backup` returns 503 when Docker is unavailable. Slice 0 contract stack:
-`bun run stack:up` / `stack:down`.
+Clean-VM / production path is `scripts/install.sh`. Backup and restore are host operations (`scripts/backup.ts`, `scripts/restore.ts`). Procedures: [`docs/runbooks/`](docs/runbooks/).
 
-Host-run test suites need the dev stack up and `CONTROL_DATABASE_URL` exported (several integration files
-default it locally and some do not). Run `test/integration` **before** `test/contract` / `test/e2e`, or re-up
-the dev stack in between: `test/integration/quiesce.test.ts` resumes through `compose/docker-compose.yml`
-alone and recreates `gbrain-ops` without the dev override's port publication.
+CI budget: [`CLAUDE.md`](CLAUDE.md) and [`docs/runbooks/ci.md`](docs/runbooks/ci.md). Do not add `schedule:` triggers or new push/PR workflows.
 
----
-
-## Runbooks and where the docs live
+## Where the docs live
 
 | Document | What it is |
 |---|---|
-| [`docs/runbooks/install.md`](docs/runbooks/install.md) | Clean-host install and preflight |
-| [`docs/runbooks/backup-restore.md`](docs/runbooks/backup-restore.md) | Backup, quiesce lanes, new-domain restore |
-| [`docs/runbooks/upgrade.md`](docs/runbooks/upgrade.md) | The deterministic upgrade and rollback lane |
-| [`docs/runbooks/scheduler.md`](docs/runbooks/scheduler.md) | Schedules, quiet hours, catch-up/overlap |
-| [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) | Enable/disable, the three health states, revert, rotating the Anthropic key |
-| [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) | Operator recovery over the ops sidecar |
-| [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, upgrade cadence, the drift tripwire, what is not promised |
-| [`docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`](docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md) | The 0.50.5.0 → 0.60.104.0 upgrade plan |
-| [`docs/superpowers/specs/2026-10-07-gbrain-0.60.104.0-upgrade-design.md`](docs/superpowers/specs/2026-10-07-gbrain-0.60.104.0-upgrade-design.md) | The upgrade design |
-| [`docs/gbrain-0.60.104.0-upgrade-run.md`](docs/gbrain-0.60.104.0-upgrade-run.md) | The fixture upgrade run and rollback |
-| [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
-| [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
-
-**Support policy in one line:** the source pin is gbrain `0.60.115.0` and harness `2.1.274`. GHCR still
-publishes `0.50.5.0`. `scripts/install.sh` defaults to `0.60.115.0` and builds it locally when the pull misses.
-Upgrades are host-driven and deterministic. See `docs/support-policy.md`.
-
----
-
-## What not to do
-
-- Don't fork gbrain, import past its `exports` map, read its tables directly, or screen-scrape human-readable
-  CLI output.
-- Don't run `gbrain autopilot --install` in a container — `lint:forbidden` catches it.
-- Don't invoke `gbrain` through a shell string. Argv arrays only.
-- Don't weaken a test or gate to make it pass.
-- Don't mount the Docker socket into the control plane.
-- Don't `git add .env`. It holds a real `OPENAI_API_KEY` plus `RUNNER_TOKEN`, `OPS_RPC_TOKEN`,
-  `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET` and the Postgres password. `sk-`-shaped strings in tests are
-  deliberate fakes.
-- Don't attempt a host-side `docker push` to GHCR; the local token lacks `write:packages`. CI publishes, and
-  only the [`release` workflow](.github/workflows/release.yml) does (on a `v*` tag or a manual dispatch).
-- **The runner lane:**
-  - **Never give `agent-runner` a database URL** (brain or control), `GBRAIN_HOME`, `OPS_RPC_TOKEN`,
-    `ENCRYPTION_KEY` or a provider key. Its only credentials are `RUNNER_TOKEN` and the per-run gbrain
-    token, and the container is a client of the control plane, never of the database.
-  - **Never mount the Docker socket into anything that touches agent output**, and never mount a volume into
-    the runner at all (`volumes: []`, ever). Its workspace is a fresh directory under the `/tmp` tmpfs,
-    created at claim and destroyed on every exit path.
-  - **Never add a host port to the runner.** Caddy is the only service publishing host ports.
-  - **The network is the fence, and the tool flags are only defence in depth.** `runner-net` is `internal:
-    true` with no default route; `--allowedTools` / `--disallowedTools` narrow further. Never attach the
-    runner to a second network and never route `/api/runs/*` or `/api/gateway/*` through Caddy.
-  - **Bash is a distinct, higher-trust job class that Slice 4 deliberately does not implement.** A prompt
-    that asks for Bash produces no `tool_use` at all and `permission_denials: []` — `--tools ""` removes the
-    built-in surface at the source.
-  - Never `--no-deps` the runner up (the dev CA export must run first), never edit a schedule's harness
-    version to make a claim succeed, and never read the agent's closing message as the run's status or a
-    `costUsd` of `null` as zero.
-  - Never revoke a Connection as a way to pause agent runs, and never `docker compose down -v` to "clean up" a
-    run — revert is the way back, and it is a new commit, not a wipe.
-
----
-
-## Quick reference
-
-| | |
-|---|---|
-| Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
-| Branch | `main`, tracking `origin/main`. PR #8 (`Support gbrain 0.60.104.0`) is merged. |
-| Upgrade record | [`docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`](docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md) and [`docs/gbrain-0.60.104.0-upgrade-run.md`](docs/gbrain-0.60.104.0-upgrade-run.md) |
-| Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
-| gbrain pin | `v0.60.115.0` (exact, never a moving tag) |
-| Harness pin | `@anthropic-ai/claude-code@2.1.274` (exact; `HARNESS_VERSION` in `.env`) |
-| gbrain reference | `C:\Users\juanp\Desktop\gbrain` (read-only) |
-
----
-
-## Process facts the next session needs
-
-- **The next product slice is hosted sandboxes (zones §5.4).** It has no plan yet; brainstorm it before writing one. Slice 6 (managed cloud) stays deferred behind the search-mode cost measurement. This file wins.
-- **`bash` on PATH is a broken WSL relay** (`C:\Windows\system32\bash.exe`). The two build gates
-  (`test/build/pin.test.sh`, `test/build/harness-pin.test.sh`) must be run through **Git bash**:
-  `"C:/Program Files/Git/bin/bash.exe" test/build/pin.test.sh`. Export `GBRAIN_VERSION` / `HARNESS_VERSION`
-  from `.env` first, or the scripts fall back to their defaults.
-- **Machine-level opencode config (not a repo change).** The coordinator added a `permission` block to
-  `~/.config/opencode/opencode.jsonc` — `read`/`glob`/`grep`/`list`/`lsp` set to `allow`, plus
-  `external_directory` allow — because the `opencode` agent otherwise stalls on approval prompts mid-task.
-  It lives outside the repository, so a fresh VM or a different user needs it re-added before dispatching
-  `opencode` workers.
-- **Agent spend limit / mixed authorship.** Slice 3.5, 4 and 5 were authored by more than one agent (the
-  `claude` agent's monthly limit was exhausted mid-slice); the findings docs and gate files name their
-  authors where it matters. Treat the branches as mixed-authored.
-- **CI is budgeted.** Only `ci.yml` (lint/tsc/unit, ~1 min) runs on push/PR; the Docker suites run on demand via `stack.yml`. Read `docs/runbooks/ci.md` before touching `.github/workflows/`. The `gh` token has the `workflow` scope (checked 2026-10-05), so workflow-file pushes no longer need a deploy key.
-- **Hazards carried, not cured:** a new contract file can still
-  be answered by a sibling's process-global `mock.module` (F27/F32 containment); the host-side spend read
-  still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; and
-  `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
-- **OpenCode/coordinator note:** when a worker edits only docs, the eight verification commands need not be
-  re-run; when a worker edits runtime `src/`, they must.
+| [`README.md`](README.md) | Front door |
+| [`docs/runbooks/`](docs/runbooks/) | Operator procedures |
+| [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, and what is not promised |
+| [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) | Install traps for an agent doing the install |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release entries and published digests |
+| [`docs/archive/`](docs/archive/) | Findings, plans, and probe logs. Do not read unless a comment cites a measurement or someone asks. |

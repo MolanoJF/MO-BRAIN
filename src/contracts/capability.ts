@@ -100,7 +100,7 @@ export function parseSchemaPacksProse(raw: string): SchemaPacksSnapshot {
  * (2) `gbrain config get schema_pack` is NOT a substitute: with a DB-plane
  * value set it prints the FILE value plus the note "a DB-plane value also
  * exists and is shadowed at runtime", which is backwards — tier 4 (DB) OUTRANKS
- * tier 6 (file) in resolveActivePackName. See docs/schema-pack-findings.md S2.
+ * tier 6 (file) in resolveActivePackName. See docs/archive/schema-pack-findings.md S2.
  *
  * `source` is the resolution tier, one of: per-call, env, per-source-db,
  * db-config, gbrain-yml, home-config, default. We write home-config, so any

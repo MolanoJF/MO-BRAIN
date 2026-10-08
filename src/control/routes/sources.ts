@@ -244,7 +244,7 @@ sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, ctx) => {
   // confirmation is informed. `--dry-run` is passed as an ORDINARY param:
   // `sources.remove` has `supportsDryRun: false` (the generic mechanism appends
   // `--dry-run` too late / only when gbrain declares it), so it must be the
-  // op's own `dryRun` flag. MEASURED, docs/schema-pack-findings.md S6 probe 6.
+  // op's own `dryRun` flag. MEASURED, docs/archive/schema-pack-findings.md S6 probe 6.
   if (body?.confirm !== true) {
     const preview = await callOps('sources.remove', { id: sourceId, dryRun: true }, { timeoutMs: 120_000 });
     if (!preview.ok) {

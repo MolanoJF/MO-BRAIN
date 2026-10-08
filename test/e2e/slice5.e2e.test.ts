@@ -29,7 +29,7 @@ import {
  * door, see the modes, invite a teammate, run a command schedule, run an agent,
  * read the bill, back up, restore, upgrade, and count the money.
  *
- * The live-state warnings this file inherits (docs/superpowers/plans/
+ * The live-state warnings this file inherits (docs/archive/superpowers/plans/
  * 2026-09-18-slice-5-self-host-ga.md, "Live-state warnings"):
  *
  *   * The stored `anthropic_api_key` is a rotating host secret. C5 is a money

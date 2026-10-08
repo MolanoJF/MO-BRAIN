@@ -73,7 +73,7 @@ async function readActive(): Promise<SchemaActive> {
  * gbrain's manifest-shape check. Not redundant with lint: `schema lint <name>`
  * answers the misleading `Pack not found` when a pack exists but fails to
  * parse, while `validate` gives the real diagnosis (MEASURED; see
- * docs/schema-pack-findings.md S5). Returns null when the pack is fine.
+ * docs/archive/schema-pack-findings.md S5). Returns null when the pack is fine.
  */
 export async function validationError(pack: string): Promise<string | null> {
   const r = await callOps<never>('schema.validate', { packName: pack }, { timeoutMs: 60_000 });
@@ -294,7 +294,7 @@ export type SourcePackResolution = {
  * at tier 3 and we report tier `per-source-db`; when absent, the brain-wide
  * pack applies and we mark `inherited`. We never render a resolved-looking
  * state we did not read back — the honesty rule that already makes
- * `/schema/apply` answer 409. See docs/schema-pack-findings.md S1/S2/S6.
+ * `/schema/apply` answer 409. See docs/archive/schema-pack-findings.md S1/S2/S6.
  */
 export async function resolveSourcePacks(orgId: string): Promise<SourcePackResolution[]> {
   const rows = await getDb().select().from(schema.spaces)
@@ -611,7 +611,7 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
  * `(type IS NULL OR type = '')`, so it fills blank types and cannot
  * reclassify, delete or unembed anything. Verified against the pinned
  * container with a pack whose prefixes deliberately targeted already-typed
- * pages — zero rows changed. See docs/schema-pack-findings.md S3.
+ * pages — zero rows changed. See docs/archive/schema-pack-findings.md S3.
  */
 schemaRoutes.post('/schema/sync', guard('admin', async (c, ctx) => {
   const caller = await callerFor(ctx);

@@ -83,7 +83,7 @@ export function compileConnection(
     boundSlugPrefixes,
     // Member skills: `full`, not the profile's `starter` default —
     // list_skills/get_skill are outside STARTER_OPS. Scopes still come from
-    // the profile (docs/member-skills-findings.md). Applied by
+    // the profile (docs/archive/member-skills-findings.md). Applied by
     // auth.rescopeClient, since mcp grant takes no --surface.
     surface: 'full',
     tokenTtl: clampTokenTtl(opts?.tokenTtl),

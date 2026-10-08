@@ -371,7 +371,7 @@ Bun.serve({
           ? (body as { runId: string }).runId : undefined;
 
         // The pack seam. The ONLY variable injected is GBRAIN_SCHEMA_PACK —
-        // tier 2 of the resolution chain (docs/schema-pack-findings.md S1) —
+        // tier 2 of the resolution chain (docs/archive/schema-pack-findings.md S1) —
         // scoped to this single spawn and never persisted, so the control
         // plane can inspect a pack's fully extends-resolved manifest WITHOUT
         // activating it. It must be the env tier with NO positional: a

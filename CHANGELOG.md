@@ -40,12 +40,12 @@ brain, and when a mutation adds a type, every Space resolving the pack gets one 
 type — create-only, idempotent, one commit per Space, and never indexed because `README.md` is a
 gbrain metafile. `schema sync` stays additive: it fills blank types and never reclassifies. Bundled
 packs remain read-only; fork one to edit it. The S7 authoring probes that pinned this behaviour at
-gbrain 0.50.5.0 are in [`docs/schema-pack-findings.md`](docs/schema-pack-findings.md).
+gbrain 0.50.5.0 are in [`docs/archive/schema-pack-findings.md`](docs/archive/schema-pack-findings.md).
 
 `mobrain-personal` is the default schema pack for new brains; the Schema page lists only
 `mobrain-personal` and `gbrain-base-v2`; edits to `mobrain-personal` go into an auto-created
 `my-personal` layer. Live-verified on the dev stack (S8 live in
-[`docs/schema-pack-findings.md`](docs/schema-pack-findings.md)): seeded at `gbrain-ops` boot
+[`docs/archive/schema-pack-findings.md`](docs/archive/schema-pack-findings.md)): seeded at `gbrain-ops` boot
 (`written` then `unchanged` on restart), `gbrain schema validate` reports 20 page types / 21 link
 verbs, and the active pack is left unchanged across the deploy (no auto-migration).
 

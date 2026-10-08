@@ -3,7 +3,7 @@
  *
  * gbrain's seven bundled packs stay on disk: `schema validate` with no name
  * hardcodes gbrain-base, and gbrain-everything extends gbrain-investor
- * (docs/schema-pack-findings.md S5). We only hide them.
+ * (docs/archive/schema-pack-findings.md S5). We only hide them.
  */
 export const BUNDLED_PACKS = [
   'gbrain-base', 'gbrain-base-v2', 'gbrain-recommended',

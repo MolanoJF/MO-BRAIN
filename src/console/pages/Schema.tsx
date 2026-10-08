@@ -71,7 +71,7 @@ export function syncSummary(report: Sync): string {
  * `/api/schema/packs`, which routes through gbrain's own resolver: `gbrain-creator`
  * reports 27 effective page types from a manifest that declares 1. Reading the
  * raw manifest here would be the false claim Task 1's `packOverride` seam exists
- * to prevent (MEASURED, docs/schema-pack-findings.md S4).
+ * to prevent (MEASURED, docs/archive/schema-pack-findings.md S4).
  */
 export function packSummary(detail: PackDetail): string {
   const types = `${detail.pageTypes.length} page type${detail.pageTypes.length === 1 ? '' : 's'}`;

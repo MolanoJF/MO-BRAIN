@@ -104,7 +104,7 @@ test('(a) init leaves mcp.publish_skills on', async () => {
 });
 
 test('(b) the compiled starter surface includes list_skills and get_skill', async () => {
-  // Measured at 0.60.104.0 (docs/gbrain-0.60.104.0-findings.md): starter
+  // Measured at 0.60.104.0 (docs/archive/gbrain-0.60.104.0-findings.md): starter
   // tools/list count=35 and the array contains both names. The 0.50 pin hid them.
   const names = await toolNames();
   console.log(`[member-skills] starter tools/list count=${names.length}`);

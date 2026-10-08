@@ -197,7 +197,7 @@ export async function patchConfig(patch: Record<string, unknown>, opts: { sql: S
  * same way). MEASURED against the pinned 0.50.5.0 container: a flat
  * `<name>.yaml` written here is invisible to `schema list` and answers
  * `Pack not found: <name>` from `schema lint`. See
- * docs/schema-pack-findings.md S1.
+ * docs/archive/schema-pack-findings.md S1.
  */
 export function packPath(name: string): string {
   return join(SCHEMA_PACK_DIR, name, 'pack.yaml');
@@ -208,7 +208,7 @@ export async function writeSchemaPack(name: string, yaml: string, opts: { sql: S
   assertUserPackName(name);
   await writeFilePlane(packPath(name), () => yaml, { ...opts, mode: 0o644 });
   // The loader takes the first existing of pack.yaml / pack.yml / pack.json
-  // (load-active.ts; MEASURED docs/schema-pack-findings.md S7 step 4), so a
+  // (load-active.ts; MEASURED docs/archive/schema-pack-findings.md S7 step 4), so a
   // stale pack.json would shadow this YAML write. Delete the sibling.
   await unlink(join(SCHEMA_PACK_DIR, name, 'pack.json'))
     .catch((e) => { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; });

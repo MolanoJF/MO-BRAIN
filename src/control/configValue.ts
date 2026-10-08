@@ -9,11 +9,11 @@ import { callOps } from './opsClient.ts';
  * (gbrain `src/mcp/publish-gates.ts:12-14,26`; `src/core/skill-catalog.ts`
  * `readMcpPublishSkills`), so the readback can over-report against the gate.
  * The default is accurate because only `gbrain init` writes the file plane.
- * Divergence tracked upstream (docs/member-skills-findings.md). It prints the
+ * Divergence tracked upstream (docs/archive/member-skills-findings.md). It prints the
  * value on the first line then a `[config] source: ...` note; a missing key
  * exits 1 with `Config key not found`. `callOps` returns `{ ok: false }` on
  * that — it does NOT throw on a non-zero op exit. Parse the first non-`[config]`
- * line. MEASURED; docs/schema-pack-findings.md S1 and S6 probe 1.
+ * line. MEASURED; docs/archive/schema-pack-findings.md S1 and S6 probe 1.
  */
 export async function readConfigValue(key: string): Promise<string | null> {
   const r = await callOps<never>('config.get', { key }, { timeoutMs: 60_000 });

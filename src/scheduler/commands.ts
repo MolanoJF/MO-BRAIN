@@ -43,7 +43,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 /**
  * `autopilot --status --json`'s AutopilotStatusReport, OBSERVED from the
- * pinned gbrain (docs/autopilot-status-findings.md): exactly these keys, and
+ * pinned gbrain (docs/archive/autopilot-status-findings.md): exactly these keys, and
  * on a Mobrain stack `installed:false, state:'not_installed'`.
  */
 const AUTOPILOT_STATUS_KEYS = [

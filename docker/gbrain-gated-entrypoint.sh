@@ -64,7 +64,7 @@ trap 'stop_child; exit 0' TERM INT
 # While paused, `gbrain jobs supervisor` may have left an orphaned worker
 # process behind (reparented to tini) still holding brain-DB connections --
 # `stop_child` only signals the direct child. Sweep every gbrain process on
-# each paused poll so the count can actually reach zero (docs/slice-3.5-findings.md F2).
+# each paused poll so the count can actually reach zero (docs/archive/slice-3.5-findings.md F2).
 sweep_orphans() {
   if [ -f "$PAUSE" ] && [ -r "$QUIESCE" ]; then
     sh "$QUIESCE" >/dev/null 2>&1 || true

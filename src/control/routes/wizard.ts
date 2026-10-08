@@ -216,7 +216,7 @@ wizard.get('/schema-packs', guard(async (c) => {
  * `gbrain-base-v2`, which is why Mobrain always passes the pack explicitly —
  * it stores `mobrain-personal`), so a pre-init write would simply be stamped
  * over. See
- * docs/schema-pack-findings.md S2.
+ * docs/archive/schema-pack-findings.md S2.
  *
  * Validated against gbrain's own pack list rather than a hardcoded set, so a
  * user-installed pack is selectable the moment it is on disk.

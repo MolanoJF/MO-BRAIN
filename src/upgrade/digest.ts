@@ -48,7 +48,7 @@ export type StateDigest = {
  * continuously-growing log would instead assert that no schedule fired during
  * the gate, which rollback does not promise. Measured: +6 `schedule_runs`
  * between a pre-upgrade digest and the post-rollback digest of an otherwise
- * identical control DB (docs/slice-3.5-findings.md, F3).
+ * identical control DB (docs/archive/slice-3.5-findings.md, F3).
  *
  * `agent_runs`/`agent_run_events`/`agent_run_usage` (Slice 4 Task 14, L9): the
  * same class, from the runner's own ledger — a run in flight appends events,

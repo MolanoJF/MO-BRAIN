@@ -95,7 +95,7 @@ test('schema.show resolves through the env tier, not the raw manifest', async ()
   // UNRESOLVED manifest — gbrain-creator would report 1 page type. The env
   // tier with no positional routes through gbrain's own resolver and yields
   // 27. If anyone ever switches this entry back to a positional pack name,
-  // this assertion breaks. See docs/schema-pack-findings.md S4.
+  // this assertion breaks. See docs/archive/schema-pack-findings.md S4.
   const creator = await execOperation(OPERATIONS['schema.show']!, {}, {
     json: true, env: { GBRAIN_SCHEMA_PACK: 'gbrain-creator' },
   });

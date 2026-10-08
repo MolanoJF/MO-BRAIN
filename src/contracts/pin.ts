@@ -7,7 +7,7 @@
  * `scripts/emit-operations.ts` still compute their own fallback and are out
  * of this task's scope, but Step 4's compose fix means they now see the
  * real value at runtime instead of silently defaulting — filed in
- * docs/slice-3.5-findings.md as a residual cleanup, not silently expanded
+ * docs/archive/slice-3.5-findings.md as a residual cleanup, not silently expanded
  * into this task.
  */
 import { readFile, rename, writeFile } from 'node:fs/promises';

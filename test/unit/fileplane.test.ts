@@ -111,7 +111,7 @@ test('a user pack is written as <name>/pack.yaml, the only shape gbrain discover
   // gbrain's defaultPackLocator probes pack.yaml/pack.yml/pack.json INSIDE a
   // directory named after the pack (src/core/schema-pack/load-active.ts).
   // A flat <name>.yaml is never listed and never loadable — MEASURED against
-  // the pinned container; see docs/schema-pack-findings.md S1.
+  // the pinned container; see docs/archive/schema-pack-findings.md S1.
   expect(packPath('hr-policies')).toBe(join(SCHEMA_PACK_DIR, 'hr-policies', 'pack.yaml'));
   expect(packPath('hr-policies')).not.toBe(join(SCHEMA_PACK_DIR, 'hr-policies.yaml'));
 });

@@ -11,12 +11,11 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dir, '..', '..');
 
 // Historical records that intentionally keep the old namespace: the CHANGELOG's
-// existing entries and the SDD plans quote the personal namespace, docs/slice-*
-// are the findings of record, and this test names the token it forbids.
+// existing entries, and docs/archive/ (findings and finished plans). This test
+// names the token it forbids.
 const ALLOWLIST = [
   'CHANGELOG.md',
-  'docs/slice-',
-  'docs/superpowers/',
+  'docs/archive/',
   'test/unit/image-namespace.test.ts',
 ];
 
