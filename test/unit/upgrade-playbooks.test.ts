@@ -45,6 +45,7 @@ const TRANSLATED_MIGRATION_FILES: readonly string[] = [
   '0.60.98.0',
   '0.60.99.0',
   '0.60.100.0',
+  '0.60.102.0',
 ];
 
 /** Spec list: migration files present in the v0.60.104.0 tree after the pin. */
@@ -152,13 +153,33 @@ describe('playbooksFor', () => {
     expect(() => playbooksFor('0.50.5.0', '0.50.2.0')).toThrow('is not ahead of');
   });
 
-  test('throws on the first untranslated migration-file release', () => {
-    const missing = MIGRATION_FILES_AFTER_PIN.find(
-      (version) => !TRANSLATED_MIGRATION_FILES.includes(version),
-    );
-    expect(typeof missing).toBe('string');
-    expect(() => playbooksFor('0.50.5.0', '0.60.104.0'))
-      .toThrow(`no playbook entry for ${missing}`);
+  test('playbooksFor from the pin to 0.60.104.0 returns 104 specs and does not throw', () => {
+    const specs = playbooksFor('0.50.5.0', '0.60.104.0');
+    expect(specs).toHaveLength(104);
+    expect(versionsOf(specs)).toEqual(frozenReleases.afterPin.map((row) => row.version));
+  });
+
+  test('blocksResume is only on the files that require an ask-first hold', () => {
+    const expected = new Set(['0.60.26.0', '0.60.45.0', '0.60.57.0', '0.60.99.0', '0.60.102.0']);
+    const declineKey: Record<string, string> = {
+      '0.60.45.0': 'auto_chronicle',
+      '0.60.99.0': 'fences.normalize',
+      '0.60.102.0': 'fences.repair.enabled',
+    };
+    for (const spec of PLAYBOOKS) {
+      if (!('checklist' in spec)) continue;
+      const holds = spec.checklist.filter((item) => item.blocksResume === true);
+      expect(holds.length > 0).toBe(expected.has(spec.version));
+      const ops = holds.flatMap((item) => item.declineOp ? [item.declineOp] : []);
+      if (spec.version in declineKey) {
+        expect(ops).toEqual([{
+          op: 'config.set',
+          params: { key: declineKey[spec.version]!, value: 'false' },
+        }]);
+      } else {
+        expect(ops).toEqual([]);
+      }
+    }
   });
 });
 
