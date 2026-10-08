@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, fieldClass, linkClass,
-  navItemClass, noticeClass, tableClass, toneClass,
+  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, eyebrowClass, fieldClass, linkClass,
+  metricClass, navItemClass, noticeClass, pageTitleClass, progressFillClass, progressTrackClass,
+  sectionTitleClass, tableClass, toneClass,
   type ButtonLayout, type ButtonVariant, type ColumnAlign, type LinkSurface,
   type NoticeLayout, type Tone,
 } from './classes.ts';
@@ -22,7 +23,10 @@ import {
  * base rules in `qm/plugins/admin/public/index.html`.
  */
 
-export { badgeClass, buttonClass, fieldClass, linkClass, navItemClass, noticeClass, tableClass, toneClass };
+export {
+  badgeClass, buttonClass, eyebrowClass, fieldClass, linkClass, metricClass, navItemClass, noticeClass,
+  pageTitleClass, progressFillClass, progressTrackClass, sectionTitleClass, tableClass, toneClass,
+};
 export type { ButtonLayout, ButtonVariant, ColumnAlign, LinkSurface, NoticeLayout, Tone };
 export { Icon } from './Icon.tsx';
 
@@ -83,8 +87,8 @@ export function NavItem({
  * never matches an `<a>` at all.
  *
  * `surface` is not decoration. See `linkClass`: `text-cta` is unsafe on a
- * warning notice's fill in dark mode, so a link there inherits the notice's own
- * legible copy colour instead.
+ * warning notice's fill in some themes, so a link there inherits the notice's
+ * own legible copy colour instead.
  */
 export function Link({
   surface = 'page', className, children, ...rest
@@ -256,8 +260,8 @@ export function Textarea({
 /* -------------------------------------------------------------------- Card */
 
 /**
- * qm's card: `padding: 18px` with `padding-block: var(--section-gap)`, a
- * hairline border, `--radius`, on `--surface`.
+ * A card: 24px inside on every side, a hairline border, `--radius`, on
+ * `--surface`. It has no shadow; the brand draws its edges with borders.
  *
  * qm's own rule also carries `margin: 0 0 22px`. That is left off here on
  * purpose — a primitive that owns its outer margin cannot be laid out by its
@@ -275,7 +279,7 @@ export function Card({
   className?: string;
   children?: ReactNode;
 }) {
-  const base = 'px-[18px] py-[var(--section-gap)] border border-border rounded-[var(--radius)] bg-surface';
+  const base = 'p-6 border border-border rounded-[var(--radius)] bg-surface';
   return (
     <section className={className ? `${base} ${className}` : base}>
       {(title !== undefined || subtitle !== undefined || head !== undefined) && (
@@ -304,6 +308,63 @@ export function Card({
         </div>
       )}
     </section>
+  );
+}
+
+/* -------------------------------------------------- Headings, labels, metrics */
+
+/**
+ * The page's heading. It is an `h1`, so a page has one. Its look is the theme's
+ * (`--heading-size`, `--heading-weight`), which is why no page writes a size.
+ */
+export function PageTitle({ children, className }: { children: ReactNode; className?: string }) {
+  const base = pageTitleClass();
+  return <h1 className={className ? `${base} ${className}` : base}>{children}</h1>;
+}
+
+/** A heading inside a page or a notice. It is an `h2`, and inherits its colour. */
+export function SectionTitle({ children, className }: { children: ReactNode; className?: string }) {
+  const base = sectionTitleClass();
+  return <h2 className={className ? `${base} ${className}` : base}>{children}</h2>;
+}
+
+/**
+ * A large figure. A `div`, so it can sit anywhere a number would: in a card's
+ * body, beside a label, in a row of totals.
+ */
+export function Metric({ children, className }: { children: ReactNode; className?: string }) {
+  const base = metricClass();
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * The uppercase micro-label that names a thing: a field group, a column, a
+ * count. Table headers share its declarations without going through this
+ * component, so a header never needs a wrapper.
+ */
+export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+  const base = eyebrowClass();
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * A determinate progress bar: a 2px hairline track with an accent fill. It is a
+ * `progressbar` with its value stated, so a screen reader hears the number rather
+ * than being left to infer it from the width.
+ */
+export function ProgressBar({ value, label }: { value: number; label: string }) {
+  const pct = Math.min(100, Math.max(0, value));
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pct)}
+      className={progressTrackClass()}
+    >
+      <div className={progressFillClass()} style={{ width: `${pct}%` }} />
+    </div>
   );
 }
 
@@ -397,7 +458,7 @@ export function Spinner({ size = 16 }: { size?: number }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-block animate-spin rounded-full border-2 border-border border-t-cta"
+      className="inline-block animate-spin rounded-full border-2 border-border border-t-accent"
       style={{ width: size, height: size }}
     />
   );
@@ -416,6 +477,9 @@ export function Spinner({ size = 16 }: { size?: number }) {
  * The class-name defaults are the settings modal's because it is still the only
  * caller; the CSS in `styles.css` is already the generic modal shell in
  * everything but its name, and gets renamed when the last caller moves.
+ *
+ * The card carries `--shadow-overlay`. It is the only shadow the console draws:
+ * everything else is separated by a hairline border, which is the brand's rule.
  */
 export function Dialog({
   label, onClose, children,
@@ -480,7 +544,13 @@ export function Dialog({
         if (close) onClose();
       }}
     >
-      <div ref={cardRef} className={cardClass} role="dialog" aria-modal="true" aria-label={label}>
+      <div
+        ref={cardRef}
+        className={`${cardClass} shadow-[var(--shadow-overlay)]`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+      >
         {children}
       </div>
     </div>,

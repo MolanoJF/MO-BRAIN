@@ -3,7 +3,7 @@ import {
   ApiError, schemaPacksApi, sourcesApi,
   type PackDetail, type SchemaSync, type SourceSummary,
 } from '../api.ts';
-import { Button, Card, Empty, Input, Notice, Select } from '../ui/index.tsx';
+import { Button, Card, Empty, Input, Notice, PageTitle, Select } from '../ui/index.tsx';
 import { useOrg } from '../OrgContext.tsx';
 import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
 import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
@@ -222,7 +222,7 @@ export function Sources() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Sources</h1>
+        <PageTitle>Sources</PageTitle>
         <p className="text-sm text-muted">
           Every Source is a gbrain source. Set each one's schema pack, backfill its blank page types,
           and add or retire sources.

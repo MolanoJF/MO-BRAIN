@@ -12,6 +12,8 @@ import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { asBrainMode, capabilitiesFor } from '../capabilities.ts';
+import { SEARCH_MODES } from '../lifecycle.ts';
+import { callOps } from '../opsClient.ts';
 
 export const orgRoutes = new Hono();
 
@@ -80,4 +82,36 @@ orgRoutes.patch('/org/mode', guard('owner', async (c, { userId, orgId }) => {
     .where(eq(schema.organizations.id, orgId));
   await audit(orgId, userId, 'org.mode', { mode, renamed: Boolean(name) });
   return c.json({ ok: true, brainMode: mode });
+}));
+
+async function loadBrain(orgId: string) {
+  const [brain] = await getDb().select().from(schema.brains).where(eq(schema.brains.organizationId, orgId));
+  if (!brain) throw Object.assign(new Error('no brain for organization'), { status: 404 });
+  return brain;
+}
+
+orgRoutes.get('/brain/search-mode', guard('admin', async (c, { orgId }) => {
+  const brain = await loadBrain(orgId);
+  return c.json({ mode: brain.searchMode, modes: SEARCH_MODES, lifecycle: brain.lifecycle });
+}));
+
+orgRoutes.patch('/brain/search-mode', guard('admin', async (c, { userId, orgId }) => {
+  const body = await c.req.json().catch(() => ({}));
+  const mode = body?.mode;
+  if (typeof mode !== 'string' || !SEARCH_MODES.some((m) => m.id === mode)) {
+    return c.json({ error: 'invalid_mode' }, 400);
+  }
+  const brain = await loadBrain(orgId);
+
+  // A ready brain's engine reads the mode from gbrain config; apply it first
+  // so a failure stores nothing. Before ready, /finish applies the stored mode.
+  if (brain.lifecycle === 'ready') {
+    let ok = false;
+    try { ok = (await callOps('config.set', { key: 'search.mode', value: mode })).ok; } catch { ok = false; }
+    if (!ok) return c.json({ error: 'config_set_failed' }, 502);
+  }
+  await getDb().update(schema.brains).set({ searchMode: mode, updatedAt: new Date() })
+    .where(eq(schema.brains.id, brain.id));
+  await audit(orgId, userId, 'brain.searchMode', { mode, previous: brain.searchMode ?? null, applied: brain.lifecycle === 'ready' });
+  return c.json({ ok: true, mode, lifecycle: brain.lifecycle });
 }));

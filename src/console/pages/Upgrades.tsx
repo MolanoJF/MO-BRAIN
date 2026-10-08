@@ -3,7 +3,7 @@ import {
   api, upgradeApi, type DetectResult, type UpgradeRunRow, type UpgradeEventRow,
   type ChecklistItemRow, type DriftResult, type UpgradeRunDetail,
 } from '../api.ts';
-import { Badge, Button, Card, Empty, Notice, Table, TableWrap, type Tone } from '../ui/index.tsx';
+import { Badge, Button, Card, Empty, Notice, PageTitle, Table, TableWrap, type Tone } from '../ui/index.tsx';
 
 /**
  * The eight steps every run passes through, in order (Task 10's run state
@@ -222,7 +222,7 @@ export function Upgrades() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <header><h1 className="text-xl font-semibold">Upgrades</h1></header>
+      <header><PageTitle>Upgrades</PageTitle></header>
 
       {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
 

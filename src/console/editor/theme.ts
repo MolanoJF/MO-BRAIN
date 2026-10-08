@@ -42,7 +42,7 @@ const chromeStyles = {
   ".cm-line": { position: "relative" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-cta)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-    backgroundColor: "color-mix(in srgb, var(--color-cta) 30%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)",
   },
   ".cm-activeLine": {
     backgroundColor: "color-mix(in srgb, var(--color-subtle) 55%, transparent)",
@@ -56,7 +56,7 @@ const chromeStyles = {
 
   // ---- Live-preview widget classes (see vendor/baalda/livePreview.ts) ----
   ".cm-md-link": {
-    color: "var(--color-cta)",
+    color: "var(--color-text)",
     textDecoration: "underline",
     textUnderlineOffset: "2px",
     cursor: "pointer",
@@ -155,7 +155,7 @@ const highlight = HighlightStyle.define([
   { tag: t.strikethrough, textDecoration: "line-through", color: "var(--color-muted)" },
   {
     tag: [t.link, t.url],
-    color: "var(--color-cta)",
+    color: "var(--color-text)",
     textDecoration: "underline",
     textUnderlineOffset: "2px",
   },

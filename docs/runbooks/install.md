@@ -217,6 +217,14 @@ In local mode that address works from the host itself and from any phone, tablet
 
 Open `https://<DOMAIN>`. A box with no admin shows the bootstrap form; create the first admin (owner). That account can then add members, Connections, and the org's provider API keys. A returning operator sees the sign-in page instead.
 
+Setup is three steps on one card, each with a Back button:
+
+1. **Sign in.** Create the account (email and password, or Google if enabled).
+2. **OpenAI key.** Paste the key. It is checked against OpenAI before it is stored, so a bad key or an unreachable network is reported here. Back returns to sign-in.
+3. **Create brain.** Creates your private Space and builds the brain (initialize, import, embed, health check), which takes a few minutes. It defaults to Balanced search and the `mobrain-personal` schema. If it fails, Try again resumes where it stopped; Back lets you replace the key.
+
+Search mode can be changed afterwards in Settings → General.
+
 ### Google sign-in (optional)
 
 You can skip this entirely. It adds a **"Continue with Google"** button next to the email/password form, a second way in, not a replacement. Everything above works the same with or without it, and a deployment that leaves it unset behaves exactly as before.

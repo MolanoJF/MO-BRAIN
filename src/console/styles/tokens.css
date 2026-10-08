@@ -1,114 +1,36 @@
 /* ---------------------------------------------------------------------------
-   The console's design tokens, ported from qm's admin kit
-   (`qm/plugins/admin/public/index.html` :root/:root.dark, and the control
-   scale at the top of `qm/plugins/admin/public/admin-components.css`).
+   The console's design tokens: the contract every component reads.
 
-   Two tiers, and the split is the whole reason theming works:
+   Three tiers. The split is the whole reason theming works:
 
-     Tier 1  raw values, redefined per theme on `<html>` (`:root` / `:root.dark`)
-     Tier 2  `@theme inline`, which hands Tailwind those tokens by REFERENCE
+     Tier 1  raw values. Colour, shape, type and motion are declared by the
+             active theme, `styles/themes/<name>.css`, which this file imports.
+     Tier 2  `@theme inline`, which hands Tier 1 to Tailwind by REFERENCE.
+     Tier 3  layout and density that do not vary by theme, declared here.
 
    `@import "tailwindcss"` deliberately stays in `styles.css` rather than moving
    here: Tailwind v4 anchors automatic source detection at the directory of the
    file holding that import, so importing it from `src/console/styles/` would
-   scan only this folder and generate no utilities at all for the 23 `.tsx`
-   files one level up.
+   scan only this folder and generate no utilities at all for the .tsx files one
+   level up.
+
+   To switch design systems, add `themes/<name>.css` with the same token names
+   and change the one import below. docs/runbooks/design-system.md has the steps.
    --------------------------------------------------------------------------- */
+
+@import "./themes/molior.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ---- Tier 1: raw values ---------------------------------------------------
-   Ported verbatim from qm. `color-scheme` is not decoration — it is what makes
-   native scrollbars, form controls and the caret follow the theme.          */
+/* ---- Tier 3: layout and density that do not vary by theme ---------------- */
 
 :root {
-  color-scheme: light;
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --subtle: #f4f5f4;
-  /* qm's dark block defines --sidebar-active and its light block does not,
-     relying on nothing reading it in light mode. Restated here at the value
-     qm's light sidebar actually paints (= --subtle) so the light/dark pairing
-     invariant in test/unit/console-tokens.test.ts holds without an exception
-     list — an exception list is how the pairing check stops being a check. */
-  --sidebar-active: #f4f5f4;
-  --text: #18181b;
-  --muted: #667085;
-  --border: #e5e5e5;
-  --ink: #101828;
-  --danger: #b42318;
-  --ok: #16723a;
-  --warn: #b54708;
-  --warn-text: #7a2e0e;
-  --warn-strong: #6b280c;
-  --warn-border: #fde68a;
-  --warn-surface: #fffbeb;
-  --cta: oklch(0.27 0.062 250);
-  --cta-hover: oklch(0.33 0.07 250);
-  --cta-foreground: oklch(0.99 0 0);
-  --trigger: #6b5cf0;
-  /* The modal scrim, qm's value. It is a token rather than the literal
-     `rgba(0, 0, 0, .6)` the settings backdrop used to carry — the last colour
-     outside these two blocks, and the one Phase 1's comment promised. A scrim
-     cannot be mixed from --text, which INVERTS between themes and would paint
-     white over the page in dark mode; it is its own near-black in both, tuned
-     per theme so it dims that theme's page rather than a generic black. The
-     0.6 alpha lives at the call site, not here, so the token stays a colour. */
-  --scrim: oklch(0.145 0 0);
-  --radius: 8px;
-  --shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
   --sidebar-w: 280px;
   --maxw: 1180px;
   --readw: 900px;
-}
-
-:root.dark {
-  color-scheme: dark;
-  --bg: oklch(0.165 0.022 250);
-  --surface: oklch(0.205 0.024 250);
-  --subtle: oklch(0.245 0.024 250);
-  --sidebar-active: oklch(0.245 0.024 250);
-  --text: oklch(0.975 0.005 250);
-  --muted: oklch(0.72 0.021 250);
-  --border: oklch(0.275 0.024 250);
-  --ink: #fafafa;
-  --danger: #f97066;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --warn-text: #fde68a;
-  --warn-strong: #fef3c7;
-  --warn-border: oklch(0.48 0.09 85);
-  --warn-surface: oklch(0.25 0.035 85);
-  --cta: oklch(0.42 0.085 250);
-  --cta-hover: oklch(0.48 0.09 250);
-  --cta-foreground: oklch(0.99 0 0);
-  /* Restated at qm's light value rather than re-tuned. qm's dark block omits
-     --trigger, so dark inherits this exact purple from :root; writing it out
-     is visually verbatim and keeps the pairing invariant whole. */
-  --trigger: #6b5cf0;
-  --scrim: oklch(0.11 0.03 250);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.02);
-}
-
-/* qm's control/section scale (`admin-components.css:1-9`) — the closest thing
-   qm has to a type and spacing scale, and the reason every one of its controls
-   lines up on the same 32px rhythm. Theme-independent, so it is declared once. */
-:root {
-  --control-height: 32px;
-  --control-radius: 6px;
-  --control-font: 13px;
   --section-font: 14px;
   --section-gap: 24px;
   --control-gap: 8px;
-}
-
-/* The font stacks live in tier 1 so the bridge below can point at them.
-   They cannot be declared only inside `@theme inline` as `--font-mono:
-   var(--font-mono)` — that is a self-reference, which CSS resolves to the
-   guaranteed-invalid value and silently drops the font. */
-:root {
-  --app-font: Inter, system-ui, sans-serif;
-  --app-font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 /* ---- Tier 2: the Tailwind bridge ------------------------------------------
@@ -121,10 +43,9 @@
 
    The `--color-*` spellings are the ones ~260 existing call sites already
    write (`text-muted`, `text-ok`, `text-warning`, `text-danger`,
-   `border-subtle`), which is why those five hand-written rules could be
-   deleted from styles.css without touching a single page. The one rename is
-   `--color-accent` -> `--color-cta`; its live references in styles.css and
-   editor/theme.ts move with it, and no alias is left behind.            */
+   `border-subtle`). `--color-cta` is the primary action. `--color-accent` is
+   the brand accent role; it was the old name of the CTA colour before that
+   rename, and no live reference still reads it under that meaning.          */
 
 @theme inline {
   --color-bg: var(--bg);
@@ -141,6 +62,10 @@
   --color-cta: var(--cta);
   --color-cta-hover: var(--cta-hover);
   --color-cta-foreground: var(--cta-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-selected-surface: var(--selected-surface);
+  --color-focus: var(--focus);
   --color-trigger: var(--trigger);
   --color-warn-text: var(--warn-text);
   --color-warn-strong: var(--warn-strong);
@@ -150,9 +75,11 @@
   --font-sans: var(--app-font);
   --font-mono: var(--app-font-mono);
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 16px;
+  /* The radius scale points at the theme's shape tokens, so a theme that
+     changes its corners changes every `rounded-*` utility at once. */
+  --radius-sm: var(--control-radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
 
   --spacing: 4px;
 }

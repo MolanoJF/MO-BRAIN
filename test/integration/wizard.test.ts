@@ -124,6 +124,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
   },
   removeSchemaPack: async () => ({ removed: false }),
+  gitSetRemote: async () => ({ ok: true }),
+  gitClearRemote: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; finishOrder.push('reset'); },
   pauseBrainWriters: async () => { finishOrder.push('pause'); },
@@ -539,4 +541,131 @@ test('GET /wizard/schema-packs hides every bundled pack except gbrain-base-v2', 
   } finally {
     schemaListOverride = null;
   }
+});
+
+// Console onboarding: one /prepare call replaces the mode, schema and Space
+// steps, and /provider can be re-run until the brain is ready.
+describe('wizard prepare', () => {
+  const setBrain = async (patch: Record<string, unknown>) => {
+    const [brain] = await getDb().select().from(schema.brains);
+    await getDb().update(schema.brains).set(patch).where(eq(schema.brains.id, brain!.id));
+  };
+  const getBrain = async () => (await getDb().select().from(schema.brains))[0]!;
+  const ownedSpaces = async () => (await getDb().select().from(schema.spaces)
+    .where(eq(schema.spaces.organizationId, orgId))).filter((s) => s.ownerMembershipId);
+
+  beforeAll(async () => {
+    await getDb().delete(schema.connections);
+    await getDb().delete(schema.spaces);
+  });
+
+  test('from provider-configured it lands on sources-added with the defaults', async () => {
+    await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: 'mobrain-personal' });
+    const res = await call('/api/wizard/prepare', {});
+    expect(res.status).toBe(200);
+    const body = await res.json() as { lifecycle: string; searchMode: string; schemaPack: string; sourceId: string };
+    expect(body.lifecycle).toBe('sources-added');
+    expect(body.searchMode).toBe('balanced');
+    expect(body.schemaPack).toBe('mobrain-personal');
+    expect(body.sourceId).toMatch(/^my-space-/);
+    const brain = await getBrain();
+    expect(brain.lifecycle).toBe('sources-added');
+    expect(brain.searchMode).toBe('balanced');
+    expect((await ownedSpaces()).length).toBe(1);
+    const audits = await getDb().select().from(schema.auditLog).where(eq(schema.auditLog.action, 'wizard.prepare'));
+    expect(audits.length).toBe(1);
+  });
+
+  test('a second prepare is idempotent and creates no second Space', async () => {
+    const res = await call('/api/wizard/prepare', {});
+    expect(res.status).toBe(200);
+    expect((await res.json() as { lifecycle: string }).lifecycle).toBe('sources-added');
+    expect((await ownedSpaces()).length).toBe(1);
+  });
+
+  test('a legacy brain with no pack gets the default pack, checked against the list', async () => {
+    await getDb().delete(schema.connections);
+    await getDb().delete(schema.spaces);
+    await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: null });
+    schemaListOverride = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
+    try {
+      const res = await call('/api/wizard/prepare', {});
+      expect(res.status).toBe(200);
+      expect((await res.json() as { schemaPack: string }).schemaPack).toBe('mobrain-personal');
+      expect((await getBrain()).schemaPack).toBe('mobrain-personal');
+    } finally { schemaListOverride = null; }
+  });
+
+  test('a default pack gbrain does not know is refused', async () => {
+    await getDb().delete(schema.connections);
+    await getDb().delete(schema.spaces);
+    await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: null });
+    const res = await call('/api/wizard/prepare', {}); // default list holds gbrain-base-v2 only
+    expect(res.status).toBe(400);
+    expect((await getBrain()).lifecycle).toBe('mode-selected');
+    await setBrain({ schemaPack: 'mobrain-personal' });
+    expect((await call('/api/wizard/prepare', {})).status).toBe(200);
+  });
+
+  test('a stored search mode is kept', async () => {
+    await getDb().delete(schema.connections);
+    await getDb().delete(schema.spaces);
+    await setBrain({ lifecycle: 'provider-configured', searchMode: 'tokenmax', schemaPack: 'mobrain-personal' });
+    const res = await call('/api/wizard/prepare', {});
+    expect((await res.json() as { searchMode: string }).searchMode).toBe('tokenmax');
+    expect((await getBrain()).searchMode).toBe('tokenmax');
+  });
+
+  test('prepare from uninitialized or ready is 409', async () => {
+    await setBrain({ lifecycle: 'uninitialized' });
+    expect((await call('/api/wizard/prepare', {})).status).toBe(409);
+    await setBrain({ lifecycle: 'ready' });
+    expect((await call('/api/wizard/prepare', {})).status).toBe(409);
+  });
+
+  test('provider re-run at sources-added replaces the secret and keeps the lifecycle', async () => {
+    await setBrain({ lifecycle: 'sources-added' });
+    const res = await call('/api/wizard/provider', {
+      provider: 'openai', apiKey: 'sk-second-key', embeddingModel: 'openai:text-embedding-3-small',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain('sk-second-key');
+    expect((await getBrain()).lifecycle).toBe('sources-added');
+    // storeSecret versions: the newest row is the one that is read back.
+    const { readSecret } = await import('../../src/control/secrets.ts');
+    expect(await readSecret(orgId, 'openai_api_key')).toBe('sk-second-key');
+    const rows = await getDb().select().from(schema.secrets).where(eq(schema.secrets.organizationId, orgId));
+    expect(JSON.stringify(rows)).not.toContain('sk-second-key');
+  });
+
+  test('provider at ready is 409', async () => {
+    await setBrain({ lifecycle: 'ready' });
+    const res = await call('/api/wizard/provider', {
+      provider: 'openai', apiKey: 'sk-third-key', embeddingModel: 'openai:text-embedding-3-small',
+    });
+    expect(res.status).toBe(409);
+  });
+
+  test('provider with verify:true and a failing check is refused and stores nothing', async () => {
+    await setBrain({ lifecycle: 'uninitialized' });
+    await getDb().delete(schema.secrets);
+    const realFetch = globalThis.fetch;
+    let sawKey = '';
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+      sawKey = String((init?.headers as Record<string, string>).Authorization);
+      return new Response('{}', { status: 401 });
+    }) as unknown as typeof fetch;
+    try {
+      const res = await call('/api/wizard/provider', {
+        provider: 'openai', apiKey: 'sk-bad-key', embeddingModel: 'openai:text-embedding-3-small', verify: true,
+      });
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      expect(JSON.parse(text).error).toBe('invalid_api_key');
+      expect(text).not.toContain('sk-bad-key');
+      expect(sawKey).toBe('Bearer sk-bad-key');
+    } finally { globalThis.fetch = realFetch; }
+    expect((await getDb().select().from(schema.secrets)).length).toBe(0);
+    expect((await getBrain()).lifecycle).toBe('uninitialized');
+  });
 });

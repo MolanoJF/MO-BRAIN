@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
-import { Badge, Card, Empty, Link, Notice, Table, TableWrap, toneClass } from '../ui/index.tsx';
+import { Badge, Card, Empty, Link, Notice, PageTitle, Table, TableWrap, toneClass } from '../ui/index.tsx';
 import { alertLabel, alertTone, isPinnedAlert } from './Schedules.tsx';
 
 type RepoStatus = {
@@ -41,7 +41,7 @@ export function Health() {
 
   return (
     <div className="max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">Health</h1>
+      <PageTitle>Health</PageTitle>
       <div>
         <Badge tone={health.ok ? 'ok' : 'danger'}>
           {health.ok ? 'All components healthy' : 'Degraded'}

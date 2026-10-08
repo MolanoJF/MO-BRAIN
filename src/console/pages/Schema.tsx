@@ -3,7 +3,7 @@ import {
   api, schemaPacksApi,
   type PackDetail, type PackPageType, type ScaffoldResult, type SchemaSync,
 } from '../api.ts';
-import { Badge, Button, Card, Empty, Table, TableWrap } from '../ui/index.tsx';
+import { Badge, Button, Card, Empty, PageTitle, Table, TableWrap } from '../ui/index.tsx';
 import { NewPackPanel, PackEditor, ScaffoldResults } from './SchemaBuilder.tsx';
 
 type Active = {
@@ -171,7 +171,7 @@ export function Schema() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="text-xl font-semibold">Schema</h1>
+        <PageTitle>Schema</PageTitle>
         <p className="text-sm text-muted">
           The schema pack decides what kinds of pages the brain recognizes.
         </p>

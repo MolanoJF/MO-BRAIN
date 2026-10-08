@@ -5,7 +5,7 @@ import {
 } from '../api.ts';
 import { runStateLabel, runStateTone, slotClocks } from './Schedules.tsx';
 import {
-  Badge, Button, Card, Empty, Notice, Table, TableWrap, Toolbar, toneClass, type Tone,
+  Badge, Button, Card, Empty, Notice, PageTitle, SectionTitle, Table, TableWrap, Toolbar, toneClass, type Tone,
 } from '../ui/index.tsx';
 import type { DiffSummary, RangeCommit } from '../../agent/types.ts';
 
@@ -747,7 +747,7 @@ export function Runs() {
   return (
     <div className="max-w-3xl space-y-6">
       <header>
-        <h1 className="text-xl font-semibold">Runs</h1>
+        <PageTitle>Runs</PageTitle>
         <p className="text-sm text-muted">
           Every agent run in this organization, with the receipt it left: the prompt, the tool calls, the token
           counts, the cost and the brain diff — all in one page load.
@@ -822,7 +822,7 @@ export function Runs() {
               as routine. */}
           {moved !== null && (
             <Notice tone="danger" layout="stack">
-              <h2 className="text-lg font-semibold">Read isolation broke</h2>
+              <SectionTitle>Read isolation broke</SectionTitle>
               <p className="text-sm">{moved}</p>
             </Notice>
           )}

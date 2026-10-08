@@ -81,3 +81,6 @@ export const SEARCH_MODES = [
     description: 'Adds query expansion and an uncapped, per-chunk Haiku synopsis. Most thorough and most expensive — budget for it before enabling team-wide.',
   },
 ] as const;
+
+/** The mode a brain gets when nobody chose one (the console's Create brain). */
+export const DEFAULT_SEARCH_MODE: (typeof SEARCH_MODES)[number]['id'] = 'balanced';

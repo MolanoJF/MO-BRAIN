@@ -49,7 +49,7 @@ body {
 .cm-md-table th { background: var(--color-surface); font-weight: 600; }
 .cm-md-add-row, .cm-md-add-col {
   color: var(--color-muted); background: transparent;
-  border: 1px dashed var(--color-border); border-radius: 4px;
+  border: 1px dashed var(--color-border); border-radius: var(--radius);
   cursor: pointer; line-height: 1;
 }
 .cm-md-add-row { display: block; margin-top: 4px; width: 100%; padding: 2px; }
@@ -61,7 +61,7 @@ body {
 }
 .cm-md-cell code {
   font-family: var(--font-mono); background: var(--color-subtle);
-  padding: 0 2px; border-radius: 3px;
+  padding: 0 2px; border-radius: var(--radius);
 }
 
 /* ---- App shell (console shell redesign) ---- */
@@ -91,7 +91,7 @@ body {
 .icon-btn {
   width: 28px; height: 28px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--color-muted); border-radius: 4px;
+  background: transparent; color: var(--color-muted); border-radius: var(--radius);
 }
 .icon-btn:hover { color: var(--color-text); background: var(--color-bg); }
 /* No `.source-switcher button { width: 100% }` here any more: the switcher is a
@@ -110,10 +110,10 @@ body {
 .tree-row {
   display: block; width: 100%; text-align: left; font-size: 12px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  padding: 4px 8px; border-radius: 4px;
+  padding: 4px 8px; border-radius: var(--radius);
 }
 .tree-row:hover { background: var(--color-bg); }
-.tree-row.is-selected { background: color-mix(in srgb, var(--color-cta) 15%, transparent); }
+.tree-row.is-selected { background: var(--color-selected-surface); }
 .tree-row .chevron {
   display: inline-block; width: 14px; color: var(--color-muted);
   transition: transform .1s ease;
@@ -159,14 +159,33 @@ body {
 /* ---- Focus visibility ----
    Global, as in qm, rather than a per-component opt-in: a control that forgets
    to opt in is invisible to a keyboard user, and nobody finds out until
-   somebody tries to drive the console without a mouse. */
-:focus-visible { outline: 2px solid var(--color-cta); outline-offset: 2px; }
+   somebody tries to drive the console without a mouse.
+
+   The ring is the accent, with a 1px --text keyline on its outer edge. A yellow
+   ring alone is about 1.4:1 against the light page, under the 3:1 a focus
+   indicator needs. The keyline is what makes it visible. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--color-text);
+}
 /* These are full-bleed rows inside scrolling, overflow-hidden containers, where
    an outset ring is clipped away by the very box it is meant to mark. The
-   settings rail used to be in this list as `.nav-item`; it carries the same
-   offset as a `focus-visible:` utility from `navItemClass` now. */
+   keyline moves inside for the same reason. The settings rail used to be in
+   this list as `.nav-item`; it carries the same offset as a `focus-visible:`
+   utility from `navItemClass` now. */
 .tree-row:focus-visible,
 .icon-btn:focus-visible,
 .account-box button:focus-visible {
   outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px var(--color-text);
+}
+/* Fields signal focus with their border, not a ring (the brand's field spec),
+   so the ring is switched off for them. Checkboxes and radios keep it: they are
+   not text fields and have no border to change. */
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
