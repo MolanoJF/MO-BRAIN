@@ -6,6 +6,11 @@ import frozenReleases from '../../src/upgrade/playbooks/released-0.60.104.0.json
 
 const versionsOf = (specs: readonly { version: string }[]) => specs.map((s) => s.version);
 
+/** Migration-file versions whose playbooks are registered. One commit adds one. */
+const TRANSLATED_MIGRATION_FILES: readonly string[] = [
+  '0.51.0.0',
+];
+
 /** Spec list: migration files present in the v0.60.104.0 tree after the pin. */
 const MIGRATION_FILES_AFTER_PIN = [
   '0.51.0.0', '0.51.7.0', '0.51.8.0', '0.52.1.0', '0.52.2.0', '0.53.0.0',
@@ -111,9 +116,13 @@ describe('playbooksFor', () => {
     expect(() => playbooksFor('0.50.5.0', '0.50.2.0')).toThrow('is not ahead of');
   });
 
-  test('throws on the first migration-file release until that playbook exists', () => {
+  test('throws on the first untranslated migration-file release', () => {
+    const missing = MIGRATION_FILES_AFTER_PIN.find(
+      (version) => !TRANSLATED_MIGRATION_FILES.includes(version),
+    );
+    expect(typeof missing).toBe('string');
     expect(() => playbooksFor('0.50.5.0', '0.60.104.0'))
-      .toThrow('no playbook entry for 0.51.0.0');
+      .toThrow(`no playbook entry for ${missing}`);
   });
 });
 
@@ -125,13 +134,21 @@ describe('the 0.60.104.0 release freeze', () => {
     expect(vs).toEqual([...vs].sort(cmpVersion));
   });
 
-  test('the 38 migration-file tags match the spec list and have no PlaybookSpec', () => {
+  test('the 38 migration-file tags match the spec list', () => {
     const withFile = frozenReleases.afterPin
       .filter((row) => row.migrationFile)
       .map((row) => row.version);
     expect(withFile).toEqual([...MIGRATION_FILES_AFTER_PIN].sort(cmpVersion));
     const playbooks = new Set(versionsOf(PLAYBOOKS));
-    for (const version of withFile) expect(playbooks.has(version)).toBe(false);
+    for (const version of withFile) {
+      expect(playbooks.has(version)).toBe(TRANSLATED_MIGRATION_FILES.includes(version));
+    }
+  });
+
+  test('the window through the latest translated migration file includes it and does not throw', () => {
+    const latest = TRANSLATED_MIGRATION_FILES[TRANSLATED_MIGRATION_FILES.length - 1]!;
+    const specs = playbooksFor('0.50.5.0', latest);
+    expect(versionsOf(specs)).toContain(latest);
   });
 
   test('every afterPin version is in RELEASED_VERSIONS', () => {
