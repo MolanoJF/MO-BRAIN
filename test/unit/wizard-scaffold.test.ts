@@ -58,12 +58,12 @@ describe('scaffoldWithRetry (wizard /finish)', () => {
 });
 
 describe('scaffoldProblems (wizard notice)', () => {
-  test('names each failing Space and stays empty when all went well', () => {
+  test('names each failing Source and stays empty when all went well', () => {
     expect(scaffoldProblems(undefined)).toEqual([]);
     expect(scaffoldProblems([{ sourceId: 's1', created: [], error: null }])).toEqual([]);
     expect(scaffoldProblems([
       { sourceId: 's1', created: [], error: 'ops down' },
       { sourceId: '*', created: [], error: 'boom' },
-    ])).toEqual(['s1: ops down', 'Your Spaces: boom']);
+    ])).toEqual(['s1: ops down', 'Your Sources: boom']);
   });
 });

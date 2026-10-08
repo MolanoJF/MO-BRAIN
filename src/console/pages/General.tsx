@@ -8,12 +8,12 @@ export function switchCopy(mode: 'personal' | 'company'): { title: string; body:
   return mode === 'personal'
     ? {
       title: 'Personal brain',
-      body: 'Only you use this brain. Turn it into a company brain to add shared Spaces, invite teammates and grant them access. Your own Space stays private either way.',
+      body: 'Only you use this brain. Turn it into a company brain to add shared Sources, invite teammates and grant them access. Your own Source stays private either way.',
       action: 'Turn into a company brain',
     }
     : {
       title: 'Company brain',
-      body: 'Teammates can be invited and granted company Spaces. Each person keeps a private Space nobody else can see. You can switch back only while you are the only member.',
+      body: 'Teammates can be invited and granted company Sources. Each person keeps a private Source nobody else can see. You can switch back only while you are the only member.',
       action: 'Switch back to a personal brain',
     };
 }

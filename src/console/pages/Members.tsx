@@ -76,7 +76,7 @@ export function Members() {
       const r = await api.post<PrivateSpaceOutcome>(
         `/members/${encodeURIComponent(memberId)}/private-space`,
       );
-      setSpaceNotice({ memberId, ok: true, message: `Private space ready (${r.sourceId})` });
+      setSpaceNotice({ memberId, ok: true, message: `Private Source ready (${r.sourceId})` });
       setInviteWarning((w) => (w && w.memberId === memberId ? null : w));
       await load();
     } catch (e) {
@@ -123,7 +123,7 @@ export function Members() {
                  checked={privateSpacesEnabled === true}
                  disabled={settingsBusy || privateSpacesEnabled === null}
                  onChange={(e) => void togglePrivateSpaces(e.target.checked)} />
-          <span>Give each member a private space</span>
+          <span>Give each member a private Source</span>
         </label>
         {settingsBusy && <p className="text-xs text-muted">Saving…</p>}
       </section>
@@ -150,15 +150,15 @@ export function Members() {
           {/* Not `text-muted`: a Notice paints its own copy colour per theme,
               and muting one line inside it drops that line out of the warning
               palette — this line is the one that must not fade. */}
-          <p>Send this link to them. They'll create their account, get their own private Space, and see the company Spaces you grant on the Access tab. It expires in 24 hours.</p>
+          <p>Send this link to them. They'll create their account, get their own private Source, and see the company Sources you grant on the Access tab. It expires in 24 hours.</p>
         </Notice>
       )}
 
       {inviteWarning && (
         <Notice layout="stack">
-          <p className="font-medium text-warning">Private space not provisioned</p>
+          <p className="font-medium text-warning">Private Source not provisioned</p>
           <p>
-            {inviteWarning.email} was invited, but their private space failed: {inviteWarning.error}
+            {inviteWarning.email} was invited, but their private Source failed: {inviteWarning.error}
           </p>
           {spaceNotice?.memberId === inviteWarning.memberId && !spaceNotice.ok && (
             <p className="text-danger">{spaceNotice.message}</p>
@@ -166,7 +166,7 @@ export function Members() {
           <div>
             <Button disabled={busy}
                     onClick={() => void provision(inviteWarning.memberId)}>
-              Provision private space
+              Provision private Source
             </Button>
           </div>
         </Notice>
@@ -188,7 +188,7 @@ export function Members() {
             </div>
             <div className="flex gap-2 shrink-0">
               <Button disabled={busy} onClick={() => void provision(m.id)}>
-                Private space
+                Private Source
               </Button>
               <Button disabled={busy} onClick={() => void remint(m)}>
                 Claim link

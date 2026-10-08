@@ -31,7 +31,7 @@ export function MyBrain() {
       setReads(d.connection?.readSpaceIds ?? []);
     } catch (e) {
       setMsg({ ok: false, text: e instanceof ApiError && e.body.error === 'no_private_space'
-        ? 'You do not have a private Space yet. Ask an admin to retry provisioning it.'
+        ? 'You do not have a private Source yet. Ask an admin to retry provisioning it.'
         : e instanceof Error ? e.message : 'Could not load' });
     }
   };
@@ -56,7 +56,7 @@ export function MyBrain() {
       <Card>
         <h2 className="font-medium">{data.space.name}</h2>
         <p className="text-sm text-muted">
-          Your private Space (<span className="font-mono">{data.space.sourceId}</span>). Only you can see it —
+          Your private Source (<span className="font-mono">{data.space.sourceId}</span>). Only you can see it —
           admins included.
         </p>
       </Card>
@@ -67,7 +67,7 @@ export function MyBrain() {
       <Card>
         <h2 className="font-medium">What your agent can read</h2>
         {data.readable.length === 0 ? (
-          <p className="text-sm text-muted">No company Spaces have been shared with you yet.</p>
+          <p className="text-sm text-muted">No company Sources have been shared with you yet.</p>
         ) : (
           <ul className="space-y-1">
             {data.readable.map((s) => (

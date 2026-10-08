@@ -131,8 +131,8 @@ export function Claim({ token }: { token: string }) {
     <div className="mx-auto mt-16 max-w-md space-y-4 p-6">
       <h1 className="text-xl font-semibold">Create your account</h1>
       <p className="text-sm text-muted">
-        You've been invited to a company brain. You'll get your own private Space that only you can see,
-        plus access to the company Spaces your admin shares with you.
+        You've been invited to a company brain. You'll get your own private Source that only you can see,
+        plus access to the company Sources your admin shares with you.
       </p>
       <Input type="email" placeholder="The email this invite was sent to" value={email}
              onChange={(e) => setEmail(e.target.value)} />
