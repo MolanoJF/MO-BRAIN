@@ -6,7 +6,7 @@ Scratch project `gbrain-upgrade-fixture` only. `.env` was written from `.env.exa
 
 ## Ordering bug, then the recorded run
 
-Run `run-6c03a910-563b-4954-81f0-d1ad3fb163c0` applied migrations (exit 0, `GBRAIN_SELF_UPGRADE_MODE=off`) and then auto-rolled back. Doctor parity failed because `supervisor` was `ok` at baseline and `warn` after the swap: the six `blocksResume` items had already stopped `gbrain-worker`. `schemaVersionOk` was true. That run is not the recorded success. The gate now resumes the baseline writers, scores `compareDoctor` unchanged, and only then stops `agent-runner`, `scheduler`, `gbrain-worker`, and `gbrain-serve`.
+Run `run-6c03a910-563b-4954-81f0-d1ad3fb163c0` applied migrations (exit 0, `GBRAIN_SELF_UPGRADE_MODE=off`) and then auto-rolled back. Doctor parity failed because `supervisor` was `ok` at baseline and `warn` after the swap: the six `blocksResume` items had already stopped `gbrain-worker`. `schemaVersionOk` was true. That run is not the recorded success. The hold path does not start `agent-runner`, `scheduler`, `gbrain-worker`, or `gbrain-serve` before a checklist ack.
 
 Recorded run: `run-e5782832-82df-440d-937d-2ccc7d289a60`.
 

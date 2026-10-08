@@ -79,8 +79,7 @@ Leaving **Postgres as the only live process**. Only then are the four snapshot a
 That ordering *is* the atomicity guarantee (D3); the snapshot's own manifest records the stop order and
 the supervisor drain proof.
 
-The measured cost of that window on the 0.50.0.0 → 0.50.5.0 delta (Gate C, recorded in
-`docs/slice-3.5-findings.md`):
+The measured cost of that window on the 0.50.0.0 → 0.50.5.0 delta (Gate C):
 
 | Phase | Measured | Span |
 |---|---|---|
