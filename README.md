@@ -38,7 +38,7 @@ ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros}/agent-runner:2.1.274   #
 DOMAIN=brain.acme-co.com IMAGE_REGISTRY=ghcr.io IMAGE_NAMESPACE=molioros bash scripts/install.sh
 ```
 
-Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. The images above are what GHCR publishes today (`gbrain-base:0.50.5.0`). The source pin in `.env.example` is `0.60.104.0`; that tag is not published yet, and `scripts/install.sh` still defaults to `0.50.5.0`. On an air-gapped or registry-less host, `scripts/install.sh` names the documented local-build fallback when the pull fails (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
+Never use a moving tag. The gbrain and harness versions are exact, and the production compose file pulls images — it never builds them. The images above are what GHCR publishes today (`gbrain-base:0.50.5.0`). The source pin is `0.60.115.0`. `scripts/install.sh` writes that pin and builds it locally when the pull misses (see [`docs/runbooks/install.md`](docs/runbooks/install.md)).
 
 **On a Tailscale tailnet?** `INSTALL_MODE=tailscale bash scripts/install.sh` installs tailnet-only, behind `tailscale serve`, with a real certificate and without touching ports 80/443. See [`docs/runbooks/install.md`](docs/runbooks/install.md#tailscale-install-tailnet-only-real-certificate).
 
@@ -75,7 +75,7 @@ When on, the runner is fenced to one internal network with no route out and its 
 
 | Dependency | Pin | Where |
 |---|---|---|
-| gbrain | **0.60.104.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
+| gbrain | **0.60.115.0** | `GBRAIN_VERSION`, build `ARG GBRAIN_VERSION` ([upstream](https://github.com/garrytan/gbrain)) |
 | Mobrain app (control plane) | **1.0.0** | `APP_VERSION` (the `control-plane` image tag) |
 | Claude Code harness (agent runner only) | **2.1.274** | `HARNESS_VERSION` |
 

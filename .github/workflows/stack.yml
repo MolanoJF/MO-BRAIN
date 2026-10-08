@@ -17,7 +17,7 @@ on:
         options: [all, build, integration, contract, e2e]
         default: all
       gbrain_version:
-        description: 'gbrain pin under test (blank = pinned-current 0.60.104.0)'
+        description: 'gbrain pin under test (blank = pinned-current 0.60.115.0)'
         type: string
         default: ''
   workflow_call:
@@ -41,7 +41,7 @@ permissions:
 env:
   IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
-  GBRAIN_VERSION: ${{ inputs.gbrain_version || '0.60.104.0' }}
+  GBRAIN_VERSION: ${{ inputs.gbrain_version || '0.60.115.0' }}
   HARNESS_VERSION: '2.1.274'
 
 jobs:

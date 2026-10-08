@@ -3,7 +3,7 @@
 # control plane runs src/control/app.ts. Same image means GBRAIN_VERSION
 # guarantees the sidecar binary IS the server binary — version skew between
 # wrapper and gbrain is exactly the bug class the exact pin exists to prevent.
-ARG GBRAIN_VERSION=0.60.104.0
+ARG GBRAIN_VERSION=0.60.115.0
 FROM mobrain/gbrain-base:${GBRAIN_VERSION}
 ARG GBRAIN_VERSION
 

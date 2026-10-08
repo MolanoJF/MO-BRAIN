@@ -7,7 +7,7 @@ set -euo pipefail
 # `MOBRAIN_*` are the current names; the legacy `BRAINSTAND_*` spelling keeps
 # working for one release, because .env files in the wild already use it.
 ENV_PATH="${MOBRAIN_ENV_PATH:-${BRAINSTAND_ENV_PATH:-.env}}"
-GBRAIN_VERSION="${GBRAIN_VERSION:-0.50.5.0}"
+GBRAIN_VERSION="${GBRAIN_VERSION:-0.60.115.0}"
 # The product's app version (the published `control-plane` image tag).
 # APP_VERSION is the canonical name; the legacy aliases written below name the
 # same value so an older .env reader still resolves the released tag (D3 rename).
@@ -297,10 +297,15 @@ fi
 # look for compose/.env and miss the secrets we just wrote at $ENV_PATH.
 echo "Pulling pinned images (${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-molioros})…"
 if ! docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml pull; then
-  echo "Could not pull the pinned Mobrain images." >&2
-  echo "On an air-gapped or registry-less host, build them locally instead:" >&2
-  echo "  docker compose --env-file \"$ENV_PATH\" -f compose/docker-compose.yml -f compose/docker-compose.build.yml build" >&2
-  exit 16
+  echo "Could not pull the pinned Mobrain images. Building them locally." >&2
+  registry="${IMAGE_REGISTRY:-ghcr.io}"
+  namespace="${IMAGE_NAMESPACE:-molioros}"
+  docker build -f docker/gbrain-base.Dockerfile \
+    --build-arg "GBRAIN_VERSION=${GBRAIN_VERSION}" \
+    -t "${registry}/${namespace}/gbrain-base:${GBRAIN_VERSION}" .
+  docker tag "${registry}/${namespace}/gbrain-base:${GBRAIN_VERSION}" \
+    "mobrain/gbrain-base:${GBRAIN_VERSION}"
+  docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml -f compose/docker-compose.build.yml build
 fi
 docker compose --env-file "$ENV_PATH" -f compose/docker-compose.yml up -d --wait
 

@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 
 // The live registry is the supported pin. A fixture .env or an old CI
 // injection must not point this seam at a frozen catalog.
-const VERSION = '0.60.104.0';
+const VERSION = '0.60.115.0';
 
 describe('registry invariants', () => {
   test('every operation id matches its key', () => {
