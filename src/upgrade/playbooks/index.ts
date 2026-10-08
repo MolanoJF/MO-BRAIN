@@ -28,6 +28,7 @@ import { v0_60_47_0 } from './v0.60.47.0.ts';
 import { v0_60_52_0 } from './v0.60.52.0.ts';
 import { v0_60_53_0 } from './v0.60.53.0.ts';
 import { v0_60_57_0 } from './v0.60.57.0.ts';
+import { v0_60_61_0 } from './v0.60.61.0.ts';
 import frozenReleases from './released-0.60.104.0.json' with { type: 'json' };
 import type { PlaybookSpec } from './types.ts';
 
@@ -224,6 +225,7 @@ export const PLAYBOOKS: readonly PlaybookSpec[] = [
   v0_60_52_0,
   v0_60_53_0,
   v0_60_57_0,
+  v0_60_61_0,
 ];
 
 const BY_VERSION = new Map(PLAYBOOKS.map((s) => [s.version, s]));
