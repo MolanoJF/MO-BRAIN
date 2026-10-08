@@ -42,7 +42,13 @@ class FakeRunner implements Runner {
 const COMPOSE = ['docker', 'compose', '-f', 'compose/docker-compose.yml'];
 
 let dir: string;
-beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'bs-snap-')); });
+beforeEach(async () => {
+  // Bun auto-loads a developer's .env, which carries COMPOSE_PROJECT_NAME after
+  // an install. Without this reset every volume name below is prefixed and the
+  // argv expectations fail; the D4 block sets it explicitly to prove the override.
+  delete process.env.COMPOSE_PROJECT_NAME;
+  dir = await mkdtemp(join(tmpdir(), 'bs-snap-'));
+});
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
 describe('SNAPSHOT_DATABASES / snapshotVolumes', () => {
