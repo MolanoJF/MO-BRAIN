@@ -26,9 +26,8 @@ jobs:
     timeout-minutes: 10
     env:
       # Bun loads the repo's .env locally; a CI runner has none, so the pin is
-      # passed explicitly. Without it pin.ts falls back to 0.50.0.0 and the
-      # operations.json seam test reads the wrong registered version.
-      GBRAIN_VERSION: '0.50.5.0'
+      # passed explicitly. Without it pin.ts falls back to 0.50.0.0.
+      GBRAIN_VERSION: '0.60.104.0'
       HARNESS_VERSION: '2.1.274'
       CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
     services:

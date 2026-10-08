@@ -27,7 +27,7 @@ Each upgrade is snapshot-first (both databases plus both volumes, with zero writ
 
 Two things make the target honest:
 
-- **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up and blocks nothing else.
+- **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up; a `blocksResume` item holds writers until `resume-writers`, and any other pending item blocks nothing else.
 - **The drift check runs when an upstream tag lands.** Dispatch `stack.yml` with `gbrain_version` set to the new tag (`gh workflow run stack.yml -f suite=contract -f gbrain_version=<tag>`); pinned-current `0.60.104.0` is the default when the input is blank. A drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade. There is no nightly cron (see `docs/runbooks/ci.md` for why).
 - **The three pinned images stay publicly, anonymously pullable.** `scripts/ci/check-public-images.sh` runs a credential-less `docker pull` of `gbrain-base`, `control-plane`, and `agent-runner`, the same thing `scripts/install.sh` does for an external user. `release.yml`'s `verify-public` job runs it right after every publish and fails that release outright if any image isn't public. Visibility is a GitHub setting outside the release pipeline and can regress on its own (a manual toggle, or a package deleted and recreated, which defaults to private), so `release-verify.yml`'s `public` job runs the same check on demand.
 
