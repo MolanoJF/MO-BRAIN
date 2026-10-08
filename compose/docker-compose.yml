@@ -6,6 +6,11 @@ x-gbrain-env: &gbrain-env
   GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain
   GBRAIN_HOME: /srv/gbrain-home
   GBRAIN_SELF_UPGRADE_MODE: "off"
+  # Task 2: at 0.60.104.0 `apply-migrations --yes` alone authorizes upstream's
+  # Phase F autopilot install (a crontab line written from inside a container —
+  # a silent no-op or a duplicate scheduler). This covers any in-container
+  # invocation of apply-migrations; the schema step passes the CLI flag too.
+  GBRAIN_NO_AUTOPILOT_INSTALL: "1"
   # Task 6: deterministic regardless of how `~` resolves per-container —
   # ops reads exactly this path, gbrain-worker's supervisor writes exactly
   # this path, both already share the gbrain-home volume (S2 unchanged).

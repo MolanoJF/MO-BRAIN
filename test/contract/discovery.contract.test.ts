@@ -109,8 +109,8 @@ test('.well-known/gbrain exposes live profiles and harness adapters', async () =
     expect(body!.protocol).toBe('mcp');
     expect(Array.isArray(body!.adapters)).toBe(true);
     const adapters = body!.adapters as Array<Record<string, unknown>>;
-    // V10: 13 adapters at v0.50.0.0.
-    expect(adapters.length).toBe(13);
+    // Measured at 0.60.104.0: 14 adapters. 0.50.0.0 had 13; hermes is present.
+    expect(adapters.length).toBe(14);
 
     // Plan defect (Work Item J): the plan grouped adapters by `.connection`
     // and asserted "four connection classes" (the assertion array itself
@@ -135,7 +135,7 @@ test('.well-known/gbrain exposes live profiles and harness adapters', async () =
     const ids = (adapters.map((a) => a.id) as string[]).sort();
     expect(ids).toEqual([
       'chatgpt', 'claude-code', 'claude-desktop', 'codex', 'cursor', 'generic',
-      'grok-bot', 'grok-build', 'muse', 'muse-code', 'openclaw', 'opencode', 'perplexity',
+      'grok-bot', 'grok-build', 'hermes', 'muse', 'muse-code', 'openclaw', 'opencode', 'perplexity',
     ]);
     expect(body!.profiles).toBeDefined();
   } finally {

@@ -76,20 +76,12 @@ test('register-client accepts a token-ttl inside the bounds', async () => {
 });
 
 /**
- * Plan defect (Work Item E, 2026-09-14): the plan expected
- * `auth rescope-client --dry-run --json` to preview without mutating (V2).
- * `rescopeClient`'s own handler DOES implement --dry-run (gbrain's read-only
- * reference src/cli.ts:833 usage string and :848 dispatch), but gbrain
- * 0.50.0.0 validates flags against a pre-dispatch, per-COMMAND (not
- * per-subcommand) static allowlist (src/core/cli-flag-registry.generated.ts)
- * before the handler ever runs, and that allowlist's 'auth' entry omits
- * '--dry-run' — so every `gbrain auth <anything> --dry-run` is rejected
- * with "unknown flag --dry-run for 'gbrain auth'" regardless of subcommand.
- * `--json` alone is in the allowlist and works. This is a confirmed upstream
- * bug, not a registry mistake: `auth.rescopeClient.supportsDryRun` is set to
- * false to match OBSERVED reality (Slice 1/2 must not build the rescope
- * confirm screen on a dry-run preview at this pinned version — see
- * docs/slice-0-findings.md V2).
+ * 0.50.0.0 rejected `gbrain auth * --dry-run` pre-dispatch
+ * ("unknown flag --dry-run for 'gbrain auth'"). Measured at 0.60.104.0:
+ * the flag is accepted. `rescope-client alice-example --dry-run --json`
+ * still exits non-zero because no grant field or --profile was passed:
+ * stderr `Error: Pass a grant field or --profile to rescope`, stdout
+ * `error.code=invalid_grant`. This test does not flip supportsDryRun.
  */
 test('rescope-client --json emits parseable JSON (real mutation, no dry-run)', async () => {
   expect(aliceClientId).not.toBe(''); // depends on the register-client test above
@@ -101,10 +93,13 @@ test('rescope-client --json emits parseable JSON (real mutation, no dry-run)', a
   expect(r.json).not.toBeNull();
 });
 
-test('auth --dry-run is rejected pre-dispatch at this pinned version (upstream bug)', async () => {
+test('auth --dry-run is accepted and a rescope with no grant field is invalid_grant', async () => {
   const r = await composeExec('gbrain-ops', [
     'gbrain', 'auth', 'rescope-client', 'alice-example', '--dry-run', '--json',
   ]);
   expect(r.exitCode).not.toBe(0);
-  expect(r.stderr + r.stdout).toMatch(/unknown flag --dry-run for 'gbrain auth'/);
+  expect(r.stderr + r.stdout).toMatch(/Pass a grant field or --profile to rescope/);
+  expect(r.stderr + r.stdout).not.toMatch(/unknown flag --dry-run/);
+  const body = JSON.parse(r.stdout) as { error?: { code?: string } };
+  expect(body.error?.code).toBe('invalid_grant');
 });

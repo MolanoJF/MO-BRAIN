@@ -174,9 +174,77 @@ export async function tarVolumeToFile(
   }
 }
 
+/** Archive member as a relative path. `./foo/` and `foo` are the same member. */
+export function normalizeArchivePath(raw: string): string {
+  return raw.trim().replace(/^\.\//, '').replace(/\/+$/, '');
+}
+
+function volumeRelative(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === '/dst') return '';
+  const withoutMount = trimmed.startsWith('/dst/') ? trimmed.slice('/dst/'.length) : trimmed;
+  return normalizeArchivePath(withoutMount);
+}
+
+/**
+ * Paths present on the volume that the archive does not contain, and that are
+ * not ancestors of a member. `tar xf` overlays; it does not delete these, so a
+ * rollback would keep files the new pin wrote. Deepest first, so a parent
+ * removal does not have to cover a child the caller also names.
+ */
+export function pathsAbsentFromArchive(
+  existing: readonly string[], members: readonly string[],
+): string[] {
+  const keep = new Set<string>();
+  for (const raw of members) {
+    const member = normalizeArchivePath(raw);
+    if (!member || member === '.' || member.split('/').includes('..')) continue;
+    keep.add(member);
+    const parts = member.split('/');
+    for (let i = 1; i < parts.length; i += 1) keep.add(parts.slice(0, i).join('/'));
+  }
+  const absent = new Set<string>();
+  for (const raw of existing) {
+    const path = volumeRelative(raw);
+    if (!path || path === '.' || path.split('/').includes('..')) continue;
+    if (!keep.has(path)) absent.add(path);
+  }
+  return [...absent].sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
 export async function untarFileIntoVolume(
   runner: Runner, volume: string, inDir: string, fileName: string,
 ): Promise<void> {
+  const listed = await runner.run([
+    'docker', 'run', '--rm', '-v', `${inDir}:/in:ro`,
+    'busybox', 'tar', '-tf', `/in/${fileName}`,
+  ], 900_000);
+  if (listed.exitCode !== 0) {
+    throw new Error(`tar list of ${fileName} failed (${listed.exitCode}): ${listed.stderr}`);
+  }
+  const found = await runner.run([
+    'docker', 'run', '--rm', '-v', `${volume}:/dst:ro`,
+    'busybox', 'find', '/dst', '-mindepth', '1', '-print',
+  ], 900_000);
+  if (found.exitCode !== 0) {
+    throw new Error(`volume list of ${volume} failed (${found.exitCode}): ${found.stderr}`);
+  }
+  const absent = pathsAbsentFromArchive(
+    found.stdout.split('\n'),
+    listed.stdout.split('\n'),
+  );
+  // busybox rm takes the paths as argv, not a shell string. Batch under the
+  // typical ARG_MAX so a volume the new pin filled still deletes.
+  for (let i = 0; i < absent.length; i += 100) {
+    const batch = absent.slice(i, i + 100).map((path) => `/dst/${path}`);
+    const removed = await runner.run([
+      'docker', 'run', '--rm', '-v', `${volume}:/dst`,
+      'busybox', 'rm', '-rf', ...batch,
+    ], 900_000);
+    if (removed.exitCode !== 0) {
+      throw new Error(`removing paths absent from ${fileName} failed (${removed.exitCode}): ${removed.stderr}`);
+    }
+  }
   const r = await runner.run([
     'docker', 'run', '--rm',
     '-v', `${volume}:/dst`, '-v', `${inDir}:/in:ro`,

@@ -12,8 +12,14 @@ export type { UpgradeRunState };
  * from `journal.ndjson` alone. `state` is `string`, not `UpgradeRunState`, on
  * purpose — the file on disk is untrusted and may name a state a newer build
  * wrote, which `resumeFrom` reports as `unknown` rather than trusting.
+ *
+ * `writers: 'held'` is journal data on `gated_ok`, not a new run state. Absent
+ * means the gate passed and the closing step is unfinished — still a rollback.
  */
-export type JournalStateRecord = { seq: number; state: string };
+export type JournalStateRecord = { seq: number; state: string; writers?: 'held' };
+
+/** Printed by `run` and named by `resumeFrom` when writers were held on purpose. */
+export const RESUME_WRITERS_COMMAND = 'bun run scripts/upgrade.ts resume-writers --run';
 
 /**
  * The legal edges, and only the legal edges. Keys are exactly the CHECK list in
@@ -101,6 +107,11 @@ const ROLLBACK_REASONS: Readonly<Record<string, string>> = {
     'and closing the run — is in an unknown state',
 };
 
+const HOLD_WRITERS_REASON =
+  'the schema jump succeeded and writers are down on purpose; the next command is ' +
+  `${RESUME_WRITERS_COMMAND} <runId>, not rollback. ` +
+  'Rollback remains the way back if the admin rejects the jump itself.';
+
 export function isTerminal(state: UpgradeRunState): boolean {
   return TRANSITIONS[state].length === 0;
 }
@@ -118,6 +129,7 @@ export function nextState(current: UpgradeRunState, outcome: 'ok' | 'failed'): U
 export type ResumeDecision =
   | { kind: 'resume'; from: UpgradeRunState; next: UpgradeRunState }
   | { kind: 'rollback-required'; from: UpgradeRunState; reason: string }
+  | { kind: 'hold-writers'; from: 'gated_ok'; reason: string }
   | { kind: 'terminal'; from: UpgradeRunState; needsAttention: boolean }
   | { kind: 'unknown'; reason: string };
 
@@ -150,6 +162,11 @@ export function resumeFrom(journal: readonly JournalStateRecord[]): ResumeDecisi
       kind: 'terminal', from: state,
       needsAttention: state === 'failed' || state === 'rollback_failed',
     };
+  }
+  // A held gate is an intentional pause, not an unfinished close. Only this
+  // pairing: a gated_ok record without `writers` stays rollback-required.
+  if (state === 'gated_ok' && last.writers === 'held') {
+    return { kind: 'hold-writers', from: 'gated_ok', reason: HOLD_WRITERS_REASON };
   }
   if (ROLLBACK_REQUIRED.includes(state)) {
     return { kind: 'rollback-required', from: state, reason: ROLLBACK_REASONS[state]! };

@@ -9,7 +9,7 @@ exists because of a way that goes wrong unattended.
 
 It is off unless someone turned it on. `agent-runner` ships under the compose profile **`runner`**; a
 deployment that only connects members' own agents omits it and loses nothing else — not `/schedules`,
-not the console, not a health check ([D12](../superpowers/plans/2026-09-17-slice-4-agent-runner.md)).
+not the console, not a health check (D12).
 
 Compose commands below use the form this repo uses locally, with the dev override appended:
 
@@ -219,8 +219,7 @@ to sign-in instead of printing the code. **Before F18 the bundle had no sign-in 
 returning operator landed on "Create the first admin" and every submission was refused
 `already_bootstrapped` — a 409 from a form that had nothing left to do — so a lane that was running
 perfectly was unreachable from its own console. The page's existence and the two measured screens
-(`h1 = "Create the first admin"` before, `h1 = "Sign in"` after) are **F18's** measurements, in
-[`docs/slice-4-findings.md`](../slice-4-findings.md), not re-run here.
+(`h1 = "Create the first admin"` before, `h1 = "Sign in"` after) are **F18's** measurements, not re-run here.
 
 Console: **`/runs`**. The list, and then a detail that renders the prompt, the tool-call timeline, the
 token counts, the cost, the diff and the revert button. That page is the answer to the question, and
@@ -381,7 +380,7 @@ The diff is the **git range** of the write Space, captured as a head pair at cla
 finish. Three limits are stated rather than hidden:
 
 - **gbrain makes no commit for an MCP write.** In this stack a `put_page` over `/mcp` leaves an
-  *untracked file* and `HEAD` unmoved (`docs/slice-4-findings.md`, P8). So the run's **finish path
+  *untracked file* and `HEAD` unmoved (P8). So the run's **finish path
   commits the run's writes itself** — `commitAs(writeSpace, runMember, "agent run <runId>")` — *before*
   it reads the after-head. That is what makes the range real, and it is why the author of a commit in
   these Spaces is one of **our** writers and never gbrain.
@@ -677,7 +676,7 @@ refusal text under *`runner_never_seen`* were measured on this stack on **2026-0
 changed the gate (F19) — those readings are the ones quoted there, not re-run by the file's original
 author. *Getting in* is **F18's** measurement by the agent that built the sign-in page, quoted from the
 live bundle in a fresh browser profile. This pass (the slice-4 close-out re-verification, 2026-09-18)
-folded both into [`docs/slice-4-findings.md`](../slice-4-findings.md) as F18/F19 and did **not** re-drive
+recorded both as F18/F19 and did **not** re-drive
 the browser or re-toggle the lane.
 
 The run detail and the revert refusal were captured against the control DB generation that existed at

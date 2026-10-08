@@ -1,9 +1,10 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import {
-  dockerVolumeDriver, dumpDatabase, tarVolumeToFile,
+  dockerVolumeDriver, dumpDatabase, tarVolumeToFile, untarFileIntoVolume,
   SNAPSHOT_DATABASES,
   projectName, snapshotVolumes, volumeLabel,
 } from '../../src/upgrade/snapshot.ts';
@@ -137,7 +138,78 @@ describe('verify and restore', () => {
       ['brain-db', 'brain-repos', 'control-db', 'gbrain-home'],
     );
   });
+
+  test('volume restore removes a path absent from the archive', async () => {
+    const volume = await mkdtemp(join(dir, 'vol-'));
+    const archiveDir = await mkdtemp(join(dir, 'arc-'));
+    const packed = await mkdtemp(join(dir, 'pack-'));
+    await mkdir(join(volume, '.gbrain', 'persistence'), { recursive: true });
+    await writeFile(join(volume, 'keep.txt'), 'kept');
+    await writeFile(join(volume, '.gbrain', 'persistence', 'host.json'), '{}');
+    await writeFile(join(packed, 'keep.txt'), 'kept');
+    const packedTar = Bun.spawn(['tar', '-cf', join(archiveDir, 'snap.tar'), '-C', packed, 'keep.txt'], {
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    expect(await packedTar.exited).toBe(0);
+
+    await untarFileIntoVolume(new LocalRestoreRunner(volume, archiveDir), 'fixture-volume', archiveDir, 'snap.tar');
+
+    expect(await Bun.file(join(volume, 'keep.txt')).text()).toBe('kept');
+    expect(existsSync(join(volume, '.gbrain', 'persistence', 'host.json'))).toBe(false);
+  });
 });
+
+/** Applies the restore argv to a local directory so the unit test sees a real deletion. */
+class LocalRestoreRunner implements Runner {
+  constructor(private volumeDir: string, private archiveDir: string) {}
+  async run(argv: string[]): Promise<RunResult> {
+    if (argv.includes('-tf')) {
+      return hostTar(['-tf', this.hostArchive(argv)]);
+    }
+    if (argv.includes('find')) {
+      const lines: string[] = [];
+      const walk = async (current: string) => {
+        for (const name of await readdir(current)) {
+          const abs = join(current, name);
+          lines.push(`/dst/${relative(this.volumeDir, abs)}`);
+          if ((await stat(abs)).isDirectory()) await walk(abs);
+        }
+      };
+      await walk(this.volumeDir);
+      return { exitCode: 0, stdout: `${lines.join('\n')}\n`, stderr: '' };
+    }
+    if (argv.includes('rm')) {
+      for (const arg of argv) {
+        if (!arg.startsWith('/dst/')) continue;
+        await rm(join(this.volumeDir, arg.slice('/dst/'.length)), { recursive: true, force: true });
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    if (argv.includes('xf')) {
+      return hostTar(['-xf', this.hostArchive(argv), '-C', this.volumeDir]);
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  }
+  async captureToFile(): Promise<void> {
+    throw new Error('not used');
+  }
+  async feedFile(): Promise<RunResult> {
+    throw new Error('not used');
+  }
+  private hostArchive(argv: string[]): string {
+    const member = argv.find((arg) => arg.startsWith('/in/'));
+    if (!member) throw new Error('restore argv has no /in path');
+    return join(this.archiveDir, member.slice('/in/'.length));
+  }
+}
+
+async function hostTar(args: string[]): Promise<RunResult> {
+  const p = Bun.spawn(['tar', ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
+  ]);
+  return { exitCode, stdout, stderr };
+}
 
 describe('projectName / snapshotVolumes (D4)', () => {
   test('defaults to the legacy project name so existing deployments keep their volumes', () => {

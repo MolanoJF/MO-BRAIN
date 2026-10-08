@@ -170,4 +170,19 @@ describe('resumeFrom', () => {
     const bogus = [{ runId: 'r', seq: 1, at: '2026-09-16T00:00:00.000Z', state: 'half_swapped' }];
     expect(resumeFrom(bogus).kind).toBe('unknown');
   });
+
+  test('gated_ok with writers held is not a rollback', () => {
+    const decision = resumeFrom([{ seq: 1, state: 'gated_ok', writers: 'held' }]);
+    expect(decision).toEqual({
+      kind: 'hold-writers',
+      from: 'gated_ok',
+      reason: expect.stringContaining('resume-writers'),
+    });
+    if (decision.kind !== 'hold-writers') throw new Error('expected hold-writers');
+    expect(decision.reason).toContain('bun run scripts/upgrade.ts resume-writers --run');
+  });
+
+  test('gated_ok without a hold is still rollback-required', () => {
+    expect(resumeFrom([{ seq: 1, state: 'gated_ok' }]).kind).toBe('rollback-required');
+  });
 });

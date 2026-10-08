@@ -6,7 +6,7 @@ Mobrain supports exactly one gbrain version per release:
 
 | | |
 |---|---|
-| **Supported gbrain version** | **`0.50.5.0`** (the pin in `.env` and the image build `ARG`) |
+| **Supported gbrain version** | **`0.60.104.0`** (the pin in `.env` and the image build `ARG`) |
 | **Supported harness version** (agent runner only) | **`2.1.274`** |
 
 "Supported" has a concrete meaning here. A version is supported when Mobrain's contract suite runs green against it (pinned-current), its deterministic upgrade playbook exists, and the images at its exact tag are the ones the installer pulls. Exact semver only — never a moving tag, never a range. A version that is not the supported pin is not supported, regardless of where upstream is.
@@ -27,8 +27,8 @@ Each upgrade is snapshot-first (both databases plus both volumes, with zero writ
 
 Two things make the target honest:
 
-- **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up and blocks nothing else.
-- **The drift check runs when an upstream tag lands.** Dispatch `stack.yml` with `gbrain_version` set to the new tag (`gh workflow run stack.yml -f suite=contract -f gbrain_version=<tag>`); pinned-current `0.50.5.0` is the default when the input is blank. A drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade. There is no nightly cron (see `docs/runbooks/ci.md` for why).
+- **Nothing auto-upgrades.** The console's banner *offers* a candidate and a human selects it. A pending `awaiting_admin_decision` checklist item keeps the banner up; a `blocksResume` item holds writers until `resume-writers`, and any other pending item blocks nothing else.
+- **The drift check runs when an upstream tag lands.** Dispatch `stack.yml` with `gbrain_version` set to the new tag (`gh workflow run stack.yml -f suite=contract -f gbrain_version=<tag>`); pinned-current `0.60.104.0` is the default when the input is blank. A drift finding is news, not a broken build, and it is what starts the clock on the next supported upgrade. There is no nightly cron (see `docs/runbooks/ci.md` for why).
 - **The three pinned images stay publicly, anonymously pullable.** `scripts/ci/check-public-images.sh` runs a credential-less `docker pull` of `gbrain-base`, `control-plane`, and `agent-runner`, the same thing `scripts/install.sh` does for an external user. `release.yml`'s `verify-public` job runs it right after every publish and fails that release outright if any image isn't public. Visibility is a GitHub setting outside the release pipeline and can regress on its own (a manual toggle, or a package deleted and recreated, which defaults to private), so `release-verify.yml`'s `public` job runs the same check on demand.
 
 ## What this policy does and does not promise

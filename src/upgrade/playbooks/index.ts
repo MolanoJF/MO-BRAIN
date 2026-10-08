@@ -1,4 +1,43 @@
 import { v0_50_2_0 } from './v0.50.2.0.ts';
+import { v0_51_0_0 } from './v0.51.0.0.ts';
+import { v0_51_7_0 } from './v0.51.7.0.ts';
+import { v0_51_8_0 } from './v0.51.8.0.ts';
+import { v0_52_1_0 } from './v0.52.1.0.ts';
+import { v0_52_2_0 } from './v0.52.2.0.ts';
+import { v0_53_0_0 } from './v0.53.0.0.ts';
+import { v0_54_1_0 } from './v0.54.1.0.ts';
+import { v0_56_2_0 } from './v0.56.2.0.ts';
+import { v0_58_0_0 } from './v0.58.0.0.ts';
+import { v0_59_0_0 } from './v0.59.0.0.ts';
+import { v0_59_2_0 } from './v0.59.2.0.ts';
+import { v0_59_10_0 } from './v0.59.10.0.ts';
+import { v0_60_5_0 } from './v0.60.5.0.ts';
+import { v0_60_6_0 } from './v0.60.6.0.ts';
+import { v0_60_11_0 } from './v0.60.11.0.ts';
+import { v0_60_20_0 } from './v0.60.20.0.ts';
+import { v0_60_26_0 } from './v0.60.26.0.ts';
+import { v0_60_27_0 } from './v0.60.27.0.ts';
+import { v0_60_28_0 } from './v0.60.28.0.ts';
+import { v0_60_30_0 } from './v0.60.30.0.ts';
+import { v0_60_31_0 } from './v0.60.31.0.ts';
+import { v0_60_36_0 } from './v0.60.36.0.ts';
+import { v0_60_37_0 } from './v0.60.37.0.ts';
+import { v0_60_44_0 } from './v0.60.44.0.ts';
+import { v0_60_45_0 } from './v0.60.45.0.ts';
+import { v0_60_47_0 } from './v0.60.47.0.ts';
+import { v0_60_52_0 } from './v0.60.52.0.ts';
+import { v0_60_53_0 } from './v0.60.53.0.ts';
+import { v0_60_57_0 } from './v0.60.57.0.ts';
+import { v0_60_61_0 } from './v0.60.61.0.ts';
+import { v0_60_62_0 } from './v0.60.62.0.ts';
+import { v0_60_63_0 } from './v0.60.63.0.ts';
+import { v0_60_74_0 } from './v0.60.74.0.ts';
+import { v0_60_77_0 } from './v0.60.77.0.ts';
+import { v0_60_98_0 } from './v0.60.98.0.ts';
+import { v0_60_99_0 } from './v0.60.99.0.ts';
+import { v0_60_100_0 } from './v0.60.100.0.ts';
+import { v0_60_102_0 } from './v0.60.102.0.ts';
+import frozenReleases from './released-0.60.104.0.json' with { type: 'json' };
 import type { PlaybookSpec } from './types.ts';
 
 export type { ChecklistItemSpec, PlaybookSpec, PlaybookStep, UpstreamSkillRef } from './types.ts';
@@ -36,7 +75,32 @@ export type ReleasedVersion = { version: string; evidence: string };
  * 0.49.0.0 is included as a real release that we deliberately did NOT write a
  * playbook for: it is the row that makes the "a version in range with no entry"
  * throw observable, and it is why the throw's error names a real version.
+ *
+ * Versions strictly after 0.50.5.0 and at or before 0.60.104.0 are the GitHub
+ * releases frozen in released-0.60.104.0.json. A file-absent tag also has a
+ * noPlaybookRequired spec. A tag whose migration file is in the v0.60.104.0
+ * tree has a hand-translated PlaybookSpec. playbooksFor('0.50.5.0', '0.60.104.0')
+ * returns every afterPin row.
  */
+
+type FrozenRelease = {
+  version: string;
+  publishedAt: string;
+  migrationFile: boolean;
+};
+
+const AFTER_PIN: readonly FrozenRelease[] = frozenReleases.afterPin;
+
+function releaseEvidence(row: FrozenRelease): string {
+  const file = `skills/migrations/v${row.version}.md`;
+  const presence = row.migrationFile
+    ? `${file} is present in the v0.60.104.0 tree`
+    : `${file} is absent from the v0.60.104.0 tree`;
+  return (
+    `GitHub release v${row.version} of garrytan/gbrain, publishedAt ${row.publishedAt}. ${presence}.`
+  );
+}
+
 export const RELEASED_VERSIONS: readonly ReleasedVersion[] = [
   {
     version: '0.49.0.0',
@@ -76,6 +140,10 @@ export const RELEASED_VERSIONS: readonly ReleasedVersion[] = [
       '(OAuth scope ceiling, transcript redaction, .env guardrail, bunfig preload lockdown). No ' +
       'skills/migrations/v0.50.5.0.md exists.',
   },
+  ...AFTER_PIN.map((row) => ({
+    version: row.version,
+    evidence: releaseEvidence(row),
+  })),
 ];
 
 /**
@@ -132,6 +200,49 @@ export const PLAYBOOKS: readonly PlaybookSpec[] = [
       'security-hardening wave whose risk is configuration (the .env guardrail quarantine), probed ' +
       'by Task 1 and gated by Task 11, not a migration step.',
   },
+  ...AFTER_PIN.filter((row) => !row.migrationFile).map((row): PlaybookSpec => ({
+    version: row.version,
+    noPlaybookRequired: true,
+    evidence: releaseEvidence(row),
+  })),
+  v0_51_0_0,
+  v0_51_7_0,
+  v0_51_8_0,
+  v0_52_1_0,
+  v0_52_2_0,
+  v0_53_0_0,
+  v0_54_1_0,
+  v0_56_2_0,
+  v0_58_0_0,
+  v0_59_0_0,
+  v0_59_2_0,
+  v0_59_10_0,
+  v0_60_5_0,
+  v0_60_6_0,
+  v0_60_11_0,
+  v0_60_20_0,
+  v0_60_26_0,
+  v0_60_27_0,
+  v0_60_28_0,
+  v0_60_30_0,
+  v0_60_31_0,
+  v0_60_36_0,
+  v0_60_37_0,
+  v0_60_44_0,
+  v0_60_45_0,
+  v0_60_47_0,
+  v0_60_52_0,
+  v0_60_53_0,
+  v0_60_57_0,
+  v0_60_61_0,
+  v0_60_62_0,
+  v0_60_63_0,
+  v0_60_74_0,
+  v0_60_77_0,
+  v0_60_98_0,
+  v0_60_99_0,
+  v0_60_100_0,
+  v0_60_102_0,
 ];
 
 const BY_VERSION = new Map(PLAYBOOKS.map((s) => [s.version, s]));

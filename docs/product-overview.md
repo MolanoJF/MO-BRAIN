@@ -342,7 +342,7 @@ The product is explicit about its own gaps rather than hiding them:
 - **No historical/trended observability** (metrics dashboard, queue-age percentiles) — out of
   scope for GA on purpose, revisited alongside managed cloud.
 
-Full detail: `docs/pending-tasks.md`.
+What is next is in `HANDOFF.md`.
 
 ---
 
@@ -357,5 +357,6 @@ Full detail: `docs/pending-tasks.md`.
 | Upgrade it | `docs/runbooks/upgrade.md` |
 | Recover when the console is down | `docs/runbooks/break-glass.md` |
 | What's supported, for how long | `docs/support-policy.md` |
-| Everything still open | `docs/pending-tasks.md` |
-| Full architectural history / decisions | `HANDOFF.md`, `docs/superpowers/plans/` |
+| Everything still open | `HANDOFF.md` |
+| Upgrade record | `docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`, `docs/gbrain-0.60.104.0-upgrade-run.md` |
+| Architectural decisions still in tree | `HANDOFF.md` |

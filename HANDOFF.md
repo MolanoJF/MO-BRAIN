@@ -2,9 +2,7 @@
 
 **Mobrain 1.0.0 is the tagged release.** `main` has moved since that tag. Tip `578bbaa` (2026-09-23) is personal-and-company zones plus optional Google sign-in, on top of the console, schema, skills, and autopilot work that landed after the tag. Nothing since `v1.0.0` has been tagged or published. The published digests below are still the 1.0.0 artifacts.
 
-**Next product slice:** hosted sandboxes, §5.4 of [`docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md`](docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md). It needs its own brainstorm before a plan. The open questions there are who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud (Slice 6) stays deferred; pricing still waits on a search-mode cost measurement on a real corpus.
-
-[`PROGRESS.md`](docs/superpowers/plans/PROGRESS.md) and [`docs/pending-tasks.md`](docs/pending-tasks.md) still describe the 1.0.0 close. Where they say the next stage is Slice 6, this file wins.
+**Next product slice:** hosted sandboxes (zones §5.4). It needs its own brainstorm before a plan. The open questions are who pays for model calls, isolation on one host, web-terminal auth through Caddy, and whether today's shared runner stays for company jobs. Managed cloud (Slice 6) stays deferred; pricing still waits on a search-mode cost measurement on a real corpus. This file wins over any older note that names Slice 6 as next.
 
 ---
 
@@ -86,8 +84,8 @@ Not a release. All of this is on `main` at `578bbaa` and is not in the published
 - Console shell and design system, and editing a Space's markdown in the console.
 - Schema-pack management and custom packs, including folder scaffolding from the pack.
 - Private member Spaces, the autopilot tripwire, member agent skills over MCP, and Space git-bundle export.
-- **Zones 5.1–5.3.** Spec: [`docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md`](docs/superpowers/specs/2026-09-22-personal-and-company-zones-design.md). Plans: [`zones-1-privacy`](docs/superpowers/plans/2026-09-22-zones-1-privacy.md), [`zones-2-personal-first`](docs/superpowers/plans/2026-09-22-zones-2-personal-first.md), [`zones-3-invite-login`](docs/superpowers/plans/2026-09-22-zones-3-invite-login.md).
-- **Optional Google sign-in.** Plan: [`docs/superpowers/plans/2026-09-22-google-exclusive-auth.md`](docs/superpowers/plans/2026-09-22-google-exclusive-auth.md). Email and password stay. The button exists only when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
+- **Zones 5.1–5.3** shipped: personal-and-company zones, privacy, personal-first, and invite login.
+- **Optional Google sign-in.** Email and password stay. The button exists only when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
 
 Zones behavior a caller can rely on:
 
@@ -136,7 +134,7 @@ Zones behavior a caller can rely on:
 - **One required Connection-purge path does not exist (F22).** `POST /api/connections/:id/revoke` exists;
   `DELETE /api/connections/:id` does not, so a revoked Connection survives until its member is offboarded
   (which cascades) — and cannot be offboarded while a live schedule holds the member. Deferred to the next
-  hardening slice; see `docs/slice-5-findings.md`.
+  hardening slice.
 - **A restore or a quiesce leaves the runner DOWN by design** (D12/D13): `restoreLane` deliberately does not
   resume a service whose profile is inactive, and `agent-runner` drains on SIGTERM and exits 0. Bring it back
   with the CA export first:
@@ -164,8 +162,6 @@ Zones behavior a caller can rely on:
 - `test/unit/scheduler-main.test.ts` and `test/unit/seed-space.test.ts` fail here and are **environmental**:
   `brainstand-postgres-1` publishes no host port (Caddy is the only service that does), so host-side
   `localhost:5432` cannot connect by design. Neither touches the console.
-
-**Progress tracker:** [`docs/superpowers/plans/PROGRESS.md`](docs/superpowers/plans/PROGRESS.md)
 
 ---
 
@@ -210,13 +206,13 @@ alone and recreates `gbrain-ops` without the dev override's port publication.
 | [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md) | Enable/disable, the three health states, revert, rotating the Anthropic key |
 | [`docs/runbooks/break-glass.md`](docs/runbooks/break-glass.md) | Operator recovery over the ops sidecar |
 | [`docs/support-policy.md`](docs/support-policy.md) | The supported pin, upgrade cadence, the drift tripwire, what is not promised |
-| [`docs/superpowers/specs/2026-09-22-console-design-system-design.md`](docs/superpowers/specs/2026-09-22-console-design-system-design.md) | The console design system — tokens, primitives, theming, what is and is not verified |
-| [`docs/slice-5-findings.md`](docs/slice-5-findings.md) | U1–U3, P1–P9, F20–F32 — every status and every deferral |
-| [`docs/pending-tasks.md`](docs/pending-tasks.md) | The open backlog after 1.0.0, by owner slice and priority |
+| [`docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`](docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md) | The 0.50.5.0 → 0.60.104.0 upgrade plan |
+| [`docs/superpowers/specs/2026-10-07-gbrain-0.60.104.0-upgrade-design.md`](docs/superpowers/specs/2026-10-07-gbrain-0.60.104.0-upgrade-design.md) | The upgrade design |
+| [`docs/gbrain-0.60.104.0-upgrade-run.md`](docs/gbrain-0.60.104.0-upgrade-run.md) | The fixture upgrade run and rollback |
 | [`CHANGELOG.md`](CHANGELOG.md) | The release entries and the published digests |
 | [`README.md`](README.md), [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md) | The front door |
 
-**Support policy in one line:** we support exactly the pinned gbrain (`0.50.5.0`) and harness (`2.1.274`);
+**Support policy in one line:** we support exactly the pinned gbrain (`0.60.104.0`) and harness (`2.1.274`);
 upgrades are host-driven and deterministic; we target a supported upgrade within **30 days** of an upstream
 tag; the drift check runs on demand via `stack.yml`. See `docs/support-policy.md` for the full promises and
 non-promises.
@@ -264,13 +260,9 @@ non-promises.
 |---|---|
 | Release | **Mobrain 1.0.0**, tagged `v1.0.0`; digests in [`CHANGELOG.md`](CHANGELOG.md) |
 | Branch | `main` at `578bbaa`, tracking `origin/main`. Slices 0–5 are merged. The post-1.0.0 work in the section above is on this same branch. |
-| Roadmap | [`docs/superpowers/plans/2026-09-14-brainstand-roadmap.md`](docs/superpowers/plans/2026-09-14-brainstand-roadmap.md) |
-| Slice 5 plan | [`docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md`](docs/superpowers/plans/2026-09-18-slice-5-self-host-ga.md) — D1–D13, Tasks 1–18 |
-| Slice 5 findings | [`docs/slice-5-findings.md`](docs/slice-5-findings.md) — U1–U3, P1–P9, F20–F32, the deferrals |
-| Slice 4 plan | [`docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md`](docs/superpowers/plans/2026-09-17-slice-4-agent-runner.md) — historical |
-| Earlier findings | [`docs/slice-0-findings.md`](docs/slice-0-findings.md), [`docs/slice-2-findings.md`](docs/slice-2-findings.md), [`docs/slice-3-findings.md`](docs/slice-3-findings.md), [`docs/slice-3.5-findings.md`](docs/slice-3.5-findings.md), [`docs/slice-4-findings.md`](docs/slice-4-findings.md) |
+| Upgrade record | [`docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md`](docs/superpowers/plans/2026-10-07-gbrain-0.60.104.0-upgrade.md) and [`docs/gbrain-0.60.104.0-upgrade-run.md`](docs/gbrain-0.60.104.0-upgrade-run.md) |
 | Spec | `C:\Users\juanp\.claude\plans\we-want-to-do-snug-wolf.md` |
-| gbrain pin | `v0.50.5.0` (exact, never a moving tag) |
+| gbrain pin | `v0.60.104.0` (exact, never a moving tag) |
 | Harness pin | `@anthropic-ai/claude-code@2.1.274` (exact; `HARNESS_VERSION` in `.env`) |
 | gbrain reference | `C:\Users\juanp\Desktop\gbrain` (read-only) |
 
@@ -278,7 +270,7 @@ non-promises.
 
 ## Process facts the next session needs
 
-- **The next product slice is hosted sandboxes (zones spec §5.4).** It has no plan yet; brainstorm it before writing one. Slice 6 (managed cloud) stays deferred behind the search-mode cost measurement. `PROGRESS.md` still names Slice 6 as next; this file wins.
+- **The next product slice is hosted sandboxes (zones §5.4).** It has no plan yet; brainstorm it before writing one. Slice 6 (managed cloud) stays deferred behind the search-mode cost measurement. This file wins.
 - **`bash` on PATH is a broken WSL relay** (`C:\Windows\system32\bash.exe`). The two build gates
   (`test/build/pin.test.sh`, `test/build/harness-pin.test.sh`) must be run through **Git bash**:
   `"C:/Program Files/Git/bin/bash.exe" test/build/pin.test.sh`. Export `GBRAIN_VERSION` / `HARNESS_VERSION`
@@ -292,7 +284,7 @@ non-promises.
   `claude` agent's monthly limit was exhausted mid-slice); the findings docs and gate files name their
   authors where it matters. Treat the branches as mixed-authored.
 - **CI is budgeted.** Only `ci.yml` (lint/tsc/unit, ~1 min) runs on push/PR; the Docker suites run on demand via `stack.yml`. Read `docs/runbooks/ci.md` before touching `.github/workflows/`. The `gh` token has the `workflow` scope (checked 2026-10-05), so workflow-file pushes no longer need a deploy key.
-- **Hazards carried, not cured** (all recorded in `docs/slice-5-findings.md`): a new contract file can still
+- **Hazards carried, not cured:** a new contract file can still
   be answered by a sibling's process-global `mock.module` (F27/F32 containment); the host-side spend read
   still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`; and
   `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.

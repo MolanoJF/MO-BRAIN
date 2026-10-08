@@ -478,31 +478,19 @@ describe('Slice 3.5 seam gate A', () => {
     // through the SAME verifySupervisorDrained reader (via an injected ops caller).
     const proof = await verifySupervisorDrained({ ops: slice0OpsCaller });
 
-    // The audit-derived positive IS real: the supervisor wrote a clean
-    // shutting_down event, and the reader read its exit code and reason right.
-    expect(proof.decidingEvent?.event).toBe('shutting_down');
+    // Measured at 0.60.104.0: the audit writes shutting_down then stopped,
+    // both exit_code 0 and reason SIGTERM. The reader takes the last
+    // in-window event, so decidingEvent is stopped. stop --json reason is
+    // drained and status --json workers is []. The 0.50 pin left the worker
+    // alive (F2); this pin does not. Do not retune grace periods.
+    expect(proof.decidingEvent?.event).toBe('stopped');
     expect(proof.exitCode).toBe(0); // ExitCodes.CLEAN
     expect(proof.reason).not.toBeNull();
     expect(['SIGTERM', 'SIGINT']).toContain(proof.reason as string);
     expect(proof.running).toBe(false);
-
-    // But a clean supervisor exit is NOT a clean drain (honesty rule 3): at this
-    // pin `gbrain jobs supervisor stop` leaves the worker process ALIVE. The pid
-    // in /srv/gbrain-home/.gbrain/workers/worker-*.json stays in /proc for
-    // minutes (F2 in docs/slice-3.5-findings.md), so verifySupervisorDrained
-    // reads live workers and correctly refuses to call this clean.
-    //
-    // This is a HONEST-VERDICT assertion, deliberately not the plan's
-    // clean===true. The plan's positive is proven end-to-end by Gate C's C6
-    // against the real quiesce, which stops the gbrain-worker CONTAINER: the
-    // supervisor is pid 1 there and its workers die with the container (F1
-    // records a real-quiesce run with clean:true). A detached supervisor inside
-    // slice0's gbrain-ops was tried at the container boundary first and never
-    // receives SIGTERM through tini, so it writes no clean event at all and
-    // cannot stand in for the real quiesce. Deviation reported in worker_done.
-    expect(proof.workers.length).toBeGreaterThan(0);
-    expect(proof.clean).toBe(false);
-    expect(proof.classification).toBe('unproven');
+    expect(proof.workers.length).toBe(0);
+    expect(proof.clean).toBe(true);
+    expect(proof.classification).toBe('clean');
 
     // The load-bearing honesty-rule-3 property, deterministically: a clean
     // `shutting_down{exit_code:0}` audit event with a LIVE worker must NOT be

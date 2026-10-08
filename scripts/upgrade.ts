@@ -5,18 +5,21 @@ import { mkdir, readFile, readdir, statfs, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { OPERATIONS } from '../src/contracts/registry.ts';
 import { verifyRuntimePin as verifyPinRuntime, writePin, type CallOps } from '../src/contracts/pin.ts';
-import { captureCapability, type CapabilitySnapshot } from '../src/contracts/capability.ts';
+import { captureCapability, type CapabilityExec, type CapabilitySnapshot } from '../src/contracts/capability.ts';
 import { scrubOutput } from '../src/docker/host.ts';
 import type { RepoStatus } from '../src/ops/git.ts';
 import { appendEvent, openJournal, readJournal, type Journal } from '../src/upgrade/journal.ts';
+import { schemaStepJournal, schemaStepParams } from '../src/upgrade/schema-step.ts';
 import { verifyManifest } from '../src/upgrade/manifest.ts';
 import {
   SNAPSHOT_DATABASES, snapshotVolumes, dockerVolumeDriver, type SnapshotContext,
 } from '../src/upgrade/snapshot.ts';
 import { QUIESCE_ORDER, composeModel, quiesce, restoreLane } from '../src/upgrade/quiesce.ts';
-import { hasPlaybook, playbooksFor, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
-import { canTransition, resumeFrom, type UpgradeRunState } from '../src/upgrade/state.ts';
-import { compareDigests, compareDoctor, rollback, stateDigest, type StateDigest } from '../src/upgrade/digest.ts';
+import { hasPlaybook, playbooksFor, type ChecklistItemSpec, type PlaybookSpec } from '../src/upgrade/playbooks/index.ts';
+import {
+  canTransition, resumeFrom, RESUME_WRITERS_COMMAND, TRANSITIONS, type UpgradeRunState,
+} from '../src/upgrade/state.ts';
+import { compareDigests, compareDoctor, rollback, stateDigest, type DoctorParity, type StateDigest } from '../src/upgrade/digest.ts';
 import type {
   DoctorBaseline, DoctorCheckSummary, SnapshotManifest, UpgradeContext,
 } from '../src/upgrade/types.ts';
@@ -205,7 +208,8 @@ export type ParsedArgs =
   | { cmd: 'plan'; to: string }
   | { cmd: 'run'; to: string; yes: boolean }
   | { cmd: 'rollback'; runId: string }
-  | { cmd: 'status'; runId: string | null };
+  | { cmd: 'status'; runId: string | null }
+  | { cmd: 'resume-writers'; runId: string };
 
 function flag(argv: string[], name: string): string | null {
   const i = argv.indexOf(name);
@@ -231,9 +235,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (!runId) throw new UsageError('rollback requires --run <id>: a rollback addresses a run');
       return { cmd: 'rollback', runId };
     case 'status': return { cmd: 'status', runId };
+    case 'resume-writers':
+      if (!runId) throw new UsageError('resume-writers requires --run <id>: it finishes a held run');
+      return { cmd: 'resume-writers', runId };
     default:
       throw new UsageError(
-        'usage: bun run scripts/upgrade.ts <plan|run|rollback|status> [--to <version>] [--run <id>] [--yes]',
+        'usage: bun run scripts/upgrade.ts <plan|run|rollback|status|resume-writers> ' +
+        '[--to <version>] [--run <id>] [--yes]',
       );
   }
 }
@@ -431,7 +439,7 @@ export type RunDeps = PreflightDeps & {
   emitOperations(version: string): Promise<void>;
   buildImages(ctx: UpgradeContext, version: string): Promise<void>;
   recreate(ctx: UpgradeContext, services: readonly string[]): Promise<void>;
-  resume(ctx: UpgradeContext): Promise<void>;
+  resume(ctx: UpgradeContext, services?: readonly string[]): Promise<void>;
   captureDoctorAfter(ctx: UpgradeContext): Promise<DoctorBaseline>;
   rollback(ctx: UpgradeContext, runId: string): Promise<{ ok: boolean }>;
 };
@@ -440,6 +448,38 @@ export type UpgradeReport = {
   runId: string; fromVersion: string; toVersion: string;
   state: UpgradeRunState; ok: boolean; rolledBack: boolean; notes: string[];
 };
+
+/**
+ * compareDoctor, plus the one hold exception. A blocksResume hold leaves
+ * gbrain-worker down, so supervisor ok→warn is that hold, not a regression.
+ * The exception does not apply when the worker is up, and it never excuses
+ * any other previously-ok check.
+ */
+export function scoreDoctorGate(
+  baseline: DoctorBaseline,
+  after: DoctorBaseline,
+  opts: { holdActive: boolean; workerDown: boolean },
+): DoctorParity {
+  const parity = compareDoctor(baseline, after);
+  if (!opts.holdActive || !opts.workerDown) return parity;
+  const was = baseline.checks.find((c) => c.name === 'supervisor');
+  const now = after.checks.find((c) => c.name === 'supervisor');
+  if (was?.status !== 'ok' || now?.status !== 'warn') return parity;
+  return { ...parity, regressed: parity.regressed.filter((c) => c.name !== 'supervisor') };
+}
+
+/** The supervisor check reads a DB lock the worker takes after start. Wait
+ *  only when the baseline scored it ok, so the gate sees that same writer up.
+ *  A timeout does not skip the check: doctor still runs and compareDoctor
+ *  still scores whatever it finds. */
+async function waitForBaselineSupervisor(ctx: UpgradeContext, baseline: DoctorBaseline): Promise<void> {
+  if (baseline.checks.find((c) => c.name === 'supervisor')?.status !== 'ok') return;
+  for (let i = 0; i < 30; i += 1) {
+    const r = await opsRpc(ctx, 'jobs.supervisorStatus', {}, 30_000);
+    if (r.exitCode === 0) return;
+    await Bun.sleep(2_000);
+  }
+}
 
 /** A dry run has no journal; a real run must never be handed a context without one. */
 function requireJournal(ctx: UpgradeContext): Journal {
@@ -534,19 +574,16 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
     // 5. Schema. Exit codes only (U3). gbrain-ops is the only live gbrain
     //    process, so post-upgrade's lock-free config.json rewrite has nobody to
     //    race (U4) and still runs behind ops' advisory lock (S3).
-    const migrateExit = (await opsRpc(ctx, 'applyMigrations', { yes: true, nonInteractive: true })).exitCode;
+    //    schemaStepParams skips the Phase F autopilot install (0.60.104.0's
+    //    `--yes` alone would authorize one) and schemaStepJournal records the
+    //    exit code and nothing else — no migration count is claimed for this
+    //    delta, because nothing here read upstream's migration files.
+    const migrateExit = (await opsRpc(ctx, 'applyMigrations', schemaStepParams())).exitCode;
+    await appendEvent(journal, { step: 'schema', ...schemaStepJournal(migrateExit) });
     if (migrateExit !== 0) {
       // U3: exit codes are 0/1/2 and there is no --json. We record the CODE and
       // never parse the prose (G3). The failure is upstream's, at upstream's
       // migration number, raised by the conditions the fixture created.
-      await appendEvent(journal, {
-        step: 'schema', message: `apply-migrations exited ${migrateExit}`,
-        data: {
-          exitCode: migrateExit, outcome: 'failed',
-          evidence: 'apply-migrations refused to complete; docs/slice-3.5-findings.md records the '
-            + 'fixtured collision and the observed exit code',
-        },
-      });
       throw new Error(`apply-migrations exited ${migrateExit}`);
     }
     const postExit = (await opsRpc(ctx, 'postUpgrade', {})).exitCode;
@@ -567,28 +604,17 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       );
     }
     const addedKeys = guard.keys.filter((k) => !before.configKeys.includes(k));
-    // The schema step's own durable record: U3 exit code, U10's honest no-op
-    // outcome, and the evidence for WHY nothing was pending.
-    await appendEvent(journal, {
-      step: 'schema', message: 'no migrations were pending on this delta',
-      data: {
-        exitCode: 0, outcome: 'no_migrations_pending',
-        evidence: 'migrate.ts is byte-identical at 0.50.0.0 and 0.50.5.0, so apply-migrations exited '
-          + '0 with nothing to apply; this delta ships zero schema migrations',
-      },
-    });
     await enter('migrated',
-      'apply-migrations and post-upgrade both exited 0. On the 0.50.0.0 -> 0.50.5.0 delta upstream ' +
-      'ships zero schema migrations (U10), so "nothing applied" is the expected result; a non-zero ' +
-      'exit or a surprise here is a finding for docs/slice-3.5-findings.md, not something to wave ' +
-      'through.',
+      'apply-migrations and post-upgrade both exited 0; no migration count is claimed for this ' +
+      'delta (U3/G3: the exit code is the whole record). A non-zero exit or a surprise here is a ' +
+      'finding for docs/slice-3.5-findings.md, not something to wave through.',
       { applyExit: 0, postExit: 0, selfUpgradeMode: guard.mode, configKeysAdded: addedKeys });
 
     // 6. Playbooks. Deterministic steps run; checklist items are OPENED as
     //    awaiting_admin_decision. The control plane is down, so both are
     //    journaled for the reconciler rather than written to the DB (D2).
     const ledger: Record<string, unknown>[] = [];
-    const checklist: Record<string, unknown>[] = [];
+    const checklist: Array<ChecklistItemSpec & { version: string; state: 'pending' }> = [];
     for (const spec of pre.playbooks) {
       if (!hasPlaybook(spec)) {
         ledger.push({
@@ -598,7 +624,9 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
         continue;
       }
       for (const step of spec.steps) await step.run(ctx);
-      for (const item of spec.checklist) checklist.push({ version: spec.version, ...item });
+      for (const item of spec.checklist) {
+        checklist.push({ version: spec.version, ...item, state: 'pending' });
+      }
       ledger.push({
         version: spec.version,
         state: spec.checklist.length > 0 ? 'awaiting_admin_decision' : 'applied',
@@ -610,14 +638,31 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
       });
     }
     await enter('playbooks_applied', `${ledger.length} version(s) recorded`, { ledger, checklist });
+    const holdWriters = checklist.some((item) => item.blocksResume === true);
 
-    // 7. Resume, then gate. The writers come back here, not at the swap.
-    await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
-    await deps.resume(ctx);
-    // The TO pin's capability, now that its gbrain-serve is live.
-    await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json');
+    // 7. Gate. A blocksResume hold resumes only gbrain-ops and control-plane.
+    //    The four writers stay down until a checklist ack; starting them here
+    //    would run paid defaults before that ack. supervisor ok→warn is that
+    //    hold, and only while the worker stays down. compareDoctor is not
+    //    filtered when the worker is up.
+    if (holdWriters) {
+      await deps.recreate(ctx, ['control-plane']);
+      await deps.resume(ctx, ['gbrain-ops', 'control-plane']);
+    } else {
+      await deps.recreate(ctx, ['gbrain-serve', 'gbrain-worker', 'control-plane']);
+      await deps.resume(ctx);
+      await waitForBaselineSupervisor(ctx, pre.baseline);
+    }
+    // Serve stays down on a hold, so this probe does not wait. resumeWriters
+    // recaptures capability-to.json once serve is up.
+    await captureCapabilityForRun(ctx, ctx.toVersion, 'capability-to.json', {
+      waitForServe: !holdWriters,
+    });
     const after = await deps.captureDoctorAfter(ctx);
-    const parity = compareDoctor(pre.baseline, after);
+    const parity = scoreDoctorGate(pre.baseline, after, {
+      holdActive: holdWriters,
+      workerDown: holdWriters,
+    });
     await appendEvent(journal, {
       step: 'gate', message: 'doctor parity computed per check (D5)',
       data: { parity },
@@ -628,11 +673,25 @@ export async function runUpgrade(ctx: UpgradeContext, deps: RunDeps): Promise<Up
         `schemaVersionOk=${parity.schemaVersionOk}`,
       );
     }
-    await enter('gated_ok', 'doctor parity holds per check (D5)', {
+    const gateData = {
       regressed: [], resolved: parity.resolved.map((c) => c.name),
       newChecks: parity.newChecks.map((c) => c.name),
-      status: after.status, healthScore: after.healthScore,
-    });
+      status: parity.status, healthScore: parity.healthScore,
+    };
+    if (holdWriters) {
+      await enter('gated_ok', 'doctor parity holds per check (D5); writers held', {
+        ...gateData, writers: 'held', reason: 'blocks_resume',
+      });
+      const command = `${RESUME_WRITERS_COMMAND} ${ctx.runId}`;
+      console.log(command);
+      notes.push(command);
+      return {
+        runId: ctx.runId, fromVersion: ctx.fromVersion, toVersion: ctx.toVersion,
+        state, ok: true, rolledBack: false, notes,
+      };
+    }
+
+    await enter('gated_ok', 'doctor parity holds per check (D5)', gateData);
 
     await enter('completed', `upgraded ${ctx.fromVersion} -> ${ctx.toVersion}`, {});
     await appendEvent(journal, {
@@ -698,7 +757,11 @@ export async function statusOf(runId: string | null) {
     const events = await readJournal(UPGRADE_DIR, id).catch(() => []);
     out.push({
       runId: id, events: events.length,
-      decision: resumeFrom(events.map((e) => ({ seq: e.seq, state: e.step }))),
+      decision: resumeFrom(events.map((e) => {
+        const record: { seq: number; state: string; writers?: 'held' } = { seq: e.seq, state: e.step };
+        if (e.step === 'gated_ok' && recordData(e.data)?.writers === 'held') record.writers = 'held';
+        return record;
+      })),
     });
   }
   return out;
@@ -818,15 +881,19 @@ const CAPABILITY_SERVE_URL = process.env.CAPABILITY_SERVE_URL ?? 'http://gbrain-
  */
 async function captureCapabilityForRun(
   ctx: UpgradeContext, version: string, file: string,
+  opts: { waitForServe?: boolean; exec?: CapabilityExec } = {},
 ): Promise<CapabilitySnapshot> {
-  const exec = (service: string, argv: string[]) =>
-    shCapture([...ctx.compose, 'exec', '-T', service, ...argv], 300_000);
+  const exec: CapabilityExec = opts.exec ?? ((service, argv) =>
+    shCapture([...ctx.compose, 'exec', '-T', service, ...argv], 300_000));
   let snap = await captureCapability({ serveBaseUrl: CAPABILITY_SERVE_URL, exec });
   // gbrain-serve may still be settling after a resume; retry so the snapshot
-  // carries a real well-known reply rather than a null one.
-  for (let i = 0; i < 30 && snap.wellKnown === null; i += 1) {
-    await Bun.sleep(2_000);
-    snap = await captureCapability({ serveBaseUrl: CAPABILITY_SERVE_URL, exec });
+  // carries a real well-known reply rather than a null one. A hold leaves
+  // serve down on purpose, so waiting here would only burn the settle budget.
+  if (opts.waitForServe !== false) {
+    for (let i = 0; i < 30 && snap.wellKnown === null; i += 1) {
+      await Bun.sleep(2_000);
+      snap = await captureCapability({ serveBaseUrl: CAPABILITY_SERVE_URL, exec });
+    }
   }
   await writeFile(join(ctx.upgradeDir, file), `${JSON.stringify(snap, null, 2)}\n`);
   await appendEvent(requireJournal(ctx), {
@@ -1028,7 +1095,7 @@ async function defaultDeps(ctx: UpgradeContext): Promise<RunDeps> {
     emitOperations: (version) => emitOperations(version),
     buildImages: (c, version) => buildImages(c, version),
     recreate: (c, services) => defaultRecreate(c, services),
-    resume: (c) => resumeAtCurrentPin(c),
+    resume: (c, services) => resumeAtCurrentPin(c, services),
     captureDoctorAfter: (c) => captureDoctor(c),
     rollback: async (c, id) => {
       const r = await rollback(c, id, {
@@ -1040,6 +1107,246 @@ async function defaultDeps(ctx: UpgradeContext): Promise<RunDeps> {
       return { ok: r.ok };
     },
   };
+}
+
+/** Writers a blocksResume hold leaves down. Order is QUIESCE_ORDER; the
+ *  resume dependency starts them in reverse (restoreLane). */
+export const HELD_WRITER_SERVICES = [
+  'agent-runner', 'scheduler', 'gbrain-worker', 'gbrain-serve',
+] as const;
+
+export type ResumeWritersDeps = {
+  /**
+   * Journal root handed to readJournal and openJournal. The parameter is not
+   * the run directory: joining the run id onto the run directory nests the
+   * journal one level too deep for the reconciler.
+   */
+  journalRoot?: string;
+  /** Injected by the unit test so it does not start Docker. */
+  resume?: (services: readonly string[]) => Promise<void>;
+  /**
+   * Replaces compose exec for the post-resume capability recapture. The unit
+   * test injects it so the settle loop and the new journal event run without
+   * Docker. Absent on a host call means the real exec.
+   */
+  captureExec?: CapabilityExec;
+  /** Ops RPC for a declined item's declineOp. No shell string. */
+  applyOptOut?: (op: string, params: Record<string, string>) => Promise<void>;
+  /**
+   * Control-DB overlay. The host CLI passes this because acks land in
+   * upgrade_checklist_items, not in the journal. A caller that omits it
+   * (the unit test) reads item state from the journal alone.
+   */
+  decisions?: (runId: string) => Promise<ReadonlyArray<{ key: string; state: string }>>;
+};
+
+export type ResumeWritersReport = {
+  runId: string;
+  state: 'completed';
+  resumed: readonly string[];
+  alreadyCompleted: boolean;
+  optOutsApplied: string[];
+};
+
+type BlocksResumeItem = {
+  key: string;
+  state: 'pending' | 'acknowledged' | 'declined';
+  declineOp?: { op: string; params: Record<string, string> };
+};
+
+function recordData(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  return data as Record<string, unknown>;
+}
+
+function parseItemState(raw: unknown): BlocksResumeItem['state'] | null {
+  if (raw === 'pending' || raw === 'acknowledged' || raw === 'declined') return raw;
+  return null;
+}
+
+function parseDeclineOp(raw: unknown): BlocksResumeItem['declineOp'] | undefined {
+  const rec = recordData(raw);
+  if (!rec || typeof rec.op !== 'string' || rec.op === '') return undefined;
+  const params = recordData(rec.params);
+  if (!params) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v !== 'string') return undefined;
+    out[k] = v;
+  }
+  return { op: rec.op, params: out };
+}
+
+function blocksResumeItems(events: ReadonlyArray<{ data?: unknown }>): Map<string, BlocksResumeItem> {
+  const byKey = new Map<string, BlocksResumeItem>();
+  for (const event of events) {
+    const list = recordData(event.data)?.checklist;
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) {
+      const rec = recordData(raw);
+      if (!rec || rec.blocksResume !== true || typeof rec.key !== 'string' || rec.key === '') continue;
+      const declineOp = parseDeclineOp(rec.declineOp);
+      byKey.set(rec.key, {
+        key: rec.key,
+        state: parseItemState(rec.state) ?? 'pending',
+        ...(declineOp ? { declineOp } : {}),
+      });
+    }
+  }
+  return byKey;
+}
+
+function appliedOptOutKeys(events: ReadonlyArray<{ step: string; data?: unknown }>): Set<string> {
+  const keys = new Set<string>();
+  for (const event of events) {
+    if (event.step !== 'checklist_opt_out') continue;
+    const key = recordData(event.data)?.key;
+    if (typeof key === 'string' && key !== '') keys.add(key);
+  }
+  return keys;
+}
+
+function heldTargetVersion(events: ReadonlyArray<{ step: string; data?: unknown }>): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const data = recordData(events[i]!.data);
+    if (events[i]!.step === 'capability' && data?.file === 'capability-to.json' && typeof data.version === 'string') {
+      return data.version;
+    }
+  }
+  return process.env.GBRAIN_VERSION ?? '0.50.5.0';
+}
+
+/** Settle-loop recapture. Writes capability-to.json, then appends a new capability seq. */
+async function recaptureHeldCapability(
+  runId: string, journalRoot: string, version: string, exec?: CapabilityExec,
+): Promise<void> {
+  const ctx: UpgradeContext = {
+    ...hostContext(runId),
+    upgradeDir: join(journalRoot, runId),
+    journal: await openJournal(journalRoot, runId),
+  };
+  await captureCapabilityForRun(ctx, version, 'capability-to.json', exec ? { exec } : {});
+}
+
+function hostContext(runId: string): UpgradeContext {
+  return {
+    runId,
+    fromVersion: process.env.GBRAIN_VERSION ?? '0.50.5.0',
+    toVersion: process.env.GBRAIN_VERSION ?? '0.50.5.0',
+    dryRun: false,
+    upgradeDir: join(UPGRADE_DIR, runId),
+    envPath: '.env',
+    compose: [...COMPOSE],
+    journal: null,
+    now: () => new Date(),
+  };
+}
+
+/** Ack state for one run. runId is an argv field, never interpolated into a shell.
+ *
+ *  `:'run_id'` is psql metasyntax. `psql -c` sends the string to the server
+ *  without interpolating it (measured on psql 16.15: syntax error at `:`),
+ *  so the query is fed on stdin, where that substitution runs. */
+async function checklistStates(runId: string): Promise<Array<{ key: string; state: string }>> {
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) {
+    throw new Error(`refusing checklist query for run id '${runId}'`);
+  }
+  const r = await feedString([
+    ...COMPOSE, 'exec', '-T', 'postgres', 'psql', '-U', 'gbrain', '-d', 'control',
+    '-v', 'ON_ERROR_STOP=1', '-v', `run_id=${runId}`, '-tA',
+  ], "select coalesce(json_agg(json_build_object('key', item_key, 'state', state)), '[]') " +
+    "from upgrade_checklist_items where run_id = :'run_id';\n", 30_000);
+  if (r.exitCode !== 0) throw new Error(`checklist state query failed: ${r.stderr}`);
+  return JSON.parse(r.stdout.trim() || '[]') as Array<{ key: string; state: string }>;
+}
+
+async function applyDeclineOptOut(
+  runId: string, op: string, params: Record<string, string>,
+): Promise<void> {
+  const r = await opsRpc(hostContext(runId), op, params);
+  if (r.exitCode !== 0) throw new Error(`decline opt-out ${op} exited ${r.exitCode}`);
+}
+
+/**
+ * Finish a held gate. Does not rebuild images and does not move the pin.
+ * Refuses while any journaled blocksResume item is pending, or declined
+ * without an opt-out already applied. A declined item with declineOp has that
+ * op applied through ops RPC, then the four held writers resume and the run
+ * enters completed.
+ */
+export async function resumeWriters(
+  runId: string, deps: ResumeWritersDeps = {},
+): Promise<ResumeWritersReport> {
+  const journalRoot = deps.journalRoot ?? UPGRADE_DIR;
+  const events = (await readJournal(journalRoot, runId)).slice().sort((a, b) => a.seq - b.seq);
+  if (events.length === 0) {
+    throw new Error(`no journal for run ${runId}: refusing to resume writers without a recorded hold`);
+  }
+  const decision = resumeFrom(events.filter((e) => e.step in TRANSITIONS).map((e) => ({
+    seq: e.seq,
+    state: e.step,
+    ...(e.step === 'gated_ok' && recordData(e.data)?.writers === 'held' ? { writers: 'held' as const } : {}),
+  })));
+  if (decision.kind === 'terminal' && decision.from === 'completed') {
+    return { runId, state: 'completed', resumed: [], alreadyCompleted: true, optOutsApplied: [] };
+  }
+  if (decision.kind !== 'hold-writers') {
+    throw new Error(
+      `refusing to resume writers for ${runId}: the journal is not gated_ok with writers held`,
+    );
+  }
+
+  const items = blocksResumeItems(events);
+  if (deps.decisions) {
+    for (const row of await deps.decisions(runId)) {
+      const item = items.get(row.key);
+      const state = parseItemState(row.state);
+      if (item && state) item.state = state;
+    }
+  }
+  const applied = appliedOptOutKeys(events);
+  const optOutsApplied: string[] = [];
+  const applyOptOut = deps.applyOptOut ?? ((op, params) => applyDeclineOptOut(runId, op, params));
+  for (const item of items.values()) {
+    if (item.state === 'acknowledged') continue;
+    if (item.state === 'declined' && item.declineOp && applied.has(item.key)) continue;
+    if (item.state === 'declined' && item.declineOp) {
+      await applyOptOut(item.declineOp.op, item.declineOp.params);
+      await appendEvent(await openJournal(journalRoot, runId), {
+        step: 'checklist_opt_out',
+        message: `applied decline opt-out for ${item.key}`,
+        data: { key: item.key, op: item.declineOp.op },
+      });
+      optOutsApplied.push(item.key);
+      continue;
+    }
+    if (item.state === 'declined') {
+      throw new Error(
+        `refusing to resume writers: blocksResume item '${item.key}' was declined and has no opt-out`,
+      );
+    }
+    throw new Error(
+      `refusing to resume writers: blocksResume item '${item.key}' is still pending`,
+    );
+  }
+
+  const services = [...HELD_WRITER_SERVICES];
+  if (deps.resume) await deps.resume(services);
+  else await resumeAtCurrentPin(hostContext(runId), services);
+  // Writers, including gbrain-serve, are up. Recapture with the settle loop
+  // and a new seq: the hold-time capability-to.json has a null well-known,
+  // and reconcile will not re-import that seq if we only overwrite the file.
+  // A unit test injects resume and must also inject captureExec; otherwise
+  // this would start Docker. The host CLI injects neither.
+  if (deps.captureExec || !deps.resume) {
+    await recaptureHeldCapability(runId, journalRoot, heldTargetVersion(events), deps.captureExec);
+  }
+  await appendEvent(await openJournal(journalRoot, runId), {
+    step: 'completed',
+    message: `resumed held writers for ${runId}`,
+    data: { resumed: services },
+  });
+  return { runId, state: 'completed', resumed: services, alreadyCompleted: false, optOutsApplied };
 }
 
 if (import.meta.main) {
@@ -1070,6 +1377,14 @@ if (import.meta.main) {
           .map((p) => p.part).concat(parity.onlyInA, parity.onlyInB).join(', ')}`);
       }
       process.exit(r.ok && parity.equal ? 0 : 4);
+    }
+    if (args.cmd === 'resume-writers') {
+      // No image rebuild and no pin move. Acks live in the control DB; the
+      // journal still carries blocksResume and declineOp.
+      console.log(JSON.stringify(await resumeWriters(args.runId, {
+        decisions: (id) => checklistStates(id),
+      }), null, 2));
+      process.exit(0);
     }
     const ctx = await buildContext({ to: args.to, dryRun: args.cmd === 'plan' });
     const deps = await defaultDeps(ctx);

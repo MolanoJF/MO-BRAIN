@@ -3,7 +3,9 @@ import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 
-const VERSION = process.env.GBRAIN_VERSION ?? '0.50.0.0';
+// The live registry is the supported pin. A fixture .env or an old CI
+// injection must not point this seam at a frozen catalog.
+const VERSION = '0.60.104.0';
 
 describe('registry invariants', () => {
   test('every operation id matches its key', () => {
@@ -66,13 +68,6 @@ describe('registry invariants', () => {
   test('operations.json matches registry.ts', () => {
     const emitted = JSON.parse(readFileSync(`contracts/v${VERSION}/operations.json`, 'utf8'));
     const fromJson = Object.fromEntries(emitted.operations.map((o: any) => [o.id, o]));
-    expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
-  });
-
-  test('pinned-next operations.json is the same registry labeled 0.51.0.0', () => {
-    const emitted = JSON.parse(readFileSync('contracts/v0.51.0.0/operations.json', 'utf8'));
-    expect(emitted.gbrainVersion).toBe('0.51.0.0');
-    const fromJson = Object.fromEntries(emitted.operations.map((o: { id: string }) => [o.id, o]));
     expect(fromJson).toEqual(JSON.parse(JSON.stringify(OPERATIONS)));
   });
 

@@ -34,6 +34,10 @@ services:
       GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:-change-me-in-a-real-deployment}@postgres:5432/${GBRAIN_DB:-gbrain}
       GBRAIN_HOME: /srv/gbrain-home
       GBRAIN_SELF_UPGRADE_MODE: "off"
+      # Task 2: skips the Phase F autopilot install that `apply-migrations
+      # --yes` alone would authorize at 0.60.104.0 — same guard as the
+      # x-gbrain-env block in docker-compose.yml, kept in both compose files.
+      GBRAIN_NO_AUTOPILOT_INSTALL: "1"
       # Headless `gbrain init` must pick an embedding provider non-interactively,
       # which requires a real provider credential to be present in the container.
       # Sourced from the host env / .env, never committed. The ${VAR:-} form
