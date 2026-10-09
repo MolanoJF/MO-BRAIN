@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { ApiError, type SetRemoteBody, type SpacePush } from './api.ts';
-import { Button, Input } from './ui/index.tsx';
+import { Button, Icon, Input } from './ui/index.tsx';
 import { SettingsLink } from './ui/SettingsLink.tsx';
 
 /**
@@ -96,6 +97,7 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
   /** The wizard connects before the brain exists, so there is nothing to push yet. */
   pushOnConnect?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RemoteMode>('github');
   const [url, setUrl] = useState('');
   const [name, setName] = useState(sourceId);
@@ -137,11 +139,15 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
   const blocked = tokenInfo.stored === null || (missing && !inline);
   return (
     <div className="space-y-2">
-      <div className="text-[length:var(--control-font)] font-medium">Git remote</div>
-      {gitRemote ? (
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
+              className="flex w-full items-center gap-2 text-left text-[length:var(--control-font)]">
+        <Icon glyph={ChevronRight} size={14} className={open ? 'rotate-90 text-muted' : 'text-muted'} />
+        <span className="font-medium">Git remote</span>
+        <span className="truncate text-muted">{gitRemote ? (status ?? 'Connected') : 'Not connected'}</span>
+      </button>
+      {open && (gitRemote ? (
         <>
           <div className="text-[length:var(--control-font)] font-mono break-all">{gitRemote}</div>
-          {status && <div className="text-xs text-muted">{status}</div>}
           <div className="flex flex-wrap gap-2">
             {pushOnConnect && (
               <Button disabled={off} onClick={() => void pushNow()}>{working ? 'Working…' : 'Push now'}</Button>
@@ -187,9 +193,9 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
           </div>
           <p className="text-xs text-muted">{REMOTE_NOTICE}</p>
         </>
-      )}
-      {message && <div className="text-[length:var(--control-font)]">{message}</div>}
-      {problem && <div className="text-[length:var(--control-font)] text-danger">{problem}</div>}
+      ))}
+      {open && message && <div className="text-[length:var(--control-font)]">{message}</div>}
+      {open && problem && <div className="text-[length:var(--control-font)] text-danger">{problem}</div>}
     </div>
   );
 }
