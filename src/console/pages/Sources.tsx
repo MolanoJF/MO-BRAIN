@@ -71,6 +71,10 @@ export function renameSourceError(current: string, next: string): string | null 
   return null;
 }
 
+/** Shown when the Source being archived or removed is the member's own private Space. */
+export const PRIVATE_RETIRE_NOTE =
+  'This is your private Space, so your agent is disconnected from it too. You can create a new private Space afterwards.';
+
 /** Toggle one Space id in the list of Spaces the member's agent reads. */
 export function toggleRead(current: string[], id: string): string[] {
   return current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
@@ -311,12 +315,8 @@ function SourceRow({ src, open, onToggle, shared, agent }: {
                 <TextButton disabled={!idle} onClick={() => void backfill()}>Backfill types</TextButton>
                 <Link href={filesApi.exportUrl(src.sourceId)} download>Export</Link>
                 <TextButton disabled={!idle} onClick={() => { setName(src.name); setPending('rename'); }}>Rename</TextButton>
-                {!src.private && (
-                  <>
-                    <TextButton disabled={!idle} onClick={() => setPending('archive')}>Archive</TextButton>
-                    <TextButton danger disabled={!idle} onClick={() => void probeRemove()}>Remove</TextButton>
-                  </>
-                )}
+                <TextButton disabled={!idle} onClick={() => setPending('archive')}>Archive</TextButton>
+                <TextButton danger disabled={!idle} onClick={() => void probeRemove()}>Remove</TextButton>
               </div>
 
               {pending === null && result === null && <p className="text-xs text-muted">{BACKFILL_NOTICE}</p>}
@@ -334,6 +334,7 @@ function SourceRow({ src, open, onToggle, shared, agent }: {
               {pending === 'archive' && (
                 <Notice layout="stack">
                   <p>Archiving hides {src.name} from search and keeps its data for 72 hours.</p>
+                  {src.private && <p>{PRIVATE_RETIRE_NOTE}</p>}
                   <div className="flex gap-2">
                     <Button variant="danger" disabled={!idle} onClick={() => void archive()}>Archive {src.name}</Button>
                     <Button onClick={cancel}>Keep it</Button>
@@ -345,6 +346,7 @@ function SourceRow({ src, open, onToggle, shared, agent }: {
                 <Notice layout="stack">
                   <p className="font-medium">Remove — impact preview</p>
                   <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
+                  {src.private && <p>{PRIVATE_RETIRE_NOTE}</p>}
                   <div className="flex gap-2">
                     <Button variant="danger" disabled={!idle || !canConfirmRemove(true, removePreview)}
                             onClick={() => void confirmRemove()}>Confirm remove</Button>
@@ -441,6 +443,12 @@ export function Sources() {
     setOpen(id);
   });
 
+  const createPrivate = () => step('private', async () => {
+    await myConnectionApi.createSpace();
+    await load();
+    await reloadSources();
+  });
+
   const groups = [
     { label: 'My Brain', rows: (rows ?? []).filter((r) => r.private) },
     { label: 'Company', rows: (rows ?? []).filter((r) => !r.private) },
@@ -479,6 +487,16 @@ export function Sources() {
 
       {rows === null && !error && <p className="text-sm text-muted">Loading…</p>}
       {rows !== null && rows.length === 0 && <Empty>No Sources yet.</Empty>}
+      {rows !== null && !rows.some((r) => r.private) && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted">You don't have a private Space.</p>
+            <Button disabled={busy !== null} onClick={() => void createPrivate()}>
+              {busy === 'private' ? 'Creating…' : 'Create private Space'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {groups.map((g) => (
         <section key={g.label} className="space-y-2">

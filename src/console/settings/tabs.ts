@@ -20,7 +20,7 @@
  */
 
 export type SettingsTab =
-  | 'general' | 'sources' | 'mcp' | 'credentials' | 'schema' | 'members' | 'access' | 'schedules'
+  | 'general' | 'sources' | 'schema' | 'mcp' | 'credentials' | 'members' | 'access' | 'schedules'
   | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
@@ -47,9 +47,9 @@ export interface SettingsTabEntry {
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'general', label: 'General', minRole: 'admin' },
   { id: 'sources', label: 'Sources', minRole: 'viewer' },
+  { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'mcp', label: 'MCP', minRole: 'viewer' },
   { id: 'credentials', label: 'Credentials', minRole: 'viewer' },
-  { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
   { id: 'access', label: 'Access', minRole: 'admin', companyOnly: true },
   { id: 'schedules', label: 'Schedules', minRole: 'viewer' },

@@ -430,9 +430,12 @@ test('a member cannot add a Source or change a company Source', async () => {
   expect(await spaceRow('company-a')).toMatchObject({ name: 'Company A' });
 });
 
-test('a member manages their own private Space but cannot archive or remove it', async () => {
+test('a member manages their own private Space, and archiving it disconnects their agent', async () => {
   await insertPrivateSpace('mem-priv', 'sources-member@example.test', 'Mem');
-  opsHandler = memberOpsHandler();
+  opsHandler = (op, params) => {
+    if (op === 'sources.archive' || op === 'config.unset') return ok('');
+    return memberOpsHandler()(op);
+  };
   const rename = await hit('PATCH', '/api/sources/mem-priv', memberCookie, { name: 'My notes' });
   expect(rename.status).toBe(200);
   expect(await spaceRow('mem-priv')).toMatchObject({ name: 'My notes' });
@@ -441,13 +444,27 @@ test('a member manages their own private Space but cannot archive or remove it',
   expect(sync.status).toBe(200);
   expect((await sync.json()).total_applied).toBe(3);
 
-  for (const body of [{ mode: 'archive' }, { mode: 'remove', confirm: true }]) {
-    const res = await hit('DELETE', '/api/sources/mem-priv', memberCookie, body);
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe('private_space_permanent');
-  }
-  expect(opsCalls.filter((c) => c.op === 'sources.archive' || c.op === 'sources.remove')).toHaveLength(0);
+  const res = await hit('DELETE', '/api/sources/mem-priv', memberCookie, { mode: 'archive' });
+  expect(res.status).toBe(200);
+  expect(opsCalls.filter((c) => c.op === 'sources.archive')).toHaveLength(1);
+  expect(await spaceRow('mem-priv')).toBeNull();
+});
+
+test('removing a private Space asks for confirmation first, like any Source', async () => {
+  await insertPrivateSpace('mem-priv', 'sources-member@example.test', 'Mem');
+  opsHandler = (op) => {
+    if (op === 'sources.remove') return ok('would remove 3 pages');
+    if (op === 'config.unset') return ok('');
+    return memberOpsHandler()(op);
+  };
+  const first = await hit('DELETE', '/api/sources/mem-priv', memberCookie, { mode: 'remove' });
+  expect(first.status).toBe(409);
+  expect((await first.json()).error).toBe('confirmation_required');
   expect(await spaceRow('mem-priv')).not.toBeNull();
+
+  const confirmed = await hit('DELETE', '/api/sources/mem-priv', memberCookie, { mode: 'remove', confirm: true });
+  expect(confirmed.status).toBe(200);
+  expect(await spaceRow('mem-priv')).toBeNull();
 });
 
 test('an admin cannot manage another member\'s private Space', async () => {

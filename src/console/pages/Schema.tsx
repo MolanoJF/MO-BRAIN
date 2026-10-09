@@ -108,7 +108,6 @@ export function Schema() {
   const [pack, setPack] = useState('');
   const [lint, setLint] = useState<Lint | null>(null);
   const [preview, setPreview] = useState<Sync | null>(null);
-  const [applied, setApplied] = useState<Sync | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [builder, setBuilder] = useState<{ mode: 'new' } | { mode: 'edit'; name: string } | null>(null);
@@ -136,7 +135,7 @@ export function Schema() {
 
   // Any change to the candidate invalidates the gate: a preview of the old
   // pack must never authorize applying a different one.
-  const choose = (name: string) => { setPack(name); setLint(null); setPreview(null); setApplied(null); };
+  const choose = (name: string) => { setPack(name); setLint(null); setPreview(null); };
 
   // Expanding a pack makes it the candidate and invalidates the gate. Collapsing
   // leaves the candidate alone — the controls are only rendered while expanded.
@@ -153,7 +152,6 @@ export function Schema() {
     setPreview(null);
     await load();
   });
-  const runSync = () => step(async () => { setApplied(await api.post<Sync>('/schema/sync', {})); await load(); });
   const runScaffold = () => step(async () => setScaffold((await schemaPacksApi.scaffold()).results));
 
   if (!state) return <Empty>Loading…</Empty>;
@@ -273,16 +271,15 @@ export function Schema() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Backfill types</h2>
+        <h2 className="text-sm font-semibold">Folders</h2>
         <p className="text-sm text-muted">
-          Fills in pages that have no type yet, using the active pack's path prefixes. {ADDITIVE_NOTICE}
+          Creates the active pack's folders in every Source. To type pages that already exist, open a
+          Source in Sources and choose Backfill types.
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button disabled={busy} onClick={runSync}>Run sync</Button>
           <Button disabled={busy} onClick={runScaffold}>Create folders</Button>
         </div>
         {scaffold && <ScaffoldResults results={scaffold} />}
-        {applied && <SyncTable title={`Applied — ${applied.total_applied} page(s) typed`} report={applied} />}
       </section>
     </div>
   );

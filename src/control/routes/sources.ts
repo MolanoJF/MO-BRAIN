@@ -11,6 +11,7 @@ import { resolveSourcePacks } from './schema.ts';
 import { grantsFor } from '../grants.ts';
 import { inspectRepos } from '../opsClient.ts';
 import { canManageSpace, manageableSpace } from '../sourceAccess.ts';
+import { detachPrivateSpaceConnections } from '../privateSpaces.ts';
 import { isAdminRole } from '../zone.ts';
 
 /**
@@ -224,11 +225,6 @@ sourceRoutes.delete('/sources/:sourceId', guard('viewer', async (c, ctx) => {
   const owned = await manageableSpace(ctx, sourceId);
   if (!owned) return c.json({ error: `unknown source ${sourceId}` }, 400);
   const { space } = owned;
-  // A private Space is the write target of its owner's agent connection, and
-  // `connections.write_space_id` has no ON DELETE: gbrain would archive it and
-  // then the row delete would fail. Not retirable from here.
-  if (space.ownerMembershipId !== null) return c.json({ error: 'private_space_permanent' }, 409);
-
   const body = await c.req.json().catch(() => ({}));
   const mode = typeof body?.mode === 'string' ? body.mode : 'archive';
   if (mode !== 'archive' && mode !== 'remove') {
@@ -239,6 +235,8 @@ sourceRoutes.delete('/sources/:sourceId', guard('viewer', async (c, ctx) => {
   // ("For most workflows prefer the soft-delete path"): hide from search,
   // preserve data for 72h.
   if (mode === 'archive') {
+    // A private Space is its owner's agent write target: disconnect the agent first.
+    if (space.ownerMembershipId !== null) await detachPrivateSpaceConnections(space.id, userId);
     const archived = await archiveSpace(space);
     if (!archived.ok) {
       return c.json({ error: `sources archive failed (exit ${archived.exitCode})`, detail: archived.stderr }, 400);
@@ -271,6 +269,7 @@ sourceRoutes.delete('/sources/:sourceId', guard('viewer', async (c, ctx) => {
 
   // Preview first (captured for the receipt), THEN the destructive call.
   const preview = await callOps('sources.remove', { id: sourceId, dryRun: true }, { timeoutMs: 120_000 });
+  if (space.ownerMembershipId !== null) await detachPrivateSpaceConnections(space.id, userId);
   const r = await callOps('sources.remove', { id: sourceId, confirmDestructive: true }, { timeoutMs: 300_000 });
   if (!r.ok) {
     return c.json({

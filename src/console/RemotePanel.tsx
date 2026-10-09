@@ -99,7 +99,6 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
   const [mode, setMode] = useState<RemoteMode>('github');
   const [url, setUrl] = useState('');
   const [name, setName] = useState(sourceId);
-  const [owner, setOwner] = useState('');
   const [token, setToken] = useState('');
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -121,7 +120,7 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
     const push = pushOnConnect ? {} : { push: false };
     const r = await api.set(mode === 'url'
       ? { mode, url: url.trim(), ...push }
-      : { mode, name: name.trim(), ...(owner.trim() ? { owner: owner.trim() } : {}), ...push });
+      : { mode, name: name.trim(), ...push });
     return `${r.created ? `Created ${r.created}. ` : ''}${pushText(r.push)}`;
   });
 
@@ -161,17 +160,6 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
             <Button variant={mode === 'url' ? 'primary' : undefined} disabled={off}
                     onClick={() => setMode('url')}>Add existing repo</Button>
           </div>
-          {mode === 'url' ? (
-            <Input placeholder="https://github.com/you/brain.git" value={url}
-                   onChange={(e) => setUrl(e.target.value)} />
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Input className="max-w-xs" placeholder="Repository name" value={name}
-                     onChange={(e) => setName(e.target.value)} />
-              <Input className="max-w-xs" placeholder="Owner (default: the token's account)" value={owner}
-                     onChange={(e) => setOwner(e.target.value)} />
-            </div>
-          )}
           {stored && <p className="text-xs text-muted">{tokenSourceText(tokenInfo.scope)}</p>}
           {missing && !inline && (
             <p className="text-xs text-muted">
@@ -183,11 +171,20 @@ export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged,
                    placeholder="GitHub token (repo scope)"
                    onChange={(e) => setToken(e.target.value)} />
           )}
-          <Button variant="primary"
-                  disabled={off || blocked || !canSetRemote(mode, { url, name, token, tokenStored: stored })}
-                  onClick={() => void connect()}>
-            {working ? 'Connecting…' : mode === 'github' ? 'Create private repo and push' : 'Connect and push'}
-          </Button>
+          <div className="flex gap-2">
+            {mode === 'url' ? (
+              <Input className="min-w-0 flex-1" placeholder="https://github.com/you/brain.git" value={url}
+                     onChange={(e) => setUrl(e.target.value)} />
+            ) : (
+              <Input className="min-w-0 flex-1" placeholder="Repository name" value={name}
+                     onChange={(e) => setName(e.target.value)} />
+            )}
+            <Button variant="primary" className="shrink-0"
+                    disabled={off || blocked || !canSetRemote(mode, { url, name, token, tokenStored: stored })}
+                    onClick={() => void connect()}>
+              {working ? 'Connecting…' : mode === 'github' ? 'Create private repo and push' : 'Connect and push'}
+            </Button>
+          </div>
           <p className="text-xs text-muted">{REMOTE_NOTICE}</p>
         </>
       )}

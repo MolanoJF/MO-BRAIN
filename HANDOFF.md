@@ -39,7 +39,7 @@ Zones a caller can rely on:
 - Company Space access is an explicit `space_grants` row. Personal mode refuses invites and grants with `403 { error: "company_mode_required" }`.
 - An invite creates a placeholder account. The claim page sets a password only on that placeholder.
 - Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. Admin Spend collapses that member's personal automations to one row.
-- The Space picker groups My Brain and Company. Settings → Sources is one tab for every role: your private Space and the company Sources shared with you, with schema, git remote and maintenance behind each row (`canManage` from `GET /api/sources` decides what a row offers; a private Space can't be archived or removed). Admins and owners add Sources there in any mode. A member chooses which granted company Sources their agent reads with the row's Agent reads switch.
+- The Space picker groups My Brain and Company. Settings → Sources is one tab for every role: your private Space and the company Sources shared with you, with schema, git remote and maintenance behind each row (`canManage` from `GET /api/sources` decides what a row offers; archiving or removing a private Space also revokes and deletes its agent connection, the way offboarding does, and the member can provision a new one). Admins and owners add Sources there in any mode. A member chooses which granted company Sources their agent reads with the row's Agent reads switch.
 
 **Not built:** hosted sandboxes (§5.4). Per-member budget caps were deferred with them.
 

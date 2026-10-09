@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb, schema } from './db/client.ts';
-import { provisionConnection } from './connections.ts';
+import { provisionConnection, revokeConnection } from './connections.ts';
 import { callOps, seedSpace } from './opsClient.ts';
 import type { Role } from './rbac.ts';
 
@@ -254,4 +254,30 @@ function isUniqueViolation(e: unknown): boolean {
   const err = e as { code?: string; errno?: string; cause?: { code?: string; errno?: string } };
   const code = err.errno ?? err.code ?? err.cause?.errno ?? err.cause?.code;
   return code === '23505';
+}
+
+/**
+ * Detach everything that writes to a private Space so it can be archived or
+ * removed: its schedules (and their alerts), then its connections, revoked in
+ * gbrain and deleted (`connections.write_space_id` has no ON DELETE). The same
+ * sequence member offboarding runs. The member keeps their membership and can
+ * provision a fresh private Space afterwards.
+ */
+export async function detachPrivateSpaceConnections(spaceId: string, actor: string): Promise<number> {
+  const conns = await getDb().select({ id: schema.connections.id }).from(schema.connections)
+    .where(eq(schema.connections.writeSpaceId, spaceId));
+  const ids = conns.map((c) => c.id);
+  if (ids.length === 0) return 0;
+
+  const scheds = await getDb().select({ id: schema.schedules.id }).from(schema.schedules)
+    .where(inArray(schema.schedules.connectionId, ids));
+  const schedIds = scheds.map((x) => x.id);
+  if (schedIds.length > 0) {
+    await getDb().delete(schema.scheduleAlerts).where(inArray(schema.scheduleAlerts.scheduleId, schedIds));
+    await getDb().delete(schema.heldNotifications).where(inArray(schema.heldNotifications.scheduleId, schedIds));
+    await getDb().delete(schema.schedules).where(inArray(schema.schedules.id, schedIds));
+  }
+  for (const id of ids) await revokeConnection(id, actor);
+  await getDb().delete(schema.connections).where(inArray(schema.connections.id, ids));
+  return ids.length;
 }

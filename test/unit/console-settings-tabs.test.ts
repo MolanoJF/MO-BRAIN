@@ -14,11 +14,11 @@ describe('the registry: thirteen tabs, in the deliberate menu order', () => {
   test('all thirteen ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
-    // mcp sits directly under Sources, for every role, in either mode.
+    // mcp follows Sources for a member, and Schema for an admin, in either mode.
     // appearance sits LAST for a mechanical reason, asserted below: the first
     // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      'general', 'sources', 'mcp', 'credentials', 'schema', 'members', 'access', 'schedules',
+      'general', 'sources', 'schema', 'mcp', 'credentials', 'members', 'access', 'schedules',
       'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
     expect(SETTINGS_TABS).toHaveLength(13);

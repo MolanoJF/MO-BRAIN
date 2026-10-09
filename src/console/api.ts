@@ -313,7 +313,7 @@ export type SourceSummary = {
   inGbrain: boolean;
   /** Token-free https URL of the Space's git remote, or null when it has none. */
   gitRemote: string | null;
-  /** A member's own private Space. It can't be archived or removed. */
+  /** A member's own private Space. Archiving or removing it also disconnects their agent. */
   private: boolean;
   /** The caller may change this Source: its owner (private), or an admin (company). */
   canManage: boolean;
@@ -946,6 +946,8 @@ export type MyConnection = {
 
 export const myConnectionApi = {
   get: () => api.get<MyConnection>('/my/connection'),
+  /** Provisions a fresh private Space and agent connection; 409 when one is already active. */
+  createSpace: () => api.post<{ ok: true; sourceId: string }>('/private-space', {}),
   /** Renames the private Space's display name only; its gbrain source id never changes. */
   renameSpace: (name: string) => api.patch<{ ok: true; sourceId: string; name: string }>('/my/space', { name }),
   setReads: (readSpaceIds: string[]) => api.put<{ ok: true; readSpaceIds: string[] }>('/my/connection', { readSpaceIds }),
