@@ -75,3 +75,14 @@ export async function createGithubRepo(args: {
   if (repo.private !== true) throw new Error(`GitHub created ${repo.full_name} but it is not private; refusing to use it.`);
   return { cloneUrl: repo.clone_url, fullName: repo.full_name };
 }
+
+/**
+ * Check a GitHub token with `GET /user`. Returns the login it belongs to;
+ * throws GitHub's own reason (never the token) when it is refused.
+ */
+export async function validateGithubToken(token: string): Promise<{ login: string }> {
+  const r = await gh(token, '/user');
+  if (!r.ok) throw new Error(`GitHub rejected this token. ${await failure(r)}`);
+  const login = ((await r.json().catch(() => null)) as { login?: string } | null)?.login;
+  return { login: login ?? '' };
+}

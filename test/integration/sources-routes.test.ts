@@ -48,6 +48,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitTree: async () => ({ sourceId: '', root: '', entries: [] }),
   gitExportBundle: async () => new Response(null),
   gitReadFile: async () => ({ content: '', sha: '', size: 0 }),
+  gitSetRemote: async () => ({ configured: true }),
+  gitClearRemote: async () => ({ removed: true }),
   gitWriteFile: async () => ({ committed: true, sha: 'written-sha' }),
 }));
 
@@ -169,6 +171,7 @@ test('GET /sources joins live gbrain counts and flags an unregistered source', a
         sources: [
           { id: 'customers', name: 'Customers', local_path: '/srv/brain-repos/customers', federated: true, page_count: 7, last_sync_at: '2026-09-17T06:12:52.152Z' },
           { id: 'legacy', name: 'Legacy', local_path: null, federated: false, page_count: 2, last_sync_at: null },
+          { id: 'default', name: 'default', local_path: null, federated: true, page_count: 0, last_sync_at: null },
         ],
       });
     }
@@ -187,8 +190,83 @@ test('GET /sources joins live gbrain counts and flags an unregistered source', a
     lastSyncAt: '2026-09-17T06:12:52.152Z', federated: true, inGbrain: true,
     pack: 'gbrain-base-v2', tier: 'home-config', inherited: true,
   });
+  expect(customers.private).toBe(false);
   expect(body.unregistered).toEqual(['legacy']);
+  expect(body.builtinDefault).toBeNull();
   expect(body.sourcesListOk).toBe(true);
+});
+
+const listWithDefault = (pageCount: number | null) => (op: string) => {
+  if (op === 'sources.list') {
+    return ok('', {
+      sources: [
+        { id: 'customers', name: 'Customers', local_path: null, federated: true, page_count: 1, last_sync_at: null },
+        { id: 'default', name: 'default', local_path: null, federated: true, page_count: pageCount, last_sync_at: null },
+      ],
+    });
+  }
+  if (op === 'config.get') return fail(1, 'Config key not found');
+  if (op === 'schema.active') return ok(ACTIVE('gbrain-base-v2'));
+  if (op === 'schema.show') return ok('', showJson(19, 17));
+  throw new Error(`unexpected op ${op}`);
+};
+
+test('GET /sources reports the built-in default source with pages as builtinDefault, not unregistered', async () => {
+  await insertSpace('customers', 'Customers');
+  opsHandler = listWithDefault(12);
+  const body = await (await hit('GET', '/api/sources', ownerCookie)).json();
+  expect(body.builtinDefault).toEqual({ pageCount: 12 });
+  expect(body.unregistered).toEqual([]);
+  expect(body.sources.map((s: any) => s.sourceId)).toEqual(['customers']);
+});
+
+test('GET /sources treats a null default page_count as empty', async () => {
+  await insertSpace('customers', 'Customers');
+  opsHandler = listWithDefault(null);
+  const body = await (await hit('GET', '/api/sources', ownerCookie)).json();
+  expect(body.builtinDefault).toBeNull();
+  expect(body.unregistered).toEqual([]);
+});
+
+const membershipIdOf = async (email: string) => {
+  const [row] = await getDb().select({ id: schema.memberships.id }).from(schema.memberships)
+    .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+    .where(eq(schema.users.email, email));
+  return row!.id;
+};
+
+async function insertPrivateSpace(sourceId: string, ownerEmail: string, name = sourceId) {
+  await getDb().insert(schema.spaces).values({
+    id: randomUUID(), organizationId: orgId, sourceId, name,
+    kind: 'local-git', localPath: `/srv/brain-repos/${sourceId}`,
+    ownerMembershipId: await membershipIdOf(ownerEmail),
+  });
+}
+
+test('GET /sources marks the caller\'s own private Space as private', async () => {
+  await insertSpace('customers', 'Customers');
+  await insertPrivateSpace('mine-priv', 'sources-owner@example.test', 'Mine');
+  opsHandler = (op) => {
+    if (op === 'sources.list') return ok('', { sources: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    if (op === 'schema.active') return ok(ACTIVE('gbrain-base-v2'));
+    if (op === 'schema.show') return ok('', showJson(19, 17));
+    throw new Error(`unexpected op ${op}`);
+  };
+  const body = await (await hit('GET', '/api/sources', ownerCookie)).json();
+  const flags = Object.fromEntries(body.sources.map((s: any) => [s.sourceId, s.private]));
+  expect(flags).toEqual({ customers: false, 'mine-priv': true });
+});
+
+test('PATCH /sources/:sourceId on a private Space renames spaces.name only, no gbrain rename', async () => {
+  await insertPrivateSpace('mine-priv', 'sources-owner@example.test', 'Mine');
+  opsHandler = () => { throw new Error('must not reach gbrain'); };
+  const res = await hit('PATCH', '/api/sources/mine-priv', ownerCookie, { name: '  Renamed  ' });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, sourceId: 'mine-priv', name: 'Renamed' });
+  expect(opsCalls.filter((c) => c.op === 'sources.rename')).toHaveLength(0);
+  expect(await spaceRow('mine-priv')).toMatchObject({ name: 'Renamed' });
+  expect((await lastAudit())?.action).toBe('source.rename');
 });
 
 test('GET /sources reports null counts when sources.list fails, never 0', async () => {

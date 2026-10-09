@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
-import { api, sourcesApi, type PackCreateResult } from '../api.ts';
+import { api, credentialsApi, sourcesApi, type PackCreateResult } from '../api.ts';
 import { RemotePanel } from '../RemotePanel.tsx';
 import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { Button, Empty, Icon, Input, Notice } from '../ui/index.tsx';
@@ -41,6 +41,12 @@ export function Wizard({ onReady }: { onReady: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [folderProblems, setFolderProblems] = useState<string[]>([]);
+  // The wizard runs before the shell, so Settings is unreachable: the remote panel takes the
+  // token inline and stores it as the member's own (at setup the brain is personal).
+  const [memberToken, setMemberToken] = useState<boolean | null>(null);
+  const loadToken = () => credentialsApi.status()
+    .then((c) => setMemberToken(c.github.member.configured)).catch(() => setMemberToken(false));
+  useEffect(() => { void loadToken(); }, []);
 
   const load = async () => setState(await api.get<State>('/wizard/state'));
   useEffect(() => { void load(); }, []);
@@ -147,7 +153,11 @@ export function Wizard({ onReady }: { onReady: () => void }) {
               push: () => sourcesApi.pushRemote(state.spaces[0]!.sourceId),
               clear: () => sourcesApi.clearRemote(state.spaces[0]!.sourceId),
             }}
-            onChanged={load}
+            onChanged={async () => { await load(); await loadToken(); }}
+            token={{
+              stored: memberToken, scope: 'member',
+              save: async (t) => { await credentialsApi.setGithub('member', t); setMemberToken(true); },
+            }}
           />
         </section>
       )}
@@ -187,6 +197,7 @@ function ProviderStep({ busy, onSubmit }: { busy: boolean; onSubmit: (b: unknown
       <h2 className="font-medium">Connect a model provider</h2>
       <p className="text-sm text-muted">
         Stored encrypted. It is written to the brain's config file, never to its database.
+        You can change this later in Settings → Credentials.
       </p>
       <Input className="font-mono" type="password" placeholder="sk-…"
              value={apiKey} onChange={(e) => setApiKey(e.target.value)} />

@@ -42,6 +42,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---
   brainUsage: async () => { throw new Error('ops unreachable'); },
   seedSpace: async () => {},
+  gitSetRemote: async (r: { url: string }) => ({ url: r.url, branch: 'main' }),
+  gitClearRemote: async () => ({ removed: true }),
   resetBrainSchema: async () => {},
   pauseBrainWriters: async () => {},
   resumeBrainWriters: async () => {},

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, filesApi, type SpaceSummary } from './api.ts';
 
 /**
@@ -57,6 +57,23 @@ export function pickSource(
  * than a console that simply forgets your Source, so a failed read returns
  * `null` (read as "no preference") and a failed write is swallowed.
  */
+/**
+ * After a reload the selection stays put if it still exists; otherwise it is
+ * re-picked with the same rule as the first load (URL, remembered, first).
+ */
+export function pickAfterReload(
+  spaces: SpaceSummary[],
+  currentId: string | null,
+  fromUrl: string | null,
+  remembered: string | null,
+): SpaceSummary | null {
+  if (currentId !== null) {
+    const kept = spaces.find((s) => s.sourceId === currentId);
+    if (kept) return kept;
+  }
+  return pickSource(spaces, fromUrl, remembered);
+}
+
 export function readRememberedSource(): string | null {
   try {
     return localStorage.getItem(REMEMBERED_KEY);
@@ -80,6 +97,8 @@ type SourceState = {
   setCurrent: (sourceId: string) => void;
   loading: boolean;
   error: string | null;
+  /** Re-reads the Source list (after a rename, say) without losing the selection. */
+  reload: () => Promise<void>;
 };
 
 const Ctx = createContext<SourceState | null>(null);
@@ -102,40 +121,44 @@ export function SourceProvider({
 }) {
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  // `reload` is called from stale closures (page handlers), so it reads the live id from a ref.
+  const currentIdRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const reload = async () => {
+    try {
+      const body = await filesApi.list();
+      setSpaces(body.spaces);
+      const picked = pickAfterReload(body.spaces, currentIdRef.current, fromUrl, readRememberedSource());
+      currentIdRef.current = picked?.sourceId ?? null;
+      setCurrentId(picked?.sourceId ?? null);
+      rememberSource(picked?.sourceId ?? null);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not load Sources.');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
-    void filesApi.list()
-      .then((body) => {
-        if (cancelled) return;
-        setSpaces(body.spaces);
-        const picked = pickSource(body.spaces, fromUrl, readRememberedSource());
-        setCurrentId(picked?.sourceId ?? null);
-        rememberSource(picked?.sourceId ?? null);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof ApiError ? e.message : 'Could not load Sources.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    void reload().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setCurrent = (sourceId: string) => {
+    currentIdRef.current = sourceId;
     setCurrentId(sourceId);
     rememberSource(sourceId);
   };
 
   const current = spaces.find((s) => s.sourceId === currentId) ?? null;
 
-  return <Ctx.Provider value={{ spaces, current, setCurrent, loading, error }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ spaces, current, setCurrent, loading, error, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useSource(): SourceState {

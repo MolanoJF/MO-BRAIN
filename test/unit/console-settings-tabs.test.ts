@@ -10,18 +10,18 @@ import {
  * blank panel.
  */
 
-describe('the registry: thirteen tabs, in the deliberate menu order', () => {
-  test('all thirteen ids appear, in the order the product owner asked for', () => {
+describe('the registry: fourteen tabs, in the deliberate menu order', () => {
+  test('all fourteen ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
     // mcp sits directly under My Brain, for every role, in either mode.
     // appearance sits LAST for a mechanical reason, asserted below: the first
     // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      'general', 'mine', 'mcp', 'sources', 'schema', 'members', 'access', 'schedules',
+      'general', 'mine', 'mcp', 'credentials', 'sources', 'schema', 'members', 'access', 'schedules',
       'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
-    expect(SETTINGS_TABS).toHaveLength(13);
+    expect(SETTINGS_TABS).toHaveLength(14);
   });
 
   test('minRole matches the design doc\'s table exactly', () => {
@@ -30,6 +30,7 @@ describe('the registry: thirteen tabs, in the deliberate menu order', () => {
       general: 'admin',
       mine: 'viewer',
       mcp: 'viewer',
+      credentials: 'viewer',
       sources: 'admin', schema: 'admin', members: 'admin', access: 'admin',
       schedules: 'viewer', health: 'viewer', spend: 'admin', runs: 'viewer',
       upgrades: 'viewer', appearance: 'viewer',
@@ -38,15 +39,15 @@ describe('the registry: thirteen tabs, in the deliberate menu order', () => {
 });
 
 describe('visibleTabs: role-gated menu contents', () => {
-  test('an admin sees all thirteen tabs, in registry order', () => {
-    expect(visibleTabs(true)).toHaveLength(13);
+  test('an admin sees all fourteen tabs, in registry order', () => {
+    expect(visibleTabs(true)).toHaveLength(14);
     expect(visibleTabs(true).map((t) => t.id)).toEqual(SETTINGS_TABS.map((t) => t.id));
   });
 
-  test('a non-admin sees exactly the seven viewer tabs, in order', () => {
+  test('a non-admin sees exactly the eight viewer tabs, in order', () => {
     // mcp is the tab a member's list gains, immediately after mine.
     expect(visibleTabs(false).map((t) => t.id)).toEqual([
-      'mine', 'mcp', 'schedules', 'health', 'runs', 'upgrades', 'appearance',
+      'mine', 'mcp', 'credentials', 'schedules', 'health', 'runs', 'upgrades', 'appearance',
     ]);
   });
 

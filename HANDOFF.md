@@ -29,6 +29,7 @@ Not a release. Not in the published `1.0.0` images.
 - Schema-pack management and custom packs.
 - Private member Spaces, the autopilot tripwire, member agent skills over MCP, and Space git-bundle export.
 - Zones 5.1–5.3: personal-and-company zones, privacy, personal-first, invite login.
+- Console: Settings → Credentials tab (GitHub tokens per member and per company, admin model-provider keys; git remotes reuse the stored token), sidebar account row at the bottom, per-Source export, Source and private-Space rename, and `default` source filtering.
 - Optional Google sign-in when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. Email and password stay.
 
 Zones a caller can rely on:

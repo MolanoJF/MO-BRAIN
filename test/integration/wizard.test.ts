@@ -125,6 +125,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
   },
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
+  gitSetRemote: async (r: { url: string }) => ({ url: r.url, branch: 'main' }),
+  gitClearRemote: async () => ({ removed: true }),
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; finishOrder.push('reset'); },
   pauseBrainWriters: async () => { finishOrder.push('pause'); },
   resumeBrainWriters: async () => { finishOrder.push('resume'); },

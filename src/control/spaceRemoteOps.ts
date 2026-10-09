@@ -14,8 +14,13 @@ import { getDb, schema } from './db/client.ts';
 import { callOps, gitClearRemote, gitSetRemote } from './opsClient.ts';
 import { storeSecret } from './secrets.ts';
 import { createGithubRepo } from './spaceRemote.ts';
+import { resolveGithubToken } from './credentials.ts';
 
-export type RemoteSpace = { id: string; sourceId: string; name: string; gitRemote: string | null };
+export type RemoteSpace = {
+  id: string; sourceId: string; name: string; gitRemote: string | null;
+  /** Decides which stored GitHub token applies; looked up by id when the caller did not select it. */
+  ownerMembershipId?: string | null;
+};
 export type RemoteResult = { status: number; body: object };
 
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
@@ -48,8 +53,18 @@ export async function connectRemote(
   ctx: { userId: string; orgId: string }, space: RemoteSpace, body: any,
 ): Promise<RemoteResult> {
   const { userId, orgId } = ctx;
-  const token = typeof body?.token === 'string' ? body.token.trim() : '';
-  if (!token) return { status: 400, body: { error: 'An access token is required.' } };
+  // An explicit token is the legacy per-remote path. Without one, the stored
+  // GitHub token for this Space's scope (Settings -> Credentials) is used.
+  const explicit = typeof body?.token === 'string' ? body.token.trim() : '';
+  let ownerMembershipId = space.ownerMembershipId;
+  if (ownerMembershipId === undefined) {
+    const [row] = await getDb().select({ owner: schema.spaces.ownerMembershipId }).from(schema.spaces)
+      .where(eq(schema.spaces.id, space.id));
+    ownerMembershipId = row?.owner ?? null;
+  }
+  const resolved = await resolveGithubToken({ orgId, space: { ownerMembershipId }, explicitToken: explicit });
+  if (!resolved) return { status: 400, body: { error: 'github_token_missing' } };
+  const { token } = resolved;
 
   let url: string;
   let created: string | null = null;
@@ -78,8 +93,9 @@ export async function connectRemote(
     return { status: 400, body: { error: scrub(e?.message ?? 'remote_error', token), ...(created ? { created } : {}) } };
   }
 
-  const secretName = remoteSecretName(space.sourceId);
-  await storeSecret(orgId, secretName, token);
+  // A shared token is referenced, never copied into a per-remote secret.
+  const secretName = resolved.secretName ?? remoteSecretName(space.sourceId);
+  if (!resolved.secretName) await storeSecret(orgId, secretName, token);
   await getDb().update(schema.spaces)
     .set({ gitRemote: set.url, kind: 'remote-git', deployKeySecretId: secretName })
     .where(eq(schema.spaces.id, space.id));

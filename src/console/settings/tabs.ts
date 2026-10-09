@@ -20,7 +20,7 @@
  */
 
 export type SettingsTab =
-  | 'general' | 'mine' | 'mcp' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
+  | 'general' | 'mine' | 'mcp' | 'credentials' | 'sources' | 'schema' | 'members' | 'access' | 'schedules'
   | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
 
 export type SettingsTabRole = 'admin' | 'viewer';
@@ -36,6 +36,7 @@ export interface SettingsTabEntry {
 /**
  * Registry order = menu order, and it is deliberate: `schedules` sits right
  * after `access`, not at the end, per the product owner's requested layout.
+ * `credentials` sits right after `mcp`: both are per-member connection setup.
  *
  * `appearance` goes LAST, and that position is load-bearing rather than
  * aesthetic: `resolveTab(null, isAdmin)` returns the first visible tab, so
@@ -47,6 +48,7 @@ export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'general', label: 'General', minRole: 'admin' },
   { id: 'mine', label: 'My Brain', minRole: 'viewer' },
   { id: 'mcp', label: 'MCP', minRole: 'viewer' },
+  { id: 'credentials', label: 'Credentials', minRole: 'viewer' },
   { id: 'sources', label: 'Sources', minRole: 'admin' },
   { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
@@ -63,7 +65,7 @@ const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t
 
 /**
  * The tabs a caller may see. An admin in company mode (the default) sees all
- * thirteen; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
+ * fourteen; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
  * rather than shown-and-disabled — there is no locked/greyed state to design
  * for, because a member never sees the tab exists. Personal mode additionally
  * hides `companyOnly` tabs.

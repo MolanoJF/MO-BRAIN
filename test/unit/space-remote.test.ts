@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createGithubRepo, githubRepoError } from '../../src/control/spaceRemote.ts';
 import { canSetRemote, pushText, remoteError } from '../../src/console/pages/Sources.tsx';
+import { TOKEN_MISSING_TEXT, tokenSourceText } from '../../src/console/RemotePanel.tsx';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -83,6 +84,20 @@ describe('console remote form', () => {
     expect(canSetRemote('github', f)).toBe(true);
     expect(canSetRemote('github', { ...f, token: ' ' })).toBe(false);
     expect(canSetRemote('github', { ...f, name: 'a b' })).toBe(false);
+  });
+
+  test('a token is only required when none is stored', () => {
+    expect(canSetRemote('github', { ...f, token: '', tokenStored: true })).toBe(true);
+    expect(canSetRemote('github', { ...f, token: '', tokenStored: false })).toBe(false);
+    expect(remoteError('github', { ...f, token: '' })).toBe(TOKEN_MISSING_TEXT);
+    expect(remoteError('url', { ...f, url: 'https://github.com/a/b.git', token: '', tokenStored: true })).toBeNull();
+    // A stored token does not excuse a bad repository name.
+    expect(canSetRemote('github', { ...f, token: '', tokenStored: true, name: 'a b' })).toBe(false);
+  });
+
+  test('the token source line names the right Settings token', () => {
+    expect(tokenSourceText('member')).toMatch(/your GitHub token.*Settings → Credentials/);
+    expect(tokenSourceText('org')).toMatch(/company GitHub token/);
   });
 
   test('url mode refuses non-https and credentials in the URL', () => {
