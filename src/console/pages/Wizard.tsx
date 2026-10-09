@@ -67,7 +67,7 @@ function KeyStep({ onBack, onSaved }: { onBack: () => void; onSaved: () => Promi
   };
 
   return (
-    <OnboardingCard step={2} onBack={onBack} title="Add your OpenAI key"
+    <OnboardingCard onBack={onBack} title="Add your OpenAI key"
       subtitle={<>
         Stored encrypted and used for embeddings and search. Get one at{' '}
         <a className="underline" href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
@@ -134,7 +134,7 @@ function ReadyStep({ onBack, onReady }: { onBack: () => void; onReady: () => voi
 
   if (folderProblems.length > 0) {
     return (
-      <OnboardingCard step={3} title="Your brain is ready">
+      <OnboardingCard title="Your brain is ready">
         <Notice tone="warning" layout="stack">
           <p className="font-medium">Its folders were not created.</p>
           {folderProblems.map((p) => <p key={p} className="text-sm font-mono">{p}</p>)}
@@ -147,7 +147,7 @@ function ReadyStep({ onBack, onReady }: { onBack: () => void; onReady: () => voi
 
   if (running) {
     return (
-      <OnboardingCard step={3} title="Creating your brain">
+      <OnboardingCard title="Creating your brain">
         <ul className="space-y-3" aria-live="polite">
           <Row state={phase === 'prepare' ? 'active' : 'done'}>Setting up your private space</Row>
           <Row state={phase === 'finish' ? 'active' : 'todo'}>
@@ -159,7 +159,7 @@ function ReadyStep({ onBack, onReady }: { onBack: () => void; onReady: () => voi
   }
 
   return (
-    <OnboardingCard step={3} onBack={onBack} title="Your brain is ready to create"
+    <OnboardingCard onBack={onBack} title="Your brain is ready to create"
       subtitle="Change any of these later in Settings."
       foot={<Button variant="primary" onClick={() => void create()}>{error ? 'Try again' : 'Create brain'}</Button>}>
       <ul className="space-y-1 text-sm">

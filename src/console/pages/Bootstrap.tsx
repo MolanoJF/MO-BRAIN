@@ -72,7 +72,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
 
   if (googleSession) {
     return (
-      <OnboardingCard step={1} title="Name this brain's organization"
+      <OnboardingCard title="Name this brain's organization"
         subtitle={`Signed in as ${googleSession.email}. This name is shown to everyone you invite later.`}>
         <form onSubmit={submitForSession} className="space-y-4">
           <Input placeholder="Organization name" value={orgName}
@@ -92,7 +92,7 @@ export function Bootstrap({ onDone, onSignIn }: { onDone: () => void; onSignIn: 
   }
 
   return (
-    <OnboardingCard step={1} title="Create your account"
+    <OnboardingCard title="Create your account"
       subtitle="This sets up your own private brain. You can turn it into a company brain later in Settings.">
       <form onSubmit={submit} className="space-y-4">
         {/* `Input`, not `Field`: these controls have only ever had placeholders. */}
