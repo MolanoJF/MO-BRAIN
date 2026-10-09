@@ -21,6 +21,7 @@ import { requireRole, type Role } from '../rbac.ts';
 import { accessFromGrants, spaceAccess } from '../spaceAccess.ts';
 import { grantsFor } from '../grants.ts';
 import { callerFor, canSeeZone } from '../zone.ts';
+import { manageableSpace } from '../sourceAccess.ts';
 import { callOps, gitExportBundle, gitReadFile, gitTree, gitWriteFile } from '../opsClient.ts';
 
 export const fileRoutes = new Hono();
@@ -121,16 +122,15 @@ fileRoutes.get('/spaces/:sourceId/files', guard('viewer', async (c, ctx) => {
 
 // The export — the full git repo (every ref, every commit) as a `.bundle` a
 // member can `git clone` locally and later push to a remote of their own.
-// `admin`, not `viewer`: a bundle hands over the whole history at once,
-// including anything a since-deleted page's commits still carry, so this is
-// stricter than the read-only browse above rather than reusing `readGate`.
+// Whoever may MANAGE the Space (`canManageSpace`): its owner for a private
+// Space, an admin for a company one. A bundle hands over the whole history at
+// once, including anything a since-deleted page's commits still carry, so this
+// is stricter than the read-only browse above rather than reusing `readGate`.
 // Someone else's personal Space is the same 404 as a missing Space.
-// `canSeeZone` does not let admin/owner through.
-fileRoutes.get('/spaces/:sourceId/export', guard('admin', async (c, ctx) => {
+fileRoutes.get('/spaces/:sourceId/export', guard('viewer', async (c, ctx) => {
   const sourceId = c.req.param('sourceId') ?? '';
-  const caller = await callerFor(ctx);
-  const space = await spaceFor(caller.orgId, sourceId);
-  if (!space || !canSeeZone(caller, space)) return c.json({ error: 'space_not_found' }, 404);
+  const space = (await manageableSpace(ctx, sourceId))?.space;
+  if (!space) return c.json({ error: 'space_not_found' }, 404);
 
   const upstream = await gitExportBundle(space.sourceId);
   if (!upstream.ok) {

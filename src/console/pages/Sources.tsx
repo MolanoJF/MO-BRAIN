@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import {
-  ApiError, credentialsApi, filesApi, schemaPacksApi, sourcesApi,
-  type PackDetail, type SchemaSync, type SourceSummary,
+  ApiError, credentialsApi, filesApi, myConnectionApi, schemaPacksApi, sourcesApi,
+  type MyConnection, type PackDetail, type SourceSummary,
 } from '../api.ts';
-import { Button, Card, Empty, Input, Link, Notice, PageTitle, Select } from '../ui/index.tsx';
-import { SettingsLink } from '../ui/SettingsLink.tsx';
+import { Badge, Button, Card, Empty, Icon, Input, Link, Notice, PageTitle, Select } from '../ui/index.tsx';
 import { useOrg } from '../OrgContext.tsx';
 import { useSource } from '../SourceContext.tsx';
 import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
-import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
+import { inheritanceNote } from './Schema.tsx';
 
 /* -------------------------------------------------------------------------
  * Pure helpers. Exported so test/unit/console-sources.test.ts can assert the
@@ -71,20 +71,35 @@ export function renameSourceError(current: string, next: string): string | null 
   return null;
 }
 
+/** Toggle one Space id in the list of Spaces the member's agent reads. */
+export function toggleRead(current: string[], id: string): string[] {
+  return current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+}
+
 /**
- * Private rows are the member's own Space: rename and git remote live under My
- * Brain, so the Sources card shows a pointer instead of those controls. Export
- * and archive stay for every row.
+ * A source id from a display name, for the one-field "New source" form. Never
+ * collides with `taken`, and always satisfies `SOURCE_ID`; `null` when the name
+ * has no letters or digits to build one from.
  */
-export const PRIVATE_SPACE_NOTE =
-  'Your private Space — rename it and set its git remote under My Brain.';
+export function slugifySourceId(name: string, taken: readonly string[]): string | null {
+  const base = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 56).replace(/-+$/g, '');
+  if (base === '') return null;
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
+  return id;
+}
 
-export const EXPORT_HINT = 'Full git history as a git bundle';
-
-export function sourceRowControls(src: Pick<SourceSummary, 'private'>): {
-  rename: boolean; remote: boolean; privateNote: boolean;
-} {
-  return { rename: !src.private, remote: !src.private, privateNote: src.private };
+/** One line of git state for a collapsed row and for the connected panel. */
+export function gitStatusText(src: Pick<SourceSummary, 'gitRemote' | 'gitStatus'>): string {
+  if (!src.gitRemote) return 'No git remote';
+  const g = src.gitStatus;
+  if (!g) return 'Git connected';
+  const drift = [
+    g.uncommittedFiles > 0 ? `${g.uncommittedFiles} uncommitted` : null,
+    g.unpushedCommits > 0 ? `${g.unpushedCommits} unpushed` : null,
+  ].filter((x) => x !== null);
+  return drift.length === 0 ? 'Git up to date' : `Git: ${drift.join(', ')}`;
 }
 
 /** The notice for gbrain's built-in `default` source, shown only when it holds pages. */
@@ -144,96 +159,88 @@ function reason(e: unknown): string {
 
 export { REMOTE_NOTICE, canSetRemote, pushText, remoteError } from '../RemotePanel.tsx';
 
-/** Admin route for one Source's remote. */
-const adminRemoteApi = (sourceId: string): RemoteApi => ({
+/** Every Source goes through the one route set; the server decides who may manage which. */
+const remoteApiFor = (sourceId: string): RemoteApi => ({
   set: (body) => sourcesApi.setRemote(sourceId, body),
   push: () => sourcesApi.pushRemote(sourceId),
   clear: () => sourcesApi.clearRemote(sourceId),
 });
 
-export function Sources() {
-  const { org } = useOrg();
-  const [rows, setRows] = useState<SourceSummary[]>([]);
-  const [unregistered, setUnregistered] = useState<string[]>([]);
-  const [builtinDefault, setBuiltinDefault] = useState<{ pageCount: number } | null>(null);
-  const [renaming, setRenaming] = useState<{ sourceId: string; name: string } | null>(null);
+/** A quiet text action: the maintenance verbs are rare, so they don't get button chrome. */
+function TextButton({ danger, className, ...rest }: { danger?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type="button"
+            className={`text-[length:var(--control-font)] underline-offset-2 enabled:hover:underline disabled:opacity-45 ${
+              danger ? 'text-danger' : 'text-muted enabled:hover:text-text'} ${className ?? ''}`}
+            {...rest} />
+  );
+}
+
+type Pending = 'archive' | 'remove' | 'rename' | null;
+
+type Shared = {
+  listOk: boolean;
+  packs: PackDetail[];
+  busy: string | null;
+  tokenStored: (src: SourceSummary) => boolean | null;
+  reload: () => Promise<void>;
+  step: (id: string, fn: () => Promise<void>) => Promise<void>;
+};
+
+/**
+ * One Source. Collapsed it is a name, three facts and (for a company Source) the
+ * agent switch — no buttons. Opening it shows the two things you configure
+ * (schema, git) and a single line of maintenance verbs; Archive and Remove ask
+ * for confirmation in place.
+ */
+function SourceRow({ src, open, onToggle, shared, agent }: {
+  src: SourceSummary;
+  open: boolean;
+  onToggle: () => void;
+  shared: Shared;
+  agent: { visible: boolean; on: boolean; disabled: boolean; toggle: () => void };
+}) {
+  const { listOk, packs, busy, reload, step } = shared;
   const { reload: reloadSources } = useSource();
-  const [listOk, setListOk] = useState(true);
-  // null while loading. Company Spaces use the org token.
-  const [orgToken, setOrgToken] = useState<boolean | null>(null);
-  const [details, setDetails] = useState<PackDetail[]>([]);
-  const [packs, setPacks] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [newId, setNewId] = useState('');
-  const [newName, setNewName] = useState('');
-  const [notice, setNotice] = useState<string | null>(null);
-  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending>(null);
+  const [name, setName] = useState(src.name);
   const [removePreview, setRemovePreview] = useState<string | null>(null);
-  const [sync, setSync] = useState<{ sourceId: string; preview: SchemaSync; applied: SchemaSync } | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const idle = busy === null;
 
-  const load = async () => {
-    const body = await sourcesApi.list();
-    setRows(body.sources);
-    setUnregistered(body.unregistered);
-    setBuiltinDefault(body.builtinDefault ?? null);
-    setListOk(body.sourcesListOk);
-  };
-  useEffect(() => { void load().catch((e) => setError(reason(e))); }, []);
-  useEffect(() => {
-    void credentialsApi.status()
-      .then((c) => setOrgToken(c.github.org?.configured ?? false))
-      .catch(() => setOrgToken(false));
-  }, []);
-  useEffect(() => {
-    void schemaPacksApi.list()
-      .then((body) => { setDetails(body.packs); setPacks(body.packs.map((p) => p.name)); })
-      .catch(() => undefined);
-  }, []);
-
-  const step = async (id: string, fn: () => Promise<void>) => {
-    setBusy(id); setError(null);
-    try { await fn(); }
-    catch (e) { setError(reason(e)); }
-    finally { setBusy(null); }
-  };
-
-  const setPack = (src: SourceSummary, pack: string) => step(src.sourceId, async () => {
-    await schemaPacksApi.setSourcePack(src.sourceId, pack);
-    await load();
+  const run = (fn: () => Promise<void>) => step(src.sourceId, async () => {
+    setProblem(null);
+    try { await fn(); } catch (e) { setProblem(reason(e)); }
   });
 
-  const resetPack = (src: SourceSummary) => step(src.sourceId, async () => {
-    await schemaPacksApi.resetSourcePack(src.sourceId);
-    await load();
-  });
+  const options = src.pack && !packs.some((p) => p.name === src.pack)
+    ? [src.pack, ...packs.map((p) => p.name)] : packs.map((p) => p.name);
 
-  const saveRename = (src: SourceSummary) => step(src.sourceId, async () => {
-    if (renaming === null) return;
-    const invalid = renameSourceError(src.name, renaming.name);
-    if (invalid !== null) { setError(invalid); return; }
-    await sourcesApi.rename(src.sourceId, renaming.name.trim());
-    setRenaming(null);
-    await load();
+  const setPack = (pack: string) => run(async () => { await schemaPacksApi.setSourcePack(src.sourceId, pack); await reload(); });
+  const resetPack = () => run(async () => { await schemaPacksApi.resetSourcePack(src.sourceId); await reload(); });
+  const backfill = () => run(async () => {
+    const r = await schemaPacksApi.runSync(src.sourceId);
+    setResult(r.total_applied === 0 ? 'Every page already has a type.' : `Typed ${r.total_applied} page${r.total_applied === 1 ? '' : 's'}.`);
+    await reload();
+  });
+  const saveName = () => run(async () => {
+    const invalid = renameSourceError(src.name, name);
+    if (invalid !== null) { setProblem(invalid); return; }
+    await sourcesApi.rename(src.sourceId, name.trim());
+    setPending(null);
+    await reload();
     await reloadSources();
   });
-
-  const archive = (src: SourceSummary) => step(src.sourceId, async () => {
-    await sourcesApi.remove(src.sourceId, { mode: 'archive' });
-    await load();
-  });
-
-  // The first click is a PROBE, not the deletion: an unconfirmed remove answers
-  // 409 with the `--dry-run` impact preview, which is held until the operator
-  // confirms. A server that somehow answers success here just reloads.
-  const requestRemove = (src: SourceSummary) => step(src.sourceId, async () => {
-    setRemoveTarget(src.sourceId);
-    setRemovePreview(null);
+  const archive = () => run(async () => { await sourcesApi.remove(src.sourceId, { mode: 'archive' }); await reload(); });
+  // The first Remove click is a PROBE, not the deletion: an unconfirmed remove
+  // answers 409 with gbrain's `--dry-run` impact preview, which must be seen
+  // before the destructive call is unlocked (`canConfirmRemove`).
+  const probeRemove = () => run(async () => {
+    setPending('remove'); setRemovePreview(null);
     try {
       await sourcesApi.remove(src.sourceId, { mode: 'remove' });
-      setRemoveTarget(null);
-      await load();
+      setPending(null); await reload();
     } catch (e) {
       if (e instanceof ApiError && e.body.error === 'confirmation_required') {
         setRemovePreview(typeof e.body.preview === 'string' ? e.body.preview : '');
@@ -242,43 +249,211 @@ export function Sources() {
       throw e;
     }
   });
-
-  const confirmRemove = (src: SourceSummary) => step(src.sourceId, async () => {
-    if (!canConfirmRemove(removeTarget === src.sourceId, removePreview)) return;
+  const confirmRemove = () => run(async () => {
+    if (!canConfirmRemove(pending === 'remove', removePreview)) return;
     await sourcesApi.remove(src.sourceId, { mode: 'remove', confirm: true });
-    setRemoveTarget(null);
-    setRemovePreview(null);
-    await load();
+    setPending(null); setRemovePreview(null);
+    await reload();
   });
-
-  const backfill = (src: SourceSummary) => step(src.sourceId, async () => {
-    const preview = await schemaPacksApi.previewSync(src.sourceId);
-    const applied = await schemaPacksApi.runSync(src.sourceId);
-    setSync({ sourceId: src.sourceId, preview, applied });
-    await load();
-  });
-
-  const add = () => step('add', async () => {
-    const invalid = addSourceError(newId, newName);
-    if (invalid !== null) { setError(invalid); return; }
-    const r = await sourcesApi.add({ sourceId: newId, name: newName });
-    setNotice(r.isolationNotice);
-    setNewId('');
-    setNewName('');
-    await load();
-  });
-
-  const detailFor = (pack: string | null): PackDetail | null =>
-    pack === null ? null : details.find((d) => d.name === pack) ?? null;
+  const cancel = () => { setPending(null); setRemovePreview(null); setName(src.name); setProblem(null); };
 
   return (
-    <div className="max-w-3xl space-y-8">
-      <header>
-        <PageTitle>Sources</PageTitle>
-        <p className="text-sm text-muted">
-          These are the brain's Sources. Set each one's schema pack, backfill its blank page types,
-          and add or retire Sources. Your own private Space is managed under My Brain.
-        </p>
+    <Card className="!p-0">
+      <div className="flex items-center gap-3 px-5 py-4">
+        <button type="button" aria-expanded={open} onClick={onToggle}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <Icon glyph={ChevronRight} size={14} className={open ? 'rotate-90 text-muted' : 'text-muted'} />
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{src.name}</span>
+            <span className="block truncate text-[length:var(--control-font)] text-muted">
+              {src.pack ?? 'no schema'} · {pageCountText(src, listOk)} · {gitStatusText(src)}
+            </span>
+          </span>
+        </button>
+        {agent.visible && (
+          <label className="flex shrink-0 items-center gap-2 text-[length:var(--control-font)] text-muted">
+            <input type="checkbox" checked={agent.on} disabled={agent.disabled} onChange={agent.toggle} />
+            Agent reads
+          </label>
+        )}
+      </div>
+
+      {open && (
+        <div className="space-y-5 border-t border-border px-5 py-4">
+          <div className="space-y-1">
+            <div className="text-[length:var(--control-font)] font-medium">Schema</div>
+            {src.canManage ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Select className="max-w-xs" value={src.pack ?? ''} disabled={!idle}
+                        onChange={(e) => void setPack(e.currentTarget.value)}>
+                  {options.length === 0 && <option value="">(no schemas available)</option>}
+                  {options.map((p) => <option key={p} value={p}>{p}</option>)}
+                </Select>
+                {src.inherited
+                  ? <span className="text-xs text-muted">Brain default</span>
+                  : <TextButton disabled={!idle} onClick={() => void resetPack()}>Use brain default</TextButton>}
+              </div>
+            ) : (
+              <div className="text-[length:var(--control-font)]">{src.pack ?? 'none'}</div>
+            )}
+            <p className="text-xs text-muted">Edit a schema's page types under Schema.</p>
+          </div>
+
+          {src.canManage && (
+            <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} status={gitStatusText(src)}
+                         busy={!idle} api={remoteApiFor(src.sourceId)} onChanged={reload}
+                         token={{ stored: shared.tokenStored(src), scope: src.private ? 'member' : 'org' }} />
+          )}
+
+          {src.canManage && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <TextButton disabled={!idle} onClick={() => void backfill()}>Backfill types</TextButton>
+                <Link href={filesApi.exportUrl(src.sourceId)} download>Export</Link>
+                <TextButton disabled={!idle} onClick={() => { setName(src.name); setPending('rename'); }}>Rename</TextButton>
+                {!src.private && (
+                  <>
+                    <TextButton disabled={!idle} onClick={() => setPending('archive')}>Archive</TextButton>
+                    <TextButton danger disabled={!idle} onClick={() => void probeRemove()}>Remove</TextButton>
+                  </>
+                )}
+              </div>
+
+              {pending === null && result === null && <p className="text-xs text-muted">{BACKFILL_NOTICE}</p>}
+              {result && pending === null && <p className="text-[length:var(--control-font)]">{result}</p>}
+
+              {pending === 'rename' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input aria-label="Source name" className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Button variant="primary" disabled={!idle || renameSourceError(src.name, name) !== null}
+                          onClick={() => void saveName()}>Save</Button>
+                  <Button onClick={cancel}>Cancel</Button>
+                </div>
+              )}
+
+              {pending === 'archive' && (
+                <Notice layout="stack">
+                  <p>Archiving hides {src.name} from search and keeps its data for 72 hours.</p>
+                  <div className="flex gap-2">
+                    <Button variant="danger" disabled={!idle} onClick={() => void archive()}>Archive {src.name}</Button>
+                    <Button onClick={cancel}>Keep it</Button>
+                  </div>
+                </Notice>
+              )}
+
+              {pending === 'remove' && removePreview !== null && (
+                <Notice layout="stack">
+                  <p className="font-medium">Remove — impact preview</p>
+                  <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
+                  <div className="flex gap-2">
+                    <Button variant="danger" disabled={!idle || !canConfirmRemove(true, removePreview)}
+                            onClick={() => void confirmRemove()}>Confirm remove</Button>
+                    <Button onClick={cancel}>Keep it</Button>
+                  </div>
+                </Notice>
+              )}
+            </div>
+          )}
+
+          {problem && <div className="text-[length:var(--control-font)] text-danger">{problem}</div>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The one Sources page: the Sources you own and the ones shared with you, in the
+ * same two groups as the sidebar. `canManage` (from the server) decides what a
+ * row offers; nobody is shown a control the server would refuse.
+ */
+export function Sources() {
+  const { org } = useOrg();
+  const isAdmin = org?.role === 'owner' || org?.role === 'admin';
+  const { reload: reloadSources } = useSource();
+  const [rows, setRows] = useState<SourceSummary[] | null>(null);
+  const [unregistered, setUnregistered] = useState<string[]>([]);
+  const [builtinDefault, setBuiltinDefault] = useState<{ pageCount: number } | null>(null);
+  const [listOk, setListOk] = useState(true);
+  const [packs, setPacks] = useState<PackDetail[]>([]);
+  const [mine, setMine] = useState<MyConnection | null>(null);
+  const [tokens, setTokens] = useState<{ member: boolean; org: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  const load = async () => {
+    const body = await sourcesApi.list();
+    setRows(body.sources);
+    setUnregistered(body.unregistered);
+    setBuiltinDefault(body.builtinDefault ?? null);
+    setListOk(body.sourcesListOk);
+    // Not every member has an agent connection yet; the page works without one.
+    setMine(await myConnectionApi.get().catch(() => null));
+  };
+  useEffect(() => { void load().catch((e) => setError(reason(e))); }, []);
+  useEffect(() => {
+    void schemaPacksApi.list().then((b) => setPacks(b.packs)).catch(() => undefined);
+    void credentialsApi.status()
+      .then((c) => setTokens({ member: c.github.member.configured, org: c.github.org?.configured ?? false }))
+      .catch(() => setTokens({ member: false, org: false }));
+  }, []);
+
+  const step = async (id: string, fn: () => Promise<void>) => {
+    setBusy(id); setError(null);
+    try { await fn(); } catch (e) { setError(reason(e)); } finally { setBusy(null); }
+  };
+
+  const reload = async () => { await load(); };
+
+  const readIds = mine?.connection?.readSpaceIds ?? [];
+  const readable = new Map((mine?.readable ?? []).map((s) => [s.sourceId, s.id]));
+  const agentFor = (src: SourceSummary) => {
+    const spaceId = readable.get(src.sourceId);
+    const live = mine?.connection != null && spaceId !== undefined && !src.private;
+    return {
+      visible: live,
+      on: spaceId !== undefined && readIds.includes(spaceId),
+      disabled: busy !== null || mine?.connection?.state !== 'active',
+      toggle: () => void step('agent', async () => {
+        if (spaceId === undefined) return;
+        await myConnectionApi.setReads(toggleRead(readIds, spaceId));
+        await load();
+      }),
+    };
+  };
+
+  const shared: Shared = {
+    listOk, packs, busy, reload, step,
+    tokenStored: (src) => (tokens === null ? null : src.private ? tokens.member : tokens.org),
+  };
+
+  const create = () => step('add', async () => {
+    const id = slugifySourceId(newName, (rows ?? []).map((r) => r.sourceId));
+    const invalid = id === null ? 'Give the Source a name.' : addSourceError(id, newName);
+    if (invalid !== null || id === null) { setError(invalid); return; }
+    await sourcesApi.add({ sourceId: id, name: newName.trim() });
+    setNewName(''); setCreating(false);
+    await load();
+    await reloadSources();
+    setOpen(id);
+  });
+
+  const groups = [
+    { label: 'My Brain', rows: (rows ?? []).filter((r) => r.private) },
+    { label: 'Company', rows: (rows ?? []).filter((r) => !r.private) },
+  ].filter((g) => g.rows.length > 0);
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <PageTitle>Sources</PageTitle>
+          <p className="text-sm text-muted">Where your pages live. Open a Source to change its schema or git remote.</p>
+        </div>
+        {isAdmin && !creating && <Button className="shrink-0" onClick={() => setCreating(true)}>New source</Button>}
       </header>
 
       {error && <div className="text-[length:var(--control-font)] text-danger">{error}</div>}
@@ -288,186 +463,36 @@ export function Sources() {
         </div>
       )}
 
-      <section className="space-y-3">
-        <h2 className="font-medium">Sources</h2>
-        {rows.length === 0 && <Empty>No Sources yet.</Empty>}
-        {rows.map((src) => {
-          const detail = detailFor(src.pack);
-          const isOpen = expanded === src.sourceId;
-          const clicked = removeTarget === src.sourceId;
-          const options = src.pack && !packs.includes(src.pack) ? [src.pack, ...packs] : packs;
-          return (
-            <Card key={src.sourceId} className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  {renaming?.sourceId === src.sourceId ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input aria-label="Source name" className="max-w-xs" value={renaming.name}
-                             onChange={(e) => setRenaming({ sourceId: src.sourceId, name: e.target.value })} />
-                      <Button variant="primary"
-                              disabled={busy !== null || renameSourceError(src.name, renaming.name) !== null}
-                              onClick={() => void saveRename(src)}>
-                        Save
-                      </Button>
-                      <Button onClick={() => setRenaming(null)}>Cancel</Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span>{src.name}</span>
-                      {sourceRowControls(src).rename && (
-                        <Button disabled={busy !== null}
-                                onClick={() => setRenaming({ sourceId: src.sourceId, name: src.name })}>
-                          Edit name
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  <div className="text-[length:var(--control-font)] text-muted font-mono">
-                    {src.sourceId} · {src.kind}
-                  </div>
-                  <div className="text-[length:var(--control-font)] text-muted">
-                    {pageCountText(src, listOk)} · {lastSyncText(src, listOk)}
-                    {src.federated === null ? '' : ` · federated ${src.federated ? 'yes' : 'no'}`}
-                  </div>
-                </div>
-                <Button className="shrink-0" disabled={busy !== null}
-                        onClick={() => setExpanded(isOpen ? null : src.sourceId)}>
-                  {isOpen ? 'Hide types' : 'View types'}
-                </Button>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-[length:var(--control-font)]">{sourcePackLabel(src)}</div>
-                {!src.inherited && <p className="text-xs text-muted">{NO_SOURCE_READBACK_NOTICE}</p>}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    className="max-w-xs"
-                    value={src.pack ?? ''}
-                    disabled={busy !== null}
-                    onChange={(e) => void setPack(src, e.currentTarget.value)}
-                  >
-                    {options.length === 0 && <option value="">(no packs available)</option>}
-                    {options.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </Select>
-                  {!src.inherited && (
-                    <Button disabled={busy !== null} onClick={() => void resetPack(src)}>
-                      Reset to brain default
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {isOpen && (
-                detail
-                  ? <PackTypesView detail={detail} />
-                  : <Empty>No resolved details for {src.pack ?? 'this pack'}.</Empty>
-              )}
-
-              {sourceRowControls(src).remote && (
-                <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} busy={busy !== null}
-                             api={adminRemoteApi(src.sourceId)} onChanged={load}
-                             token={{ stored: orgToken, scope: 'org' }} />
-              )}
-              {sourceRowControls(src).privateNote && (
-                <p className="text-sm text-muted">
-                  Your private Space — rename it and set its git remote under{' '}
-                  <SettingsLink tab="mine">My Brain</SettingsLink>.
-                </p>
-              )}
-
-              <div className="flex flex-wrap gap-2">
-                <Button disabled={busy !== null} onClick={() => void backfill(src)}>
-                  Backfill blank types
-                </Button>
-                <Button disabled={busy !== null} onClick={() => void archive(src)}>
-                  Archive
-                </Button>
-                <Link href={filesApi.exportUrl(src.sourceId)} download>Export as .bundle</Link>
-                {/*
-                  Archive and Remove are plain `Button`s, and Remove is
-                  deliberately NOT `ui`'s `ConfirmButton`. The restyle stops at
-                  the class names here; the flow is left exactly as it was.
-
-                  The two-step is not a UI affordance — it lives in the control
-                  plane. `requestRemove` makes a REAL call (`mode: 'remove'` with
-                  no `confirm`). A server that does not demand confirmation
-                  removes the Source on that first click and the flow ends there;
-                  `Confirm remove` and `Keep it` only ever render because the
-                  server answered 409 `confirmation_required` and handed back
-                  gbrain's own `--dry-run` impact preview, and only a preview that
-                  actually arrived unlocks the destructive second call
-                  (`canConfirmRemove`). Archive is unconditional and single-click
-                  for the same reason: nothing server-side asks it to confirm.
-
-                  `ConfirmButton` arms from a local boolean — click to arm, click
-                  to fire — so adopting it would invert all of that. It would put
-                  a confirmation click in front of every ordinary archive and
-                  remove, including the ones the server was happy to do
-                  immediately; it would let the second click fire without the
-                  operator ever having been shown what the removal destroys; and
-                  its disarm-on-blur would silently discard a preview the server
-                  had already produced. Moving a server-side contract into local
-                  state makes the page lie about who is deciding.
-                */}
-                {clicked ? (
-                  <>
-                    <Button
-                      variant="danger"
-                      disabled={busy !== null || !canConfirmRemove(clicked, removePreview)}
-                      onClick={() => void confirmRemove(src)}
-                    >
-                      Confirm remove
-                    </Button>
-                    <Button onClick={() => { setRemoveTarget(null); setRemovePreview(null); }}>
-                      Keep it
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="danger" disabled={busy !== null}
-                          onClick={() => void requestRemove(src)}>
-                    Remove
-                  </Button>
-                )}
-              </div>
-              <p className="text-xs text-muted">{BACKFILL_NOTICE} {EXPORT_HINT}.</p>
-
-              {clicked && removePreview !== null && (
-                <Notice layout="stack">
-                  <p className="font-medium">Remove — impact preview</p>
-                  <pre className="text-xs whitespace-pre-wrap font-mono">{removePreview}</pre>
-                </Notice>
-              )}
-
-              {sync?.sourceId === src.sourceId && (
-                <div className="space-y-3">
-                  <SyncTable title="Backfill preview — nothing written" report={sync.preview} />
-                  <SyncTable title={`Backfilled — ${sync.applied.total_applied} page(s) typed`} report={sync.applied} />
-                </div>
-              )}
-            </Card>
-          );
-        })}
-      </section>
-
-      {(org?.capabilities.sharedSources ?? true) && (
-        <section className="space-y-3">
-          <h2 className="font-medium">Add source</h2>
-          <Input placeholder="source-id" value={newId}
-                 onChange={(e) => setNewId(e.target.value)} />
-          <Input placeholder="Name" value={newName}
-                 onChange={(e) => setNewName(e.target.value)} />
-          <Button variant="primary" disabled={busy !== null || !canAddSource(newId, newName)}
-                  onClick={() => void add()}>
-            {busy === 'add' ? 'Adding…' : 'Add source'}
-          </Button>
-          <p className="text-sm text-muted">{notice ?? ISOLATION_NOTICE}</p>
-        </section>
+      {creating && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input aria-label="New source name" autoFocus className="max-w-xs" placeholder="Name" value={newName}
+                   onChange={(e) => setNewName(e.target.value)} />
+            <Button variant="primary" disabled={busy !== null || newName.trim() === ''} onClick={() => void create()}>
+              {busy === 'add' ? 'Creating…' : 'Create'}
+            </Button>
+            <Button onClick={() => { setCreating(false); setNewName(''); }}>Cancel</Button>
+          </div>
+          <p className="mt-2 text-xs text-muted">{ISOLATION_NOTICE}</p>
+        </Card>
       )}
 
+      {rows === null && !error && <p className="text-sm text-muted">Loading…</p>}
+      {rows !== null && rows.length === 0 && <Empty>No Sources yet.</Empty>}
+
+      {groups.map((g) => (
+        <section key={g.label} className="space-y-2">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-muted">{g.label}</h2>
+          {g.rows.map((src) => (
+            <SourceRow key={src.sourceId} src={src} shared={shared} agent={agentFor(src)}
+                       open={open === src.sourceId}
+                       onToggle={() => setOpen(open === src.sourceId ? null : src.sourceId)} />
+          ))}
+        </section>
+      ))}
+
       {builtinDefault !== null && (
-        <Notice layout="stack">
-          <p>{builtinDefaultText(builtinDefault.pageCount)}</p>
-        </Notice>
+        <Notice layout="stack"><p>{builtinDefaultText(builtinDefault.pageCount)}</p></Notice>
       )}
 
       {unregistered.length > 0 && (

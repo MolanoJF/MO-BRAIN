@@ -84,9 +84,11 @@ export function pushText(push: SpacePush | null): string {
   return `Connected, but the push did not go through (exit ${push.exitCode}).${push.detail ? ` ${push.detail}` : ''}`;
 }
 
-export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, token: tokenInfo, pushOnConnect = true }: {
+export function RemotePanel({ sourceId, gitRemote, status, busy, api, onChanged, token: tokenInfo, pushOnConnect = true }: {
   sourceId: string;
   gitRemote: string | null;
+  /** One line of git state, shown under the remote once connected. */
+  status?: string | null;
   busy: boolean;
   api: RemoteApi;
   onChanged: () => Promise<void> | void;
@@ -140,6 +142,7 @@ export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, token: 
       {gitRemote ? (
         <>
           <div className="text-[length:var(--control-font)] font-mono break-all">{gitRemote}</div>
+          {status && <div className="text-xs text-muted">{status}</div>}
           <div className="flex flex-wrap gap-2">
             {pushOnConnect && (
               <Button disabled={off} onClick={() => void pushNow()}>{working ? 'Working…' : 'Push now'}</Button>

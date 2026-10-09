@@ -313,8 +313,12 @@ export type SourceSummary = {
   inGbrain: boolean;
   /** Token-free https URL of the Space's git remote, or null when it has none. */
   gitRemote: string | null;
-  /** A member's own private Space: renamed and given a remote under My Brain, not here. */
+  /** A member's own private Space. It can't be archived or removed. */
   private: boolean;
+  /** The caller may change this Source: its owner (private), or an admin (company). */
+  canManage: boolean;
+  /** Working-repo drift; null when the Source has no remote or the probe failed. */
+  gitStatus: { branch: string | null; uncommittedFiles: number; unpushedCommits: number } | null;
 };
 
 /** What the push after connecting (or "Push now") did. `detail` is gbrain's own refusal text. */

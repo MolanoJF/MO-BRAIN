@@ -12,7 +12,6 @@ import { Button, NavItem } from '../ui/index.tsx';
  */
 const PAGES: Record<SettingsTab, ComponentType> = {
   general: lazy(() => import('../pages/General.tsx').then((m) => ({ default: m.General }))),
-  mine: lazy(() => import('../pages/MyBrain.tsx').then((m) => ({ default: m.MyBrain }))),
   mcp: lazy(() => import('../pages/Mcp.tsx').then((m) => ({ default: m.Mcp }))),
   credentials: lazy(() => import('../pages/Credentials.tsx').then((m) => ({ default: m.Credentials }))),
   sources: lazy(() => import('../pages/Sources.tsx').then((m) => ({ default: m.Sources }))),
@@ -29,7 +28,6 @@ const PAGES: Record<SettingsTab, ComponentType> = {
 
 const LABEL: Record<SettingsTab, string> = {
   general: 'General',
-  mine: 'My Brain',
   mcp: 'MCP',
   credentials: 'Credentials',
   sources: 'Sources', schema: 'Schema', members: 'Members', access: 'Access',

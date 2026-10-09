@@ -1,8 +1,8 @@
 import { test, expect, describe } from 'bun:test';
 import {
   sourcePackLabel, removeConfirmState, canConfirmRemove,
-  validSourceId, addSourceError, canAddSource, renameSourceError, sourceRowControls, builtinDefaultText,
-  PRIVATE_SPACE_NOTE, EXPORT_HINT, pageCountText, lastSyncText,
+  validSourceId, addSourceError, canAddSource, renameSourceError, builtinDefaultText,
+  pageCountText, lastSyncText, toggleRead, slugifySourceId, gitStatusText,
   SOURCE_ID, ISOLATION_NOTICE, NO_SOURCE_READBACK_NOTICE, BACKFILL_NOTICE,
 } from '../../src/console/pages/Sources.tsx';
 import { pickAfterReload } from '../../src/console/SourceContext.tsx';
@@ -31,6 +31,8 @@ const source = (over: Partial<SourceSummary> = {}): SourceSummary => ({
   inGbrain: true,
   gitRemote: null,
   private: false,
+  canManage: true,
+  gitStatus: null,
   ...over,
 });
 
@@ -161,20 +163,44 @@ describe('renameSourceError', () => {
   });
 });
 
-describe('sourceRowControls — private vs company rows', () => {
-  test('a company row gets rename and the remote panel, no private note', () => {
-    expect(sourceRowControls(source({ private: false })))
-      .toEqual({ rename: true, remote: true, privateNote: false });
+describe('slugifySourceId — the one-field New source form', () => {
+  test('lowercases and hyphenates, and satisfies the server guard', () => {
+    expect(slugifySourceId('Company KB', [])).toBe('company-kb');
+    expect(validSourceId(slugifySourceId('  Ünï  Wiki!! ', [])!)).toBe(true);
   });
-
-  test('a private row gets only the pointer to My Brain', () => {
-    expect(sourceRowControls(source({ private: true })))
-      .toEqual({ rename: false, remote: false, privateNote: true });
-    expect(PRIVATE_SPACE_NOTE).toMatch(/under My Brain/);
+  test('never collides with an existing id', () => {
+    expect(slugifySourceId('Notes', ['notes'])).toBe('notes-2');
+    expect(slugifySourceId('Notes', ['notes', 'notes-2'])).toBe('notes-3');
   });
+  test('a name with nothing to build an id from is refused', () => {
+    expect(slugifySourceId('!!!', [])).toBeNull();
+  });
+  test('a very long name still yields a valid id', () => {
+    expect(validSourceId(slugifySourceId('a'.repeat(200), [])!)).toBe(true);
+  });
+});
 
-  test('the export hint names the git bundle', () => {
-    expect(EXPORT_HINT).toMatch(/git bundle/i);
+describe('gitStatusText — one honest line', () => {
+  test('no remote says so', () => {
+    expect(gitStatusText(source())).toBe('No git remote');
+  });
+  test('a remote whose state could not be read is just connected, not "up to date"', () => {
+    expect(gitStatusText(source({ gitRemote: 'https://github.com/a/b.git' }))).toBe('Git connected');
+  });
+  test('drift is counted, clean is up to date', () => {
+    const remote = 'https://github.com/a/b.git';
+    expect(gitStatusText(source({ gitRemote: remote, gitStatus: { branch: 'main', uncommittedFiles: 0, unpushedCommits: 0 } })))
+      .toBe('Git up to date');
+    expect(gitStatusText(source({ gitRemote: remote, gitStatus: { branch: 'main', uncommittedFiles: 2, unpushedCommits: 1 } })))
+      .toBe('Git: 2 uncommitted, 1 unpushed');
+  });
+});
+
+describe('toggleRead — which company Sources the agent reads', () => {
+  test('adds or removes one id, keeping order stable', () => {
+    expect(toggleRead([], 'a')).toEqual(['a']);
+    expect(toggleRead(['a', 'b'], 'a')).toEqual(['b']);
+    expect(toggleRead(['b'], 'a')).toEqual(['b', 'a']);
   });
 });
 

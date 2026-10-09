@@ -36,10 +36,10 @@ Zones a caller can rely on:
 
 - A fresh install is a personal brain on schema pack `mobrain-core`, the locked base every Mo-brain schema extends (`mobrain-personal`, custom packs, the `my-brain` and `my-personal` layers). The control plane refuses any write or activation that doesn't reach core or that redefines a core entry (`CORE_LOCKED`; `src/control/coreLock.ts`). The console wizard is three steps: Sign in, OpenAI key (checked when saved), Create brain. Create brain defaults to Balanced search and one private Space. Search mode can be changed later in Settings → General.
 - Company mode is the owner's switch in Settings → General. Switching back to personal is allowed only while that owner is the only member and no invite is open.
-- Company Space access is an explicit `space_grants` row. Personal mode refuses invites, shared sources, and grants with `403 { error: "company_mode_required" }`.
+- Company Space access is an explicit `space_grants` row. Personal mode refuses invites and grants with `403 { error: "company_mode_required" }`.
 - An invite creates a placeholder account. The claim page sets a password only on that placeholder.
 - Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. Admin Spend collapses that member's personal automations to one row.
-- The Space picker groups My Brain and Company. A member chooses which granted company Spaces their agent reads from the My Brain settings tab.
+- The Space picker groups My Brain and Company. Settings → Sources is one tab for every role: your private Space and the company Sources shared with you, with schema, git remote and maintenance behind each row (`canManage` from `GET /api/sources` decides what a row offers; a private Space can't be archived or removed). Admins and owners add Sources there in any mode. A member chooses which granted company Sources their agent reads with the row's Agent reads switch.
 
 **Not built:** hosted sandboxes (§5.4). Per-member budget caps were deferred with them.
 

@@ -382,8 +382,79 @@ test('DELETE /sources/:sourceId remove cascades when confirmed and cleans up', a
   expect((await lastAudit())?.action).toBe('source.remove');
 });
 
-test('a non-admin cannot reach the sources routes', async () => {
+const memberOpsHandler = () => (op: string) => {
+  if (op === 'sources.list') return ok('', { sources: [] });
+  if (op === 'config.get') return fail(1, 'Config key not found');
+  if (op === 'schema.active') return ok(ACTIVE('gbrain-base-v2'));
+  if (op === 'schema.show') return ok('', showJson(19, 17));
+  if (op === 'config.set') return ok('');
+  if (op === 'schema.sync') return ok('', { total_applied: 3, total_would_apply: 3 });
+  throw new Error(`unexpected op ${op}`);
+};
+
+test('a member lists their own private Space and granted company Sources, nothing else', async () => {
+  await insertSpace('company-a', 'Company A');
+  await insertSpace('company-b', 'Company B');
+  await insertPrivateSpace('mem-priv', 'sources-member@example.test', 'Mem');
+  await insertPrivateSpace('own-priv', 'sources-owner@example.test', 'Own');
+  const [a] = await getDb().select().from(schema.spaces).where(eq(schema.spaces.sourceId, 'company-a'));
+  await getDb().insert(schema.spaceGrants).values({
+    organizationId: orgId, membershipId: await membershipIdOf('sources-member@example.test'),
+    spaceId: a!.id, access: 'read', grantedBy: 'test',
+  });
+  opsHandler = memberOpsHandler();
+
+  const body = await (await hit('GET', '/api/sources', memberCookie)).json();
+  const flags = Object.fromEntries(body.sources.map((x: any) => [x.sourceId, x.canManage]));
+  expect(flags).toEqual({ 'company-a': false, 'mem-priv': true });
+  expect(body.unregistered).toEqual([]);
+  expect(body.builtinDefault).toBeNull();
+
+  // An admin manages every company Source, but not a member's private Space.
+  const adminBody = await (await hit('GET', '/api/sources', ownerCookie)).json();
+  const adminFlags = Object.fromEntries(adminBody.sources.map((x: any) => [x.sourceId, x.canManage]));
+  expect(adminFlags).toEqual({ 'company-a': true, 'company-b': true, 'own-priv': true });
+});
+
+test('a member cannot add a Source or change a company Source', async () => {
+  await insertSpace('company-a', 'Company A');
   opsHandler = () => { throw new Error('must not reach gbrain'); };
-  expect((await hit('GET', '/api/sources', memberCookie)).status).toBe(403);
   expect((await hit('POST', '/api/sources', memberCookie, { sourceId: 'x', name: 'X' })).status).toBe(403);
+  expect((await hit('PATCH', '/api/sources/company-a', memberCookie, { name: 'Mine now' })).status).toBe(400);
+  expect((await hit('PUT', '/api/sources/company-a/remote', memberCookie, { mode: 'url', url: 'https://github.com/a/b.git' })).status).toBe(400);
+  expect((await hit('DELETE', '/api/sources/company-a', memberCookie, { mode: 'archive' })).status).toBe(400);
+  expect((await hit('POST', '/api/schema/sources/company-a', memberCookie, { pack: 'mobrain-core' })).status).toBe(400);
+  expect((await hit('POST', '/api/schema/sync', memberCookie, { source: 'company-a' })).status).toBe(400);
+  expect((await hit('POST', '/api/schema/sync', memberCookie, {})).status).toBe(403);
+  expect((await hit('GET', '/api/spaces/company-a/export', memberCookie)).status).toBe(404);
+  expect(await spaceRow('company-a')).toMatchObject({ name: 'Company A' });
+});
+
+test('a member manages their own private Space but cannot archive or remove it', async () => {
+  await insertPrivateSpace('mem-priv', 'sources-member@example.test', 'Mem');
+  opsHandler = memberOpsHandler();
+  const rename = await hit('PATCH', '/api/sources/mem-priv', memberCookie, { name: 'My notes' });
+  expect(rename.status).toBe(200);
+  expect(await spaceRow('mem-priv')).toMatchObject({ name: 'My notes' });
+
+  const sync = await hit('POST', '/api/schema/sync', memberCookie, { source: 'mem-priv' });
+  expect(sync.status).toBe(200);
+  expect((await sync.json()).total_applied).toBe(3);
+
+  for (const body of [{ mode: 'archive' }, { mode: 'remove', confirm: true }]) {
+    const res = await hit('DELETE', '/api/sources/mem-priv', memberCookie, body);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('private_space_permanent');
+  }
+  expect(opsCalls.filter((c) => c.op === 'sources.archive' || c.op === 'sources.remove')).toHaveLength(0);
+  expect(await spaceRow('mem-priv')).not.toBeNull();
+});
+
+test('an admin cannot manage another member\'s private Space', async () => {
+  await insertPrivateSpace('mem-priv', 'sources-member@example.test', 'Mem');
+  opsHandler = () => { throw new Error('must not reach gbrain'); };
+  expect((await hit('PATCH', '/api/sources/mem-priv', ownerCookie, { name: 'Nope' })).status).toBe(400);
+  expect((await hit('DELETE', '/api/sources/mem-priv', ownerCookie, { mode: 'archive' })).status).toBe(400);
+  expect((await hit('POST', '/api/schema/sources/mem-priv', ownerCookie, { pack: 'mobrain-core' })).status).toBe(400);
+  expect((await hit('GET', '/api/spaces/mem-priv/export', ownerCookie)).status).toBe(404);
 });

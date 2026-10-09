@@ -10,28 +10,28 @@ import {
  * blank panel.
  */
 
-describe('the registry: fourteen tabs, in the deliberate menu order', () => {
-  test('all fourteen ids appear, in the order the product owner asked for', () => {
+describe('the registry: thirteen tabs, in the deliberate menu order', () => {
+  test('all thirteen ids appear, in the order the product owner asked for', () => {
     // schedules sits right after access, not at the end — a reordering here
     // is a product change to the settings menu, not a harmless refactor.
-    // mcp sits directly under My Brain, for every role, in either mode.
+    // mcp sits directly under Sources, for every role, in either mode.
     // appearance sits LAST for a mechanical reason, asserted below: the first
     // visible tab is what resolveTab(null, …) opens settings on.
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      'general', 'mine', 'mcp', 'credentials', 'sources', 'schema', 'members', 'access', 'schedules',
+      'general', 'sources', 'mcp', 'credentials', 'schema', 'members', 'access', 'schedules',
       'health', 'spend', 'runs', 'upgrades', 'appearance',
     ]);
-    expect(SETTINGS_TABS).toHaveLength(14);
+    expect(SETTINGS_TABS).toHaveLength(13);
   });
 
   test('minRole matches the design doc\'s table exactly', () => {
     const roles = Object.fromEntries(SETTINGS_TABS.map((t) => [t.id, t.minRole]));
     expect(roles).toEqual({
       general: 'admin',
-      mine: 'viewer',
+      sources: 'viewer',
       mcp: 'viewer',
       credentials: 'viewer',
-      sources: 'admin', schema: 'admin', members: 'admin', access: 'admin',
+      schema: 'admin', members: 'admin', access: 'admin',
       schedules: 'viewer', health: 'viewer', spend: 'admin', runs: 'viewer',
       upgrades: 'viewer', appearance: 'viewer',
     });
@@ -39,15 +39,15 @@ describe('the registry: fourteen tabs, in the deliberate menu order', () => {
 });
 
 describe('visibleTabs: role-gated menu contents', () => {
-  test('an admin sees all fourteen tabs, in registry order', () => {
-    expect(visibleTabs(true)).toHaveLength(14);
+  test('an admin sees all thirteen tabs, in registry order', () => {
+    expect(visibleTabs(true)).toHaveLength(13);
     expect(visibleTabs(true).map((t) => t.id)).toEqual(SETTINGS_TABS.map((t) => t.id));
   });
 
-  test('a non-admin sees exactly the eight viewer tabs, in order', () => {
-    // mcp is the tab a member's list gains, immediately after mine.
+  test('a non-admin sees exactly the nine viewer tabs, in order', () => {
+    // mcp is the tab a member's list gains, immediately after sources.
     expect(visibleTabs(false).map((t) => t.id)).toEqual([
-      'mine', 'mcp', 'credentials', 'schedules', 'health', 'runs', 'upgrades', 'appearance',
+      'sources', 'mcp', 'credentials', 'schedules', 'health', 'runs', 'upgrades', 'appearance',
     ]);
   });
 
@@ -63,7 +63,7 @@ describe('visibleTabs: role-gated menu contents', () => {
     // resolveTab(null, …) returns the FIRST visible tab, which is what opening
     // settings lands on. Moving a preferences tab to the top of the registry
     // would silently move every admin off General and every member off
-    // My Brain — a product change disguised as a reordering.
+    // Sources — a product change disguised as a reordering.
     expect(visibleTabs(true).at(-1)!.id).toBe('appearance');
     expect(visibleTabs(false).at(-1)!.id).toBe('appearance');
     expect(resolveTab(null, true)).not.toBe('appearance');
@@ -99,17 +99,17 @@ describe('resolveTab: what the modal actually opens on', () => {
     // The exact regression this guards: spend is a real, valid tab id, so a
     // naive isSettingsTab-only check would let it through for anyone.
     expect(resolveTab('spend', false)).not.toBe('spend');
-    expect(resolveTab('spend', false)).toBe('mine');
+    expect(resolveTab('spend', false)).toBe('sources');
   });
 
   test('an unknown segment falls back to the first visible tab', () => {
     expect(resolveTab('nonsense', true)).toBe('general');
-    expect(resolveTab('nonsense', false)).toBe('mine');
+    expect(resolveTab('nonsense', false)).toBe('sources');
   });
 
   test('no requested tab at all (null) also falls back, same as unknown', () => {
     expect(resolveTab(null, true)).toBe('general');
-    expect(resolveTab(null, false)).toBe('mine');
+    expect(resolveTab(null, false)).toBe('sources');
   });
 });
 
@@ -134,12 +134,12 @@ describe('personal mode hides the team tabs', () => {
     expect(resolveTab(null, true)).toBe('general');
   });
 
-  test('a member opens settings on My Brain', () => {
-    expect(resolveTab(null, false)).toBe('mine');
+  test('a member opens settings on Sources', () => {
+    expect(resolveTab(null, false)).toBe('sources');
   });
 });
 
-describe('mcp is under My Brain for every role, and it is not the landing', () => {
+describe('mcp is under Sources for every role, and it is not the landing', () => {
   test('mcp is viewer, not company-only, and present for an admin, a member, and personal mode', () => {
     const entry = SETTINGS_TABS.find((t) => t.id === 'mcp');
     expect(entry).toEqual({ id: 'mcp', label: 'MCP', minRole: 'viewer' });
@@ -148,14 +148,14 @@ describe('mcp is under My Brain for every role, and it is not the landing', () =
     expect(visibleTabs(true, 'personal').map((t) => t.id)).toContain('mcp');
     expect(visibleTabs(false, 'personal').map((t) => t.id)).toContain('mcp');
     const member = visibleTabs(false).map((t) => t.id);
-    expect(member[member.indexOf('mine') + 1]).toBe('mcp');
+    expect(member[member.indexOf('sources') + 1]).toBe('mcp');
   });
 
-  test('opening settings still lands on General or My Brain, never MCP, and appearance stays last', () => {
+  test('opening settings still lands on General or Sources, never MCP, and appearance stays last', () => {
     expect(resolveTab(null, true)).toBe('general');
-    expect(resolveTab(null, false)).toBe('mine');
+    expect(resolveTab(null, false)).toBe('sources');
     expect(resolveTab(null, true, 'personal')).toBe('general');
-    expect(resolveTab(null, false, 'personal')).toBe('mine');
+    expect(resolveTab(null, false, 'personal')).toBe('sources');
     expect(resolveTab('mcp', true)).toBe('mcp');
     expect(resolveTab('mcp', false, 'personal')).toBe('mcp');
     expect(visibleTabs(true).at(-1)!.id).toBe('appearance');
@@ -163,7 +163,7 @@ describe('mcp is under My Brain for every role, and it is not the landing', () =
     expect(visibleTabs(true, 'personal').at(-1)!.id).toBe('appearance');
   });
 
-  test('a member pasting /settings/spend still lands on My Brain', () => {
-    expect(resolveTab('spend', false)).toBe('mine');
+  test('a member pasting /settings/spend still lands on Sources', () => {
+    expect(resolveTab('spend', false)).toBe('sources');
   });
 });

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
-import { callerFor } from '../zone.ts';
+import { callerFor, isAdminRole } from '../zone.ts';
+import { manageableSpace } from '../sourceAccess.ts';
 import { parse as parseYaml } from 'yaml';
 import { callOps, patchFilePlaneConfig, putSchemaPack, putSchemaPackJson, readSchemaPackRaw, removeSchemaPack } from '../opsClient.ts';
 import { readConfigValue } from '../configValue.ts';
@@ -434,7 +435,7 @@ schemaRoutes.get('/schema/skill', guard('admin', async (c) => {
  * file declares 1 (MEASURED, S4). Serving the raw manifest here would be a
  * false claim; the whole point of Task 1's packOverride seam is to avoid it.
  */
-schemaRoutes.get('/schema/packs', guard('admin', async (c, { orgId }) => {
+schemaRoutes.get('/schema/packs', guard('viewer', async (c, { orgId }) => {
   const brain = await loadBrain(orgId);
   const active = await readActive();
   const names = visiblePackNames(await listSchemaPacks(), active.pack);
@@ -467,11 +468,11 @@ schemaRoutes.get('/schema/sources', guard('admin', async (c, ctx) => {
  * If the readback disagrees the write is NOT reported as applied: same 409
  * shape and same refusal to round a mismatch up as `/schema/apply`.
  */
-schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, ctx) => {
+schemaRoutes.post('/schema/sources/:sourceId', guard('viewer', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
-  if (!(await sourceVisible(orgId, sourceId, caller.membershipId))) {
+  if (!(await manageableSpace(ctx, sourceId))) {
     return c.json({ error: `unknown source ${sourceId}` }, 400);
   }
 
@@ -527,11 +528,11 @@ schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, ctx) => 
  * readback, not the exit code: an absent key IS the requested end state. If the
  * key survives the unset we answer 409 rather than claim a reset.
  */
-schemaRoutes.delete('/schema/sources/:sourceId', guard('admin', async (c, ctx) => {
+schemaRoutes.delete('/schema/sources/:sourceId', guard('viewer', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const { userId, orgId } = caller;
   const sourceId = c.req.param('sourceId') ?? '';
-  if (!(await sourceVisible(orgId, sourceId, caller.membershipId))) {
+  if (!(await manageableSpace(ctx, sourceId))) {
     return c.json({ error: `unknown source ${sourceId}` }, 400);
   }
 
@@ -681,15 +682,18 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
  * container with a pack whose prefixes deliberately targeted already-typed
  * pages — zero rows changed. See docs/archive/schema-pack-findings.md S3.
  */
-schemaRoutes.post('/schema/sync', guard('admin', async (c, ctx) => {
+schemaRoutes.post('/schema/sync', guard('viewer', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const { userId, orgId } = caller;
   // An optional `{ source }` runs the per-Space backfill (gate 4 passed). The
-  // audit target names the Space, not 'brain', when a fence is in play.
+  // audit target names the Space, not 'brain', when a fence is in play. A
+  // member may backfill the Space they manage; the brain-wide run is admin-only.
   const body = await c.req.json().catch(() => ({}));
   const source = typeof body?.source === 'string' ? body.source : undefined;
-  if (source !== undefined && !(await sourceVisible(orgId, source, caller.membershipId))) {
-    return c.json({ error: `unknown source ${source}` }, 400);
+  if (source === undefined ? !isAdminRole(caller.role) : !(await manageableSpace(ctx, source))) {
+    return source === undefined
+      ? c.json({ error: 'forbidden' }, 403)
+      : c.json({ error: `unknown source ${source}` }, 400);
   }
 
   const r = await callOps<{ total_applied: number; total_would_apply: number }>(

@@ -24,16 +24,20 @@ beforeAll(async () => {
 afterAll(async () => { await closeDb(); });
 
 describe('personal mode refuses team routes', () => {
-  test('invite, shared source and grants answer company_mode_required', async () => {
+  test('invite and grants answer company_mode_required', async () => {
     for (const [method, path, body] of [
       ['POST', '/api/members', { email: 'x@example.test', role: 'member' }],
-      ['POST', '/api/sources', { sourceId: 'shared-kb', name: 'Shared' }],
       ['PUT', '/api/grants', { membershipId: 'm', spaceId: 's', access: 'read' }],
     ] as const) {
       const res = await hit(method, path, ownerCookie, body);
       expect(res.status).toBe(403);
       expect((await res.json() as { error: string }).error).toBe('company_mode_required');
     }
+  });
+
+  test('the owner can add a Source in personal mode', async () => {
+    const res = await hit('POST', '/api/sources', ownerCookie, { sourceId: 'owner-kb', name: 'Owner KB' });
+    expect(res.status).not.toBe(403);
   });
 
   test('the same routes open once the org is in company mode', async () => {

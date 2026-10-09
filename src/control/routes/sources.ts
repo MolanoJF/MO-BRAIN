@@ -8,17 +8,21 @@ import { callOps } from '../opsClient.ts';
 import { connectRemote, disconnectRemote, pushRemote } from '../spaceRemoteOps.ts';
 import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
 import { resolveSourcePacks } from './schema.ts';
-import { requireCapability } from '../capabilities.ts';
+import { grantsFor } from '../grants.ts';
+import { inspectRepos } from '../opsClient.ts';
+import { canManageSpace, manageableSpace } from '../sourceAccess.ts';
+import { isAdminRole } from '../zone.ts';
 
 /**
- * `/api/sources/*` — the Sources admin API (Task 5). A Space is a gbrain
- * source; this is where an admin adds, renames, archives and removes one, and
- * sees the schema pack each resolves.
+ * `/api/sources/*` — the unified Sources API. A Space is a gbrain source; this
+ * is where a member sees the Sources they can open and manages their own
+ * private one, and where an admin adds, renames, archives and removes company
+ * Sources. `canManage` says which, per row (`../sourceAccess.ts`).
  *
  * `GET` joins our `spaces` rows with gbrain's live `sources.list` and Task 4's
  * pack resolution, and FLAGS mismatches (a source in one plane but not the
- * other) rather than hiding them. Every route is `admin`-only: removal is
- * destructive and irreversible.
+ * other) rather than hiding them. Adding a Source is `admin`-only; the routes
+ * that change one answer the same `unknown source` to anyone who may not.
  */
 export const sourceRoutes = new Hono();
 
@@ -36,11 +40,6 @@ type GbrainSource = {
  *  unregistered source unless it actually holds pages. */
 const GBRAIN_FALLBACK_SOURCE_ID = 'default';
 
-type SpaceRow = {
-  id: string; sourceId: string; name: string; kind: string;
-  ownerMembershipId: string | null; gitRemote: string | null;
-};
-
 async function audit(orgId: string, actor: string, action: string, target: string, after: unknown) {
   // S3c: `after` is a redacted summary — never a raw request body.
   await getDb().insert(schema.auditLog)
@@ -54,24 +53,6 @@ const guard = (min: Role, handler: (c: any, ctx: { userId: string; orgId: string
     try { return await handler(c, ctx); }
     catch (e: any) { return c.json({ error: e?.message ?? 'sources_error' }, e?.status ?? 400); }
   };
-
-/** The `(organizationId, sourceId)` pair is uniquely indexed, so a Space from
- *  another org can never be resolved here. Validated before ANY destructive
- *  call or interpolated into a gbrain config key. */
-async function spaceFor(orgId: string, sourceId: string): Promise<SpaceRow | null> {
-  const [space] = await getDb().select({
-    id: schema.spaces.id,
-    sourceId: schema.spaces.sourceId,
-    name: schema.spaces.name,
-    kind: schema.spaces.kind,
-    ownerMembershipId: schema.spaces.ownerMembershipId,
-    gitRemote: schema.spaces.gitRemote,
-  }).from(schema.spaces).where(and(
-    eq(schema.spaces.organizationId, orgId),
-    eq(schema.spaces.sourceId, sourceId),
-  ));
-  return space ?? null;
-}
 
 /**
  * Delete the `spaces` row and clear the per-source pack override together.
@@ -102,25 +83,31 @@ export async function archiveSpace(space: { id: string; sourceId: string }): Pro
   return { ok: true };
 }
 
-sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
+sourceRoutes.get('/sources', guard('viewer', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const orgId = caller.orgId;
-  const hidden = new Set((await getDb().select({
-    sourceId: schema.spaces.sourceId, owner: schema.spaces.ownerMembershipId,
-  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId)))
-    .filter((s) => s.owner !== null && s.owner !== caller.membershipId)
-    .map((s) => s.sourceId));
+  const admin = isAdminRole(caller.role);
+  const spaceRows = await getDb().select({
+    id: schema.spaces.id, sourceId: schema.spaces.sourceId,
+    gitRemote: schema.spaces.gitRemote, owner: schema.spaces.ownerMembershipId,
+  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId));
+  // Own private Space; company Spaces for an admin, else only the granted ones.
+  const granted = admin ? null : new Set((await grantsFor(orgId, caller.membershipId)).map((g) => g.spaceId));
+  const visible = new Set(spaceRows
+    .filter((r) => r.owner === null ? granted === null || granted.has(r.id) : r.owner === caller.membershipId)
+    .map((r) => r.sourceId));
+  const hidden = new Set(spaceRows.filter((r) => !visible.has(r.sourceId)).map((r) => r.sourceId));
 
   const [packResolvedAll, listed] = await Promise.all([
     resolveSourcePacks(orgId),
     callOps<{ sources: GbrainSource[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 }),
   ]);
-  const packResolved = packResolvedAll.filter((s) => !hidden.has(s.sourceId));
-  const spaceRows = await getDb().select({
-    sourceId: schema.spaces.sourceId, gitRemote: schema.spaces.gitRemote, owner: schema.spaces.ownerMembershipId,
-  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId));
+  const packResolved = packResolvedAll.filter((s) => visible.has(s.sourceId));
   const remotes = new Map(spaceRows.map((r) => [r.sourceId, r.gitRemote]));
   const owners = new Map(spaceRows.map((r) => [r.sourceId, r.owner]));
+  // Drift in the working repo: uncommitted pages the brain cannot see, commits not yet pushed.
+  const repoStatus = new Map<string, Awaited<ReturnType<typeof inspectRepos>>[number]>();
+  try { for (const r of await inspectRepos()) repoStatus.set(r.sourceId, r); } catch { /* status stays null */ }
 
   // A failed `sources.list` is NOT an empty brain: rows keep `pageCount: null`,
   // never 0, and the payload says the list could not be read.
@@ -131,6 +118,8 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
 
   const sources = packResolved.map((s) => {
     const g = byId.get(s.sourceId);
+    const owner = owners.get(s.sourceId) ?? null;
+    const repo = remotes.get(s.sourceId) ? repoStatus.get(s.sourceId) : undefined;
     return {
       sourceId: s.sourceId,
       name: s.name,
@@ -145,21 +134,24 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
       federated: g?.federated ?? null,
       inGbrain: g !== undefined,
       gitRemote: remotes.get(s.sourceId) ?? null,
-      private: owners.get(s.sourceId) != null,
+      gitStatus: repo
+        ? { branch: repo.branch, uncommittedFiles: repo.uncommittedFiles, unpushedCommits: repo.unpushedCommits }
+        : null,
+      private: owner !== null,
+      canManage: canManageSpace(caller, { ownerMembershipId: owner }),
     };
   });
 
-  // Flag the other direction of the mismatch too: a gbrain source with no
-  // `spaces` row is invisible to the console unless we name it.
+  // The drift flags are for the admin who can act on them.
   const known = new Set(packResolvedAll.map((s) => s.sourceId));
   // gbrain's own `default` source never has a `spaces` row, so it is not a
   // mismatch to flag while empty. When it holds pages, those are reported via
   // `builtinDefault` (the console words that specially), not in `unregistered`.
   const builtin = byId.get(GBRAIN_FALLBACK_SOURCE_ID);
-  const builtinDefault = builtin && (builtin.page_count ?? 0) > 0 && !known.has(builtin.id)
+  const builtinDefault = admin && builtin && (builtin.page_count ?? 0) > 0 && !known.has(builtin.id)
     ? { pageCount: builtin.page_count as number }
     : null;
-  const unregistered = (gbrain ?? [])
+  const unregistered = !admin ? [] : (gbrain ?? [])
     .filter((s) => !known.has(s.id) && !hidden.has(s.id) && s.id !== GBRAIN_FALLBACK_SOURCE_ID)
     .map((s) => s.id);
 
@@ -167,7 +159,6 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
 }));
 
 sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
-  await requireCapability(orgId, 'sharedSources');
   const { sourceId, name, description } = await c.req.json();
   // ONE implementation, shared with `/api/wizard/space`, so they cannot drift.
   const result = await addSpaceSource({ userId, orgId }, { sourceId, name, description }, 'source.add');
@@ -175,14 +166,12 @@ sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
   return c.json({ ok: true, sourceId: result.sourceId, isolationNotice: ISOLATION_NOTICE });
 }));
 
-sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, ctx) => {
-  const caller = await callerFor(ctx);
-  const { userId, orgId } = caller;
+sourceRoutes.patch('/sources/:sourceId', guard('viewer', async (c, ctx) => {
   const sourceId = c.req.param('sourceId') ?? '';
-  const space = await spaceFor(orgId, sourceId);
-  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) {
-    return c.json({ error: `unknown source ${sourceId}` }, 400);
-  }
+  const owned = await manageableSpace(ctx, sourceId);
+  if (!owned) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  const { space } = owned;
+  const { userId, orgId } = ctx;
 
   const body = await c.req.json().catch(() => ({}));
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -202,45 +191,43 @@ sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, ctx) => {
 }));
 
 /* Git remote for a Space — logic in `../spaceRemoteOps.ts`, shared with the
- * member's own `/api/my/space/remote`. Admin-only here, and the Space must be
- * visible to the caller (never another member's private Space). */
+ * member's own `/api/my/space/remote`. The Space must be one the caller may
+ * manage (never another member's private Space). */
 
 async function ownedSpace(c: any, ctx: { userId: string; orgId: string; role: Role }) {
-  const caller = await callerFor(ctx);
-  const sourceId = c.req.param('sourceId') ?? '';
-  const space = await spaceFor(caller.orgId, sourceId);
-  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) return null;
-  return space;
+  return (await manageableSpace(ctx, c.req.param('sourceId') ?? ''))?.space ?? null;
 }
 
 const respond = (c: any, r: { status: number; body: object }) => c.json(r.body, r.status);
 
-sourceRoutes.put('/sources/:sourceId/remote', guard('admin', async (c, ctx) => {
+sourceRoutes.put('/sources/:sourceId/remote', guard('viewer', async (c, ctx) => {
   const space = await ownedSpace(c, ctx);
   if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
   return respond(c, await connectRemote(ctx, space, await c.req.json().catch(() => ({}))));
 }));
 
-sourceRoutes.post('/sources/:sourceId/remote/push', guard('admin', async (c, ctx) => {
+sourceRoutes.post('/sources/:sourceId/remote/push', guard('viewer', async (c, ctx) => {
   const space = await ownedSpace(c, ctx);
   if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
   return respond(c, await pushRemote(ctx, space));
 }));
 
-sourceRoutes.delete('/sources/:sourceId/remote', guard('admin', async (c, ctx) => {
+sourceRoutes.delete('/sources/:sourceId/remote', guard('viewer', async (c, ctx) => {
   const space = await ownedSpace(c, ctx);
   if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
   return respond(c, await disconnectRemote(ctx, space));
 }));
 
-sourceRoutes.delete('/sources/:sourceId', guard('admin', async (c, ctx) => {
-  const caller = await callerFor(ctx);
-  const { userId, orgId } = caller;
+sourceRoutes.delete('/sources/:sourceId', guard('viewer', async (c, ctx) => {
+  const { userId, orgId } = ctx;
   const sourceId = c.req.param('sourceId') ?? '';
-  const space = await spaceFor(orgId, sourceId);
-  if (!space || (space.ownerMembershipId !== null && space.ownerMembershipId !== caller.membershipId)) {
-    return c.json({ error: `unknown source ${sourceId}` }, 400);
-  }
+  const owned = await manageableSpace(ctx, sourceId);
+  if (!owned) return c.json({ error: `unknown source ${sourceId}` }, 400);
+  const { space } = owned;
+  // A private Space is the write target of its owner's agent connection, and
+  // `connections.write_space_id` has no ON DELETE: gbrain would archive it and
+  // then the row delete would fail. Not retirable from here.
+  if (space.ownerMembershipId !== null) return c.json({ error: 'private_space_permanent' }, 409);
 
   const body = await c.req.json().catch(() => ({}));
   const mode = typeof body?.mode === 'string' ? body.mode : 'archive';
