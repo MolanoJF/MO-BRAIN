@@ -33,7 +33,7 @@ Not a release. Not in the published `1.0.0` images.
 
 Zones a caller can rely on:
 
-- A fresh install is a personal brain on schema pack `mobrain-personal`. The console wizard is three steps: Sign in, OpenAI key (checked when saved), Create brain. Create brain defaults to Balanced search and one private Space. Search mode can be changed later in Settings → General.
+- A fresh install is a personal brain on schema pack `mobrain-core`, the locked base every Mo-brain schema extends (`mobrain-personal`, custom packs, the `my-brain` and `my-personal` layers). The control plane refuses any write or activation that doesn't reach core or that redefines a core entry (`CORE_LOCKED`; `src/control/coreLock.ts`). The console wizard is three steps: Sign in, OpenAI key (checked when saved), Create brain. Create brain defaults to Balanced search and one private Space. Search mode can be changed later in Settings → General.
 - Company mode is the owner's switch in Settings → General. Switching back to personal is allowed only while that owner is the only member and no invite is open.
 - Company Space access is an explicit `space_grants` row. Personal mode refuses invites, shared sources, and grants with `403 { error: "company_mode_required" }`.
 - An invite creates a placeholder account. The claim page sets a password only on that placeholder.

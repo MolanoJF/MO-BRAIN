@@ -10,20 +10,20 @@
     "name": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-      "description": "The pack's unique id. Lowercase letters, digits and hyphens only, must start with a letter or digit, at most 64 characters. Cannot match a read-only bundled pack name (gbrain-base, gbrain-base-v2, gbrain-recommended, gbrain-creator, gbrain-investor, gbrain-engineer, gbrain-everything)."
+      "description": "The pack's unique id. Lowercase letters, digits and hyphens only, must start with a letter or digit, at most 64 characters. Cannot match a bundled gbrain pack name, a name starting with mobrain-, or a layer name (my-brain, my-personal)."
     },
     "description": {
       "type": "string",
       "description": "One or two sentences, in plain language, describing what ontology this pack adds and who it is for. Shown to admins reviewing the import."
     },
     "extends": {
-      "type": ["string", "null"],
+      "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-      "description": "The name of a pack this one builds on, usually gbrain-base-v2. Its page types, link types and other inheritable fields are merged in by gbrain (child wins); a pack cannot extend itself. Set null for a standalone ontology that inherits nothing. Do NOT omit this property: gbrain defaults a missing extends to gbrain-base, so omitting it silently inherits the base pack instead of giving you a standalone one. When set to a pack name, a link verb may reference parent types that this draft does not declare."
+      "description": "The Mo-brain pack this one builds on: mobrain-core, mobrain-personal, or another custom pack whose chain ends at mobrain-core. Required and never null. Its page types, link types and other inheritable fields are merged in by gbrain, but mobrain-core's entries are locked: this draft cannot redeclare a core type, verb or inverse. A pack cannot extend itself. Link verbs may reference parent types that this draft does not declare."
     },
     "pageTypes": {
       "type": "array",
-      "description": "The page types this pack declares. A standalone pack (extends: null) needs at least one. Each type owns one folder and may own extra prefixes, but no two types may claim the same folder or prefix.",
+      "description": "The new page types this pack adds on top of its parent. Names used by mobrain-core are refused. Each type owns one folder and may own extra prefixes, but no two types may claim the same folder or prefix.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -74,7 +74,7 @@
     },
     "linkVerbs": {
       "type": "array",
-      "description": "The typed relationships pages can form, each as an active verb. A verb may name the from and to page types it connects; when extends is null both must exist in pageTypes, and when extends is set they may be provided by the parent. Leave the array empty to declare no links.",
+      "description": "The typed relationships pages can form, each as an active verb. A verb may name the from and to page types it connects; they may be provided by the parent. Names used by mobrain-core (verbs and inverses) are refused. Leave the array empty to declare no links.",
       "items": {
         "type": "object",
         "additionalProperties": false,

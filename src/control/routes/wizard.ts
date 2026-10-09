@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireAdmin } from './auth.ts';
 import { storeSecret } from '../secrets.ts';
-import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson, pauseBrainWriters, resumeBrainWriters } from '../opsClient.ts';
+import { callOps, patchFilePlaneConfig, seedSpace, resetBrainSchema, putSchemaPackJson, removeSchemaPack, pauseBrainWriters, resumeBrainWriters } from '../opsClient.ts';
 import { provisionPrivateSpace, privateSpaceSourceId, gbrainSourceName } from '../privateSpaces.ts';
 import { canAdvance, nextStep, SEARCH_MODES, LIFECYCLE_ORDER, DEFAULT_SEARCH_MODE } from '../lifecycle.ts';
 import { DEFAULT_SCHEMA_PACK } from '../bootstrap.ts';
@@ -12,7 +12,8 @@ import { verifyOpenAiKey } from '../providerCheck.ts';
 import type { Lifecycle } from '../lifecycle.ts';
 import { OPERATIONS } from '../../contracts/registry.ts';
 import { parseSchemaActiveProse } from '../../contracts/capability.ts';
-import { resolveSourcePacks, effectivePack, validationError, lint } from './schema.ts';
+import { resolveSourcePacks, effectivePack, validationError, lint, activationViolations, readRawManifest } from './schema.ts';
+import { CORE_LOCKED, chainReachesCore } from '../coreLock.ts';
 import { scaffoldSpaces, type ScaffoldResult } from '../scaffold.ts';
 import { validateDraft, draftToManifest } from '../schemaDraft.ts';
 import { requireCapability } from '../capabilities.ts';
@@ -179,7 +180,7 @@ wizard.post('/provider', guard(async (c, { userId, orgId }) => {
 /**
  * Step 2 — the one mandatory human decision (V4).
  *
- * Spec P6: bootstrap stores `mobrain-personal`, so when a pack is already
+ * Spec P6: bootstrap stores `mobrain-core`, so when a pack is already
  * stored this step also passes `schema-selected` — the Schema step no longer
  * exists for a fresh install. A legacy brain with no stored pack stops at
  * `mode-selected` and the console still renders the Schema step for it.
@@ -259,7 +260,7 @@ wizard.get('/schema-packs', guard(async (c) => {
  * point in the wizard the brain has not been init'd, and `init` writes
  * config.json's `schema_pack` itself (gbrain's own init default is still
  * `gbrain-base-v2`, which is why Mo-brain always passes the pack explicitly —
- * it stores `mobrain-personal`), so a pre-init write would simply be stamped
+ * it stores `mobrain-core`), so a pre-init write would simply be stamped
  * over. See
  * docs/archive/schema-pack-findings.md S2.
  *
@@ -287,7 +288,16 @@ wizard.post('/schema', guard(async (c, { userId, orgId }) => {
     }
 
     const brain = await loadBrain(orgId);
+    // L1 before the write, L5 after it (core lock). A draft that fails either
+    // never stays on disk.
+    const chain = await chainReachesCore(name, async (n) => (n === name ? { extends: v.draft.extends } : readRawManifest(n)));
+    if (!chain.ok) return c.json({ error: chain.reason, code: CORE_LOCKED }, 400);
     await putSchemaPackJson(name, draftToManifest(v.draft, brain.gbrainVersion ?? '0.50.5.0'));
+    const locked = await activationViolations(name);
+    if (locked.length) {
+      await removeSchemaPack(name);
+      return c.json({ error: locked[0]!.message, code: CORE_LOCKED }, 400);
+    }
 
     const invalid = await validationError(name);
     const report = invalid ? null : await lint(name, false);
@@ -313,6 +323,9 @@ wizard.post('/schema', guard(async (c, { userId, orgId }) => {
   if (!known.includes(pack)) {
     return c.json({ error: `unknown schema pack ${pack}`, packs: known }, 400);
   }
+
+  const locked = await activationViolations(pack);
+  if (locked.length) return c.json({ error: locked[0]!.message, code: CORE_LOCKED }, 400);
 
   const brain = await loadBrain(orgId);
   await advance(brain.id, brain.lifecycle as Lifecycle, 'schema-selected', { schemaPack: pack });

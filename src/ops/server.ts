@@ -12,7 +12,7 @@ import type { OpsResponse } from './dispatch.ts';
 import { buildArgv, redactArgv } from '../contracts/argv.ts';
 import { extractReceiptJson } from '../contracts/json.ts';
 import {
-  patchConfig, writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedSpaceRepo,
+  patchConfig, writeSchemaPack, writeSchemaPackJson, readSchemaPackRaw, removeSchemaPack, seedSpaceRepo,
   takeGrantCredentialsFile, readSupervisorAuditTail, deleteCredentialDelivery, seedManagedPacks,
 } from './fileplane.ts';
 import { resetBrainSchema } from './brainSchema.ts';
@@ -115,6 +115,12 @@ Bun.serve({
         if (!name || typeof manifest !== 'object' || manifest === null) return json({ error: 'name and manifest required' }, 400);
         await writeSchemaPackJson(name, manifest, { sql });
         return json({ ok: true, name });
+      }
+
+      if (url.pathname === '/fileplane/schema-pack-read') {
+        const { name } = body as { name?: string };
+        if (!name) return json({ error: 'name required' }, 400);
+        return json({ raw: await readSchemaPackRaw(name) });
       }
 
       if (url.pathname === '/fileplane/schema-pack-remove') {

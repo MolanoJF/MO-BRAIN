@@ -6,6 +6,14 @@ provenance — every `U*`, `P*` and `F*` — is in [`docs/slice-5-findings.md`](
 
 ## [Unreleased]
 
+**`mobrain-core` is the base of every schema.** A new brain starts on `mobrain-core`, a minimal,
+domain-neutral pack (12 types, 10 general link verbs). `mobrain-personal` 2.0.0 now extends it and
+declares only what it adds; the investor-flavoured verbs live there, not in core. Every custom pack must
+extend core, and core's types and verbs cannot be removed or redefined by any pack, including Mo-brain's
+own. The control plane enforces this on every write and activation path and answers `CORE_LOCKED`. Edits
+to core go to the `my-brain` layer; edits to Personal still go to `my-personal`. `gbrain-base-v2` and
+`company-brain` stay selectable, labeled as gbrain packs. Existing brains are not migrated: rebuild them.
+
 **Tailscale install mode.** `INSTALL_MODE=tailscale bash scripts/install.sh` installs a tailnet-only
 brain: Caddy on loopback high ports, fronted by `tailscale serve` with the host's real tailnet
 certificate. New preflight refusals 18 (Tailscale missing/not running) and 19 (serve port already

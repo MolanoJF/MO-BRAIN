@@ -5,6 +5,8 @@ import {
 } from '../api.ts';
 import { Badge, Button, Card, Empty, PageTitle, Table, TableWrap } from '../ui/index.tsx';
 import { NewPackPanel, PackEditor, ScaffoldResults } from './SchemaBuilder.tsx';
+import { editLabel, packBadge } from './schemaLock.ts';
+export { editLabel };
 
 type Active = {
   pack: string | null; version: string | null; source: string | null;
@@ -78,12 +80,6 @@ export function packSummary(detail: PackDetail): string {
   const verbs = `${detail.linkVerbs.length} link verb${detail.linkVerbs.length === 1 ? '' : 's'}`;
   const base = `${types} · ${verbs}`;
   return detail.extends ? `${base} · extends ${detail.extends}` : base;
-}
-
-/** Bundled packs are forked; Mo-brain's own pack is customized through a layer. */
-export function editLabel(d: Pick<PackDetail, 'bundled' | 'managed'>): string {
-  if (d.bundled) return 'Fork to edit';
-  return d.managed ? 'Customize' : 'Edit';
 }
 
 /** One page type's label: `thesis (concept) — investing/theses/, theses/`. */
@@ -243,10 +239,15 @@ export function Schema() {
                 ? <div className="text-[length:var(--control-font)] text-danger">{d.error}</div>
                 : (
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-[length:var(--control-font)] text-muted">{packSummary(d)}</div>
-                    <Button disabled={busy} onClick={() => setBuilder({ mode: 'edit', name: d.name })}>
-                      {editLabel(d)}
-                    </Button>
+                    <div className="text-[length:var(--control-font)] text-muted">
+                      {packSummary(d)}
+                      {packBadge(d) && <div>{packBadge(d)}</div>}
+                    </div>
+                    {editLabel(d) && (
+                      <Button disabled={busy} onClick={() => setBuilder({ mode: 'edit', name: d.name })}>
+                        {editLabel(d)}
+                      </Button>
+                    )}
                   </div>
                 )}
               {isOpen && d.error === null && (

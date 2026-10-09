@@ -6,12 +6,19 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { callerFor } from '../zone.ts';
-import { callOps, patchFilePlaneConfig, putSchemaPack, putSchemaPackJson, removeSchemaPack } from '../opsClient.ts';
+import { parse as parseYaml } from 'yaml';
+import { callOps, patchFilePlaneConfig, putSchemaPack, putSchemaPackJson, readSchemaPackRaw, removeSchemaPack } from '../opsClient.ts';
 import { readConfigValue } from '../configValue.ts';
 import { listSchemaPackSections, listSchemaPacks } from './wizard.ts';
 import { parseSchemaActiveProse, type SchemaActive } from '../../contracts/capability.ts';
 import { BUNDLED_PACKS, draftToManifest, validateDraft, validateMutations } from '../schemaDraft.ts';
-import { isManagedPack, LAYER_PACK, LAYER_PARENT, visiblePackNames } from '../../contracts/packs.ts';
+import {
+  CORE_PACK, isGbrainFallbackPack, isLayerPack, isManagedPack, isReservedPackName, layerFor,
+  visiblePackNames, type ManagedPack,
+} from '../../contracts/packs.ts';
+import {
+  CORE_LOCKED, CORE_MANIFEST, chainReachesCore, ownViolations, resolvedViolations, type Manifest, type Violation,
+} from '../coreLock.ts';
 import { scaffoldSpaces } from '../scaffold.ts';
 
 export const schemaRoutes = new Hono();
@@ -106,6 +113,54 @@ export async function lint(pack: string | undefined, withDb: boolean): Promise<L
   };
 }
 
+/** A pack's RAW manifest (its own declarations), or null when it can't be read. */
+export async function readRawManifest(pack: string): Promise<Manifest | null> {
+  const r = await callOps<Manifest>('schema.showRaw', { packName: pack }, { json: true, timeoutMs: 60_000 });
+  return r.ok && r.json ? r.json : null;
+}
+
+/** A pack's RESOLVED manifest, through gbrain's own merge (the packOverride seam). */
+async function readResolvedManifest(pack: string): Promise<Manifest | null> {
+  const r = await callOps<Manifest>('schema.show', {}, { json: true, packOverride: pack, timeoutMs: 60_000 });
+  return r.ok && r.json ? r.json : null;
+}
+
+const lockedBody = (violations: Violation[]) => ({
+  error: violations[0]!.message,
+  code: CORE_LOCKED,
+  violations: violations.map((v) => ({ rule: v.rule, message: v.message })),
+});
+
+/** L5 for a pack already on disk. Null when it holds (or can't be resolved: gbrain's own validate reports that). */
+async function resolvedLockViolations(pack: string): Promise<Violation[]> {
+  const resolved = await readResolvedManifest(pack);
+  return resolved ? resolvedViolations(resolved) : [];
+}
+
+/**
+ * The activation gate: gbrain's own packs pass; any other pack must reach
+ * mobrain-core (L1) and resolve with every core entry intact (L5).
+ */
+export async function activationViolations(pack: string): Promise<Violation[]> {
+  if (isGbrainFallbackPack(pack)) return [];
+  const chain = await chainReachesCore(pack, readRawManifest);
+  if (!chain.ok) return [{ rule: 'L1', message: chain.reason }];
+  const resolved = await readResolvedManifest(pack);
+  if (!resolved) return [{ rule: 'L5', message: `${pack} could not be resolved by gbrain.` }];
+  return resolvedViolations(resolved);
+}
+
+/**
+ * Put a pack back after an L5 failure: a new pack is removed, a replaced one is
+ * restored from the raw text read before the write, in the format it was read.
+ */
+async function rollbackPack(name: string, previous: { format: 'json' | 'yaml'; text: string } | null): Promise<void> {
+  if (previous === null) await removeSchemaPack(name);
+  else if (previous.format === 'json') await putSchemaPackJson(name, JSON.parse(previous.text));
+  else await putSchemaPack(name, previous.text);
+  invalidateSchemaPackCache();
+}
+
 export type PackPageType = {
   name: string;
   primitive: string;
@@ -122,6 +177,8 @@ export type PackDetail = {
   extends: string | null;
   bundled: boolean;
   managed: boolean;
+  /** gbrain's own pack, activatable without the core lock. */
+  fallback: boolean;
   pageTypes: PackPageType[];
   linkVerbs: string[];
   linkTypes: { name: string; inverse: string | null; pageType: string | null; targetType: string | null }[];
@@ -147,6 +204,9 @@ type RawManifest = {
   }>;
   filing_rules?: Array<{ kind?: string; directory?: string; description?: string | null }>;
   takes_kinds?: string[];
+  borrow_from?: unknown[];
+  frontmatter_links?: Array<{ page_type?: string; fields?: string[]; link_type?: string }>;
+  enrichable_types?: Array<{ type?: string }>;
 };
 
 /**
@@ -184,7 +244,7 @@ export async function effectivePack(version: string, pack: string): Promise<Pack
   // Managed packs (and the layer, whose effective manifest is theirs plus its
   // own) can be rewritten by the ops process without this process's
   // knowledge or a version bump. Never risk serving that stale.
-  const cacheable = !isManagedPack(pack) && pack !== LAYER_PACK;
+  const cacheable = !isManagedPack(pack) && !isLayerPack(pack);
   const key = `${version}:${pack}`;
   if (cacheable) {
     const cached = packDetailCache.get(key);
@@ -210,6 +270,7 @@ function toPackDetail(
       name, version: null, description: null, extends: null,
       bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
       managed: isManagedPack(name),
+      fallback: isGbrainFallbackPack(name),
       pageTypes: [], linkVerbs: [], linkTypes: [], filingRules: [], takesKinds: [],
       error: text || `schema show exited ${r.exitCode} with no manifest`,
     };
@@ -222,6 +283,7 @@ function toPackDetail(
     extends: m.extends ?? null,
     bundled: (BUNDLED_PACKS as readonly string[]).includes(name),
     managed: isManagedPack(name),
+    fallback: isGbrainFallbackPack(name),
     pageTypes: (m.page_types ?? []).map((p) => ({
       name: p.name ?? '',
       primitive: p.primitive ?? '',
@@ -419,6 +481,9 @@ schemaRoutes.post('/schema/sources/:sourceId', guard('admin', async (c, ctx) => 
   const known = await listSchemaPacks();
   if (!known.includes(pack)) return c.json({ error: `unknown schema pack ${pack}`, packs: known }, 400);
 
+  const locked = await activationViolations(pack);
+  if (locked.length) return c.json(lockedBody(locked), 400);
+
   const invalid = await validationError(pack);
   if (invalid) return c.json({ error: invalid }, 400);
 
@@ -550,6 +615,9 @@ schemaRoutes.post('/schema/apply', guard('admin', async (c, { userId, orgId }) =
   const known = await listSchemaPacks();
   if (!known.includes(pack)) return c.json({ error: `unknown schema pack ${pack}`, packs: known }, 400);
 
+  const locked = await activationViolations(pack);
+  if (locked.length) return c.json(lockedBody(locked), 400);
+
   const invalid = await validationError(pack);
   if (invalid) return c.json({ error: invalid }, 400);
 
@@ -652,7 +720,7 @@ schemaRoutes.put('/schema/pack', guard('admin', async (c, { userId, orgId }) => 
   if (typeof name !== 'string' || !PACK_NAME.test(name)) {
     return c.json({ error: 'name must be lowercase letters, digits and hyphens' }, 400);
   }
-  if (isManagedPack(name) || name === LAYER_PACK || isBundled(name)) {
+  if (isReservedPackName(name)) {
     return c.json({ error: `${name} is reserved` }, 400);
   }
   if (typeof yaml !== 'string' || yaml.trim() === '') return c.json({ error: 'yaml is required' }, 400);
@@ -660,7 +728,31 @@ schemaRoutes.put('/schema/pack', guard('admin', async (c, { userId, orgId }) => 
     return c.json({ error: `pack manifest exceeds ${MAX_PACK_BYTES} bytes` }, 400);
   }
 
+  // L1–L4 on the manifest as submitted, before anything touches the file plane.
+  let submitted: Manifest;
+  try {
+    const parsed = parseYaml(yaml);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not a mapping');
+    submitted = parsed as Manifest;
+  } catch (e: any) {
+    return c.json({ error: `the manifest is not valid YAML or JSON: ${e?.message ?? e}` }, 400);
+  }
+  // A missing `extends` falls back to gbrain-base (gbrain fact 3).
+  const extendsName = submitted.extends === undefined ? 'gbrain-base' : submitted.extends;
+  const chain = extendsName === null
+    ? { ok: false as const, reason: `${name} does not build on ${CORE_PACK}. Set extends to "${CORE_PACK}".` }
+    : await chainReachesCore(name, async (n) => (n === name ? { ...submitted, extends: extendsName } : readRawManifest(n)));
+  if (!chain.ok) return c.json(lockedBody([{ rule: 'L1', message: chain.reason }]), 400);
+  const own = ownViolations(submitted);
+  if (own.length) return c.json(lockedBody(own), 400);
+
+  const previous = await readSchemaPackRaw(name);
   await putSchemaPack(name, yaml);
+  const l5 = await resolvedLockViolations(name);
+  if (l5.length) {
+    await rollbackPack(name, previous);
+    return c.json(lockedBody(l5), 400);
+  }
   const invalid = await validationError(name);
   const report = invalid ? null : await lint(name, false);
 
@@ -745,12 +837,24 @@ schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) =
   if (body?.mode === 'fork') {
     const from = String(body.from ?? ''); name = String(body.name ?? '');
     if (!known.includes(from)) return c.json({ error: `unknown schema pack ${from}` }, 400);
-    if (!PACK_NAME.test(name) || isBundled(name) || isManagedPack(name) || name === LAYER_PACK) {
+    if (!PACK_NAME.test(name) || isReservedPackName(name)) {
       return c.json({ error: 'invalid pack name' }, 400);
     }
     if (known.includes(name)) return c.json({ error: `${name} already exists` }, 409);
+    // A fork copies the raw manifest, so forking core (or any pack outside the
+    // core family) would produce an unlocked copy. Only user packs can be forked.
+    if (isBundled(from) || isManagedPack(from) || isLayerPack(from)) {
+      return c.json({ error: `${from} can't be forked. Start a new schema that builds on ${CORE_PACK}.`, code: CORE_LOCKED }, 400);
+    }
+    const chain = await chainReachesCore(from, readRawManifest);
+    if (!chain.ok) return c.json(lockedBody([{ rule: 'L1', message: chain.reason }]), 400);
     const r = await callOps('schema.fork', { from, to: name }, { json: true, timeoutMs: 60_000 });
     if (!r.ok) return c.json({ error: `schema fork failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+    const l5 = await resolvedLockViolations(name);
+    if (l5.length) {
+      await rollbackPack(name, null);
+      return c.json(lockedBody(l5), 400);
+    }
   } else if (body?.mode === 'draft') {
     const v = validateDraft(body.draft);
     if (!v.ok) return c.json({ error: 'invalid draft', errors: v.errors }, 400);
@@ -759,7 +863,14 @@ schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) =
     if (v.draft.extends && !known.includes(v.draft.extends)) {
       return c.json({ error: `unknown parent pack ${v.draft.extends}` }, 400);
     }
+    const chain = await chainReachesCore(name, async (n) => (n === name ? { extends: v.draft.extends } : readRawManifest(n)));
+    if (!chain.ok) return c.json(lockedBody([{ rule: 'L1', message: chain.reason }]), 400);
     await putSchemaPackJson(name, draftToManifest(v.draft, brain.gbrainVersion ?? '0.50.5.0'));
+    const l5 = await resolvedLockViolations(name);
+    if (l5.length) {
+      await rollbackPack(name, null);
+      return c.json(lockedBody(l5), 400);
+    }
   } else {
     return c.json({ error: "mode must be 'draft' or 'fork'" }, 400);
   }
@@ -782,12 +893,13 @@ schemaRoutes.post('/schema/packs', guard('admin', async (c, { userId, orgId }) =
  * and a new type's folder is scaffolded into every Space that resolves the
  * pack, create-only and idempotent.
  *
- * `mobrain-personal` itself is read-only: an edit is redirected to `my-personal`
- * (created on first edit, extending `mobrain-personal`), which is activated
- * afterward when the brain was on the parent — so future shipped versions of
- * `mobrain-personal` keep flowing in underneath the layer (spec §4.5). A
- * mutation that isn't `add_type`/`add_link_type` and targets a name the layer
- * doesn't declare itself is refused as `INHERITED_READONLY` before gbrain runs.
+ * Managed packs are read-only: an edit to `mobrain-core` is redirected to
+ * `my-brain` and one to `mobrain-personal` to `my-personal` (`LAYERS`), created
+ * on first edit and activated afterward when the brain was on the parent — so
+ * future shipped versions keep flowing in underneath the layer (spec §4.5). On
+ * every user pack, a mutation that isn't `add_type`/`add_link_type` and targets
+ * a name the pack doesn't declare itself is refused before gbrain runs
+ * (`CORE_LOCKED` for core's names, `INHERITED_READONLY` otherwise).
  */
 schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { userId, orgId }) => {
   const name = c.req.param('name') ?? '';
@@ -798,19 +910,20 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
 
   let target = name;
   let redirected = false;
+  let parent: ManagedPack | null = null;
   const brain = await loadBrain(orgId);
   if (isManagedPack(name)) {
-    if (name !== LAYER_PARENT) return c.json({ error: `${name} is read-only`, code: 'PACK_READONLY' }, 400);
-    target = LAYER_PACK; redirected = true;
+    parent = name;
+    target = layerFor(name); redirected = true;
     const { installed: before } = await listSchemaPackSections();
-    if (!before.includes(LAYER_PACK)) {
-      await putSchemaPackJson(LAYER_PACK, draftToManifest({
-        name: LAYER_PACK, description: 'Your changes, layered on top of mobrain-personal.',
-        extends: LAYER_PARENT, pageTypes: [], linkVerbs: [],
+    if (!before.includes(target)) {
+      await putSchemaPackJson(target, draftToManifest({
+        name: target, description: `Your changes, layered on top of ${name}.`,
+        extends: name, pageTypes: [], linkVerbs: [],
       }, brain.gbrainVersion ?? '0.50.5.0'));
       invalidateSchemaPackCache();
-    } else if ((await effectivePack(brain.gbrainVersion ?? '', LAYER_PACK)).extends !== LAYER_PARENT) {
-      return c.json({ error: `${LAYER_PACK} exists and does not extend ${LAYER_PARENT}` }, 409);
+    } else if ((await effectivePack(brain.gbrainVersion ?? '', target)).extends !== name) {
+      return c.json({ error: `${target} exists and does not extend ${name}` }, 409);
     }
   }
   const { installed } = await listSchemaPackSections();
@@ -820,27 +933,40 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
   const v = validateMutations(body?.mutations);
   if (!v.ok) return c.json({ error: 'invalid mutations', errors: v.errors }, 400);
 
-  if (target === LAYER_PACK) {
-    const raw = await callOps<RawManifest>('schema.showRaw', { packName: LAYER_PACK }, { json: true, timeoutMs: 60_000 });
+  // Every user pack, layers included, may only change what it declares itself.
+  // Core's names get the sharper CORE_LOCKED answer (D3).
+  {
+    const raw = await callOps<RawManifest>('schema.showRaw', { packName: target }, { json: true, timeoutMs: 60_000 });
     const ownTypes = new Set((raw.json?.page_types ?? []).map((t) => t.name));
     const ownVerbs = new Set((raw.json?.link_types ?? []).map((l) => l.name));
+    const core = new Set(CORE_MANIFEST.page_types!.map((t) => t.name));
+    const coreVerbs = new Set(CORE_MANIFEST.link_types!.flatMap((l) => [l.name, l.inverse].filter(Boolean)));
     // Walk the batch IN ORDER: a name an earlier op in this same batch
     // introduces (add_type / add_link_type) is owned for every later op on it,
-    // even though the layer's raw manifest (read before the batch) does not
-    // know about it yet.
-    const inherited = v.mutations.find((m) => {
-      if (m.op === 'add_type') { ownTypes.add(m.name); return false; }
-      if (m.op === 'add_link_type') { ownVerbs.add(m.name); return false; }
-      if (m.op === 'remove_link_type') return !ownVerbs.has(m.name);
-      const t = 'type' in m ? m.type : m.name;
-      return !ownTypes.has(t);
-    });
-    if (inherited) {
-      const t = 'type' in inherited ? inherited.type : inherited.name;
-      return c.json({
-        error: `${t} comes from ${LAYER_PARENT} and cannot be changed here. Add a new type instead.`,
-        code: 'INHERITED_READONLY',
-      }, 400);
+    // even though the raw manifest (read before the batch) does not know it yet.
+    let refused: { name: string; locked: boolean } | null = null;
+    for (const m of v.mutations) {
+      if (m.op === 'add_type') {
+        if (core.has(m.name)) { refused = { name: m.name, locked: true }; break; }
+        ownTypes.add(m.name); continue;
+      }
+      if (m.op === 'add_link_type') {
+        if (coreVerbs.has(m.name) || (m.inverse && coreVerbs.has(m.inverse))) {
+          refused = { name: coreVerbs.has(m.name) ? m.name : m.inverse!, locked: true }; break;
+        }
+        ownVerbs.add(m.name); continue;
+      }
+      const t = m.op === 'remove_link_type' ? m.name : 'type' in m ? m.type : m.name;
+      const owned = m.op === 'remove_link_type' ? ownVerbs.has(t) : ownTypes.has(t);
+      if (!owned) { refused = { name: t, locked: core.has(t) || coreVerbs.has(t) }; break; }
+    }
+    if (refused) {
+      return c.json(refused.locked
+        ? { error: `${refused.name} comes from ${CORE_PACK} and can't be changed. Add a new type instead.`, code: CORE_LOCKED }
+        : {
+          error: `${refused.name} comes from ${raw.json?.extends ?? 'a parent pack'} and cannot be changed here. Add a new type instead.`,
+          code: 'INHERITED_READONLY',
+        }, 400);
     }
   }
 
@@ -865,28 +991,36 @@ schemaRoutes.post('/schema/packs/:name/mutations', guard('admin', async (c, { us
   invalidateSchemaPackCache();
   const { invalid, lint: report } = await checkPack(target);
 
+  // L5 on the result. A gbrain mutation batch is atomic and cannot be undone
+  // from outside; L2/L3 ran before it, so a failure here is reported, and the
+  // pack is never activated.
+  const l5 = await resolvedLockViolations(target);
+  if (l5.length) {
+    await audit(orgId, userId, 'schema.pack.mutate.locked', target, { count: v.mutations.length, rules: l5.map((x) => x.rule) });
+    return c.json({ ok: false, pack: target, activated: false, ...lockedBody(l5) }, 409);
+  }
+
   // Redirected onto the layer: if the brain was still resolving the parent,
-  // flip it onto the layer so future mobrain-personal upgrades keep flowing
-  // in underneath the user's edits. If a higher tier keeps winning, say so
-  // rather than claiming an activation that didn't take (spec §4.5 step 4).
+  // flip it onto the layer so future shipped versions of the parent keep
+  // flowing in underneath the user's edits. If a higher tier keeps winning, say
+  // so rather than claiming an activation that didn't take (spec §4.5 step 4).
   //
   // This MUST run before resolveSourcePacks decides which Spaces to scaffold
-  // below: on the first edit, the brain flips from mobrain-personal to
-  // my-personal here, and a Space that inherits the brain-wide pack only
-  // resolves my-personal (`target`) once that flip has happened. Computing
-  // the scaffold set first would leave those Spaces still resolving the OLD
-  // active pack and skip them (I2).
+  // below: on the first edit, the brain flips from the parent to the layer
+  // here, and a Space that inherits the brain-wide pack only resolves the layer
+  // (`target`) once that flip has happened. Computing the scaffold set first
+  // would leave those Spaces still resolving the OLD active pack and skip them (I2).
   let activated = false;
   let activeError: string | null = null;
-  if (redirected) {
+  if (redirected && parent) {
     const before = await readActive();
-    if (before.pack === LAYER_PARENT) {
-      await patchFilePlaneConfig({ schema_pack: LAYER_PACK });
+    if (before.pack === parent) {
+      await patchFilePlaneConfig({ schema_pack: target });
       const after = await readActive();
-      if (after.pack === LAYER_PACK) {
-        await getDb().update(schema.brains).set({ schemaPack: LAYER_PACK, updatedAt: new Date() })
+      if (after.pack === target) {
+        await getDb().update(schema.brains).set({ schemaPack: target, updatedAt: new Date() })
           .where(eq(schema.brains.id, brain.id));
-        await audit(orgId, userId, 'schema.apply', LAYER_PACK, { pack: LAYER_PACK, source: after.source, via: 'auto-layer' });
+        await audit(orgId, userId, 'schema.apply', target, { pack: target, source: after.source, via: 'auto-layer' });
         activated = true;
       } else {
         activeError = `gbrain still resolves ${after.pack ?? 'no pack'} from the "${after.source}" tier, which outranks the config.json value just written.`;

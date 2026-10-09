@@ -1,7 +1,7 @@
 {
   "name": "legal-ops",
   "description": "A legal team's contracts, the matters they attach to, and the parties on the other side.",
-  "extends": "gbrain-base-v2",
+  "extends": "mobrain-core",
   "pageTypes": [
     {
       "name": "contract",

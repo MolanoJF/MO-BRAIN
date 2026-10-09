@@ -1,5 +1,6 @@
 import { mock, test, expect, describe, beforeAll, afterAll } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { packWorldReply, rawPacks, resetPackWorld } from '../helpers/packWorld.ts';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
 process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
@@ -25,6 +26,7 @@ const seedSpaceCalls: string[] = [];
 // Task 9: the JSON pack writes the wizard's schema step makes through the file
 // plane, recorded so the draft branch's manifest can be asserted.
 const jsonPackWrites: { name: string; manifest: object }[] = [];
+const removedPacks: string[] = [];
 // Task 6: op ids in call order, and where the scaffold landed inside that order.
 // `scaffoldAt` is stamped by the gitScaffold mock, which is not a callOps call.
 const opsOrder: string[] = [];
@@ -67,6 +69,8 @@ mock.module('../../src/control/opsClient.ts', () => ({
         stdout: '', stderr: 'Config key not found', json: null,
       };
     }
+    const world = packWorldReply(op, params, opts);
+    if (world) return world;
     // effectivePack resolves through `schema show` with the packOverride seam.
     if (op === 'schema.show') {
       return {
@@ -117,13 +121,14 @@ mock.module('../../src/control/opsClient.ts', () => ({
   cancelRun: async () => ({ cancelled: false }),
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
-  putSchemaPackJson: async (name: string, manifest: object) => { jsonPackWrites.push({ name, manifest }); },
+  putSchemaPackJson: async (name: string, manifest: object) => { jsonPackWrites.push({ name, manifest }); rawPacks[name] = manifest as any; },
+  readSchemaPackRaw: async () => null,
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[] }) => {
     scaffoldAt = opsOrder.length;
     scaffolds.push({ sourceId: req.sourceId, entries: req.entries });
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
   },
-  removeSchemaPack: async () => ({ removed: false }),
+  removeSchemaPack: async (name: string) => { delete rawPacks[name]; removedPacks.push(name); return { removed: true }; },
   gitSetRemote: async () => ({ ok: true }),
   gitClearRemote: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
@@ -245,7 +250,7 @@ describe('wizard', () => {
     const [brain] = await getDb().select().from(schema.brains);
     expect(brain?.searchMode).toBe('conservative');
     expect(brain?.lifecycle).toBe('schema-selected');
-    expect(brain?.schemaPack).toBe('mobrain-personal');
+    expect(brain?.schemaPack).toBe('mobrain-core');
   });
 
   test('a legacy brain with no stored pack still stops at the Schema step', async () => {
@@ -448,8 +453,10 @@ describe('wizard', () => {
   // stored as the brain's choice. A later /finish hands it to
   // `gbrain init --schema-pack`, exactly like a template pick.
   test('the schema step accepts a custom draft, writes pack.json and stores it', async () => {
+    schemaListOverride = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-core\n';
+    resetPackWorld();
     const draft = {
-      name: 'legal-ops', description: 'Contracts', extends: 'gbrain-base-v2',
+      name: 'legal-ops', description: 'Contracts', extends: 'mobrain-core',
       pageTypes: [{
         name: 'contract', primitive: 'entity', folder: 'contracts/', description: 'Signed',
         extraPrefixes: [], aliases: [], extractable: true, expertRouting: false,
@@ -479,6 +486,60 @@ describe('wizard', () => {
     expect(fin.status).toBe(200);
     const init = callOpsCalls.find((c) => c.op === 'init');
     expect(init?.params?.schemaPack).toBe('legal-ops');
+    schemaListOverride = null;
+  });
+
+  // The core lock: every wizard path that stores a pack runs the activation gate.
+  describe('the core lock', () => {
+    const draft = (extendsName: string) => ({
+      name: 'locked-ops', description: 'x', extends: extendsName,
+      pageTypes: [{ name: 'thing', primitive: 'entity', folder: 'things/', description: '', extraPrefixes: [], aliases: [], extractable: false, expertRouting: false }],
+      linkVerbs: [],
+    });
+    const LISTED = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-core\n  mobrain-personal\n  stray\n';
+
+    test('a draft that extends a gbrain pack is refused and nothing is written', async () => {
+      schemaListOverride = LISTED.replace('mobrain-core', 'mobrain-core\n  gbrain-base-v2');
+      resetPackWorld();
+      await getDb().update(schema.brains).set({ lifecycle: 'schema-selected' });
+      jsonPackWrites.length = 0;
+      const res = await call('/api/wizard/schema', { draft: draft('gbrain-base-v2') });
+      schemaListOverride = null;
+      expect(res.status).toBe(400);
+      expect((await res.json() as { code: string }).code).toBe('CORE_LOCKED');
+      expect(jsonPackWrites).toHaveLength(0);
+    });
+
+    test('a draft whose resolved pack loses a core entry is removed again', async () => {
+      schemaListOverride = LISTED;
+      resetPackWorld();
+      // gbrain's merge "lets the child win": simulate a pack that ends up redefining person.
+      rawPacks['mobrain-core']!.page_types = rawPacks['mobrain-core']!.page_types!.map((t) => (t.name === 'person' ? { ...t, extractable: false } : t));
+      removedPacks.length = 0;
+      await getDb().update(schema.brains).set({ lifecycle: 'schema-selected' });
+      const res = await call('/api/wizard/schema', { draft: draft('mobrain-core') });
+      schemaListOverride = null;
+      resetPackWorld();
+      expect(res.status).toBe(400);
+      expect((await res.json() as { code: string }).code).toBe('CORE_LOCKED');
+      expect(removedPacks).toEqual(['locked-ops']);
+    });
+
+    test('choosing a pack outside the core family is refused, gbrain packs and Personal are allowed', async () => {
+      schemaListOverride = LISTED;
+      resetPackWorld();
+      rawPacks.stray = { name: 'stray', extends: null, page_types: [] };
+      await getDb().update(schema.brains).set({ lifecycle: 'schema-selected' });
+      const refused = await call('/api/wizard/schema', { pack: 'stray' });
+      expect(refused.status).toBe(400);
+      expect((await refused.json() as { code: string }).code).toBe('CORE_LOCKED');
+      for (const pack of ['mobrain-personal', 'gbrain-base-v2']) {
+        await getDb().update(schema.brains).set({ lifecycle: 'schema-selected' });
+        const okRes = await call('/api/wizard/schema', { pack });
+        expect(okRes.status).toBe(200);
+      }
+      schemaListOverride = null;
+    });
   });
 
   // I1: resetBrainSchema wipes gbrain's sources table, so /finish re-registers
@@ -532,12 +593,12 @@ describe('wizard', () => {
 // managed pack shown.
 test('GET /wizard/schema-packs hides every bundled pack except gbrain-base-v2', async () => {
   schemaListOverride = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n  gbrain-investor\n\n' +
-    'Installed packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
+    'Installed packs (~/.gbrain/schema-packs/):\n  mobrain-core\n';
   try {
     const res = await call('/api/wizard/schema-packs');
     expect(res.status).toBe(200);
     const body = await res.json() as { packs: string[] };
-    expect(body.packs).toEqual(['gbrain-base-v2', 'mobrain-personal']);
+    expect(body.packs).toEqual(['gbrain-base-v2', 'mobrain-core']);
   } finally {
     schemaListOverride = null;
   }
@@ -560,13 +621,13 @@ describe('wizard prepare', () => {
   });
 
   test('from provider-configured it lands on sources-added with the defaults', async () => {
-    await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: 'mobrain-personal' });
+    await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: 'mobrain-core' });
     const res = await call('/api/wizard/prepare', {});
     expect(res.status).toBe(200);
     const body = await res.json() as { lifecycle: string; searchMode: string; schemaPack: string; sourceId: string };
     expect(body.lifecycle).toBe('sources-added');
     expect(body.searchMode).toBe('balanced');
-    expect(body.schemaPack).toBe('mobrain-personal');
+    expect(body.schemaPack).toBe('mobrain-core');
     expect(body.sourceId).toMatch(/^my-space-/);
     const brain = await getBrain();
     expect(brain.lifecycle).toBe('sources-added');
@@ -587,12 +648,12 @@ describe('wizard prepare', () => {
     await getDb().delete(schema.connections);
     await getDb().delete(schema.spaces);
     await setBrain({ lifecycle: 'provider-configured', searchMode: null, schemaPack: null });
-    schemaListOverride = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
+    schemaListOverride = 'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  mobrain-core\n';
     try {
       const res = await call('/api/wizard/prepare', {});
       expect(res.status).toBe(200);
-      expect((await res.json() as { schemaPack: string }).schemaPack).toBe('mobrain-personal');
-      expect((await getBrain()).schemaPack).toBe('mobrain-personal');
+      expect((await res.json() as { schemaPack: string }).schemaPack).toBe('mobrain-core');
+      expect((await getBrain()).schemaPack).toBe('mobrain-core');
     } finally { schemaListOverride = null; }
   });
 
@@ -603,14 +664,14 @@ describe('wizard prepare', () => {
     const res = await call('/api/wizard/prepare', {}); // default list holds gbrain-base-v2 only
     expect(res.status).toBe(400);
     expect((await getBrain()).lifecycle).toBe('mode-selected');
-    await setBrain({ schemaPack: 'mobrain-personal' });
+    await setBrain({ schemaPack: 'mobrain-core' });
     expect((await call('/api/wizard/prepare', {})).status).toBe(200);
   });
 
   test('a stored search mode is kept', async () => {
     await getDb().delete(schema.connections);
     await getDb().delete(schema.spaces);
-    await setBrain({ lifecycle: 'provider-configured', searchMode: 'tokenmax', schemaPack: 'mobrain-personal' });
+    await setBrain({ lifecycle: 'provider-configured', searchMode: 'tokenmax', schemaPack: 'mobrain-core' });
     const res = await call('/api/wizard/prepare', {});
     expect((await res.json() as { searchMode: string }).searchMode).toBe('tokenmax');
     expect((await getBrain()).searchMode).toBe('tokenmax');

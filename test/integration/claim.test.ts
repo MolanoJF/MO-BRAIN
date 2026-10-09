@@ -68,6 +68,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   patchFilePlaneConfig: async () => {},
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
+  readSchemaPackRaw: async () => null,
   gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},

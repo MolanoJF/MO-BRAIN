@@ -1,7 +1,7 @@
 {
   "name": "research-lab",
   "description": "A research group's people, experiments, papers and datasets.",
-  "extends": "gbrain-base-v2",
+  "extends": "mobrain-core",
   "pageTypes": [
     {
       "name": "researcher",

@@ -199,6 +199,11 @@ export async function putSchemaPackJson(name: string, manifest: object): Promise
   await post('/fileplane/schema-pack-json', { name, manifest }, 60_000);
 }
 
+/** The stored manifest and its format, or null when the pack is not installed. */
+export async function readSchemaPackRaw(name: string): Promise<{ format: 'json' | 'yaml'; text: string } | null> {
+  return (await post<{ raw: { format: 'json' | 'yaml'; text: string } | null }>('/fileplane/schema-pack-read', { name }, 60_000)).raw;
+}
+
 export async function removeSchemaPack(name: string): Promise<{ removed: boolean }> {
   return post('/fileplane/schema-pack-remove', { name }, 60_000);
 }

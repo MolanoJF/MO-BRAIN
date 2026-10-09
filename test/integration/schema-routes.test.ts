@@ -1,11 +1,14 @@
 import { test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { parse as parseYaml } from 'yaml';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
 process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
 process.env.CONTROL_DATABASE_URL ??=
   'postgres://gbrain:ci-not-a-real-secret@localhost:5432/control';
 process.env.PUBLIC_URL ??= 'http://127.0.0.1:3131';
+
+import { packWorldReply, rawPacks, resetPackWorld } from '../helpers/packWorld.ts';
 
 const PASS = 'correct-horse-battery-staple-1';
 
@@ -17,6 +20,8 @@ const filePlanePatches: Record<string, unknown>[] = [];
 const packWrites: { name: string; yaml: string }[] = [];
 const jsonPackWrites: { name: string; manifest: any }[] = [];
 const packRemoves: string[] = [];
+// What `readSchemaPackRaw` answers: a pack already on disk, in its stored format.
+const storedRaw: Record<string, { format: 'json' | 'yaml'; text: string }> = {};
 // Hooks a test can set to react to a write happening (e.g. make a freshly
 // written layer show up in the next `schema.list`), reset in beforeEach.
 let onJsonPackWrite: () => void = () => {};
@@ -28,20 +33,31 @@ const scaffolds: {
 
 mock.module('../../src/control/opsClient.ts', () => ({
   // --- the three this suite drives ---
-  callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) => opsHandler(op, params, opts),
+  // The core lock's reads (showRaw / the resolved show) come from the fake
+  // pack store whenever it knows the pack; everything else is the test's handler.
+  callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) =>
+    packWorldReply(op, params, opts) ?? opsHandler(op, params, opts),
   patchFilePlaneConfig: async (patch: Record<string, unknown>) => { filePlanePatches.push(patch); onFilePlanePatch(); },
-  putSchemaPack: async (name: string, yaml: string) => { packWrites.push({ name, yaml }); },
-  putSchemaPackJson: async (name: string, manifest: any) => { jsonPackWrites.push({ name, manifest }); onJsonPackWrite(); },
+  putSchemaPack: async (name: string, yaml: string) => {
+    packWrites.push({ name, yaml });
+    rawPacks[name] = parseYaml(yaml) as any;
+  },
+  putSchemaPackJson: async (name: string, manifest: any) => {
+    jsonPackWrites.push({ name, manifest }); rawPacks[name] = manifest; onJsonPackWrite();
+  },
+  readSchemaPackRaw: async (name: string) => storedRaw[name] ?? null,
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[]; actor: { name: string; email: string }; message: string }) => {
     scaffolds.push(req);
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
   },
-  removeSchemaPack: async (name: string) => { packRemoves.push(name); return { removed: true }; },
+  removeSchemaPack: async (name: string) => { packRemoves.push(name); delete rawPacks[name]; return { removed: true }; },
   // --- the rest of the module's real exports, required for the app graph to
   //     load at all under per-file isolation. Copy verbatim from
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---
   brainUsage: async () => { throw new Error('ops unreachable'); },
   seedSpace: async () => {},
+  gitSetRemote: async () => ({ ok: true }),
+  gitClearRemote: async () => ({ removed: false }),
   resetBrainSchema: async () => {},
   pauseBrainWriters: async () => {},
   resumeBrainWriters: async () => {},
@@ -128,7 +144,7 @@ const fail = (exitCode: number, stdout: string, stderr = ''): OpsReply =>
   ({ ok: false, exitCode, stdout, stderr, json: null });
 
 // Verbatim shapes from the pinned 0.50.5.0 container.
-const LIST = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  hr-policies\n';
+const LIST = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  hr-policies\n  mobrain-core\n  mobrain-personal\n';
 const LIST_WITH_CREATOR = 'Bundled packs:\n  gbrain-base\n  gbrain-creator\n\nInstalled packs (~/.gbrain/schema-packs/):\n  hr-policies\n';
 const LIST_SHIPPED = 'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n  gbrain-investor\n\n' +
   'Installed packs (~/.gbrain/schema-packs/):\n  mobrain-personal\n';
@@ -180,6 +196,15 @@ beforeEach(async () => {
   scaffolds.length = 0;
   onJsonPackWrite = () => {};
   onFilePlanePatch = () => {};
+  resetPackWorld();
+  rawPacks['hr-policies'] = { name: 'hr-policies', extends: 'mobrain-core', page_types: [{ name: 'policy', primitive: 'concept', path_prefixes: ['policies/'] }] };
+  // The user pack most authoring tests edit: contract + governs, built on core.
+  rawPacks['legal-ops'] = {
+    name: 'legal-ops', extends: 'mobrain-core',
+    page_types: [{ name: 'contract', primitive: 'entity', path_prefixes: ['contracts/'] }],
+    link_types: [{ name: 'governs' }],
+  };
+  for (const k of Object.keys(storedRaw)) delete storedRaw[k];
   invalidateSchemaPackCache();
   await setStoredPack(null);
   await getDb().delete(schema.auditLog);
@@ -199,7 +224,7 @@ test('GET /schema reports the stored pack, the resolved pack and the tier', asyn
   const res = await hit('GET', '/api/schema', ownerCookie);
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.packs).toEqual(['gbrain-base', 'gbrain-base-v2', 'hr-policies']);
+  expect(body.packs).toEqual(['gbrain-base', 'gbrain-base-v2', 'hr-policies', 'mobrain-core', 'mobrain-personal']);
   expect(body.active.pack).toBe('gbrain-base-v2');
   expect(body.active.source).toBe('home-config');
   expect(body.diverged).toBe(false);
@@ -330,6 +355,8 @@ test('POST /schema/sync applies and audits', async () => {
   expect(await lastAudit()).toMatchObject({ action: 'schema.sync' });
 });
 
+const HR_YAML = 'api_version: gbrain-schema-pack-v1\nname: hr-policies\nextends: mobrain-core\n';
+
 test('PUT /schema/pack writes the manifest then validates it', async () => {
   opsHandler = (op) => {
     if (op === 'schema.validate') return ok('✓ hr-policies v1.0.0: valid manifest');
@@ -337,9 +364,9 @@ test('PUT /schema/pack writes the manifest then validates it', async () => {
     throw new Error(`unexpected op ${op}`);
   };
   const res = await hit('PUT', '/api/schema/pack', ownerCookie,
-    { name: 'hr-policies', yaml: 'api_version: gbrain-schema-pack-v1\n' });
+    { name: 'hr-policies', yaml: HR_YAML });
   expect(res.status).toBe(200);
-  expect(packWrites).toEqual([{ name: 'hr-policies', yaml: 'api_version: gbrain-schema-pack-v1\n' }]);
+  expect(packWrites).toEqual([{ name: 'hr-policies', yaml: HR_YAML }]);
 });
 
 test('PUT /schema/pack rejects a name that is not a safe directory name', async () => {
@@ -356,7 +383,7 @@ test('the audit row never carries the pack YAML body', async () => {
     if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
     throw new Error(`unexpected op ${op}`);
   };
-  await hit('PUT', '/api/schema/pack', ownerCookie, { name: 'hr-policies', yaml: 'secret-marker-do-not-log' });
+  await hit('PUT', '/api/schema/pack', ownerCookie, { name: 'hr-policies', yaml: `${HR_YAML}# secret-marker-do-not-log\n` });
   expect(JSON.stringify(await lastAudit())).not.toContain('secret-marker-do-not-log');
 });
 
@@ -408,6 +435,8 @@ test('a managed pack is never served from the effectivePack cache, an ordinary p
   // never serve a stale managed-pack PackDetail.
   const showCalls: Record<string, number> = {};
   let mobrainVersion = '1.0.0';
+  // This test counts the handler's own `schema.show` calls.
+  for (const n of ['mobrain-personal', 'gbrain-base-v2']) delete rawPacks[n];
   opsHandler = (op, _params, opts) => {
     if (op === 'schema.list') return ok(LIST_SHIPPED);
     if (op === 'schema.active') return ok(ACTIVE('mobrain-personal'));
@@ -567,7 +596,7 @@ test('a non-admin cannot reach any schema route', async () => {
 // --- Task 5: custom-pack authoring (create / fork / mutate / delete / scaffold) ---
 
 const draft = {
-  name: 'legal-ops', description: 'Contracts', extends: 'gbrain-base-v2',
+  name: 'legal-ops', description: 'Contracts', extends: 'mobrain-core',
   pageTypes: [{
     name: 'contract', primitive: 'entity', folder: 'contracts/', description: 'Signed',
     extraPrefixes: [], aliases: [], extractable: true, expertRouting: false,
@@ -576,7 +605,7 @@ const draft = {
 };
 
 const INSTALLED_LEGAL_OPS =
-  'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  legal-ops\n';
+  'Bundled packs:\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n  legal-ops\n  mobrain-core\n  mobrain-personal\n';
 
 test('POST /schema/packs (draft) writes pack.json, then validates and lints', async () => {
   opsHandler = (op) => {
@@ -626,7 +655,7 @@ test("a failed batch answers 409 with gbrain's code and index, even though call 
   };
   const res = await hit('POST', '/api/schema/packs/legal-ops/mutations', ownerCookie, { mutations: [
     { op: 'add_type', name: 'memo', primitive: 'annotation', prefix: 'memos/' },
-    { op: 'remove_type', name: 'ghost' },
+    { op: 'remove_type', name: 'contract' },
   ] });
   expect(res.status).toBe(409);
   const body = await res.json();
@@ -646,8 +675,11 @@ test('a successful batch on the ACTIVE pack scaffolds new folders into inheritin
   opsHandler = (op, params, opts) => {
     if (op === 'schema.list') return ok(INSTALLED_LEGAL_OPS);
     if (op === 'schema.active') return ok(ACTIVE('legal-ops'));
-    if (op === 'schema.mutate') return ok(JSON.stringify({
-      schema_version: 1, pack: 'legal-ops', batch_id: 'b1', mutations_applied: 1, results: [{}] }));
+    if (op === 'schema.mutate') {
+      // gbrain applies the batch: the pack now declares memo.
+      rawPacks['legal-ops']!.page_types!.push({ name: 'memo', primitive: 'annotation', path_prefixes: ['memos/'] });
+      return ok(JSON.stringify({ schema_version: 1, pack: 'legal-ops', batch_id: 'b1', mutations_applied: 1, results: [{}] }));
+    }
     if (op === 'schema.validate') return ok('✓ valid');
     if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
     if (op === 'schema.show') return ok('', memoManifest);
@@ -882,6 +914,7 @@ test('the first edit that activates the layer scaffolds Spaces inheriting it', a
 });
 
 test('a second edit reuses the existing layer', async () => {
+  rawPacks['my-personal'] = layerRaw(['recipe']) as any;
   opsHandler = (op, _p, opts) => {
     if (op === 'schema.list') return ok(LIST_LAYERED);
     if (op === 'schema.active') return ok(ACTIVE('my-personal'));
@@ -905,6 +938,7 @@ test('a new type introduced earlier in the same batch may be edited later in it'
   // be refused as INHERITED_READONLY — the layer does not own `recipe` yet in
   // its raw manifest, but the batch itself introduces it first.
   const mutated: string[] = [];
+  rawPacks['my-personal'] = layerRaw() as any;
   opsHandler = (op, params, opts) => {
     if (op === 'schema.list') return ok(LIST_LAYERED);
     if (op === 'schema.showRaw') return ok('', layerRaw());
@@ -972,3 +1006,204 @@ test('a foreign my-personal is never hijacked', async () => {
     { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
   expect(res.status).toBe(409);
 });
+
+// --- The core lock (mobrain-core plan, Task 5): one refusal per write path ---
+
+const LOCK_LIST =
+  'Bundled packs:\n  gbrain-base\n  gbrain-base-v2\n\nInstalled packs (~/.gbrain/schema-packs/):\n' +
+  '  hr-policies\n  legal-ops\n  mobrain-core\n  mobrain-personal\n  stray\n';
+const lockHandler = (extra: (op: string, params: Record<string, unknown>) => OpsReply | null = () => null) =>
+  (op: string, params: Record<string, unknown>): OpsReply => {
+    const x = extra(op, params);
+    if (x) return x;
+    if (op === 'schema.list') return ok(LOCK_LIST);
+    if (op === 'schema.active') return ok(ACTIVE('mobrain-core'));
+    if (op === 'schema.validate') return ok('✓ valid');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'config.get') return fail(1, 'Config key not found');
+    return ok('');
+  };
+const code = async (res: Response) => (await res.json()).code;
+
+describe_lock();
+function describe_lock() {
+  test('draft: an extends that does not reach core is refused before any write', async () => {
+    opsHandler = lockHandler();
+    const res = await hit('POST', '/api/schema/packs', ownerCookie,
+      { mode: 'draft', draft: { ...draft, name: 'x-ops', extends: 'gbrain-base-v2' } });
+    expect(res.status).toBe(400);
+    expect(await code(res)).toBe('CORE_LOCKED');
+    expect(jsonPackWrites).toEqual([]);
+  });
+
+  test('draft: a null extends or a core-named type is an invalid draft', async () => {
+    opsHandler = lockHandler();
+    const nul = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'draft', draft: { ...draft, name: 'x-ops', extends: null } });
+    expect(nul.status).toBe(400);
+    const dup = await hit('POST', '/api/schema/packs', ownerCookie,
+      { mode: 'draft', draft: { ...draft, name: 'x-ops', pageTypes: [{ ...draft.pageTypes[0]!, name: 'person' }] } });
+    expect(dup.status).toBe(400);
+    expect(jsonPackWrites).toEqual([]);
+  });
+
+  test('draft: an L5 failure after the write removes the new pack', async () => {
+    opsHandler = lockHandler();
+    // gbrain "lets the child win": the written pack redefines core's person.
+    onJsonPackWrite = () => { rawPacks['mobrain-core']!.page_types = rawPacks['mobrain-core']!.page_types!.filter((t) => t.name !== 'person'); };
+    const res = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'draft', draft: { ...draft, name: 'x-ops' } });
+    expect(res.status).toBe(400);
+    expect(await code(res)).toBe('CORE_LOCKED');
+    expect(packRemoves).toEqual(['x-ops']);
+  });
+
+  test('fork: bundled, managed and layer sources are refused; a user pack that reaches core is allowed', async () => {
+    opsHandler = lockHandler();
+    for (const from of ['gbrain-base-v2', 'mobrain-core', 'mobrain-personal']) {
+      const res = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'fork', from, name: 'copy-ops' });
+      expect(res.status).toBe(400);
+      expect(await code(res)).toBe('CORE_LOCKED');
+    }
+    const forks: string[] = [];
+    opsHandler = lockHandler((op, p) => {
+      if (op !== 'schema.fork') return null;
+      forks.push(String(p.from));
+      rawPacks['copy-ops'] = JSON.parse(JSON.stringify(rawPacks['legal-ops']));
+      return ok('');
+    });
+    const good = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'fork', from: 'legal-ops', name: 'copy-ops' });
+    expect(good.status).toBe(200);
+    expect(forks).toEqual(['legal-ops']);
+  });
+
+  test('fork: a user pack whose chain misses core is refused', async () => {
+    rawPacks.stray = { name: 'stray', extends: null, page_types: [] };
+    opsHandler = lockHandler();
+    const res = await hit('POST', '/api/schema/packs', ownerCookie, { mode: 'fork', from: 'stray', name: 'copy-ops' });
+    expect(res.status).toBe(400);
+    expect(await code(res)).toBe('CORE_LOCKED');
+  });
+
+  test('PUT: an extends that misses core, a core-named type, and a borrow are refused before the write', async () => {
+    opsHandler = lockHandler();
+    const put = (yaml: string) => hit('PUT', '/api/schema/pack', ownerCookie, { name: 'hr-policies', yaml });
+    const miss = await put('name: hr-policies\nextends: gbrain-base-v2\n');
+    expect(miss.status).toBe(400);
+    expect(await code(miss)).toBe('CORE_LOCKED');
+    const none = await put('name: hr-policies\n');
+    expect(none.status).toBe(400);
+    const redeclared = await put('name: hr-policies\nextends: mobrain-core\npage_types:\n  - name: person\n    primitive: entity\n');
+    expect(redeclared.status).toBe(400);
+    expect((await redeclared.json()).violations[0].rule).toBe('L2');
+    const borrow = await put('name: hr-policies\nextends: mobrain-core\nborrow_from: [company-brain]\n');
+    expect((await borrow.json()).violations[0].rule).toBe('L4');
+    const bad = await put('name: [unclosed');
+    expect(bad.status).toBe(400);
+    expect(packWrites).toEqual([]);
+  });
+
+  test('PUT: an L5 failure restores the previous manifest in the format it was read; a new pack is removed', async () => {
+    const previous = 'name: hr-policies\nextends: mobrain-core\n# previous\n';
+    storedRaw['hr-policies'] = { format: 'yaml', text: previous };
+    opsHandler = lockHandler();
+    const breakCore = () => { rawPacks['mobrain-core']!.link_types = rawPacks['mobrain-core']!.link_types!.filter((l) => l.name !== 'part_of'); };
+    // The pack is written, and then resolves without part_of.
+    const origPut = packWrites.push.bind(packWrites);
+    packWrites.push = (...a) => { breakCore(); return origPut(...a); };
+    const res = await hit('PUT', '/api/schema/pack', ownerCookie, { name: 'hr-policies', yaml: 'name: hr-policies\nextends: mobrain-core\n' });
+    expect(res.status).toBe(400);
+    expect(await code(res)).toBe('CORE_LOCKED');
+    expect(packWrites.at(-1)).toEqual({ name: 'hr-policies', yaml: previous });
+    resetPackWorld();
+
+    storedRaw['fresh-ops'] = undefined as any; delete storedRaw['fresh-ops'];
+    packRemoves.length = 0;
+    packWrites.push = (...a) => { breakCore(); return origPut(...a); };
+    const fresh = await hit('PUT', '/api/schema/pack', ownerCookie, { name: 'fresh-ops', yaml: 'name: fresh-ops\nextends: mobrain-core\n' });
+    expect(fresh.status).toBe(400);
+    expect(packRemoves).toEqual(['fresh-ops']);
+    packWrites.push = origPut;
+  });
+
+  test('mutations: add_type / add_link_type / remove_type on a core name is CORE_LOCKED on any user pack', async () => {
+    const calls: string[] = [];
+    opsHandler = lockHandler((op) => { calls.push(op); return null; });
+    for (const m of [
+      { op: 'add_type', name: 'person', primitive: 'entity', prefix: 'folks/' },
+      { op: 'add_link_type', name: 'part_of' },
+      { op: 'add_link_type', name: 'flows', inverse: 'has_part' },
+      { op: 'remove_type', name: 'person' },
+      { op: 'add_prefix', type: 'note', prefix: 'jots/' },
+    ]) {
+      const res = await hit('POST', '/api/schema/packs/legal-ops/mutations', ownerCookie, { mutations: [m] });
+      expect(res.status).toBe(400);
+      expect(await code(res)).toBe('CORE_LOCKED');
+    }
+    expect(calls).not.toContain('schema.mutate');
+  });
+
+  test('mutations: an edit to mobrain-core goes to my-brain, which is created on core and activated', async () => {
+    let listed = LOCK_LIST;
+    let active = 'mobrain-core';
+    const mutated: string[] = [];
+    opsHandler = lockHandler((op, p) => {
+      if (op === 'schema.list') return ok(listed);
+      if (op === 'schema.active') return ok(ACTIVE(active));
+      if (op === 'schema.mutate') {
+        mutated.push(JSON.parse(String(p.payload)).pack);
+        return ok(JSON.stringify({ schema_version: 1, pack: 'my-brain', batch_id: 'b20', mutations_applied: 1, results: [{}] }));
+      }
+      return null;
+    });
+    onJsonPackWrite = () => { listed = LOCK_LIST.replace('  hr-policies\n', '  hr-policies\n  my-brain\n'); };
+    onFilePlanePatch = () => { active = 'my-brain'; };
+    const res = await hit('POST', '/api/schema/packs/mobrain-core/mutations', ownerCookie,
+      { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pack).toBe('my-brain');
+    expect(body.activated).toBe(true);
+    expect(jsonPackWrites.at(-1)!.manifest.extends).toBe('mobrain-core');
+    expect(mutated).toEqual(['my-brain']);
+    expect(await storedPack()).toBe('my-brain');
+  });
+
+  test('mutations: an L5 failure after the batch is reported and never activated', async () => {
+    rawPacks['legal-ops']!.extends = 'mobrain-core';
+    opsHandler = lockHandler((op) => {
+      if (op !== 'schema.mutate') return null;
+      // The batch lands, and the resolved pack now lacks core's note type.
+      rawPacks['mobrain-core']!.page_types = rawPacks['mobrain-core']!.page_types!.filter((t) => t.name !== 'note');
+      return ok(JSON.stringify({ schema_version: 1, pack: 'legal-ops', batch_id: 'b21', mutations_applied: 1, results: [{}] }));
+    });
+    const res = await hit('POST', '/api/schema/packs/legal-ops/mutations', ownerCookie,
+      { mutations: [{ op: 'add_type', name: 'memo', primitive: 'annotation', prefix: 'memos/' }] });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe('CORE_LOCKED');
+    expect(body.activated).toBe(false);
+    expect(filePlanePatches).toEqual([]);
+  });
+
+  test('apply, sources and the wizard share one gate: a pack outside the core family is refused', async () => {
+    rawPacks.stray = { name: 'stray', extends: null, page_types: [] };
+    await insertSpace('customers');
+    opsHandler = lockHandler();
+    const apply = await hit('POST', '/api/schema/apply', ownerCookie, { pack: 'stray' });
+    expect(apply.status).toBe(400);
+    expect(await code(apply)).toBe('CORE_LOCKED');
+    const src = await hit('POST', '/api/schema/sources/customers', ownerCookie, { pack: 'stray' });
+    expect(src.status).toBe(400);
+    expect(await code(src)).toBe('CORE_LOCKED');
+    expect(filePlanePatches).toEqual([]);
+  });
+
+  test('apply: gbrain fallback packs skip the lock, core and Personal pass it', async () => {
+    for (const pack of ['gbrain-base-v2', 'mobrain-core', 'mobrain-personal']) {
+      let active = 'mobrain-core';
+      opsHandler = lockHandler((op) => (op === 'schema.active' ? ok(ACTIVE(active)) : null));
+      onFilePlanePatch = () => { active = pack; };
+      const res = await hit('POST', '/api/schema/apply', ownerCookie, { pack });
+      expect({ pack, status: res.status }).toEqual({ pack, status: 200 });
+    }
+  });
+}

@@ -16,7 +16,8 @@ const VERB_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 export const PRIMITIVES = ['entity', 'media', 'temporal', 'annotation', 'concept'] as const;
 export type Primitive = typeof PRIMITIVES[number];
 export { BUNDLED_PACKS } from '../contracts/packs.ts';
-import { BUNDLED_PACKS, MANAGED_PACKS, LAYER_PACK } from '../contracts/packs.ts';
+import { BUNDLED_PACKS, CORE_PACK, isReservedPackName } from '../contracts/packs.ts';
+import { coreNames } from './coreLock.ts';
 
 export type DraftPageType = {
   name: string; primitive: Primitive; folder: string; description: string;
@@ -42,15 +43,18 @@ export function validateDraft(input: unknown): { ok: true; draft: PackDraft } | 
   const name = str(o.name);
   if (!PACK_NAME.test(name)) errors.push('name must be lowercase letters, digits and hyphens');
   if ((BUNDLED_PACKS as readonly string[]).includes(name)) errors.push(`${name} is a bundled pack name`);
-  if ((MANAGED_PACKS as readonly string[]).includes(name) || name === LAYER_PACK) {
+  if (isReservedPackName(name) && !(BUNDLED_PACKS as readonly string[]).includes(name)) {
     errors.push(`${name} is reserved by Mo-brain`);
   }
+  // Every Mo-brain pack builds on core (D2). The chain itself is checked by the
+  // routes against the installed packs (L1); here a draft must at least name a parent.
   const ext = o.extends === null || o.extends === undefined || o.extends === '' ? null : str(o.extends);
-  if (ext !== null && !PACK_NAME.test(ext)) errors.push(`extends ${ext} is not a pack name`);
+  if (ext === null) errors.push(`extends is required. Use "${CORE_PACK}" unless this extends another Mo-brain schema.`);
+  else if (!PACK_NAME.test(ext)) errors.push(`extends ${ext} is not a pack name`);
   if (ext === name) errors.push('a pack cannot extend itself');
+  const locked = coreNames();
 
   const rawTypes = Array.isArray(o.pageTypes) ? o.pageTypes : [];
-  if (rawTypes.length === 0 && ext === null) errors.push('a standalone pack needs at least one page type');
   const seenTypes = new Set<string>();
   const seenFolders = new Set<string>();
   const pageTypes: DraftPageType[] = rawTypes.map((raw, i) => {
@@ -59,6 +63,7 @@ export function validateDraft(input: unknown): { ok: true; draft: PackDraft } | 
     const label = `pageTypes[${i}] (${tn || 'unnamed'})`;
     if (!TYPE_NAME.test(tn)) errors.push(`${label}: name must start with a letter; lowercase, digits, - or _`);
     if (seenTypes.has(tn)) errors.push(`${label}: duplicate type name`);
+    if (locked.types.has(tn)) errors.push(`${label}: ${tn} comes from ${CORE_PACK} and can't be changed. Add a new type instead.`);
     seenTypes.add(tn);
     const primitive = str(t.primitive) as Primitive;
     if (!(PRIMITIVES as readonly string[]).includes(primitive)) {
@@ -85,18 +90,14 @@ export function validateDraft(input: unknown): { ok: true; draft: PackDraft } | 
     const vn = str(v.name);
     if (!VERB_NAME.test(vn)) errors.push(`linkVerbs[${i}]: name must be snake_case`);
     if (seenVerbs.has(vn)) errors.push(`linkVerbs[${i}]: duplicate verb ${vn}`);
+    if (locked.verbs.has(vn)) errors.push(`linkVerbs[${i}]: ${vn} comes from ${CORE_PACK} and can't be changed. Add a new verb instead.`);
     seenVerbs.add(vn);
     const inverse = str(v.inverse) || undefined;
     if (inverse && !VERB_NAME.test(inverse)) errors.push(`linkVerbs[${i}]: inverse must be snake_case`);
+    if (inverse && locked.verbs.has(inverse)) errors.push(`linkVerbs[${i}]: ${inverse} comes from ${CORE_PACK} and can't be used as an inverse.`);
     const fromType = str(v.fromType) || undefined;
     const toType = str(v.toType) || undefined;
-    // Only a standalone pack can be checked here; with `extends`, the parent's
-    // types are gbrain's to resolve, and lint catches a dangling reference.
-    if (ext === null) {
-      for (const [k, t] of [['fromType', fromType], ['toType', toType]] as const) {
-        if (t && !seenTypes.has(t)) errors.push(`linkVerbs[${i}]: ${k} ${t} is not a type in this pack`);
-      }
-    }
+    // The parent's types are gbrain's to resolve; lint catches a dangling reference.
     return { name: vn, inverse, fromType, toType };
   });
 

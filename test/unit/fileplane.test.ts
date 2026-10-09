@@ -18,7 +18,7 @@ process.env.GBRAIN_HOME = MODULE_HOME;
 
 const {
   mergeConfigJson, takeGrantCredentialsFile, packPath, SCHEMA_PACK_DIR,
-  writeSchemaPack, writeSchemaPackJson, removeSchemaPack, seedManagedPacks,
+  writeSchemaPack, writeSchemaPackJson, readSchemaPackRaw, removeSchemaPack, seedManagedPacks,
 } = await import('../../src/ops/fileplane.ts');
 
 afterAll(async () => {
@@ -119,6 +119,7 @@ test('a user pack is written as <name>/pack.yaml, the only shape gbrain discover
 describe('schema pack yaml', () => {
   test('M4: refuses to write the managed pack name', async () => {
     await expect(writeSchemaPack('mobrain-personal', 'name: x\n', { sql: fakeSql })).rejects.toThrow(/managed/);
+    await expect(writeSchemaPack('mobrain-core', 'name: x\n', { sql: fakeSql })).rejects.toThrow(/managed/);
   });
 });
 
@@ -144,39 +145,69 @@ describe('schema pack json', () => {
 });
 
 describe('seedManagedPacks', () => {
-  const src = async (version: string) => {
+  const src = async (versions: { core: string; personal: string }) => {
     const dir = await mkdtemp(join(tmpdir(), 'bs-packs-src-'));
-    await writeFile(join(dir, 'mobrain-personal.json'),
-      JSON.stringify({ name: 'mobrain-personal', version, api_version: 'gbrain-schema-pack-v1' }));
+    for (const [name, version] of [['mobrain-core', versions.core], ['mobrain-personal', versions.personal]] as const) {
+      await writeFile(join(dir, `${name}.json`), JSON.stringify({ name, version, api_version: 'gbrain-schema-pack-v1' }));
+    }
     return dir;
   };
-  const target = () => join(SCHEMA_PACK_DIR, 'mobrain-personal', 'pack.json');
+  const target = (name = 'mobrain-personal') => join(SCHEMA_PACK_DIR, name, 'pack.json');
+  const versionOf = async (name: string) => JSON.parse(await readFile(target(name), 'utf8')).version;
+  const clear = () => Promise.all(['mobrain-core', 'mobrain-personal']
+    .map((n) => rm(join(SCHEMA_PACK_DIR, n), { recursive: true, force: true })));
 
-  test('writes an absent managed pack', async () => {
-    await rm(join(SCHEMA_PACK_DIR, 'mobrain-personal'), { recursive: true, force: true });
-    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.0.0') });
-    expect(r).toEqual([{ name: 'mobrain-personal', action: 'written' }]);
-    expect(JSON.parse(await readFile(target(), 'utf8')).version).toBe('1.0.0');
+  test('seeds core first, then Personal', async () => {
+    await clear();
+    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src({ core: '1.0.0', personal: '2.0.0' }) });
+    expect(r).toEqual([
+      { name: 'mobrain-core', action: 'written' },
+      { name: 'mobrain-personal', action: 'written' },
+    ]);
+    expect(await versionOf('mobrain-core')).toBe('1.0.0');
+    expect(await versionOf('mobrain-personal')).toBe('2.0.0');
   });
 
-  test('leaves the same version untouched', async () => {
-    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.0.0') });
-    expect(r).toEqual([{ name: 'mobrain-personal', action: 'unchanged' }]);
+  test('leaves the same versions untouched', async () => {
+    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src({ core: '1.0.0', personal: '2.0.0' }) });
+    expect(r.map((x) => x.action)).toEqual(['unchanged', 'unchanged']);
   });
 
-  test('overwrites when the shipped version moves', async () => {
-    const r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src('1.1.0') });
-    expect(r[0]!.action).toBe('written');
-    expect(JSON.parse(await readFile(target(), 'utf8')).version).toBe('1.1.0');
+  test('a version bump on one pack rewrites only that one', async () => {
+    let r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src({ core: '1.0.0', personal: '2.1.0' }) });
+    expect(r.map((x) => x.action)).toEqual(['unchanged', 'written']);
+    expect(await versionOf('mobrain-personal')).toBe('2.1.0');
+    r = await seedManagedPacks({ sql: fakeSql, sourceDir: await src({ core: '1.1.0', personal: '2.1.0' }) });
+    expect(r.map((x) => x.action)).toEqual(['written', 'unchanged']);
+    expect(await versionOf('mobrain-core')).toBe('1.1.0');
   });
 
-  test('the API writers refuse a managed name', async () => {
-    await expect(writeSchemaPackJson('mobrain-personal', {}, { sql: fakeSql })).rejects.toThrow(/managed/);
+  test('the API writers refuse both managed names', async () => {
+    for (const n of ['mobrain-core', 'mobrain-personal']) {
+      await expect(writeSchemaPackJson(n, {}, { sql: fakeSql })).rejects.toThrow(/managed/);
+      await expect(writeSchemaPack(n, 'name: x\n', { sql: fakeSql })).rejects.toThrow(/managed/);
+      await expect(removeSchemaPack(n, { sql: fakeSql })).rejects.toThrow(/managed/);
+    }
   });
 
-  test('the shipped manifest is the default source', async () => {
-    await rm(join(SCHEMA_PACK_DIR, 'mobrain-personal'), { recursive: true, force: true });
+  test('the shipped manifests are the default source', async () => {
+    await clear();
     await seedManagedPacks({ sql: fakeSql });
+    expect(JSON.parse(await readFile(target('mobrain-core'), 'utf8')).name).toBe('mobrain-core');
     expect(JSON.parse(await readFile(target(), 'utf8')).name).toBe('mobrain-personal');
+  });
+});
+
+describe('readSchemaPackRaw', () => {
+  test('returns the stored text and its format, or null', async () => {
+    const dir = join(SCHEMA_PACK_DIR, 'raw-read');
+    await mkdir(dir, { recursive: true });
+    expect(await readSchemaPackRaw('raw-read')).toBeNull();
+    await writeFile(join(dir, 'pack.yaml'), 'name: raw-read\n');
+    expect(await readSchemaPackRaw('raw-read')).toEqual({ format: 'yaml', text: 'name: raw-read\n' });
+    await rm(join(dir, 'pack.yaml'));
+    await writeFile(join(dir, 'pack.json'), '{"name":"raw-read"}\n');
+    expect(await readSchemaPackRaw('raw-read')).toEqual({ format: 'json', text: '{"name":"raw-read"}\n' });
+    await expect(readSchemaPackRaw('mobrain-core')).rejects.toThrow(/managed/);
   });
 });

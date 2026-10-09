@@ -3,7 +3,10 @@ import {
   activeSummary, divergenceWarning, canApply, syncSummary, ADDITIVE_NOTICE,
   packSummary, pageTypeLabel, inheritanceNote, editLabel,
 } from '../../src/console/pages/Schema.tsx';
-import { MANAGED_EDIT_NOTE, afterSave } from '../../src/console/pages/SchemaBuilder.tsx';
+import { afterSave } from '../../src/console/pages/SchemaBuilder.tsx';
+import {
+  buildsOnOptions, templateOptions, packBadge, managedEditNote, inheritedBadge, reachesCore,
+} from '../../src/console/pages/schemaLock.ts';
 import type { PackDetail, PackMutateResult, PackPageType } from '../../src/console/api.ts';
 
 const ACTIVE = {
@@ -134,6 +137,7 @@ const detail = (over: Partial<PackDetail> = {}): PackDetail => ({
   extends: null,
   bundled: false,
   managed: false,
+  fallback: false,
   pageTypes: [],
   linkVerbs: [],
   linkTypes: [],
@@ -213,21 +217,62 @@ describe('the inheritance note', () => {
 });
 
 describe('edit affordances', () => {
-  test('bundled packs fork, managed and user packs edit', () => {
-    expect(editLabel({ bundled: true, managed: false })).toBe('Fork to edit');
+  test('bundled gbrain packs have no edit action; managed and user packs do', () => {
+    expect(editLabel({ bundled: true, managed: false })).toBeNull();
     expect(editLabel({ bundled: false, managed: true })).toBe('Customize');
     expect(editLabel({ bundled: false, managed: false })).toBe('Edit');
   });
 
   test('the managed note says where edits go and that updates keep arriving', () => {
-    expect(MANAGED_EDIT_NOTE).toContain('my-personal');
-    expect(MANAGED_EDIT_NOTE).toMatch(/updates/i);
+    expect(managedEditNote('mobrain-personal')).toContain('my-personal');
+    expect(managedEditNote('mobrain-core')).toContain('my-brain');
+    expect(managedEditNote('mobrain-core')).toMatch(/locked/i);
+    expect(managedEditNote('mobrain-personal')).toMatch(/updates/i);
+  });
+});
+
+describe('the core lock in the console', () => {
+  const p = (name: string, ext: string | null, over: Record<string, boolean> = {}) =>
+    ({ name, extends: ext, bundled: false, managed: false, ...over });
+  const packs = [
+    p('gbrain-base-v2', 'gbrain-base', { bundled: true }),
+    p('company-brain', 'gbrain-base', { bundled: true }),
+    p('mobrain-core', null, { managed: true }),
+    p('mobrain-personal', 'mobrain-core', { managed: true }),
+    p('my-brain', 'mobrain-core'),
+    p('my-personal', 'mobrain-personal'),
+    p('legal-ops', 'mobrain-core'),
+    p('legal-ops-eu', 'legal-ops'),
+    p('standalone', null),
+  ];
+
+  test('badges: core is locked, Personal extends core, gbrain packs say so', () => {
+    expect(packBadge(packs[2]!)).toBe('Mo-brain core · base of every schema · locked');
+    expect(packBadge(packs[3]!)).toBe('extends mobrain-core');
+    expect(packBadge(packs[0]!)).toBe('gbrain pack · not built on Mo-brain core');
+    expect(packBadge(packs[1]!)).toBe('gbrain pack · not built on Mo-brain core');
+    expect(packBadge(packs[6]!)).toBeNull();
+  });
+
+  test('"Builds on" lists only packs that reach core, with no "nothing" choice', () => {
+    expect(buildsOnOptions(packs)).toEqual(['mobrain-core', 'mobrain-personal', 'my-brain', 'my-personal', 'legal-ops', 'legal-ops-eu']);
+    expect(reachesCore('standalone', packs)).toBe(false);
+  });
+
+  test('templates fork user packs only', () => {
+    expect(templateOptions(packs)).toEqual(['legal-ops', 'legal-ops-eu']);
+  });
+
+  test('inherited rows from core carry the lock', () => {
+    expect(inheritedBadge('type', 'person', 'mobrain-personal')).toEqual({ text: '🔒 from mobrain-core', locked: true });
+    expect(inheritedBadge('verb', 'has_part', 'mobrain-core').locked).toBe(true);
+    expect(inheritedBadge('type', 'journal', 'mobrain-personal')).toEqual({ text: 'from mobrain-personal', locked: false });
   });
 });
 
 const mutateResult = (over: Partial<PackMutateResult> = {}): PackMutateResult => ({
   ok: true, batchId: 'b1', applied: 1, error: null, lint: null, scaffolded: [],
-  pack: 'mobrain-personal', activated: true, activeError: null,
+  pack: 'my-personal', activated: true, activeError: null,
   ...over,
 });
 

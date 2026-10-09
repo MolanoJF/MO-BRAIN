@@ -4,7 +4,7 @@ import { validateDraft, draftToManifest, validateMutations } from '../../src/con
 const good = {
   name: 'legal-ops',
   description: 'Contracts and counterparties',
-  extends: 'gbrain-base-v2',
+  extends: 'mobrain-core',
   pageTypes: [
     { name: 'contract', primitive: 'entity', folder: 'contracts/', description: 'A signed agreement',
       extraPrefixes: ['legal/contracts/'], aliases: [], extractable: true, expertRouting: false },
@@ -35,10 +35,17 @@ describe('validateDraft', () => {
     const r = validateDraft({ ...good, pageTypes: [good.pageTypes[0], { ...good.pageTypes[0] }] });
     expect(r.ok).toBe(false);
   });
-  test('rejects a link verb naming a type the draft does not declare, when there is no extends', () => {
-    const r = validateDraft({ ...good, extends: null,
-      linkVerbs: [{ name: 'employs', fromType: 'company', toType: 'person' }] });
-    expect(r.ok).toBe(false);
+  test('requires extends: every Mo-brain pack builds on core', () => {
+    for (const extendsValue of [null, undefined, '']) {
+      const r = validateDraft({ ...good, extends: extendsValue });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors[0]).toContain('extends is required');
+    }
+  });
+  test('refuses a type or verb that mobrain-core owns', () => {
+    expect(validateDraft({ ...good, pageTypes: [{ ...good.pageTypes[0], name: 'person' }] }).ok).toBe(false);
+    expect(validateDraft({ ...good, linkVerbs: [{ name: 'part_of' }] }).ok).toBe(false);
+    expect(validateDraft({ ...good, linkVerbs: [{ name: 'holds', inverse: 'has_part' }] }).ok).toBe(false);
   });
   test('allows a link verb to a type the parent may provide when extends is set', () => {
     const r = validateDraft({ ...good, linkVerbs: [{ name: 'signed', fromType: 'person', toType: 'contract' }] });
@@ -53,7 +60,7 @@ describe('draftToManifest', () => {
     const m = draftToManifest(r.draft, '0.50.5.0') as any;
     expect(m.api_version).toBe('gbrain-schema-pack-v1');
     expect(m.version).toBe('0.1.0');
-    expect(m.extends).toBe('gbrain-base-v2');
+    expect(m.extends).toBe('mobrain-core');
     expect(m.page_types[0]).toEqual({
       name: 'contract', primitive: 'entity',
       path_prefixes: ['contracts/', 'legal/contracts/'], aliases: [],
@@ -66,10 +73,8 @@ describe('draftToManifest', () => {
       kind: 'contract', directory: 'contracts/', examples: [], description: 'A signed agreement',
     });
   });
-  test('emits an explicit extends:null for a standalone ontology', () => {
-    const r = validateDraft({ ...good, extends: null, linkVerbs: [] });
-    if (!r.ok) throw new Error('fixture');
-    const m = draftToManifest(r.draft, '0.50.5.0');
+  test('always writes extends explicitly (a missing one would inherit gbrain-base)', () => {
+    const m = draftToManifest({ ...(good as any), extends: null }, '0.50.5.0');
     expect('extends' in m).toBe(true);
     expect(m.extends).toBeNull();
   });

@@ -5,6 +5,8 @@ import {
   type SchemaLint, type ScaffoldResult,
 } from '../api.ts';
 import type { PackDraft, PackMutation } from '../../control/schemaDraft.ts';
+import { CORE_PACK } from '../../contracts/packs.ts';
+import { buildsOnOptions, inheritedBadge, managedEditNote, templateOptions } from './schemaLock.ts';
 import { Badge, Button, Card, Empty, Field, Input, Select, Table, TableWrap, Textarea, Toolbar } from '../ui/index.tsx';
 
 const IRREGULAR: Record<string, string> = { person: 'people', company: 'companies', media: 'media', analysis: 'analyses' };
@@ -93,9 +95,7 @@ export function afterSave(r: PackMutateResult, name: string): { error: string | 
   return { error: r.activeError ?? null, openPack: r.pack !== name ? r.pack : null };
 }
 
-export const MANAGED_EDIT_NOTE =
-  'mobrain-personal is maintained by Mo-brain. Your changes go into my-personal, layered on top, ' +
-  'so Mo-brain updates still reach you. Types that come from mobrain-personal cannot be removed; add new ones instead.';
+export { managedEditNote };
 
 const PRIMITIVES = ['entity', 'media', 'temporal', 'annotation', 'concept'] as const;
 const splitList = (s: string): string[] => s.split(',').map((x) => x.trim()).filter(Boolean);
@@ -166,7 +166,7 @@ export function ScaffoldResults({ results }: { results: ScaffoldResult[] }) {
  */
 export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
   parent: string | null;
-  packs: { name: string }[];
+  packs: { name: string; extends: string | null; bundled: boolean; managed: boolean }[];
   onCreated: () => void;
   /**
    * Optional submit override. The Schema page leaves it undefined and creates
@@ -179,7 +179,8 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
   const [tab, setTab] = useState<'design' | 'template' | 'import'>('design');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [buildsOn, setBuildsOn] = useState(parent ?? '');
+  const buildsOnChoices = buildsOnOptions(packs);
+  const [buildsOn, setBuildsOn] = useState(parent && buildsOnChoices.includes(parent) ? parent : CORE_PACK);
   const [types, setTypes] = useState<DesignPageType[]>([blankType()]);
   const [verbs, setVerbs] = useState<DesignLinkVerb[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -187,12 +188,11 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
   const [lint, setLint] = useState<SchemaLint | null>(null);
   const [created, setCreated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [forkFrom, setForkFrom] = useState(packs[0]?.name ?? '');
+  const templates = templateOptions(packs);
+  const [forkFrom, setForkFrom] = useState(templates[0] ?? '');
   const [forkName, setForkName] = useState('');
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
-
-  const packNames = packs.map((p) => p.name);
 
   const step = async (fn: () => Promise<void>) => {
     setBusy(true); setErrors([]); setGbrainError(null); setLint(null);
@@ -219,7 +219,7 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
 
   const submitDraft = () => step(async () => {
     const draft: PackDraft = {
-      name: name.trim(), description: description.trim(), extends: buildsOn || null,
+      name: name.trim(), description: description.trim(), extends: buildsOn,
       pageTypes: types.filter((t) => t.name.trim() !== '').map((t) => ({
         name: t.name.trim(), primitive: t.primitive as PackDraft['pageTypes'][number]['primitive'],
         folder: t.folder.trim(), description: t.description.trim(),
@@ -248,7 +248,7 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
     setImportError(null);
     setName(typeof r.draft.name === 'string' ? r.draft.name : '');
     setDescription(typeof r.draft.description === 'string' ? r.draft.description : '');
-    setBuildsOn(typeof r.draft.extends === 'string' ? r.draft.extends : '');
+    setBuildsOn(typeof r.draft.extends === 'string' ? r.draft.extends : '');  // kept as-is: the server refuses one that doesn't reach core
     setTypes((Array.isArray(r.draft.pageTypes) ? r.draft.pageTypes : []).map((t) => ({
       name: String(t.name ?? ''), primitive: String(t.primitive ?? 'entity'), folder: String(t.folder ?? ''),
       description: String(t.description ?? ''),
@@ -279,8 +279,8 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
             </Field>
             <Field label="Builds on" id="np-extends">
               <Select id="np-extends" value={buildsOn} onChange={(e) => setBuildsOn(e.target.value)}>
-                <option value="">Nothing — standalone</option>
-                {packNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                {[...buildsOnChoices, ...(buildsOn && !buildsOnChoices.includes(buildsOn) ? [buildsOn] : [])]
+                  .map((n) => <option key={n} value={n}>{n}</option>)}
               </Select>
             </Field>
           </div>
@@ -352,14 +352,15 @@ export function NewPackPanel({ parent, packs, onCreated, createDraft }: {
           <div className="flex flex-wrap gap-3">
             <Field label="Copy from" id="np-fork-from">
               <Select id="np-fork-from" value={forkFrom} onChange={(e) => setForkFrom(e.target.value)}>
-                {packNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                {templates.length === 0 && <option value="">No custom schema to copy yet</option>}
+                {templates.map((n) => <option key={n} value={n}>{n}</option>)}
               </Select>
             </Field>
             <Field label="New pack name" id="np-fork-name">
               <Input id="np-fork-name" value={forkName} onChange={(e) => setForkName(e.target.value)} />
             </Field>
           </div>
-          <Button variant="primary" disabled={busy} onClick={submitFork}>{busy ? 'Forking…' : 'Fork pack'}</Button>
+          <Button variant="primary" disabled={busy || forkFrom === ''} onClick={submitFork}>{busy ? 'Forking…' : 'Fork pack'}</Button>
         </div>
       )}
 
@@ -520,7 +521,7 @@ export function PackEditor({ name, onSaved, onOpen }: {
 
   return (
     <Card title={name} subtitle={`Editing ${name}'s own declarations. Save sends one atomic batch to gbrain.`}>
-      {detail.effective.managed && <p className="text-sm text-muted">{MANAGED_EDIT_NOTE}</p>}
+      {detail.effective.managed && <p className="text-sm text-muted">{managedEditNote(name)}</p>}
       <p className="text-sm text-muted">{ADDITIVE_BUILDER_NOTICE}</p>
 
       <div className="mt-3">
@@ -593,7 +594,7 @@ export function PackEditor({ name, onSaved, onOpen }: {
                 <tbody>
                   {inheritedTypes.map((t) => (
                     <tr key={t.name}>
-                      <td><code>{t.name}</code> <Badge tone="neutral">from {detail.effective.extends}</Badge></td>
+                      <td><code>{t.name}</code> <Badge tone="neutral">{inheritedBadge('type', t.name, detail.effective.extends).text}</Badge></td>
                       <td>{t.primitive}</td>
                       <td>{t.pathPrefixes.join(', ')}</td>
                     </tr>
@@ -604,7 +605,7 @@ export function PackEditor({ name, onSaved, onOpen }: {
           )}
           {inheritedLinks.length > 0 && (
             <p className="mt-2 text-[length:var(--control-font)] text-muted">
-              Inherited verbs: {inheritedLinks.map((l) => l.name).join(' · ')}
+              Inherited verbs: {inheritedLinks.map((l) => (inheritedBadge('verb', l.name, null).locked ? `🔒 ${l.name}` : l.name)).join(' · ')}
             </p>
           )}
         </div>

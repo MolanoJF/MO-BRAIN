@@ -239,6 +239,20 @@ export async function writeSchemaPackJson(name: string, manifest: unknown, opts:
   }
 }
 
+/**
+ * A user pack's manifest exactly as stored, with its format, so a failed
+ * write can be put back byte-for-byte in the format it was read.
+ */
+export async function readSchemaPackRaw(name: string): Promise<{ format: 'json' | 'yaml'; text: string } | null> {
+  assertUserPackName(name);
+  const dir = join(SCHEMA_PACK_DIR, name);
+  for (const [file, format] of [['pack.yaml', 'yaml'], ['pack.yml', 'yaml'], ['pack.json', 'json']] as const) {
+    const text = await readFile(join(dir, file), 'utf8').catch(() => null);
+    if (text !== null) return { format, text };
+  }
+  return null;
+}
+
 /** Delete one user pack's directory. The path is computed, never accepted. */
 export async function removeSchemaPack(name: string, opts: { sql: SQL }): Promise<{ removed: boolean }> {
   assertUserPackName(name);

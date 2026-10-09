@@ -44,15 +44,28 @@ instead of inventing a parallel one.
 - `folder` is lowercase, plural, and ends with `/` (`contracts/`, `matters/`). Nested is fine (`legal/contracts/`).
 - `extractable: true` only where facts should be pulled out of pages (contracts, people).
 - `expertRouting: true` only for types that represent people or teams who *know* things.
-- `extends`: use `"gbrain-base-v2"` unless the team explicitly wants *only* their
-  types. It keeps people, companies, meetings and the other basics. Set it to `null` for a
-  standalone ontology, and then declare every type your link verbs mention.
+- `extends`: always set it. Use `"mobrain-core"`, or `"mobrain-personal"` for a
+  personal-life brain. Never `null` and never a gbrain pack: every Mo-brain
+  schema builds on core, and the console refuses anything that doesn't.
+- **Reuse core, don't redeclare it.** Core is locked: its types and verbs can't
+  be removed or redefined, and a draft that names one is refused.
+  - Core's 12 types: `person`, `company`, `meeting`, `conversation`, `event`,
+    `project`, `concept`, `note`, `source`, `atom`, `synthesis`, `extract_receipt`.
+  - Core's 10 verbs: `relates_to`, `mentions`, `discusses`, `part_of`
+    (inverse `has_part`), `member_of` (`has_member`), `attended`
+    (`attended_by`), `created_by` (`created`), `owned_by` (`owns`),
+    `derived_from`, `supersedes` (`superseded_by`).
+  - If the team needs a "client", "matter" or "paper", add a new type. If a core
+    type nearly fits (a person, a company, a project), use it as is.
 
 ## 4. Choose link verbs
 
 `snake_case` verbs read left to right: `fromType` `name` `toType`
 (`contract governs matter`). Add `inverse` when the reverse reads naturally
-(`governed_by`). Prefer 3–10 verbs.
+(`governed_by`). Prefer 3–10 verbs. Phrase domain relations as **new** verbs
+(`governs`, `cites`, `signed`); for a general relation, use core's `relates_to`,
+`part_of`, `member_of`, `owned_by` or `created_by` instead of inventing a synonym.
+Never reuse a core verb or core inverse name.
 
 ## 5. Output
 

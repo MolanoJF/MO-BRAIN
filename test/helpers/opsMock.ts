@@ -77,6 +77,7 @@ export function installOpsMock(): OpsMock {
     patchFilePlaneConfig: async () => {},
     putSchemaPack: async () => {},
     putSchemaPackJson: async () => {},
+    readSchemaPackRaw: async () => null,
     gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
     removeSchemaPack: async () => ({ removed: false }),
     gitSetRemote: async () => ({ ok: true }),

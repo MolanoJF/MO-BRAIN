@@ -96,11 +96,11 @@ describe('single-admin bootstrap', () => {
 
   // Spec P6: every install starts as ONE person's brain on Mo-brain's own
   // personal pack. Company mode is a later settings change.
-  test('the org starts in personal mode on mobrain-personal', async () => {
+  test('the org starts in personal mode on mobrain-core', async () => {
     const [o] = await getDb().select().from(schema.organizations);
     expect(o?.brainMode).toBe('personal');
     const [b] = await getDb().select().from(schema.brains);
-    expect(b?.schemaPack).toBe('mobrain-personal');
+    expect(b?.schemaPack).toBe('mobrain-core');
   });
 
   test('a brain name defaults from the email', async () => {

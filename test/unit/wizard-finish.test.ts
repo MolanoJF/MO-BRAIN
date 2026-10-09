@@ -65,6 +65,6 @@ describe('finish sync and embed argv', () => {
 
 describe('canResumeFinish', () => {
   test('a brain with no Spaces never resumes', async () => {
-    expect(await canResumeFinish([], 'mobrain-personal')).toBe(false);
+    expect(await canResumeFinish([], 'mobrain-core')).toBe(false);
   });
 });
