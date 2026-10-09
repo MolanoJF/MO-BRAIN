@@ -1,6 +1,6 @@
 {
   "gbrainVersion": "0.60.115.0",
-  "generatedAt": "2026-10-08T19:18:54.061Z",
+  "generatedAt": "2026-10-09T00:15:53.986Z",
   "operations": [
     {
       "id": "applyMigrations",
@@ -434,6 +434,11 @@
         {
           "name": "source",
           "flag": "--source",
+          "kind": "value"
+        },
+        {
+          "name": "maxUsd",
+          "flag": "--max-usd",
           "kind": "value"
         }
       ],
@@ -1291,6 +1296,16 @@
           "name": "source",
           "flag": "--source",
           "kind": "value"
+        },
+        {
+          "name": "noPull",
+          "flag": "--no-pull",
+          "kind": "flag"
+        },
+        {
+          "name": "noEmbed",
+          "flag": "--no-embed",
+          "kind": "flag"
         }
       ],
       "supportsJson": true,

@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { finishCallOpts } from '../../src/control/routes/wizard.ts';
+import { finishCallOpts, canResumeFinish, FINISH_EMBED_MAX_USD } from '../../src/control/routes/wizard.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 
@@ -47,4 +47,24 @@ test('finish omits --schema-pack entirely when no pack was chosen', () => {
     nonInteractive: true, force: true, embeddingModel: 'openai:text-embedding-3-small',
   });
   expect(argv).not.toContain('--schema-pack');
+});
+
+describe('finish sync and embed argv', () => {
+  test('sync skips the git pull and the paid embed', () => {
+    const argv = buildArgv(OPERATIONS.sync!, { all: true, noPull: true, noEmbed: true }, { json: true });
+    expect(argv).toContain('--no-pull');
+    expect(argv).toContain('--no-embed');
+  });
+
+  test('embed carries a spend cap so a headless run is not stopped for consent', () => {
+    const argv = buildArgv(OPERATIONS.embed!, { stale: true, maxUsd: FINISH_EMBED_MAX_USD }, { json: true });
+    expect(argv[argv.indexOf('--max-usd') + 1]).toBe(FINISH_EMBED_MAX_USD);
+    expect(Number(FINISH_EMBED_MAX_USD)).toBeGreaterThan(0);
+  });
+});
+
+describe('canResumeFinish', () => {
+  test('a brain with no Spaces never resumes', async () => {
+    expect(await canResumeFinish([], 'mobrain-personal')).toBe(false);
+  });
 });

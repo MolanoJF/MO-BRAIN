@@ -68,7 +68,7 @@ async function isSourceRegistered(sourceId: string): Promise<boolean | null> {
  */
 async function syncRegisteredSource(sourceId: string): Promise<boolean> {
   try {
-    const r = await callOps('sync', { source: sourceId }, { json: true, timeoutMs: 30_000 });
+    const r = await callOps('sync', { source: sourceId, noPull: true, noEmbed: true }, { json: true, timeoutMs: 30_000 });
     return r.ok;
   } catch {
     return false;

@@ -29,6 +29,35 @@ export function finishCallOpts(op: string): { json?: boolean } {
   return spec.supportsJson ? { json: true } : {};
 }
 
+/** Ceiling on the first embed. A fresh Space holds one README per folder. */
+export const FINISH_EMBED_MAX_USD = '1';
+
+/**
+ * True when /finish already got as far as registering every Space in gbrain
+ * under the requested schema pack, so a retry only needs the later steps.
+ * Any doubt (unreadable list, a Space missing, a different pack) is "no": the
+ * full path then runs exactly as it did before.
+ */
+export async function canResumeFinish(
+  sourceIds: string[],
+  requestedPack: string | null,
+): Promise<boolean> {
+  if (sourceIds.length === 0) return false;
+  try {
+    const list = await callOps<{ sources?: { id?: string }[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 });
+    if (!list.ok) return false;
+    const have = new Set((list.json?.sources ?? []).map((s) => s.id));
+    if (!sourceIds.every((id) => have.has(id))) return false;
+    if (requestedPack) {
+      const active = await callOps<never>('schema.active', {}, { timeoutMs: 60_000 });
+      if (!active.ok || parseSchemaActiveProse(active.stdout ?? '').pack !== requestedPack) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const wizard = new Hono();
 
 /**
@@ -515,7 +544,7 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     return c.json({ error: `cannot finish from ${brain.lifecycle}` }, 409);
   }
 
-  const steps: { id: string; ok: boolean; exitCode: number; stderr?: string }[] = [];
+  const steps: { id: string; ok: boolean; exitCode: number; stderr?: string; skipped?: true }[] = [];
   const run = async (id: string, op: string, params: Record<string, unknown>, timeoutMs = 900_000) => {
     const r = await callOps(op, params, { ...finishCallOpts(op), timeoutMs });
     steps.push({
@@ -525,39 +554,51 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
     return r;
   };
 
-  // Serve and the worker cold-start vector(1280) on any reconnect. The pause
-  // file keeps their entrypoint from starting gbrain until init has created
-  // the 1536-d schema. A failed init leaves the pause in place so a retry
-  // cannot race a half-written config.json.
-  try {
-    await pauseBrainWriters();
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return c.json({ error: message }, 503);
-  }
-  await resetBrainSchema();
-  const initResult = await run('init', 'init', {
-    nonInteractive: true,
-    force: true,
-    embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
-    // Undocumented but allowlisted (see the registry entry). Omitted entirely
-    // when unset so init falls back to its own gbrain-base-v2 default rather
-    // than being handed an empty pack name.
-    ...(brain.schemaPack ? { schemaPack: brain.schemaPack } : {}),
-  });
-  if (initResult.ok) await resumeBrainWriters();
-  // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
-  // recorded in the control DB during /space (git repos on disk survive).
-  // --federated again: this IS the row that survives, so the flag must be set
-  // here too (see /space for why an unset flag hides every Space from an
-  // unqualified read on a multi-Space brain).
   const spaces = await getDb().select().from(schema.spaces)
     .where(eq(schema.spaces.organizationId, orgId));
-  for (const s of spaces) {
-    await run(`sources.add:${s.sourceId}`, 'sources.add', {
-      id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: gbrainSourceName(s),
-      federated: true,
-    }, 300_000);
+
+  // A retry after a partial failure must not start over. `init --force` wipes
+  // gbrain's sources table, and re-adding a checkout that the first attempt
+  // already claimed fails with recovery_required, so a second pass could never
+  // succeed. When gbrain already has every Space registered under the pack we
+  // asked for, init and sources.add are done: carry on with the steps after.
+  const resume = await canResumeFinish(spaces.map((s) => s.sourceId), brain.schemaPack ?? null);
+
+  if (resume) {
+    steps.push({ id: 'init', ok: true, exitCode: 0, skipped: true });
+  } else {
+    // Serve and the worker cold-start vector(1280) on any reconnect. The pause
+    // file keeps their entrypoint from starting gbrain until init has created
+    // the 1536-d schema. A failed init leaves the pause in place so a retry
+    // cannot race a half-written config.json.
+    try {
+      await pauseBrainWriters();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return c.json({ error: message }, 503);
+    }
+    await resetBrainSchema();
+    const initResult = await run('init', 'init', {
+      nonInteractive: true,
+      force: true,
+      embeddingModel: brain.embeddingModel ?? 'openai:text-embedding-3-small',
+      // Undocumented but allowlisted (see the registry entry). Omitted entirely
+      // when unset so init falls back to its own gbrain-base-v2 default rather
+      // than being handed an empty pack name.
+      ...(brain.schemaPack ? { schemaPack: brain.schemaPack } : {}),
+    });
+    if (initResult.ok) await resumeBrainWriters();
+    // resetBrainSchema wiped gbrain's sources table; re-register Spaces we already
+    // recorded in the control DB during /space (git repos on disk survive).
+    // --federated again: this IS the row that survives, so the flag must be set
+    // here too (see /space for why an unset flag hides every Space from an
+    // unqualified read on a multi-Space brain).
+    for (const s of spaces) {
+      await run(`sources.add:${s.sourceId}`, 'sources.add', {
+        id: s.sourceId, path: s.localPath ?? `/srv/brain-repos/${s.sourceId}`, name: gbrainSourceName(s),
+        federated: true,
+      }, 300_000);
+    }
   }
   // The chosen pack's folders, one README per page type, before the first
   // sync so a teammate's first page lands in a folder that already explains
@@ -569,8 +610,10 @@ wizard.post('/finish', guard(async (c, { userId, orgId }) => {
   // without folders, and the Schema page's "Create folders" is the manual retry.
   const scaffold = await scaffoldWithRetry(orgId, userId, brain.gbrainVersion ?? '', spaces.length);
   if (brain.searchMode) await run('search-mode', 'config.set', { key: 'search.mode', value: brain.searchMode });
-  await run('sync', 'sync', { all: true });
-  await run('embed', 'embed', { stale: true });
+  // --no-pull: a managed brain refuses sync without it. --no-embed + a capped
+  // `embed`: without a terminal, an uncapped embed stops at exit 3 for consent.
+  await run('sync', 'sync', { all: true, noPull: true, noEmbed: true });
+  await run('embed', 'embed', { stale: true, maxUsd: FINISH_EMBED_MAX_USD });
 
   const doctor = await run('doctor', 'doctor', {});
 

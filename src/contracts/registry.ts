@@ -808,6 +808,14 @@ export const OPERATIONS: Record<string, OperationSpec> = {
     params: [
       { name: 'all', flag: '--all', kind: 'flag' },
       { name: 'source', flag: '--source', kind: 'value' },
+      // Required on a managed brain (gbrain >= 0.60): sync refuses to run
+      // without it ("Managed sync requires skipping the Git pull"), because
+      // `sources refresh` moves the checkout and sync only catches up to it.
+      { name: 'noPull', flag: '--no-pull', kind: 'flag' },
+      // Sync embeds by default, which bills the embedding provider and, with
+      // no terminal, stops at exit 3 for consent. Callers that want a bounded
+      // spend skip it here and run `embed --stale --max-usd` themselves.
+      { name: 'noEmbed', flag: '--no-embed', kind: 'flag' },
     ],
     supportsJson: true,
     supportsDryRun: false,
@@ -824,6 +832,10 @@ export const OPERATIONS: Record<string, OperationSpec> = {
       // per-command flag allowlist carries '--source' for `embed`
       // (src/core/cli-flag-registry.generated.ts, 'embed' entry).
       { name: 'source', flag: '--source', kind: 'value' },
+      // Without a terminal, embed stops at exit 3 with a consent payload (and
+      // no stderr) unless --yes, --max-usd N, or a standing approval covers
+      // the estimate. --max-usd is the bounded form.
+      { name: 'maxUsd', flag: '--max-usd', kind: 'value' },
     ],
     supportsJson: true,
     supportsDryRun: false,
