@@ -117,6 +117,17 @@ export function legacyRedirect(pathname: string): string | null {
 }
 
 /**
+ * Navigate from anywhere (a link inside a page) so the shell follows. Each
+ * `useRoute()` keeps its own state, so a page calling its own `navigate` would
+ * change the URL without the shell noticing; the shell listens for `popstate`,
+ * which `pushState` never fires by itself, so this fires it by hand.
+ */
+export function goTo(route: Route): void {
+  window.history.pushState(null, '', routeToPath(route));
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+/**
  * The only part of this module that touches `window`/`history`. It is kept
  * to a thin wrapper over `parseRoute`/`routeToPath` on purpose: this repo
  * has no DOM test harness (no happy-dom, no jsdom, no testing-library), so

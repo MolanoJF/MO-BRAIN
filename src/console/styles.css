@@ -71,13 +71,23 @@ body {
    does, and the sidebar widens by 20px. That is the visual-parity choice, not
    a regression — the fallback is dropped so the token is the only source. */
 .sidebar {
-  width: var(--sidebar-w); flex-shrink: 0; min-height: 100vh;
+  width: var(--sidebar-w); flex-shrink: 0; height: 100%; min-height: 0;
   background: var(--color-surface); border-right: 1px solid var(--color-border);
   display: flex; flex-direction: column;
 }
-.account-box {
+/* The brain's name, where the account row used to sit: same 48px row, so the
+   sidebar's top edge lines up with it as before. */
+.brain-name {
   height: 48px; flex-shrink: 0; padding: 0 12px;
   border-bottom: 1px solid var(--color-border);
+  display: flex; align-items: center; font-weight: 600;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0;
+}
+/* Pinned to the sidebar's bottom: the file tree is the only scrolling child. */
+.account-box {
+  height: 48px; flex-shrink: 0; padding: 0 12px;
+  box-sizing: content-box; padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--color-border);
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .account-box .account-email {

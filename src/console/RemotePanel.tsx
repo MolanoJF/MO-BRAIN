@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ApiError, type SetRemoteBody, type SpacePush } from './api.ts';
 import { Button, Input } from './ui/index.tsx';
+import { SettingsLink } from './ui/SettingsLink.tsx';
 
 /**
  * Git remote controls for ONE Space. The same panel serves an admin on the
@@ -13,8 +14,10 @@ export type RemoteApi = {
   clear: () => Promise<unknown>;
 };
 
+export const TOKEN_MISSING_TEXT = 'Add a GitHub token in Settings → Credentials first.';
+
 function reason(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
+  if (e instanceof ApiError) return e.message === 'github_token_missing' ? TOKEN_MISSING_TEXT : e.message;
   if (e instanceof Error && e.message !== '') return e.message;
   return 'Request failed';
 }
@@ -28,15 +31,16 @@ function reason(e: unknown): string {
 export type RemoteMode = 'url' | 'github';
 
 export const REMOTE_NOTICE =
-  'The access token is stored encrypted and used only to push this Source. Mo-brain refuses to push ' +
+  'The GitHub token is stored encrypted and used only to push this Source. Mo-brain refuses to push ' +
   'to a remote it cannot verify is private, and blocks a push when a secret scan finds credentials.';
 
 const GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 
-export function remoteError(
-  mode: RemoteMode, f: { url: string; name: string; token: string },
-): string | null {
-  if (f.token.trim() === '') return 'An access token is required.';
+type RemoteFields = { url: string; name: string; token: string; tokenStored?: boolean };
+
+/** A token is only needed here when none is stored for the scope. */
+export function remoteError(mode: RemoteMode, f: RemoteFields): string | null {
+  if (!f.tokenStored && f.token.trim() === '') return TOKEN_MISSING_TEXT;
   if (mode === 'url') {
     let u: URL;
     try { u = new URL(f.url.trim()); } catch { return 'Enter the repository URL, e.g. https://github.com/you/brain.git.'; }
@@ -51,10 +55,26 @@ export function remoteError(
   return null;
 }
 
-export function canSetRemote(
-  mode: RemoteMode, f: { url: string; name: string; token: string },
-): boolean {
+export function canSetRemote(mode: RemoteMode, f: RemoteFields): boolean {
   return remoteError(mode, f) === null;
+}
+
+/**
+ * Which stored token covers this panel, and whether the panel may take one
+ * inline. `stored: null` means the status is still loading. `save` exists only
+ * where Settings is unreachable (the first-run wizard).
+ */
+export type RemoteToken = {
+  stored: boolean | null;
+  scope: 'member' | 'org';
+  save?: (token: string) => Promise<unknown>;
+};
+
+/** The line shown in place of a token field. */
+export function tokenSourceText(scope: 'member' | 'org'): string {
+  return scope === 'org'
+    ? 'Uses the company GitHub token from Settings → Credentials.'
+    : 'Uses your GitHub token from Settings → Credentials.';
 }
 
 /** One sentence for what a push did — the refusal text is gbrain's own. */
@@ -64,12 +84,13 @@ export function pushText(push: SpacePush | null): string {
   return `Connected, but the push did not go through (exit ${push.exitCode}).${push.detail ? ` ${push.detail}` : ''}`;
 }
 
-export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, pushOnConnect = true }: {
+export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, token: tokenInfo, pushOnConnect = true }: {
   sourceId: string;
   gitRemote: string | null;
   busy: boolean;
   api: RemoteApi;
   onChanged: () => Promise<void> | void;
+  token: RemoteToken;
   /** The wizard connects before the brain exists, so there is nothing to push yet. */
   pushOnConnect?: boolean;
 }) {
@@ -90,14 +111,15 @@ export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, pushOnC
   };
 
   const connect = () => run(async () => {
-    const fields = { url, name, token };
-    const invalid = remoteError(mode, fields);
+    const stored = tokenInfo.stored === true;
+    const invalid = remoteError(mode, { url, name, token, tokenStored: stored });
     if (invalid !== null) throw new Error(invalid);
+    // Inline entry (wizard only): store it once, then connect with the stored one.
+    if (!stored) { await tokenInfo.save!(token.trim()); setToken(''); }
     const push = pushOnConnect ? {} : { push: false };
     const r = await api.set(mode === 'url'
-      ? { mode, url: url.trim(), token: token.trim(), ...push }
-      : { mode, name: name.trim(), token: token.trim(), ...(owner.trim() ? { owner: owner.trim() } : {}), ...push });
-    setToken('');
+      ? { mode, url: url.trim(), ...push }
+      : { mode, name: name.trim(), ...(owner.trim() ? { owner: owner.trim() } : {}), ...push });
     return `${r.created ? `Created ${r.created}. ` : ''}${pushText(r.push)}`;
   });
 
@@ -108,6 +130,10 @@ export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, pushOnC
   });
 
   const off = busy || working;
+  const stored = tokenInfo.stored === true;
+  const missing = tokenInfo.stored === false;
+  const inline = missing && tokenInfo.save !== undefined;
+  const blocked = tokenInfo.stored === null || (missing && !inline);
   return (
     <div className="space-y-2">
       <div className="text-[length:var(--control-font)] font-medium">Git remote</div>
@@ -143,10 +169,19 @@ export function RemotePanel({ sourceId, gitRemote, busy, api, onChanged, pushOnC
                      onChange={(e) => setOwner(e.target.value)} />
             </div>
           )}
-          <Input type="password" autoComplete="off" value={token}
-                 placeholder={mode === 'github' ? 'GitHub token (repo scope)' : 'Access token for that repository'}
-                 onChange={(e) => setToken(e.target.value)} />
-          <Button variant="primary" disabled={off || !canSetRemote(mode, { url, name, token })}
+          {stored && <p className="text-xs text-muted">{tokenSourceText(tokenInfo.scope)}</p>}
+          {missing && !inline && (
+            <p className="text-xs text-muted">
+              Add a GitHub token in <SettingsLink tab="credentials">Settings → Credentials</SettingsLink> first.
+            </p>
+          )}
+          {inline && (
+            <Input type="password" autoComplete="off" value={token}
+                   placeholder="GitHub token (repo scope)"
+                   onChange={(e) => setToken(e.target.value)} />
+          )}
+          <Button variant="primary"
+                  disabled={off || blocked || !canSetRemote(mode, { url, name, token, tokenStored: stored })}
                   onClick={() => void connect()}>
             {working ? 'Connecting…' : mode === 'github' ? 'Create private repo and push' : 'Connect and push'}
           </Button>

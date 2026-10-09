@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { filesApi, type FileEntry } from '../api.ts';
 import { buildTree, flattenTree, toggleExpanded, indentFor, treeErrorMessage } from '../files/tree.ts';
 import { readExpanded, writeExpanded, pruneExpanded } from '../files/expanded.ts';
-import { Empty, Icon, Link } from '../ui/index.tsx';
+import { Empty, Icon } from '../ui/index.tsx';
 
 /**
  * The sidebar's collapsible file tree. Fetches `filesApi.tree(sourceId)`
@@ -70,36 +70,22 @@ export function FileTree({
 
   if (sourceId === null) return null;
 
-  // The export link lives beside the Source's tree because that is where the
-  // old Files page kept it (its source section, `pages/Files.tsx`, deleted in
-  // `0244a30`), and it is rendered in every state below rather than only for a
-  // loaded tree: whether a Source's history can be exported does not depend on
-  // how many files it happens to list. A real `Link` (an `<a href>`), not a
-  // button — the browser streams the download and carries the session cookie
-  // itself, which is why `exportUrl` is a plain URL and not a `fetch`.
-  const exportLink = (
-    <div className="px-3 pb-2">
-      <Link href={filesApi.exportUrl(sourceId)} download>Export as .bundle</Link>
-    </div>
-  );
-
   // `Empty` rather than a hand-rolled muted div, and deliberately not a
   // `Spinner`: the tree is the sidebar's whole content, and a spinner where a
   // list is about to appear draws the eye to the wait instead of to the list.
   // The copy is unchanged, which is the other half of the reason — a spinner
   // would have had to replace the word "Loading…" rather than restyle it.
-  if (loading) return <div className="file-tree">{exportLink}<Empty>Loading…</Empty></div>;
+  if (loading) return <div className="file-tree"><Empty>Loading…</Empty></div>;
   // Left as coloured text, not a `Notice`: a bordered panel inside a 280px
   // sidebar column is a card wedged into a list. `Notice` is reserved for the
   // standing warnings that were `.card border-warning`.
-  if (error !== null) return <div className="file-tree text-danger">{exportLink}{error}</div>;
+  if (error !== null) return <div className="file-tree text-danger">{error}</div>;
 
   const rows = flattenTree(buildTree(entries), expanded);
-  if (rows.length === 0) return <div className="file-tree">{exportLink}<Empty>No files in this Source.</Empty></div>;
+  if (rows.length === 0) return <div className="file-tree"><Empty>No files in this Source.</Empty></div>;
 
   return (
     <div className="file-tree" aria-label="Files">
-      {exportLink}
       {rows.map((row) => {
         const isSelected = row.kind === 'file' && row.path === selectedPath;
         const isExpanded = row.kind === 'folder' && row.expanded === true;

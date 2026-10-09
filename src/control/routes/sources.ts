@@ -31,6 +31,11 @@ type GbrainSource = {
   last_sync_at: string | null;
 };
 
+/** gbrain's built-in fallback source: unrouted writes land here. The console
+ *  never creates it, so it has no `spaces` row and must not be listed as an
+ *  unregistered source unless it actually holds pages. */
+const GBRAIN_FALLBACK_SOURCE_ID = 'default';
+
 type SpaceRow = {
   id: string; sourceId: string; name: string; kind: string;
   ownerMembershipId: string | null; gitRemote: string | null;
@@ -111,9 +116,11 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
     callOps<{ sources: GbrainSource[] }>('sources.list', {}, { json: true, timeoutMs: 60_000 }),
   ]);
   const packResolved = packResolvedAll.filter((s) => !hidden.has(s.sourceId));
-  const remotes = new Map((await getDb().select({
-    sourceId: schema.spaces.sourceId, gitRemote: schema.spaces.gitRemote,
-  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId))).map((r) => [r.sourceId, r.gitRemote]));
+  const spaceRows = await getDb().select({
+    sourceId: schema.spaces.sourceId, gitRemote: schema.spaces.gitRemote, owner: schema.spaces.ownerMembershipId,
+  }).from(schema.spaces).where(eq(schema.spaces.organizationId, orgId));
+  const remotes = new Map(spaceRows.map((r) => [r.sourceId, r.gitRemote]));
+  const owners = new Map(spaceRows.map((r) => [r.sourceId, r.owner]));
 
   // A failed `sources.list` is NOT an empty brain: rows keep `pageCount: null`,
   // never 0, and the payload says the list could not be read.
@@ -138,15 +145,25 @@ sourceRoutes.get('/sources', guard('admin', async (c, ctx) => {
       federated: g?.federated ?? null,
       inGbrain: g !== undefined,
       gitRemote: remotes.get(s.sourceId) ?? null,
+      private: owners.get(s.sourceId) != null,
     };
   });
 
   // Flag the other direction of the mismatch too: a gbrain source with no
   // `spaces` row is invisible to the console unless we name it.
   const known = new Set(packResolvedAll.map((s) => s.sourceId));
-  const unregistered = (gbrain ?? []).filter((s) => !known.has(s.id) && !hidden.has(s.id)).map((s) => s.id);
+  // gbrain's own `default` source never has a `spaces` row, so it is not a
+  // mismatch to flag while empty. When it holds pages, those are reported via
+  // `builtinDefault` (the console words that specially), not in `unregistered`.
+  const builtin = byId.get(GBRAIN_FALLBACK_SOURCE_ID);
+  const builtinDefault = builtin && (builtin.page_count ?? 0) > 0 && !known.has(builtin.id)
+    ? { pageCount: builtin.page_count as number }
+    : null;
+  const unregistered = (gbrain ?? [])
+    .filter((s) => !known.has(s.id) && !hidden.has(s.id) && s.id !== GBRAIN_FALLBACK_SOURCE_ID)
+    .map((s) => s.id);
 
-  return c.json({ sources, unregistered, sourcesListOk: gbrain !== null });
+  return c.json({ sources, unregistered, builtinDefault, sourcesListOk: gbrain !== null });
 }));
 
 sourceRoutes.post('/sources', guard('admin', async (c, { userId, orgId }) => {
@@ -171,9 +188,13 @@ sourceRoutes.patch('/sources/:sourceId', guard('admin', async (c, ctx) => {
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   if (!name) return c.json({ error: 'name is required' }, 400);
 
-  // The id is immutable; only the display name moves.
-  const r = await callOps('sources.rename', { id: sourceId, newName: name }, { timeoutMs: 60_000 });
-  if (!r.ok) return c.json({ error: `sources rename failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+  // The id is immutable; only the display name moves. A private Space's gbrain
+  // name must stay equal to its sourceId (`gbrainSourceName` in privateSpaces.ts;
+  // gbrain's `sources_name_key` is unique), so its rename is `spaces.name` only.
+  if (space.ownerMembershipId === null) {
+    const r = await callOps('sources.rename', { id: sourceId, newName: name }, { timeoutMs: 60_000 });
+    if (!r.ok) return c.json({ error: `sources rename failed (exit ${r.exitCode})`, detail: r.stderr }, 400);
+  }
 
   await getDb().update(schema.spaces).set({ name }).where(eq(schema.spaces.id, space.id));
   await audit(orgId, userId, 'source.rename', sourceId, { name });

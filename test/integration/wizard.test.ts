@@ -129,9 +129,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };
   },
   removeSchemaPack: async (name: string) => { delete rawPacks[name]; removedPacks.push(name); return { removed: true }; },
-  gitSetRemote: async () => ({ ok: true }),
-  gitClearRemote: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
+  gitSetRemote: async (r: { url: string }) => ({ url: r.url, branch: 'main' }),
+  gitClearRemote: async () => ({ removed: true }),
   resetBrainSchema: async () => { resetBrainSchemaCalls += 1; finishOrder.push('reset'); },
   pauseBrainWriters: async () => { finishOrder.push('pause'); },
   resumeBrainWriters: async () => { finishOrder.push('resume'); },

@@ -313,14 +313,16 @@ export type SourceSummary = {
   inGbrain: boolean;
   /** Token-free https URL of the Space's git remote, or null when it has none. */
   gitRemote: string | null;
+  /** A member's own private Space: renamed and given a remote under My Brain, not here. */
+  private: boolean;
 };
 
 /** What the push after connecting (or "Push now") did. `detail` is gbrain's own refusal text. */
 export type SpacePush = { pushed: boolean; exitCode: number; detail?: string };
 
 export type SetRemoteBody =
-  | { mode: 'url'; url: string; token: string; push?: boolean }
-  | { mode: 'github'; name: string; owner?: string; token: string; push?: boolean };
+  | { mode: 'url'; url: string; token?: string; push?: boolean }
+  | { mode: 'github'; name: string; owner?: string; token?: string; push?: boolean };
 
 export type RemoveSourceResult = {
   ok: true;
@@ -331,7 +333,13 @@ export type RemoveSourceResult = {
 
 export const sourcesApi = {
   list: () =>
-    api.get<{ sources: SourceSummary[]; unregistered: string[]; sourcesListOk: boolean }>('/sources'),
+    api.get<{
+      sources: SourceSummary[];
+      unregistered: string[];
+      /** Non-null only when gbrain's built-in `default` source holds pages. */
+      builtinDefault: { pageCount: number } | null;
+      sourcesListOk: boolean;
+    }>('/sources'),
   add: (body: { sourceId: string; name: string; description?: string }) =>
     api.post<{ ok: true; sourceId: string; isolationNotice: string }>('/sources', body),
   rename: (sourceId: string, name: string) =>
@@ -934,6 +942,8 @@ export type MyConnection = {
 
 export const myConnectionApi = {
   get: () => api.get<MyConnection>('/my/connection'),
+  /** Renames the private Space's display name only; its gbrain source id never changes. */
+  renameSpace: (name: string) => api.patch<{ ok: true; sourceId: string; name: string }>('/my/space', { name }),
   setReads: (readSpaceIds: string[]) => api.put<{ ok: true; readSpaceIds: string[] }>('/my/connection', { readSpaceIds }),
   /** The member's own private Space's git remote — same shapes as `sourcesApi`. */
   setRemote: (body: SetRemoteBody) =>
@@ -960,4 +970,26 @@ export type MyMcpConfig = {
 export const myMcpApi = {
   get: () => api.get<MyMcpConfig>('/my/mcp'),
   reissue: () => api.post<MyMcpConfig>('/my/mcp/reissue'),
+};
+
+/** Status only: the server never returns a credential value, not even a fragment. */
+export type CredentialStatus = { configured: boolean; updatedAt: string | null; version: number | null };
+export type CredentialsStatus = {
+  github: { member: CredentialStatus; org?: CredentialStatus };
+  /** Present for admins only. */
+  anthropic?: CredentialStatus;
+  openai?: CredentialStatus;
+};
+export type GithubScope = 'member' | 'org';
+export type GithubSaveResult = { ok: true; refreshed: string[]; failed: { sourceId: string; error: string }[] };
+
+export const credentialsApi = {
+  status: () => api.get<CredentialsStatus>('/credentials'),
+  /** Slow when remotes exist: the server re-points every remote in scope. */
+  setGithub: (scope: GithubScope, token: string) =>
+    api.put<GithubSaveResult>('/credentials/github', { scope, token }),
+  clearGithub: (scope: GithubScope) =>
+    api.delete<{ ok: true }>(`/credentials/github?scope=${scope}`),
+  setAnthropic: (key: string) => api.put<{ ok: true; version: number }>('/credentials/anthropic', { key }),
+  setOpenai: (key: string) => api.put<{ ok: true; version: number }>('/credentials/openai', { key }),
 };

@@ -407,6 +407,11 @@ DEK, with the KEK derived by HKDF from `ENCRYPTION_KEY`. It is read **only by th
 process** (`readSecret` in `src/gateway/proxy.ts`). It is never handed to the runner, never written
 into a runner's workspace, never logged, and never part of the claim response.
 
+**Console path.** An admin can also replace the key in Settings → Credentials (`PUT /api/credentials/anthropic`,
+admin only, value must start with `sk-ant-`). It stores a new version exactly as the host-side procedure below
+does, and the gateway uses it on its next model call. The console shows status only (configured, updated date,
+version) and never the value. The host-side procedure remains valid.
+
 **What this dev stack holds today, stated plainly.** The stored value is a **Claude Code OAuth access
 token**, not an `sk-ant-` API key. Measured without reading the value out (the probe printed the shape
 and the length only):

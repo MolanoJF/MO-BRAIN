@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  ApiError, schemaPacksApi, sourcesApi,
+  ApiError, credentialsApi, filesApi, schemaPacksApi, sourcesApi,
   type PackDetail, type SchemaSync, type SourceSummary,
 } from '../api.ts';
-import { Button, Card, Empty, Input, Notice, PageTitle, Select } from '../ui/index.tsx';
+import { Button, Card, Empty, Input, Link, Notice, PageTitle, Select } from '../ui/index.tsx';
+import { SettingsLink } from '../ui/SettingsLink.tsx';
 import { useOrg } from '../OrgContext.tsx';
+import { useSource } from '../SourceContext.tsx';
 import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
 import { PackTypesView, SyncTable, inheritanceNote } from './Schema.tsx';
 
@@ -60,6 +62,35 @@ export function addSourceError(sourceId: string, name: string): string | null {
   }
   if (name.trim() === '') return 'A name is required.';
   return null;
+}
+
+/** The rename validator. Null means the name is acceptable and actually changes something. */
+export function renameSourceError(current: string, next: string): string | null {
+  if (next.trim() === '') return 'A name is required.';
+  if (next.trim() === current.trim()) return 'That is already the name.';
+  return null;
+}
+
+/**
+ * Private rows are the member's own Space: rename and git remote live under My
+ * Brain, so the Sources card shows a pointer instead of those controls. Export
+ * and archive stay for every row.
+ */
+export const PRIVATE_SPACE_NOTE =
+  'Your private Space — rename it and set its git remote under My Brain.';
+
+export const EXPORT_HINT = 'Full git history as a git bundle';
+
+export function sourceRowControls(src: Pick<SourceSummary, 'private'>): {
+  rename: boolean; remote: boolean; privateNote: boolean;
+} {
+  return { rename: !src.private, remote: !src.private, privateNote: src.private };
+}
+
+/** The notice for gbrain's built-in `default` source, shown only when it holds pages. */
+export function builtinDefaultText(pageCount: number): string {
+  return `gbrain's built-in \`default\` source holds ${pageCount} page${pageCount === 1 ? '' : 's'} ` +
+    `that aren't in any Space. They aren't shown in the console.`;
 }
 
 export function canAddSource(sourceId: string, name: string): boolean {
@@ -124,7 +155,12 @@ export function Sources() {
   const { org } = useOrg();
   const [rows, setRows] = useState<SourceSummary[]>([]);
   const [unregistered, setUnregistered] = useState<string[]>([]);
+  const [builtinDefault, setBuiltinDefault] = useState<{ pageCount: number } | null>(null);
+  const [renaming, setRenaming] = useState<{ sourceId: string; name: string } | null>(null);
+  const { reload: reloadSources } = useSource();
   const [listOk, setListOk] = useState(true);
+  // null while loading. Company Spaces use the org token.
+  const [orgToken, setOrgToken] = useState<boolean | null>(null);
   const [details, setDetails] = useState<PackDetail[]>([]);
   const [packs, setPacks] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -141,9 +177,15 @@ export function Sources() {
     const body = await sourcesApi.list();
     setRows(body.sources);
     setUnregistered(body.unregistered);
+    setBuiltinDefault(body.builtinDefault ?? null);
     setListOk(body.sourcesListOk);
   };
   useEffect(() => { void load().catch((e) => setError(reason(e))); }, []);
+  useEffect(() => {
+    void credentialsApi.status()
+      .then((c) => setOrgToken(c.github.org?.configured ?? false))
+      .catch(() => setOrgToken(false));
+  }, []);
   useEffect(() => {
     void schemaPacksApi.list()
       .then((body) => { setDetails(body.packs); setPacks(body.packs.map((p) => p.name)); })
@@ -165,6 +207,16 @@ export function Sources() {
   const resetPack = (src: SourceSummary) => step(src.sourceId, async () => {
     await schemaPacksApi.resetSourcePack(src.sourceId);
     await load();
+  });
+
+  const saveRename = (src: SourceSummary) => step(src.sourceId, async () => {
+    if (renaming === null) return;
+    const invalid = renameSourceError(src.name, renaming.name);
+    if (invalid !== null) { setError(invalid); return; }
+    await sourcesApi.rename(src.sourceId, renaming.name.trim());
+    setRenaming(null);
+    await load();
+    await reloadSources();
   });
 
   const archive = (src: SourceSummary) => step(src.sourceId, async () => {
@@ -224,8 +276,8 @@ export function Sources() {
       <header>
         <PageTitle>Sources</PageTitle>
         <p className="text-sm text-muted">
-          Every Source is a gbrain source. Set each one's schema pack, backfill its blank page types,
-          and add or retire sources.
+          These are the brain's Sources. Set each one's schema pack, backfill its blank page types,
+          and add or retire Sources. Your own private Space is managed under My Brain.
         </p>
       </header>
 
@@ -248,7 +300,28 @@ export function Sources() {
             <Card key={src.sourceId} className="space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div>{src.name}</div>
+                  {renaming?.sourceId === src.sourceId ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input aria-label="Source name" className="max-w-xs" value={renaming.name}
+                             onChange={(e) => setRenaming({ sourceId: src.sourceId, name: e.target.value })} />
+                      <Button variant="primary"
+                              disabled={busy !== null || renameSourceError(src.name, renaming.name) !== null}
+                              onClick={() => void saveRename(src)}>
+                        Save
+                      </Button>
+                      <Button onClick={() => setRenaming(null)}>Cancel</Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span>{src.name}</span>
+                      {sourceRowControls(src).rename && (
+                        <Button disabled={busy !== null}
+                                onClick={() => setRenaming({ sourceId: src.sourceId, name: src.name })}>
+                          Edit name
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <div className="text-[length:var(--control-font)] text-muted font-mono">
                     {src.sourceId} · {src.kind}
                   </div>
@@ -290,8 +363,17 @@ export function Sources() {
                   : <Empty>No resolved details for {src.pack ?? 'this pack'}.</Empty>
               )}
 
-              <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} busy={busy !== null}
-                           api={adminRemoteApi(src.sourceId)} onChanged={load} />
+              {sourceRowControls(src).remote && (
+                <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} busy={busy !== null}
+                             api={adminRemoteApi(src.sourceId)} onChanged={load}
+                             token={{ stored: orgToken, scope: 'org' }} />
+              )}
+              {sourceRowControls(src).privateNote && (
+                <p className="text-sm text-muted">
+                  Your private Space — rename it and set its git remote under{' '}
+                  <SettingsLink tab="mine">My Brain</SettingsLink>.
+                </p>
+              )}
 
               <div className="flex flex-wrap gap-2">
                 <Button disabled={busy !== null} onClick={() => void backfill(src)}>
@@ -300,6 +382,7 @@ export function Sources() {
                 <Button disabled={busy !== null} onClick={() => void archive(src)}>
                   Archive
                 </Button>
+                <Link href={filesApi.exportUrl(src.sourceId)} download>Export as .bundle</Link>
                 {/*
                   Archive and Remove are plain `Button`s, and Remove is
                   deliberately NOT `ui`'s `ConfirmButton`. The restyle stops at
@@ -346,7 +429,7 @@ export function Sources() {
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-muted">{BACKFILL_NOTICE}</p>
+              <p className="text-xs text-muted">{BACKFILL_NOTICE} {EXPORT_HINT}.</p>
 
               {clicked && removePreview !== null && (
                 <Notice layout="stack">
@@ -379,6 +462,12 @@ export function Sources() {
           </Button>
           <p className="text-sm text-muted">{notice ?? ISOLATION_NOTICE}</p>
         </section>
+      )}
+
+      {builtinDefault !== null && (
+        <Notice layout="stack">
+          <p>{builtinDefaultText(builtinDefault.pageCount)}</p>
+        </Notice>
       )}
 
       {unregistered.length > 0 && (

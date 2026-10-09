@@ -1,10 +1,12 @@
 import { test, expect, describe } from 'bun:test';
 import {
   sourcePackLabel, removeConfirmState, canConfirmRemove,
-  validSourceId, addSourceError, canAddSource, pageCountText, lastSyncText,
+  validSourceId, addSourceError, canAddSource, renameSourceError, sourceRowControls, builtinDefaultText,
+  PRIVATE_SPACE_NOTE, EXPORT_HINT, pageCountText, lastSyncText,
   SOURCE_ID, ISOLATION_NOTICE, NO_SOURCE_READBACK_NOTICE, BACKFILL_NOTICE,
 } from '../../src/console/pages/Sources.tsx';
-import type { SourceSummary } from '../../src/console/api.ts';
+import { pickAfterReload } from '../../src/console/SourceContext.tsx';
+import type { SourceSummary, SpaceSummary } from '../../src/console/api.ts';
 
 /**
  * The Sources lane. Every assertion is a trust property, not a rendering
@@ -28,6 +30,7 @@ const source = (over: Partial<SourceSummary> = {}): SourceSummary => ({
   federated: true,
   inGbrain: true,
   gitRemote: null,
+  private: false,
   ...over,
 });
 
@@ -139,5 +142,63 @@ describe('the backfill copy is additive-only', () => {
   test('the isolation notice is the server wording', () => {
     expect(ISOLATION_NOTICE).toMatch(/NOT access boundaries/);
     expect(ISOLATION_NOTICE).toMatch(/its own Source/i);
+  });
+});
+
+describe('renameSourceError', () => {
+  test('a blank name is refused', () => {
+    expect(renameSourceError('Customers', '')).toBe('A name is required.');
+    expect(renameSourceError('Customers', '   ')).toBe('A name is required.');
+  });
+
+  test('an unchanged name is refused, ignoring surrounding whitespace', () => {
+    expect(renameSourceError('Customers', 'Customers')).toMatch(/already the name/i);
+    expect(renameSourceError('Customers', ' Customers ')).toMatch(/already the name/i);
+  });
+
+  test('a different name is accepted', () => {
+    expect(renameSourceError('Customers', 'Clients')).toBeNull();
+  });
+});
+
+describe('sourceRowControls — private vs company rows', () => {
+  test('a company row gets rename and the remote panel, no private note', () => {
+    expect(sourceRowControls(source({ private: false })))
+      .toEqual({ rename: true, remote: true, privateNote: false });
+  });
+
+  test('a private row gets only the pointer to My Brain', () => {
+    expect(sourceRowControls(source({ private: true })))
+      .toEqual({ rename: false, remote: false, privateNote: true });
+    expect(PRIVATE_SPACE_NOTE).toMatch(/under My Brain/);
+  });
+
+  test('the export hint names the git bundle', () => {
+    expect(EXPORT_HINT).toMatch(/git bundle/i);
+  });
+});
+
+describe('builtinDefaultText', () => {
+  test('names the page count and says the pages are not in any Space', () => {
+    expect(builtinDefaultText(7)).toBe(
+      "gbrain's built-in `default` source holds 7 pages that aren't in any Space. They aren't shown in the console.",
+    );
+    expect(builtinDefaultText(1)).toContain('1 page that');
+  });
+});
+
+describe('pickAfterReload — a rename must not move the selection', () => {
+  const sp = (sourceId: string, name = sourceId): SpaceSummary =>
+    ({ id: sourceId, sourceId, name, access: 'write', zone: 'company' });
+
+  test('keeps the current Source, with its fresh name, when it still exists', () => {
+    const picked = pickAfterReload([sp('a'), sp('b', 'Renamed')], 'b', null, 'a');
+    expect(picked?.name).toBe('Renamed');
+  });
+
+  test('re-picks with the first-load rule when the current Source is gone', () => {
+    expect(pickAfterReload([sp('a'), sp('c')], 'b', null, 'c')?.sourceId).toBe('c');
+    expect(pickAfterReload([sp('a')], 'b', null, null)?.sourceId).toBe('a');
+    expect(pickAfterReload([], 'b', null, null)).toBeNull();
   });
 });

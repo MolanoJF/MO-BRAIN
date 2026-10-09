@@ -13,8 +13,8 @@ import { DesignSystem } from './pages/DesignSystem.tsx';
 import { Empty } from './ui/index.tsx';
 
 /**
- * The console's chrome, once a session is `ready`: the sidebar (account box,
- * Source switcher, file tree) and the editor, with settings layered over
+ * The console's chrome, once a session is `ready`: the sidebar (brain name,
+ * Source switcher, file tree, then the account row pinned at the bottom) and the editor, with settings layered over
  * the top as a modal rather than a route that replaces them.
  *
  * `SourceContext` deliberately does not touch the URL (see its own doc
@@ -162,9 +162,10 @@ function ShellBody({
   return (
     <div className="shell">
       <aside className="sidebar">
-        <AccountBox onOpenSettings={openSettings} />
+        <div className="brain-name" title={org?.name}>{org?.name ?? '\u00a0'}</div>
         <SourceSwitcher />
         <FileTree sourceId={sourceIdForTree} selectedPath={selectedPath} onSelect={selectFile} />
+        <AccountBox onOpenSettings={openSettings} />
       </aside>
       <main className="main">
         {route.kind === 'design' ? (

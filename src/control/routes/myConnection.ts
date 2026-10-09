@@ -89,6 +89,24 @@ myConnectionRoutes.get('/my/connection', guard(async (c, caller) => {
 }));
 
 /**
+ * Rename the member's own private Space. `spaces.name` only: a private Space's
+ * gbrain name must stay its sourceId (`gbrainSourceName`), so no ops call.
+ */
+myConnectionRoutes.patch('/my/space', guard(async (c, caller) => {
+  const body = await c.req.json().catch(() => ({}));
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name) return c.json({ error: 'name is required' }, 400);
+  const { space } = await mine(caller);
+  if (!space) return c.json({ error: 'no_private_space' }, 404);
+  await getDb().update(schema.spaces).set({ name }).where(eq(schema.spaces.id, space.id));
+  await getDb().insert(schema.auditLog).values({
+    id: randomUUID(), organizationId: caller.orgId, actor: caller.userId,
+    action: 'source.rename', target: space.sourceId, before: null, after: { name },
+  });
+  return c.json({ ok: true, sourceId: space.sourceId, name });
+}));
+
+/**
  * The member's own private Space and its git remote. A member can only ever
  * reach the Space they OWN (`mine`), so this needs no per-Space check.
  */

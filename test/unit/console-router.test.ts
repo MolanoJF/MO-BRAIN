@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { parseRoute, routeToPath, legacyRedirect, type Route } from '../../src/console/router.ts';
+import { parseRoute, routeToPath, legacyRedirect, goTo, type Route } from '../../src/console/router.ts';
 
 /**
  * App.tsx (`pageFromPath`, `App.tsx:63-72`) read `window.location.pathname`
@@ -151,5 +151,27 @@ describe('legacyRedirect: bookmarked cold-load routes survive', () => {
   test('the bookmark property parseRoute alone cannot give: /settings/sources parses AND /sources still lands there', () => {
     expect(parseRoute('/settings/sources')).toEqual({ kind: 'settings', tab: 'sources' });
     expect(legacyRedirect('/sources')).toBe(routeToPath(parseRoute('/settings/sources')));
+  });
+});
+
+describe('goTo', () => {
+  test('pushes the settings path and fires popstate so the shell re-parses', () => {
+    const g = globalThis as any;
+    const saved = { window: g.window, PopStateEvent: g.PopStateEvent };
+    const pushed: string[] = [];
+    const events: string[] = [];
+    g.PopStateEvent = class { type = 'popstate'; };
+    g.window = {
+      history: { pushState: (_s: unknown, _t: string, url: string) => pushed.push(url) },
+      dispatchEvent: (e: { type: string }) => { events.push(e.type); return true; },
+    };
+    try {
+      goTo({ kind: 'settings', tab: 'credentials' });
+    } finally {
+      g.window = saved.window; g.PopStateEvent = saved.PopStateEvent;
+    }
+    expect(pushed).toEqual(['/settings/credentials']);
+    expect(events).toEqual(['popstate']);
+    expect(parseRoute('/settings/credentials')).toEqual({ kind: 'settings', tab: 'credentials' });
   });
 });
