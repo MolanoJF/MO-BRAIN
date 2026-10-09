@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { ApiError, brainApi, orgApi, type SearchModeInfo } from '../api.ts';
-import { MEASURED_COST_DISCLAIMER } from '../../control/lifecycle.ts';
 import { useOrg } from '../OrgContext.tsx';
 import { Button, Card, Input, Notice } from '../ui/index.tsx';
 
@@ -24,55 +23,60 @@ const PICKER_CARD =
   'w-full text-left p-3 rounded-[var(--radius)] border border-border bg-surface ' +
   'enabled:hover:bg-subtle disabled:opacity-45 disabled:cursor-not-allowed';
 
+function ModeSummary({ m }: { m: SearchModeInfo }) {
+  return (
+    <>
+      <div className="flex justify-between">
+        <span className="font-medium">{m.label}</span>
+        <span className="font-mono text-sm text-muted">{m.relativeCost}× cost</span>
+      </div>
+      <p className="text-sm text-muted">{m.description}</p>
+    </>
+  );
+}
+
+/** Shows the active mode on its own; "Change" opens the others. */
 function SearchModeCard({ onMsg }: { onMsg: (m: { ok: boolean; text: string }) => void }) {
   const [state, setState] = useState<{ mode: string | null; modes: SearchModeInfo[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [changing, setChanging] = useState(false);
   useEffect(() => {
     void brainApi.getSearchMode().then((r) => setState({ mode: r.mode, modes: r.modes })).catch(() => {});
   }, []);
   if (!state) return null;
-  const { modes } = state;
-  const measured = modes.filter((m) => m.measuredCost !== null);
+  const active = state.modes.find((m) => m.id === state.mode) ?? null;
   const choose = async (id: string) => {
     setBusy(true);
     try {
       await brainApi.setSearchMode(id);
       setState({ ...state, mode: id });
+      setChanging(false);
       onMsg({ ok: true, text: 'Search mode updated.' });
     } catch (e) {
       onMsg({ ok: false, text: e instanceof Error ? e.message : 'That did not work' });
     } finally { setBusy(false); }
   };
+  const open = changing || active === null;
   return (
     <Card>
-      <h2 className="font-medium">Search mode</h2>
-      {measured.length === modes.length ? (
-        <p className="text-sm text-muted">
-          On this deployment, the most expensive mode costs about{' '}
-          {Math.max(...measured.map((m) => m.measuredCost!))}× the cheapest.{' '}
-          {MEASURED_COST_DISCLAIMER}
-        </p>
-      ) : (
-        <p className="text-sm text-muted">
-          Not measured on this deployment. Upstream reports roughly{' '}
-          {Math.max(...modes.map((m) => m.relativeCost))}× between the cheapest and most
-          expensive mode; your own spread will differ. The Spend page shows what you
-          actually pay once the brain has run for a few days.
-        </p>
-      )}
-      <div className="mt-3 space-y-2">
-        {modes.map((m) => (
-          <button key={m.id} type="button" disabled={busy} aria-pressed={state.mode === m.id}
-                  className={state.mode === m.id ? `${PICKER_CARD} border-accent` : PICKER_CARD}
-                  onClick={() => void choose(m.id)}>
-            <div className="flex justify-between">
-              <span className="font-medium">{m.label}</span>
-              <span className="font-mono text-sm text-muted">{m.relativeCost}× cost</span>
-            </div>
-            <p className="text-sm text-muted">{m.description}</p>
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-medium">Search mode</h2>
+        {active && !changing && <Button disabled={busy} onClick={() => setChanging(true)}>Change</Button>}
+        {active && changing && <Button disabled={busy} onClick={() => setChanging(false)}>Cancel</Button>}
       </div>
+      {active && !changing && (
+        <div className={`mt-3 ${PICKER_CARD} border-accent`}><ModeSummary m={active} /></div>
+      )}
+      {open && (
+        <div className="mt-3 space-y-2">
+          {state.modes.filter((m) => m.id !== state.mode).map((m) => (
+            <button key={m.id} type="button" disabled={busy} className={PICKER_CARD}
+                    onClick={() => void choose(m.id)}>
+              <ModeSummary m={m} />
+            </button>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
