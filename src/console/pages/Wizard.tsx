@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CircleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { api, ApiError, sessionApi } from '../api.ts';
 import { Button, Empty, Icon, Input, Notice, Spinner } from '../ui/index.tsx';
 import { OnboardingCard } from '../onboarding/OnboardingCard.tsx';
@@ -93,18 +93,6 @@ function KeyStep({ onBack, onSaved }: { onBack: () => void; onSaved: () => Promi
 
 type Phase = 'idle' | 'prepare' | 'finish';
 
-function Row({ state, children }: { state: 'todo' | 'active' | 'done'; children: React.ReactNode }) {
-  return (
-    <li className={state === 'todo' ? 'flex items-start gap-3 text-sm text-muted' : 'flex items-start gap-3 text-sm text-text'}>
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-        {state === 'active' && <Spinner />}
-        {state === 'done' && <Icon glyph={Check} size={16} />}
-      </span>
-      <span>{children}</span>
-    </li>
-  );
-}
-
 function ReadyStep({ onBack, onReady }: { onBack: () => void; onReady: () => void }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [prepared, setPrepared] = useState(false);
@@ -147,26 +135,17 @@ function ReadyStep({ onBack, onReady }: { onBack: () => void; onReady: () => voi
 
   if (running) {
     return (
-      <OnboardingCard title="Creating your brain">
-        <ul className="space-y-3" aria-live="polite">
-          <Row state={phase === 'prepare' ? 'active' : 'done'}>Setting up your private space</Row>
-          <Row state={phase === 'finish' ? 'active' : 'todo'}>
-            Building your brain: initialize, import, embed, health check. This takes a few minutes.
-          </Row>
-        </ul>
+      <OnboardingCard title="Creating your brain…">
+        <div className="flex justify-center py-6" role="status" aria-live="polite">
+          <Spinner size={32} />
+        </div>
       </OnboardingCard>
     );
   }
 
   return (
     <OnboardingCard onBack={onBack} title="Your brain is ready to create"
-      subtitle="Change any of these later in Settings."
       foot={<Button variant="primary" onClick={() => void create()}>{error ? 'Try again' : 'Create brain'}</Button>}>
-      <ul className="space-y-1 text-sm">
-        <li>Private space, only you</li>
-        <li>Schema: Mo-brain personal</li>
-        <li>Search: Balanced</li>
-      </ul>
       {error && (
         <Notice tone="danger">
           <Icon glyph={CircleAlert} size={16} />
