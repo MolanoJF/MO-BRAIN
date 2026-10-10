@@ -86,6 +86,9 @@ export const SCHEMA_TOOLS: ToolDef[] = [
       required: ['scope'],
       additionalProperties: false,
     },
-    route: (a) => ({ method: 'POST', path: '/api/schema/sync', body: a.scope === 'source' ? { source: a.source } : {} }),
+    // A `source`-scoped call that omits `source` sends `''`, never an omitted
+    // key: the route's `sourceVisible` then refuses it, instead of reading the
+    // missing fence as "whole brain" and applying the widest possible sync.
+    route: (a) => ({ method: 'POST', path: '/api/schema/sync', body: a.scope === 'source' ? { source: a.source ?? '' } : {} }),
   },
 ];

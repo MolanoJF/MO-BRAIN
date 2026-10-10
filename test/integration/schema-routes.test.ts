@@ -1088,4 +1088,16 @@ describe('control MCP schema tools', () => {
     const r = await tool('schema_sync', {});
     expect(r.structuredContent.error).toBe('invalid_arguments');
   });
+
+  test('schema_sync with scope source and no source is refused before gbrain runs', async () => {
+    // A named one-Space fence must never degrade into the brain-wide apply:
+    // dropping `source` from the body would read as "no fence" at the route.
+    let reached = 0;
+    opsHandler = (op) => { reached += 1; throw new Error(`unexpected op ${op}`); };
+    const r = await tool('schema_sync', { scope: 'source' });
+    expect(reached).toBe(0);
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent.status).toBe(400);
+    expect(r.structuredContent.error).toMatch(/unknown source/);
+  });
 });
