@@ -82,6 +82,8 @@ export function installOpsMock(): OpsMock {
     putSchemaPack: async () => {},
     putSchemaPackJson: async () => {},
     gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
+    gitSetRemote: async () => ({ url: 'https://example.invalid/space.git', branch: 'main' }),
+    gitClearRemote: async () => ({ removed: true }),
     removeSchemaPack: async () => ({ removed: false }),
     seedSpace: async (sourceId: string) => { seedSpaceCalls.push(sourceId); },
     resetBrainSchema: async () => {},
