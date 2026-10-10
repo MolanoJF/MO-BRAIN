@@ -1,5 +1,7 @@
 import { mock, test, expect, describe, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { OPERATIONS } from '../../src/contracts/registry.ts';
+import { validateRequest } from '../../src/ops/dispatch.ts';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
 process.env.BETTER_AUTH_SECRET ??= 'b'.repeat(48);
@@ -87,6 +89,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
   brainUsage: async () => { throw new Error('ops unreachable'); },
   callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) => {
     calls.push({ op, params, opts });
+    // gbrain-ops rejects a malformed request before the handler ever sees it
+    // (a numeric param, an unknown flag); the mock must too.
+    validateRequest(OPERATIONS, { op, params: params ?? {}, json: opts?.json, dryRun: opts?.dryRun });
     return callOpsHandler(op, params, opts);
   },
   patchFilePlaneConfig: async () => {},
@@ -360,6 +365,12 @@ describe('provisionConnection', () => {
 
     const stored = await readSecret(orgId, memberClientSecretName(result.connectionId));
     expect(JSON.parse(String(stored))).toEqual(HANDOFF);
+  });
+
+  test('a manual harness is verified once, and a clean verify is recorded ok', async () => {
+    const result = await provisionConnection(input(), actor);
+    expect(calls.filter((c) => c.op === 'mcp.verify')).toHaveLength(1);
+    expect(result.verify).toEqual({ status: 'ok', message: '{}' });
   });
 
   test('rescope never requests --dry-run on auth.rescopeClient', async () => {

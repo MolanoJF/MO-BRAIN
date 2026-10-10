@@ -125,7 +125,7 @@ async function verifyManualHarness(
   if (connectionClass(harness) !== 'manual') return null;
   try {
     const r = await callOps('mcp.verify', {
-      client: clientId, harness, url: mcpUrl(), credentialsFile, timeoutMs: 30_000,
+      client: clientId, harness, url: mcpUrl(), credentialsFile, timeoutMs: '30000',
     }, { json: true, timeoutMs: 35_000 });
     // mcp.verify's own exit-code contract (registry.ts comment, V10/honesty
     // rule 5): 0 = ok, 2 = partial (server checks passed, harness evidence
