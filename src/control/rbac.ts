@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { auth } from './auth.ts';
 import { getDb, schema } from './db/client.ts';
+import { controlCallerOf, noteGuard } from './mcp/callerEnv.ts';
 
 export type Role = 'owner' | 'admin' | 'member' | 'viewer';
 export const ROLE_RANK: Record<Role, number> = { owner: 3, admin: 2, member: 1, viewer: 0 };
@@ -18,6 +19,15 @@ function throwStatus(status: 401 | 403, error: 'unauthorized' | 'forbidden'): ne
 
 /** Throws a Response on 401/403 — callers use the `guard` wrapper from routes/wizard.ts:60. */
 export async function requireRole(c: Context, min: Role): Promise<{ userId: string; orgId: string; role: Role }> {
+  // Control MCP (spec agent-control-mcp D3): the bearer already resolved to a
+  // human caller. Same rank check, no session, no second policy.
+  const delegated = controlCallerOf(c);
+  if (delegated) {
+    noteGuard(c, min);
+    if (!isRole(delegated.role) || ROLE_RANK[delegated.role] < ROLE_RANK[min]) throwStatus(403, 'forbidden');
+    return { userId: delegated.userId, orgId: delegated.orgId, role: delegated.role };
+  }
+
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const userId = session?.user?.id;
   if (!userId) throwStatus(401, 'unauthorized');
