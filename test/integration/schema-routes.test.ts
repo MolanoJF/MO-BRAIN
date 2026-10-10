@@ -1,4 +1,4 @@
-import { test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
+import { test, expect, beforeAll, afterAll, beforeEach, afterEach, describe, mock } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(48);
@@ -41,7 +41,9 @@ mock.module('../../src/control/opsClient.ts', () => ({
   //     load at all under per-file isolation. Copy verbatim from
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---
   brainUsage: async () => { throw new Error('ops unreachable'); },
-  mcpWhoami: async () => ({ ok: false, status: 401, error: 'invalid_token' }),
+  mcpWhoami: async (bearer: string) => (bearer.startsWith('tok-')
+    ? { ok: true, identity: { transport: 'oauth', client_id: bearer.slice(4) } }
+    : { ok: false, status: 401, error: 'invalid_token' }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
   pauseBrainWriters: async () => {},
@@ -61,6 +63,11 @@ mock.module('../../src/control/opsClient.ts', () => ({
   gitExportBundle: async () => new Response(null),
   gitReadFile: async () => ({ content: '', sha: '', size: 0 }),
   gitWriteFile: async () => ({ committed: true, sha: 'written-sha' }),
+  // This inline mock must name every export the app graph imports: a partial
+  // mock that omits one is refused by Bun and the whole file fails to load
+  // (`src/control/spaceRemoteOps.ts` imports these two).
+  gitSetRemote: async () => ({ url: 'https://example.invalid/space.git', branch: 'main' }),
+  gitClearRemote: async () => ({ removed: true }),
 }));
 
 const { default: app } = await import('../../src/control/app.ts');
@@ -972,4 +979,113 @@ test('a foreign my-personal is never hijacked', async () => {
   const res = await hit('POST', '/api/schema/packs/mobrain-personal/mutations', ownerCookie,
     { mutations: [{ op: 'add_type', name: 'recipe', primitive: 'media', prefix: 'recipes/' }] });
   expect(res.status).toBe(409);
+});
+
+// --- Task 13: the control MCP's schema tools ---
+
+describe('control MCP schema tools', () => {
+  const OWNER_CLIENT = 'gbrain_cl_schema_owner';
+  const bearer = `tok-${OWNER_CLIENT}`;
+  let connId = '';
+
+  async function tool(name: string, args: Record<string, unknown>) {
+    const res = await app.request('/api/control-mcp', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { result: { isError: boolean; structuredContent: any } }).result;
+  }
+
+  // The outer beforeEach wipes `spaces`, which the connection's FK needs, so
+  // the Space and Connection are made per test and removed after it.
+  beforeEach(async () => {
+    const [m] = await getDb().select().from(schema.memberships).where(eq(schema.memberships.organizationId, orgId));
+    const spaceId = randomUUID();
+    await getDb().insert(schema.spaces).values({
+      id: spaceId, organizationId: orgId, sourceId: 'mcp-space', name: 'MCP',
+      kind: 'local-git', localPath: '/srv/brain-repos/mcp-space',
+      // Personal, so apply's company-Space scaffold step leaves it alone.
+      ownerMembershipId: m!.id,
+    });
+    connId = randomUUID();
+    await getDb().insert(schema.connections).values({
+      id: connId, organizationId: orgId, membershipId: m!.id, writeSpaceId: spaceId, readSpaceIds: [],
+      harness: 'generic', clientName: `bs-mcp-${connId.slice(0, 8)}`, gbrainClientId: OWNER_CLIENT,
+      profile: 'memory-writer', tokenTtl: 3600, state: 'active',
+    });
+  });
+  afterEach(async () => {
+    await getDb().delete(schema.connections).where(eq(schema.connections.id, connId));
+  });
+
+  const healthy = (op: string) => {
+    if (op === 'schema.list') return ok(LIST);
+    if (op === 'schema.validate') return ok('✓ hr-policies v1.0.0: valid manifest');
+    if (op === 'schema.lint') return ok('', { ok: true, errors: [], warnings: [] });
+    if (op === 'schema.active') return ok(ACTIVE('hr-policies'));
+    // The per-test Space makes apply's post-steps read its per-source pack
+    // (`config.get`) and pack detail (`schema.show`). A failed read means
+    // "inherits" / "counts unknown" in those helpers, never a fabricated value.
+    return fail(1, '', `not stubbed: ${op}`);
+  };
+
+  test('schema_apply previews (current pack, validation, lint) and writes nothing', async () => {
+    opsHandler = (op) => (op === 'schema.active' ? ok(ACTIVE('gbrain-base-v2')) : healthy(op));
+    const p = await tool('schema_apply', { pack: 'hr-policies' });
+    expect(p.isError).toBe(false);
+    expect(p.structuredContent).toMatchObject({ preview: true, summary: { from: 'gbrain-base-v2', to: 'hr-policies' } });
+    expect(filePlanePatches).toEqual([]);
+    expect(await storedPack()).toBeNull();
+  });
+
+  test('schema_apply confirmed writes tier 6 exactly as the console does', async () => {
+    opsHandler = (op) => (op === 'schema.active' ? ok(ACTIVE('gbrain-base-v2')) : healthy(op));
+    const p = await tool('schema_apply', { pack: 'hr-policies' });
+    opsHandler = (op) => {
+      // The confirm re-runs the preview (still on base), then the route reads back hr-policies.
+      if (op === 'schema.active') { opsHandler = healthy; return ok(ACTIVE('gbrain-base-v2')); }
+      return healthy(op);
+    };
+    const r = await tool('schema_apply', { pack: 'hr-policies', confirm: p.structuredContent.confirmToken });
+    expect(r.isError).toBe(false);
+    expect(filePlanePatches).toEqual([{ schema_pack: 'hr-policies' }]);
+    expect(await storedPack()).toBe('hr-policies');
+  });
+
+  test('schema_apply divergence is an error result, never a green', async () => {
+    opsHandler = (op) => (op === 'schema.active' ? ok(ACTIVE('gbrain-base-v2')) : healthy(op));
+    const p = await tool('schema_apply', { pack: 'hr-policies' });
+    let actives = 0;
+    opsHandler = (op) => {
+      if (op === 'schema.active') return ++actives === 1 ? ok(ACTIVE('gbrain-base-v2')) : ok(ACTIVE('other-pack', 'db-config'));
+      return healthy(op);
+    };
+    const r = await tool('schema_apply', { pack: 'hr-policies', confirm: p.structuredContent.confirmToken });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent.status).toBe(409);
+    expect(await storedPack()).toBeNull();
+  });
+
+  test('schema_sync with scope brain runs the apply sync and is audited', async () => {
+    opsHandler = (op, params) => {
+      if (op === 'schema.sync') {
+        expect(params.apply).toBe(true);
+        return ok('', { total_applied: 3, total_would_apply: 3 });
+      }
+      throw new Error(`unexpected op ${op}`);
+    };
+    const r = await tool('schema_sync', { scope: 'brain' });
+    expect(r.isError).toBe(false);
+    expect(r.structuredContent.total_applied).toBe(3);
+    const rows = await getDb().select().from(schema.auditLog).where(eq(schema.auditLog.action, 'schema.sync'));
+    expect(rows.length).toBe(1);
+  });
+
+  test('schema_sync with no scope is refused before gbrain runs', async () => {
+    opsHandler = (op) => { throw new Error(`unexpected op ${op}`); };
+    const r = await tool('schema_sync', {});
+    expect(r.structuredContent.error).toBe('invalid_arguments');
+  });
 });
