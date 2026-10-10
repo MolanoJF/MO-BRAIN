@@ -35,4 +35,6 @@ export type ToolResult = {
   isError: boolean;
 };
 
-export const TOOLS: readonly ToolDef[] = [];
+import { READ_TOOLS } from './tools/read.ts';
+
+export const TOOLS: readonly ToolDef[] = [...READ_TOOLS];
