@@ -403,8 +403,8 @@ describe('wizard', () => {
     ));
     expect(conn).toBeDefined();
     // The bootstrapped admin is role `owner`; a private Space is always
-    // writer-or-better, and owner compiles to coding-agent.
-    expect(['memory-writer', 'coding-agent']).toContain(conn?.profile ?? '');
+    // A private Space is the person's memory agent: memory-writer for every role.
+    expect(conn?.profile).toBe('memory-writer');
 
     expect(seedSpaceCalls).toContain(space.sourceId);
     expect(callOpsCalls.some((c) => c.op === 'sources.add' && c.params?.id === space.sourceId)).toBe(true);

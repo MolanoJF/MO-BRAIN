@@ -273,10 +273,15 @@ describe('compileConnection private-space profile', () => {
     expect(compile('viewer').profile).toBe('memory-reader');
   });
 
-  test('writer-or-better roles are not downgraded by the flag', () => {
-    expect(compile('member', READS, { privateSpace: true }).profile).toBe('memory-writer');
-    expect(compile('admin', READS, { privateSpace: true }).profile).toBe('coding-agent');
-    expect(compile('owner', READS, { privateSpace: true }).profile).toBe('coding-agent');
+  test('every role gets memory-writer on a private space, never the fenced coding-agent', () => {
+    for (const role of ['member', 'admin', 'owner'] as const) {
+      expect(compile(role, READS, { privateSpace: true }).profile).toBe('memory-writer');
+    }
+  });
+
+  test('a company space keeps the role mapping', () => {
+    expect(compile('admin', READS, { privateSpace: false }).profile).toBe('coding-agent');
+    expect(compile('owner').profile).toBe('coding-agent');
   });
 
   test('a private space never yields memory-reader for any role', () => {

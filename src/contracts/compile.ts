@@ -66,9 +66,12 @@ export function compileConnection(
 ): CompiledConnection {
   const base = ROLE_TO_PROFILE[member.role];
   if (!base) throw new Error(`unknown role ${String(member.role)}`);
-  const profile: GrantProfileId = opts?.privateSpace === true && base === 'memory-reader'
-    ? 'memory-writer'
-    : base;
+  // A private Space's Connection is the person's own memory agent, so it is
+  // memory-writer for every role. gbrain's coding-agent profile requires an
+  // isolated write namespace and `mcp grant` defaults it to `agents/<name>/`
+  // (mcp-provision.ts), which fenced an owner's agent out of their own pages
+  // and turned off put_page fact extraction. Admin powers live in the console.
+  const profile: GrantProfileId = opts?.privateSpace === true ? 'memory-writer' : base;
 
   const boundSlugPrefixes = opts?.boundSlugPrefixes !== undefined
     ? [...opts.boundSlugPrefixes]
