@@ -57,6 +57,17 @@ describe('registry invariants', () => {
     expect(mismatches).toEqual([]);
   });
 
+  test('every mutating tool requires at least one argument (so the audit sweep never mutates)', () => {
+    for (const tool of TOOLS.filter((t) => t.mutating)) {
+      expect(`${tool.name}:${(tool.input.required ?? []).length > 0}`).toBe(`${tool.name}:true`);
+    }
+  });
+
+  test('every gated tool declares a preview (a bare `gated: {}` would silently lose staleness protection)', () => {
+    const offenders = TOOLS.filter((t) => t.gated && typeof t.gated.preview !== 'function').map((t) => t.name);
+    expect(offenders).toEqual([]);
+  });
+
   test('confused deputy: no tool declares an identity argument', () => {
     for (const tool of TOOLS) {
       for (const key of Object.keys(tool.input.properties)) {
