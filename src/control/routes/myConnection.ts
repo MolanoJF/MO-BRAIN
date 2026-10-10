@@ -223,7 +223,8 @@ async function present(
   }, { skills: await skillsPublished() });
   return {
     mcp_url, harness: connection.harness, credentials: handoff, snippet, agentInstructions,
-    verify: connection.verifyStatus ? { status: connection.verifyStatus, message: connection.verifyMessage } : null,
+    verify: connection.verifyStatus || connection.verifyMessage
+      ? { status: connection.verifyStatus, message: connection.verifyMessage } : null,
   };
 }
 

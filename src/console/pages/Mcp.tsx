@@ -166,6 +166,9 @@ export function Mcp() {
             {view.paste.agentInstructions && (
               <PasteBlock label="Agent instructions" text={view.paste.agentInstructions} />
             )}
+            {view.paste.verify && !view.paste.verify.status && view.paste.verify.message && (
+              <Notice>{view.paste.verify.message}</Notice>
+            )}
             {view.paste.verify?.status && (
               <Notice
                 tone={

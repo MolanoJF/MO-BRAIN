@@ -137,7 +137,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
 }));
 
 const {
-  previewConnection, provisionConnection, revokeConnection, createPendingConnection,
+  previewConnection, provisionConnection, VERIFY_UNREACHABLE, revokeConnection, createPendingConnection,
   retiredClientName, widenConnectionSurfaces,
 } = await import('../../src/control/connections.ts');
 const { serverClientSecretName, serverClientName, memberClientSecretName } =
@@ -366,6 +366,19 @@ describe('provisionConnection', () => {
 
     const stored = await readSecret(orgId, memberClientSecretName(result.connectionId));
     expect(JSON.parse(String(stored))).toEqual(HANDOFF);
+  });
+
+  test('a verify that never reached the endpoint is recorded as unchecked, not failed', async () => {
+    callOpsHandler = (op, _params, opts) => op === 'mcp.verify'
+      ? { ok: false, exitCode: 1, argv: [], stdout: '{}', stderr: '',
+          json: { status: 'failed', stages: [{ name: 'transport', status: 'failed', reason: 'transport_failed' }] } }
+      : defaultOk(op, opts);
+    const result = await provisionConnection(input(), actor);
+    expect(result.verify).toEqual({ status: null, message: VERIFY_UNREACHABLE });
+    const [row] = await getDb().select().from(schema.connections)
+      .where(eq(schema.connections.id, result.connectionId));
+    expect(row?.verifyStatus).toBeNull();
+    expect(row?.verifyMessage).toBe(VERIFY_UNREACHABLE);
   });
 
   test('a manual harness is verified once, and a clean verify is recorded ok', async () => {

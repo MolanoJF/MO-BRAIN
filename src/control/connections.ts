@@ -108,7 +108,25 @@ export async function previewConnection(input: ConnectionInput): Promise<{
   };
 }
 
-type VerifyResult = { status: 'ok' | 'partial' | 'failed'; message: string | null };
+/** `status: null` with a message: the server could not run the check at all (see `serverCannotReach`). */
+type VerifyResult = { status: 'ok' | 'partial' | 'failed' | null; message: string | null };
+
+export const VERIFY_UNREACHABLE =
+  'Not checked from the server: it cannot reach its own public address from inside its network, which is '
+  + 'normal on a Tailscale or LAN install. Check the connection from your agent instead.';
+
+/**
+ * gbrain's verify failed at its FIRST stage, `transport`: the request never
+ * reached the endpoint. On a Tailscale install the containers have no route
+ * to the tailnet address the handoff is bound to, so this says nothing about
+ * the credential, and a red "Verify failed" over a working connection is
+ * the wrong thing to show.
+ */
+export function serverCannotReach(json: unknown): boolean {
+  const stages = (json as { stages?: { name?: unknown; status?: unknown }[] } | null)?.stages;
+  return Array.isArray(stages) && stages.length > 0
+    && stages[0]?.name === 'transport' && stages[0]?.status === 'failed';
+}
 
 /**
  * Only for manual-class harnesses — auto-install classes write real adapter
@@ -131,6 +149,7 @@ async function verifyManualHarness(
     // rule 5): 0 = ok, 2 = partial (server checks passed, harness evidence
     // missing — never render this as a pass), anything else = failed.
     const status: VerifyResult['status'] = r.exitCode === 0 ? 'ok' : r.exitCode === 2 ? 'partial' : 'failed';
+    if (status === 'failed' && serverCannotReach(r.json)) return { status: null, message: VERIFY_UNREACHABLE };
     return { status, message: r.stdout.slice(0, 500) || null };
   } catch (e) {
     return { status: 'failed', message: e instanceof Error ? e.message.slice(0, 500) : 'verify request failed' };
@@ -236,7 +255,7 @@ export async function provisionConnection(
     serverClientId,
     state: 'active',
     provisionedAt: new Date(),
-    verifyStatus: verifyResult?.status,
+    verifyStatus: verifyResult ? verifyResult.status : undefined,
     verifiedAt: verifyResult ? new Date() : undefined,
     verifyMessage: verifyResult?.message ?? undefined,
   });
