@@ -109,15 +109,17 @@ Names are verbs on nouns; each lists min role and the route/service it wraps.
 | `member_list` | admin | `GET /members` | |
 | `member_invite` | admin | `POST /members` (company mode) | yes |
 | `space_list` | viewer | `GET /spaces` | |
-| `source_list` | admin | `GET /sources` | |
-| `source_create`, `source_rename` | admin | `POST /sources` (company mode), `PATCH /sources/:id` | |
+| `source_list` | viewer | `GET /sources` | |
+| `source_create` | admin | `POST /sources` (any mode) | |
+| `source_rename` | viewer | `PATCH /sources/:id` (route limits it to Spaces the caller manages) | |
 | `grant_list`, `grant_set` | admin | `GET /grants`, `PUT /grants` (company mode) | |
-| `schema_get`, `schema_pack_list`, `schema_pack_show` | admin | `GET /schema`, `/schema/packs`, `/schema/packs/:name` | |
+| `schema_get`, `schema_pack_show` | admin | `GET /schema`, `/schema/packs/:name` | |
+| `schema_pack_list` | viewer | `GET /schema/packs` | |
 | `schema_validate`, `schema_lint`, `schema_preview` | admin | `POST /schema/validate`, `/lint`, `/preview` (no side effects) | |
 | `schema_scaffold` | admin | `POST /schema/scaffold` (commits folders) | |
 | `schema_pack_create`, `schema_pack_mutate` | admin | `POST /schema/packs`, `/schema/packs/:name/mutations` | |
 | `schema_apply` | admin | `POST /schema/apply` | yes (preview = active pack + validate + lint) |
-| `schema_sync` | admin | `POST /schema/sync` (the "rerun"; additive-only) | |
+| `schema_sync` | viewer | `POST /schema/sync` (the "rerun"; additive-only; the route lets a member sync a Space they manage, brain-wide is admin) | |
 | `schedule_list`, `schedule_get` | viewer | `GET /schedules`, `/schedules/:id` | |
 | `schedule_create`, `schedule_update`, `schedule_run_now` | member | `POST /schedules`, `PATCH /schedules/:id`, `POST /schedules/:id/run-now` | |
 | `run_list`, `run_get` | viewer | `GET /runs`, `/runs/:id` | |

@@ -4,9 +4,13 @@ export const PEOPLE_TOOLS: ToolDef[] = [
   {
     name: 'member_invite', minRole: 'admin', mutating: true,
     gated: {
-      preview: async (args) => ({
+      preview: async (args, read) => {
+        const org = await read('GET', '/api/org');
+        if (org.body?.capabilities?.invite === false) return { summary: null, blocked: { status: 403, body: { error: 'company_mode_required' } } };
+        return {
         summary: { invite: args.email, role: args.role, effect: 'Creates a placeholder account and membership; the person sets a password from a claim link an admin sends.' },
-      }),
+        };
+      },
     },
     description: 'Invite a person to this organization with a role. Company mode only. Does not send email and never returns a claim link.',
     input: {

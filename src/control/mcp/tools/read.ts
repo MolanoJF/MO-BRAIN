@@ -41,7 +41,7 @@ export const READ_TOOLS: ToolDef[] = [
     route: () => ({ method: 'GET', path: '/api/spaces' }),
   },
   {
-    name: 'source_list', minRole: 'admin', mutating: false, input: NO_ARGS,
+    name: 'source_list', minRole: 'viewer', mutating: false, input: NO_ARGS,
     description: 'Every gbrain source in this brain with its Space, schema pack, sync status and git remote.',
     route: () => ({ method: 'GET', path: '/api/sources' }),
   },
@@ -61,7 +61,7 @@ export const READ_TOOLS: ToolDef[] = [
     route: () => ({ method: 'GET', path: '/api/schema' }),
   },
   {
-    name: 'schema_pack_list', minRole: 'admin', mutating: false, input: NO_ARGS,
+    name: 'schema_pack_list', minRole: 'viewer', mutating: false, input: NO_ARGS,
     description: 'Schema packs available: bundled and installed.',
     route: () => ({ method: 'GET', path: '/api/schema/packs' }),
   },

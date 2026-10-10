@@ -60,6 +60,9 @@ export const SCHEMA_TOOLS: ToolDef[] = [
           read('POST', '/api/schema/lint', { pack: args.pack, withDb: true }),
         ]);
         const from = current.body?.active?.pack ?? null;
+        if (validation.body?.ok === false || lint.body?.ok === false) {
+          return { summary: null, blocked: { status: 400, body: { error: 'schema_not_applicable', pack: args.pack, validation: validation.body, lint: lint.body } } };
+        }
         return {
           summary: {
             from, to: args.pack,
@@ -75,8 +78,8 @@ export const SCHEMA_TOOLS: ToolDef[] = [
     route: (a) => ({ method: 'POST', path: '/api/schema/apply', body: { pack: a.pack } }),
   },
   {
-    name: 'schema_sync', minRole: 'admin', mutating: true,
-    description: 'Rerun schema sync: give untyped pages a type from the active pack. Additive only: never reclassifies or deletes. Run schema_preview first.',
+    name: 'schema_sync', minRole: 'viewer', mutating: true,
+    description: 'Rerun schema sync (a member may run it for a Space they manage; brain-wide needs admin): give untyped pages a type from the active pack. Additive only: never reclassifies or deletes. Run schema_preview first.',
     input: {
       type: 'object',
       properties: {

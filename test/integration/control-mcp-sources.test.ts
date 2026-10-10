@@ -70,7 +70,7 @@ describe('source and grant tools', () => {
   test('personal mode: company_mode_required passes through unchanged', async () => {
     await getDb().update(schema.organizations).set({ brainMode: 'personal' }).where(eq(schema.organizations.id, fx.orgId));
     try {
-      const r = await callTool(admin, 'source_create', { sourceId: 'nope', name: 'Nope' });
+      const r = await callTool(admin, 'grant_set', { membershipId: fx.alice.membershipId, spaceId: fx.companySpaceId, access: 'read' });
       expect(r.isError).toBe(true);
       expect(r.structuredContent).toMatchObject({ status: 403, error: 'company_mode_required' });
     } finally {

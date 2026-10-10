@@ -5,7 +5,7 @@ const seg = (v: unknown) => encodeURIComponent(String(v));
 export const SOURCE_TOOLS: ToolDef[] = [
   {
     name: 'source_create', minRole: 'admin', mutating: true,
-    description: 'Create a company Space: a new gbrain source with its git repo and folders. Company mode only. Everyone granted read on it can retrieve everything in it.',
+    description: 'Create a Space: a new gbrain source with its git repo and folders. Everyone granted read on it can retrieve everything in it.',
     input: {
       type: 'object',
       properties: {
@@ -19,7 +19,7 @@ export const SOURCE_TOOLS: ToolDef[] = [
     route: (a) => ({ method: 'POST', path: '/api/sources', body: { sourceId: a.sourceId, name: a.name, description: a.description } }),
   },
   {
-    name: 'source_rename', minRole: 'admin', mutating: true,
+    name: 'source_rename', minRole: 'viewer', mutating: true,
     description: 'Change a source\'s display name. The id never changes.',
     input: {
       type: 'object',

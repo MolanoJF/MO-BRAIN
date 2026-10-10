@@ -132,7 +132,7 @@ describe('registry invariants', () => {
   });
 
   test('a member calling an admin tool is told it does not exist', async () => {
-    const r = await callTool(bearers.member, 'source_list');
+    const r = await callTool(bearers.member, 'member_list');
     expect(r).toMatchObject({ isError: true, structuredContent: { error: 'unknown_tool' } });
   });
 

@@ -9,7 +9,9 @@ import type { InputSchema } from './args.ts';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type RouteRequest = { method: HttpMethod; path: string; body?: unknown };
 export type Reader = (method: HttpMethod, path: string, body?: unknown) => Promise<{ status: number; body: any }>;
-export type GatePreview = (args: Record<string, unknown>, read: Reader) => Promise<{ summary: unknown; fingerprint?: string }>;
+/** `blocked`: the action would be refused anyway, so no confirmToken is minted. */
+export type GatePreview = (args: Record<string, unknown>, read: Reader) =>
+  Promise<{ summary: unknown; fingerprint?: string; blocked?: { status: number; body: Record<string, unknown> } }>;
 
 export type ToolDef = {
   name: string;

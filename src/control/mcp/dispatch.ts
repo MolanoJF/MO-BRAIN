@@ -109,6 +109,10 @@ export async function runTool(opts: {
     const preview = tool.gated.preview
       ? await tool.gated.preview(checked.args, read)
       : { summary: { wouldCall: tool.route(checked.args) } };
+    if (preview.blocked) {
+      await audit('refused', { status: preview.blocked.status, error: errorCode(preview.blocked.body) });
+      return result({ status: preview.blocked.status, ...preview.blocked.body }, true);
+    }
     const subject = { tool: tool.name, membershipId: caller.membershipId, args: checked.args, fingerprint: preview.fingerprint };
     if (confirm === undefined) {
       const { token, expiresAt } = mintConfirm(subject);

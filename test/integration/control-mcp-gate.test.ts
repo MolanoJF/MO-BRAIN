@@ -89,4 +89,15 @@ describe('D6 confirm gate', () => {
     expect(rows.map((r) => (r.after as any).outcome).sort()).toEqual(['ok', 'preview']);
     expect(rows.every((r) => !JSON.stringify(r.after).includes((p.confirmToken as string).split('.')[1]!))).toBe(true);
   });
+
+  test('a preview that is blocked returns the refusal and mints no confirmToken', async () => {
+    const BLOCKED: ToolDef = {
+      ...RENAME, name: 't_blocked',
+      gated: { preview: async () => ({ summary: null, blocked: { status: 403, body: { error: 'company_mode_required' } } }) },
+    };
+    const r = await runTool({ tools: [BLOCKED], fetchRoute, caller: callerOf(fx.admin, fx.orgId, 'admin'), name: 't_blocked', args: { name: 'x' } });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent).toMatchObject({ status: 403, error: 'company_mode_required' });
+    expect(r.structuredContent.confirmToken).toBeUndefined();
+  });
 });
