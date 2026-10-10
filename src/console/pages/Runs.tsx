@@ -747,7 +747,7 @@ export function Runs() {
   return (
     <div className="max-w-3xl space-y-6">
       <header>
-        <h1 className="text-xl font-semibold">Runs</h1>
+        <h1 className="text-xl font-semibold">Runner</h1>
         <p className="text-sm text-muted">
           Every agent run in this organization, with the receipt it left: the prompt, the tool calls, the token
           counts, the cost and the brain diff — all in one page load.

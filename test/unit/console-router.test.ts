@@ -125,12 +125,23 @@ describe('routeToPath is parseRoute\'s exact inverse', () => {
 });
 
 describe('legacyRedirect: bookmarked cold-load routes survive', () => {
-  test('the five admin pages redirect into settings', () => {
+  test('bookmarked pages redirect into the tab that now holds them', () => {
     expect(legacyRedirect('/sources')).toBe('/settings/sources');
     expect(legacyRedirect('/schedules')).toBe('/settings/schedules');
     expect(legacyRedirect('/runs')).toBe('/settings/runs');
-    expect(legacyRedirect('/spend')).toBe('/settings/spend');
-    expect(legacyRedirect('/upgrades')).toBe('/settings/upgrades');
+    // Spend and upgrades folded into General. A bookmark must open that page,
+    // not a tab id the router no longer recognises.
+    expect(legacyRedirect('/spend')).toBe('/settings/general');
+    expect(legacyRedirect('/upgrades')).toBe('/settings/general');
+  });
+
+  test('a retired settings URL opens General rather than the editor', () => {
+    expect(legacyRedirect('/settings/health')).toBe('/settings/general');
+    expect(legacyRedirect('/settings/spend')).toBe('/settings/general');
+    expect(legacyRedirect('/settings/upgrades')).toBe('/settings/general');
+    expect(legacyRedirect('/settings/appearance')).toBe('/settings/general');
+    expect(parseRoute('/settings/health')).toEqual({ kind: 'settings', tab: 'general' });
+    expect(parseRoute('/settings/spend')).toEqual({ kind: 'settings', tab: 'general' });
   });
 
   test('a trailing slash is the same route', () => {

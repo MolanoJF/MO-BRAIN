@@ -34,7 +34,7 @@ Not a release. Not in the published `1.0.0` images.
 Zones a caller can rely on:
 
 - A fresh install is a personal brain on schema pack `gbrain-base-v2`. The wizard has no mode step and skips the schema step when that pack is already stored.
-- Company mode is the owner's switch in Settings → General. Switching back to personal is allowed only while that owner is the only member and no invite is open.
+- Company mode is the owner's switch in Settings → Admin. Switching back to personal is allowed only while that owner is the only member and no invite is open.
 - Company Space access is an explicit `space_grants` row. Personal mode refuses invites, shared sources, and grants with `403 { error: "company_mode_required" }`.
 - An invite creates a placeholder account. The claim page sets a password only on that placeholder.
 - Another person's personal Space, schedules, runs, alerts, connections, and sources are not listed. Admin Spend collapses that member's personal automations to one row.
