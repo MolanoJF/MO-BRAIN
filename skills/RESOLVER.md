@@ -8,3 +8,4 @@ authoritative routing signal.
 |---------|-------|
 | "what do we know about", "tell me about", "look up", "search for", "who is" | `skills/query/SKILL.md` |
 | "design our schema", "set up types for our brain", "what page types should we have", "custom ontology" | `skills/mobrain-schema-designer/SKILL.md` |
+| "create a schema", "apply the schema", "rerun the schema sync", "add a source", "invite", "grant access", "create a schedule" | `skills/mobrain-operator/SKILL.md` |

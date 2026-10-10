@@ -103,13 +103,39 @@ export const AGENT_INSTRUCTIONS = [
   'callable by you on this server.',
 ].join(' ');
 
+/**
+ * Spec agent-control-mcp §6 / review R9: the control server, declared beside
+ * the data server with the SAME bearer. Appended for every class: the grant
+ * only ever wrote the data server's config.
+ */
+export function controlSnippet(control: { url: string; access_token?: string }): string {
+  const fragment = JSON.stringify({
+    mcpServers: {
+      'mobrain-control': {
+        type: 'http',
+        url: control.url,
+        headers: { Authorization: `Bearer ${control.access_token ?? '<access_token>'}` },
+      },
+    },
+  }, null, 2);
+  return [
+    'Mo-brain control server (operate schemas, sources, members and schedules within your role).',
+    'Add it beside the data server, with the same token:',
+    fragment,
+    '',
+  ].join('\n');
+}
+
 export function wiringSnippet(
   id: string,
   credentials: WiringCredentials,
-  opts: { skills?: boolean } = {},
+  opts: { skills?: boolean; control?: { url: string } } = {},
 ): { snippet: string; agentInstructions: string | null } {
   const base = baseSnippet(id, credentials);
-  const snippet = opts.skills ? `${base}\n${SKILLS_NOTE}` : base;
+  const withControl = opts.control
+    ? `${base}\n${controlSnippet({ url: opts.control.url, access_token: credentials.access_token })}`
+    : base;
+  const snippet = opts.skills ? `${withControl}\n${SKILLS_NOTE}` : withControl;
   return { snippet, agentInstructions: opts.skills ? AGENT_INSTRUCTIONS : null };
 }
 

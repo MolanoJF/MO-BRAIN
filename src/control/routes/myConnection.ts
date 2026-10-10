@@ -17,6 +17,7 @@ import { callerFor, isAdminRole, type Caller } from '../zone.ts';
 import { grantsFor } from '../grants.ts';
 import { skillsPublished } from '../configValue.ts';
 import {
+  controlMcpUrl,
   grantCredentialsOutPath,
   mcpUrl,
   memberClientSecretName,
@@ -198,13 +199,14 @@ async function present(
   const mcp_url = handoffMcpUrl(handoff);
   const clientId = handoff.client_id;
   const accessToken = handoff.access_token;
+  const control_url = controlMcpUrl();
   const { snippet, agentInstructions } = wiringSnippet(connection.harness, {
     client_id: typeof clientId === 'string' && clientId.length > 0 ? clientId : undefined,
     access_token: typeof accessToken === 'string' && accessToken.length > 0 ? accessToken : undefined,
     mcp_url,
-  }, { skills: await skillsPublished() });
+  }, { skills: await skillsPublished(), control: { url: control_url } });
   return {
-    mcp_url, harness: connection.harness, credentials: handoff, snippet, agentInstructions,
+    mcp_url, control_url, harness: connection.harness, credentials: handoff, snippet, agentInstructions,
     verify: connection.verifyStatus ? { status: connection.verifyStatus, message: connection.verifyMessage } : null,
   };
 }
