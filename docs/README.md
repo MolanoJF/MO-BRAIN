@@ -5,6 +5,7 @@ Operator procedure and the version promise. History is in [`archive/`](archive/)
 | Document | What it is |
 |---|---|
 | [Install](runbooks/install.md) | First install, preflight refusals, air-gap, Tailscale, first admin |
+| [Onboarding](runbooks/onboarding.md) | After install: verify, MCP, ingest, schedules, runner, then schema 
 | [Upgrade](runbooks/upgrade.md) | The host command, snapshots, rollback |
 | [Backup and restore](runbooks/backup-restore.md) | Verified backup, including a new domain |
 | [Agent runner](runbooks/agent-runner.md) | Enable, health, what a run did, revert |
