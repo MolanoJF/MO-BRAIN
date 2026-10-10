@@ -109,6 +109,31 @@ describe('schedule tools', () => {
     expect(row!.notifies).toBe(true);
   });
 
+  // Review finding 1 (whole-branch): `schedule_update` advertised the same
+  // field set as create, including arguments PATCH /schedules/:id never reads
+  // (`timezone`, `kind`, `jobType`, `operation`, `preset`, `agent*`). A lone
+  // ignored field was a 400 nothing_to_update, but riding alongside a real
+  // patch it was a silent 200 drop. The input schema now declares exactly what
+  // the route reads; anything else is refused before the route is dialled.
+  test('update refuses the arguments the route never reads, and keeps the ones it does', async () => {
+    for (const ignored of [
+      { timezone: 'America/New_York' }, { kind: 'calendar' }, { jobType: 'agent_prompt' },
+      { operation: 'sync' }, { agentModel: 'claude-sonnet-5' },
+    ]) {
+      const r = await callTool(alice, 'schedule_update', { id: scheduleId, ...ignored });
+      expect(r.isError).toBe(true);
+      expect(r.structuredContent.error).toBe('invalid_arguments');
+      expect((r.structuredContent.errors as string[]).some((e) => e.startsWith('unknown argument: '))).toBe(true);
+    }
+    // The keys PATCH does read still round-trip.
+    const renamed = await callTool(alice, 'schedule_update', { id: scheduleId, name: 'alice-mcp-renamed' });
+    expect(renamed.isError).toBe(false);
+    expect(renamed.structuredContent.name).toBe('alice-mcp-renamed');
+    const disabled = await callTool(alice, 'schedule_update', { id: scheduleId, enabled: false });
+    expect(disabled.isError).toBe(false);
+    await callTool(alice, 'schedule_update', { id: scheduleId, enabled: true });
+  });
+
   // Ruling 8 / S3c: the MCP's own audit row for a write carries the argument
   // KEYS and nothing else — no values, no response body, no bearer.
   test('the control_mcp.call row for a write carries keys, never values', async () => {

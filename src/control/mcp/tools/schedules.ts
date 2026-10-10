@@ -5,7 +5,7 @@ import { CONNECTION_INPUT } from './read.ts';
 
 const seg = (v: unknown) => encodeURIComponent(String(v));
 
-/** The fields `POST`/`PATCH /schedules` can read (src/control/routes/schedules.ts). The route validates values; the create set below is trimmed to what `POST` actually consumes. */
+/** Every request-body field the schedule routes declare a schema for (src/control/routes/schedules.ts). The two sets below are trimmed to what each route actually reads: `CREATE_FIELDS` for `POST`, `UPDATE_FIELDS` for `PATCH`. */
 const SCHEDULE_FIELDS: Record<string, PropSchema> = {
   name: { type: 'string', description: 'Lowercase job name; becomes reports/<name>/.', maxLength: 64 },
   connectionId: { type: 'string', description: 'The Connection it runs as. A member may use only their own.', maxLength: 64 },
@@ -41,10 +41,30 @@ const CREATE_FIELDS: Record<string, PropSchema> = Object.fromEntries(
   Object.entries(SCHEDULE_FIELDS).filter(([key]) => key !== 'enabled' && key !== 'timezone'),
 );
 
+/**
+ * What `PATCH /schedules/:id` reads (src/control/routes/schedules.ts, plus the
+ * keys `applyTunables` reads out of the same body): the timing, identity,
+ * enablement and declared tunable keys the handler inspects. `preset`,
+ * `jobType`, `operation`, `kind`, `timezone` and the `agent*` payload are
+ * creation-only or fixed row properties — PATCH reads none of them, so
+ * advertising them let a real patch be answered 200 with the ignored field
+ * silently dropped; `additionalProperties: false` refuses it instead. The
+ * policy keys `applyTunables` also reads (`gapPolicy`, …) are not declared in
+ * `SCHEDULE_FIELDS`, so they stay unadvertised.
+ */
+const PATCH_READS = new Set([
+  'name', 'connectionId', 'params', 'enabled', 'intervalSeconds',
+  'calendarHour', 'calendarMinute', 'calendarDaysOfWeek',
+  'timeoutSeconds', 'misfireGraceSeconds', 'notifies',
+]);
+const UPDATE_FIELDS: Record<string, PropSchema> = Object.fromEntries(
+  Object.entries(SCHEDULE_FIELDS).filter(([key]) => PATCH_READS.has(key)),
+);
+
 const CREATE: InputSchema = { type: 'object', properties: CREATE_FIELDS, required: ['name', 'connectionId'], additionalProperties: false };
 const UPDATE: InputSchema = {
   type: 'object',
-  properties: { id: { type: 'string', maxLength: 64 }, ...SCHEDULE_FIELDS },
+  properties: { id: { type: 'string', maxLength: 64 }, ...UPDATE_FIELDS },
   required: ['id'],
   additionalProperties: false,
 };

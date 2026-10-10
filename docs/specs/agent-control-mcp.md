@@ -199,8 +199,8 @@ Run locally, never by iterating through CI (`docs/runbooks/ci.md`): `bun run tes
   through as `company_mode_required`.
 - Contract: a registry test that every tool maps to a route or service and every state-changing tool
   writes an `audit_log` row (a table-driven test, so a new tool without audit fails).
-- Integration (dev stack, by hand): the §8 probe as `scripts/control-mcp-e2e.ts`; end-to-end "create a
-  schema → preview → apply → sync" as a member-admin agent.
+- Integration (dev stack, by hand): the §8 probe has not been written yet; end-to-end "create a
+  schema → preview → apply → sync" as a member-admin agent lives in `test/contract/control-mcp.contract.test.ts`.
 - Workflows: no new `schedule:`/push/PR workflows (`test/unit/workflows.test.ts`).
 
 ## 12. Open questions

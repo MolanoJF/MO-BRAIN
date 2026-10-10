@@ -79,6 +79,22 @@ describe('POST /api/control-mcp', () => {
     expect((await rpc(bearerFor('gbrain_cl_nobody'), init)).status).toBe(403);
   });
 
+  test('D7: a tools/call without a name is -32602 and still audited', async () => {
+    await getDb().delete(schema.auditLog).where(eq(schema.auditLog.action, 'control_mcp.call'));
+    const res = await rpc(alice, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { arguments: { secret: 'never-store-me' } } });
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).error.code).toBe(-32602);
+    const rows = await getDb().select().from(schema.auditLog).where(eq(schema.auditLog.action, 'control_mcp.call'));
+    expect(rows.length).toBe(1);
+    const row = rows[0]!;
+    expect(row.actor).toBe(fx.alice.userId);
+    expect(row.target).toBeNull();
+    const after = row.after as Record<string, unknown>;
+    expect(after).toMatchObject({ outcome: 'refused', error: 'invalid_arguments', argKeys: ['secret'] });
+    expect(after.via as string).toMatch(/^control-mcp:/);
+    expect(JSON.stringify(after)).not.toContain('never-store-me');
+  });
+
   test('a notification is 202', async () => {
     const res = await rpc(alice, { jsonrpc: '2.0', method: 'notifications/initialized' });
     expect(res.status).toBe(202);

@@ -60,8 +60,9 @@ export function defaultResolverDeps(): ResolverDeps {
   return { whoami: mcpWhoami, now: Date.now, ttlMs: ttlFromEnv() };
 }
 
-/** The OAuth client id in a `whoami` identity. The pinned key is recorded by
- *  test/contract/control-mcp-whoami.contract.test.ts. */
+/** The OAuth client id in a `whoami` identity. Which key carries it is not yet
+ *  pinned: the §8 `whoami` probe was never written. `test/contract/control-mcp.contract.test.ts`
+ *  exercises this path end to end against the real ops. */
 export function clientIdFromWhoami(identity: Record<string, unknown>): string | null {
   if (identity.transport !== 'oauth') return null;
   const client = identity.client;

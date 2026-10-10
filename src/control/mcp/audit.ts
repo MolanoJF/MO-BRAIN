@@ -15,7 +15,8 @@ export type CallOutcome = 'ok' | 'error' | 'refused' | 'preview';
 export type ControlCallAudit = {
   orgId: string | null;
   actor: string;
-  tool: string;
+  /** The tool name, or null when the call never named one. */
+  tool: string | null;
   clientId: string;
   outcome: CallOutcome;
   status?: number;

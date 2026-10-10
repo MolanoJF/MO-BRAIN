@@ -9,7 +9,7 @@
  */
 import { Hono, type Context } from 'hono';
 import { resolveCaller, tokenKey, type Resolution } from '../mcp/caller.ts';
-import { auditRefusedToken } from '../mcp/audit.ts';
+import { auditControlCall, auditRefusedToken } from '../mcp/audit.ts';
 import { handleRpc } from '../mcp/jsonrpc.ts';
 import { createLimiter, type Limiter } from '../mcp/rateLimit.ts';
 import { listingOf, runTool, visibleTools, type RouteFetch } from '../mcp/dispatch.ts';
@@ -38,6 +38,28 @@ export function defaultControlMcpDeps(): ControlMcpDeps {
 function bearerOf(header: string | undefined): string | null {
   const m = /^Bearer\s+(\S+)$/i.exec(header ?? '');
   return m ? m[1]! : null;
+}
+
+/**
+ * Spec D7: every `tools/call` writes one row. `handleRpc` refuses a request
+ * whose params carry no string `name` (`-32602`) before `runTool` runs, so the
+ * transport — which holds the resolved caller and client id — audits that
+ * refusal here, keys and codes only. The predicate mirrors `handleRpc`'s
+ * `tools/call` path so the pure jsonrpc module stays DB-free; it excludes
+ * notifications, which `handleRpc` answers 202 without executing anything.
+ */
+function refusedToolsCall(msg: unknown): { argKeys?: string[] } | null {
+  if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return null;
+  const m = msg as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
+  if (m.jsonrpc !== '2.0' || m.method !== 'tools/call' || !('id' in m)) return null;
+  if (typeof m.id !== 'string' && typeof m.id !== 'number' && m.id !== null) return null;
+  const params = m.params !== null && typeof m.params === 'object' && !Array.isArray(m.params)
+    ? m.params as Record<string, unknown> : {};
+  if (typeof params.name === 'string') return null;
+  const args = params.arguments;
+  const argKeys = args !== null && typeof args === 'object' && !Array.isArray(args)
+    ? Object.keys(args).sort() : undefined;
+  return { argKeys };
 }
 
 function unauthorized(c: Context, error: string): Response {
@@ -79,6 +101,13 @@ export function controlMcpRoutes(fetchRoute: RouteFetch, deps: ControlMcpDeps = 
     }
 
     const caller = resolved.caller;
+    const refused = refusedToolsCall(msg);
+    if (refused) {
+      await auditControlCall({
+        orgId: caller.orgId, actor: caller.userId, tool: null, clientId: caller.clientId,
+        outcome: 'refused', error: 'invalid_arguments', argKeys: refused.argKeys,
+      });
+    }
     const tools = deps.tools();
     const out = await handleRpc(msg, {
       listTools: () => visibleTools(tools, caller.role).map(listingOf),
