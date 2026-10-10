@@ -8,7 +8,8 @@ import { ROLE_RANK, type Role } from '../rbac.ts';
 import { validateArgs } from './args.ts';
 import { auditControlCall, type CallOutcome } from './audit.ts';
 import { controlEnv, guardMinOf, type ControlCaller } from './callerEnv.ts';
-import type { HttpMethod, ToolDef, ToolListing, ToolResult } from './registry.ts';
+import { checkConfirm, mintConfirm } from './confirm.ts';
+import type { HttpMethod, Reader, ToolDef, ToolListing, ToolResult } from './registry.ts';
 
 export type RouteFetch = (req: Request, env: unknown) => Response | Promise<Response>;
 export type RouteReply = { status: number; body: any; guard: Role | null };
@@ -39,11 +40,16 @@ export function visibleTools(tools: readonly ToolDef[], role: Role): ToolDef[] {
   return tools.filter((t) => ROLE_RANK[role] >= ROLE_RANK[t.minRole]);
 }
 
+const CONFIRM_NOTE = ' Requires confirmation: called without `confirm` it returns a preview and a confirmToken and changes nothing; show the preview to the human, and only if they approve, call again with the same arguments plus `confirm`.';
+
 export function listingOf(tool: ToolDef): ToolListing {
+  const inputSchema = tool.gated
+    ? { ...tool.input, properties: { ...tool.input.properties, confirm: { type: 'string' as const, description: 'confirmToken from this tool\'s preview, for the same arguments.' } } }
+    : tool.input;
   return {
     name: tool.name,
-    description: tool.description,
-    inputSchema: tool.input,
+    description: tool.gated ? `${tool.description}${CONFIRM_NOTE}` : tool.description,
+    inputSchema,
     annotations: { readOnlyHint: !tool.mutating, destructiveHint: Boolean(tool.gated), idempotentHint: !tool.mutating },
   };
 }
@@ -81,10 +87,42 @@ export async function runTool(opts: {
     return result({ error: 'unknown_tool', tool: name }, true);
   }
 
-  const checked = validateArgs(tool.input, opts.args);
+  let rawArgs = opts.args;
+  let confirm: unknown;
+  if (tool.gated && rawArgs !== null && typeof rawArgs === 'object' && !Array.isArray(rawArgs) && 'confirm' in rawArgs) {
+    const { confirm: c, ...rest } = rawArgs as Record<string, unknown>;
+    confirm = c;
+    rawArgs = rest;
+  }
+
+  const checked = validateArgs(tool.input, rawArgs);
   if (!checked.ok) {
     await audit('refused', { error: 'invalid_arguments' });
     return result({ error: 'invalid_arguments', errors: checked.errors }, true);
+  }
+
+  if (tool.gated) {
+    const read: Reader = async (method, path, body) => {
+      const r = await callRoute(opts.fetchRoute, caller, method, path, body);
+      return { status: r.status, body: r.body };
+    };
+    const preview = tool.gated.preview
+      ? await tool.gated.preview(checked.args, read)
+      : { summary: { wouldCall: tool.route(checked.args) } };
+    const subject = { tool: tool.name, membershipId: caller.membershipId, args: checked.args, fingerprint: preview.fingerprint };
+    if (confirm === undefined) {
+      const { token, expiresAt } = mintConfirm(subject);
+      await audit('preview');
+      return result({
+        preview: true, tool: tool.name, summary: preview.summary, confirmToken: token, expiresAt,
+        next: `Show this preview to the human. Only if they approve, call ${tool.name} again with the same arguments plus "confirm": "<confirmToken>".`,
+      }, false);
+    }
+    const check = checkConfirm(confirm, subject);
+    if (!check.ok) {
+      await audit('refused', { error: check.error });
+      return result({ error: check.error, hint: `Call ${tool.name} without confirm for a fresh preview.` }, true);
+    }
   }
 
   let reply: RouteReply;
