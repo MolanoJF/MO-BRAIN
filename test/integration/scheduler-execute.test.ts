@@ -187,7 +187,7 @@ describe('executing a claimed run', () => {
     // Not `other` (the org's other Space), not absent, not from the stored params.
     expect(captured.length).toBe(1);
     expect(captured[0]!.op).toBe('sync');
-    expect(captured[0]!.params).toEqual({ source: SOURCE_ID });
+    expect(captured[0]!.params).toEqual({ source: SOURCE_ID, noPull: true, noEmbed: true });
     expect((await scheduleRow(scheduleId)).params).toEqual({});
   });
 
@@ -371,7 +371,7 @@ describe('live-sync two-step', () => {
 
     expect(captured.map((c) => c.op)).toEqual(['sync', 'embed']);
     // The fence is re-applied to step 2: `stale` is ours, `source` the Connection's.
-    expect(captured[1]!.params).toEqual({ stale: true, source: 'shared' });
+    expect(captured[1]!.params).toEqual({ stale: true, maxUsd: '1', source: 'shared' });
     expect(result.classification).toBe('ok');
     // One run row, one report.
     expect(writes.length).toBe(1);
@@ -379,8 +379,8 @@ describe('live-sync two-step', () => {
       .where(eq(schema.scheduleRuns.scheduleId, scheduleId));
     expect(rows.length).toBe(1);
     // The combined report names BOTH commands and keeps both streams.
-    expect(writes[0]!.reportBody).toContain('gbrain sync --source shared --json');
-    expect(writes[0]!.reportBody).toContain('gbrain embed --stale --source shared --json');
+    expect(writes[0]!.reportBody).toContain('gbrain sync --source shared --no-pull --no-embed --json');
+    expect(writes[0]!.reportBody).toContain('gbrain embed --stale --source shared --max-usd 1 --json');
     expect(writes[0]!.reportBody).toContain('Embedded 4 chunks');
     expect((await rowOf(claimed.run.id)).state).toBe('succeeded');
     expect((await rowOf(claimed.run.id)).summary).toEqual({ changed: 7, status: 'ok' });

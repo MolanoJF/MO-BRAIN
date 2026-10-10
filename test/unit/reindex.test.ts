@@ -30,15 +30,15 @@ describe('syncAndEmbed', () => {
     const result = await syncAndEmbed('customers', { callOps: recordingOps(recorded) });
 
     expect(recorded).toEqual([
-      { op: 'sync', params: { source: 'customers' }, json: true },
-      { op: 'embed', params: { source: 'customers', stale: true }, json: true },
+      { op: 'sync', params: { source: 'customers', noPull: true, noEmbed: true }, json: true },
+      { op: 'embed', params: { source: 'customers', stale: true, maxUsd: '1' }, json: true },
     ]);
     expect(result.sync).toEqual({
-      argv: ['gbrain', 'sync', '--source', 'customers', '--json'],
+      argv: ['gbrain', 'sync', '--source', 'customers', '--no-pull', '--no-embed', '--json'],
       exitCode: 0, stderr: '', classification: 'ok',
     });
     expect(result.embed).toEqual({
-      argv: ['gbrain', 'embed', '--stale', '--source', 'customers', '--json'],
+      argv: ['gbrain', 'embed', '--stale', '--source', 'customers', '--max-usd', '1', '--json'],
       exitCode: 0, stderr: '', classification: 'ok',
     });
   });

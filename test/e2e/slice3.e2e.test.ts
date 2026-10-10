@@ -466,7 +466,7 @@ describe('Slice 3 seam gate B', () => {
     expect(cat.exitCode).toBe(0);
     expect(cat.stdout).toContain('Write Space: `shared`');
     // The --source fence came from the Connection, not from the request.
-    expect(cat.stdout).toContain(`gbrain sync --source ${WRITE_SPACE} --json`);
+    expect(cat.stdout).toContain(`gbrain sync --source ${WRITE_SPACE} --no-pull --no-embed --json`);
     // ... and it really did import: the receipt the report carries says so.
     expect(cat.stdout).toContain('"sync_status":"synced"');
     // Honesty rule 1 in the artifact the member reads: the Connection is OUR

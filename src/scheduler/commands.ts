@@ -27,6 +27,12 @@ export type SchedulerCommand = {
   scope: CommandScope;
   fenced: string[];
   tunable: Record<string, TunableSpec>;
+  /**
+   * Params every run carries, whatever the schedule stored. Neither tunable
+   * nor fenced: a stored value for one of these is refused like any unknown
+   * param, and `fenceParams` sets them.
+   */
+  fixed?: Record<string, string | boolean>;
   json: boolean;
   /**
    * How much this run changed, for report_policy 'on_change_or_failure'.
@@ -87,10 +93,18 @@ const DREAM_TOTALS_KEYS = [
   'phantoms_skipped_drift',
 ];
 
+/** The per-run ceiling on a scheduled or editor-driven `embed`. Matches the wizard's first embed. */
+export const EMBED_STEP_MAX_USD = '1';
+
 export const SCHEDULER_COMMANDS: Record<string, SchedulerCommand> = {
   sync: {
     id: 'sync', operation: 'sync', scope: 'source',
     fenced: ['source'], tunable: {}, json: true,
+    // The wizard's measured shape (routes/wizard.ts /finish): a managed brain
+    // refuses sync without --no-pull, and sync's inline embed has no cap, so
+    // with no terminal it stops at exit 3 for consent. Embedding is the
+    // separate, capped `embed` step that live-sync and syncAndEmbed run next.
+    fixed: { noPull: true, noEmbed: true },
     // src/core/sync-embed-backfill.ts buildSingleSyncJsonEnvelope:
     // { schema_version, source_id, sync_status, added, modified, deleted,
     //   chunks_created, embedded, embed_backfill? }
@@ -106,6 +120,9 @@ export const SCHEDULER_COMMANDS: Record<string, SchedulerCommand> = {
   embed: {
     id: 'embed', operation: 'embed', scope: 'source',
     fenced: ['source'], tunable: { stale: { kind: 'flag' } }, json: true,
+    // Without a terminal an uncapped embed stops at exit 3 for consent, which
+    // classifies as a failed run. The cap is the consent.
+    fixed: { maxUsd: EMBED_STEP_MAX_USD },
     // src/commands/embed.ts EmbedResult: { embedded, skipped, would_embed,
     // total_chunks, healed_splits? }
     changeCount(payload) {
@@ -257,7 +274,7 @@ export function fenceParams(
   validated: Record<string, string | boolean>,
   writeSourceId: string,
 ): Record<string, string | boolean> {
-  const out = { ...validated };
+  const out = { ...validated, ...command.fixed };
   for (const f of command.fenced) out[f] = writeSourceId;
   return out;
 }
@@ -267,7 +284,7 @@ for (const cmd of Object.values(SCHEDULER_COMMANDS)) {
   const spec = OPERATIONS[cmd.operation];
   if (!spec) throw new Error(`scheduler command ${cmd.id} names an unknown operation ${cmd.operation}`);
   const known = new Set(spec.params.map((p) => p.name));
-  for (const name of [...cmd.fenced, ...Object.keys(cmd.tunable)]) {
+  for (const name of [...cmd.fenced, ...Object.keys(cmd.tunable), ...Object.keys(cmd.fixed ?? {})]) {
     if (!known.has(name)) throw new Error(`scheduler command ${cmd.id} names unknown param ${name}`);
   }
   if (cmd.json && !spec.supportsJson) {

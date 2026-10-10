@@ -516,8 +516,8 @@ describe('revertRun', () => {
       files: [{ status: 'M', path: 'page.md' }],
       index: {
         purge: [],
-        sync: { argv: ['gbrain', 'sync', '--source', 'customers', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
-        embed: { argv: ['gbrain', 'embed', '--stale', '--source', 'customers', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
+        sync: { argv: ['gbrain', 'sync', '--source', 'customers', '--no-pull', '--no-embed', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
+        embed: { argv: ['gbrain', 'embed', '--stale', '--source', 'customers', '--max-usd', '1', '--json'], exitCode: 0, stderr: '', classification: 'ok' },
       },
     });
     // The git fact is on the row before the index moves.
@@ -526,8 +526,8 @@ describe('revertRun', () => {
     // whole point of step 3: a reverted page that still answers searches is not
     // reverted (honesty rule 7).
     expect(h.ops).toEqual([
-      { op: 'sync', params: { source: 'customers' }, json: true },
-      { op: 'embed', params: { source: 'customers', stale: true }, json: true },
+      { op: 'sync', params: { source: 'customers', noPull: true, noEmbed: true }, json: true },
+      { op: 'embed', params: { source: 'customers', stale: true, maxUsd: '1' }, json: true },
     ]);
   });
 
@@ -600,8 +600,8 @@ describe('revertRun', () => {
         },
         json: true,
       },
-      { op: 'sync', params: { source: 'customers' }, json: true },
-      { op: 'embed', params: { source: 'customers', stale: true }, json: true },
+      { op: 'sync', params: { source: 'customers', noPull: true, noEmbed: true }, json: true },
+      { op: 'embed', params: { source: 'customers', stale: true, maxUsd: '1' }, json: true },
     ]);
   });
 

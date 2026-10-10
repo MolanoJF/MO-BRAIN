@@ -470,8 +470,8 @@ describe('S2 Space Files write gate', () => {
 
     const ops = calls.filter((c) => c.op === 'sync' || c.op === 'embed');
     expect(ops.map((c) => c.op)).toEqual(['sync', 'embed']);
-    expect(ops[0]!.params).toEqual({ source: 'customers' });
-    expect(ops[1]!.params).toEqual({ source: 'customers', stale: true });
+    expect(ops[0]!.params).toEqual({ source: 'customers', noPull: true, noEmbed: true });
+    expect(ops[1]!.params).toEqual({ source: 'customers', stale: true, maxUsd: '1' });
   });
 });
 

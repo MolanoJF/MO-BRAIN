@@ -2,7 +2,7 @@ import { test, expect, describe } from 'bun:test';
 import { OPERATIONS } from '../../src/contracts/registry.ts';
 import { buildArgv } from '../../src/contracts/argv.ts';
 import {
-  SCHEDULER_COMMANDS, fenceParams, validateParams,
+  EMBED_STEP_MAX_USD, SCHEDULER_COMMANDS, fenceParams, validateParams,
 } from '../../src/scheduler/commands.ts';
 
 describe('the allowlist', () => {
@@ -78,15 +78,20 @@ describe('param validation', () => {
 describe('the scope fence', () => {
   test('a source-scoped command gets --source from the Connection, always', () => {
     const fenced = fenceParams(SCHEDULER_COMMANDS.sync!, {}, 'shared');
-    expect(fenced).toEqual({ source: 'shared' });
+    expect(fenced).toEqual({ source: 'shared', noPull: true, noEmbed: true });
     expect(buildArgv(OPERATIONS.sync!, fenced, { json: true }))
-      .toEqual(['sync', '--source', 'shared', '--json']);
+      .toEqual(['sync', '--source', 'shared', '--no-pull', '--no-embed', '--json']);
   });
 
   test('the fence overrides nothing a caller smuggled in, because validate ran first', () => {
     const validated = validateParams(SCHEDULER_COMMANDS.embed!, { stale: true });
     const fenced = fenceParams(SCHEDULER_COMMANDS.embed!, validated, 'customers');
-    expect(fenced).toEqual({ stale: true, source: 'customers' });
+    expect(fenced).toEqual({ stale: true, maxUsd: EMBED_STEP_MAX_USD, source: 'customers' });
+  });
+
+  test('a fixed param cannot be stored on a schedule, so it cannot be widened', () => {
+    expect(() => validateParams(SCHEDULER_COMMANDS.embed!, { maxUsd: '50' })).toThrow(/unknown param maxUsd/);
+    expect(() => validateParams(SCHEDULER_COMMANDS.sync!, { noPull: true })).toThrow(/unknown param noPull/);
   });
 
   test('a brain-wide command gets NO source fence — the UI must say so', () => {
