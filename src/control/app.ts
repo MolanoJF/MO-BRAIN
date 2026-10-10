@@ -18,6 +18,7 @@ import { credentialRoutes } from './routes/credentials.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { upgrades } from './routes/upgrades.ts';
 import { claimRoutes } from './routes/claim.ts';
+import { controlMcpRoutes } from './routes/controlMcp.ts';
 import { runRoutes } from './routes/runs.ts';
 import { gatewayRoutes } from './routes/gateway.ts';
 import { spendRoutes } from './routes/spend.ts';
@@ -50,6 +51,10 @@ app.route('/api', scheduleRoutes);
 app.route('/api', upgrades);
 app.route('/api', spendRoutes);
 app.route('/api', claimRoutes);
+// Spec agent-control-mcp D1: the control MCP. Its tools run the routes above
+// in-process (D3), so the mount takes the app's own fetch; it is resolved at
+// request time, after every route is registered.
+app.route('/api', controlMcpRoutes((req, env) => app.fetch(req, env as never)));
 // Slice 4 (Task 6, Task 7): the runner's two surfaces. Neither is ever routed
 // publicly — Caddy gains no route for /api/runs or /api/gateway, and the runner
 // reaches both directly on runner-net (D6). The gateway mount is the whole

@@ -9,7 +9,7 @@ const ops = installOpsMock();
 const { getDb, schema, closeDb, pinDb } = await import('../../src/control/db/client.ts');
 const { sql, and, eq } = await import('drizzle-orm');
 const { buildZoneFixture, hit } = await import('../helpers/zoneFixture.ts');
-const { memberClientSecretName, grantCredentialsOutPath } = await import('../../src/control/connections.ts');
+const { memberClientSecretName, grantCredentialsOutPath, controlMcpUrl } = await import('../../src/control/connections.ts');
 const { storeSecret, readSecret } = await import('../../src/control/secrets.ts');
 const { wiringSnippet } = await import('../../src/control/harness.ts');
 type ZoneFixture = Awaited<ReturnType<typeof buildZoneFixture>>;
@@ -374,6 +374,7 @@ describe('my mcp config', () => {
 
   type McpBody = {
     mcp_url: string;
+    control_url: string;
     harness: string;
     credentials: { client_id: string; client_secret: string; mcp_url: string };
     snippet: string;
@@ -386,13 +387,15 @@ describe('my mcp config', () => {
     const res = await hit('GET', '/api/my/mcp', fx.bob.cookie);
     expect(res.status).toBe(200);
     const body = await res.json() as McpBody;
+    expect(body.control_url).toBe(`${process.env.PUBLIC_URL!.replace(/\/+$/, '')}/api/control-mcp`);
+    expect(body.snippet).toContain('"mobrain-control"');
     expect(body.mcp_url).toBe(bobHandoff.mcp_url);
     expect(body.harness).toBe('generic');
     expect(body.credentials).toEqual(bobHandoff);
     expect(body.snippet).toBe(wiringSnippet('generic', {
       client_id: bobHandoff.client_id,
       mcp_url: bobHandoff.mcp_url,
-    }, { skills: false }).snippet);
+    }, { skills: false, control: { url: controlMcpUrl() } }).snippet);
     expect(ops.calls.some((c) => c.op === 'config.get' && c.params?.key === 'mcp.publish_skills')).toBe(true);
     expect(ops.journalDeletes).toEqual([]);
   });
@@ -435,7 +438,7 @@ describe('my mcp config', () => {
       expect(body.snippet).toBe(wiringSnippet('claude-code', {
         client_id: bobHandoff.client_id,
         mcp_url: bobHandoff.mcp_url,
-      }, { skills: true }).snippet);
+      }, { skills: true, control: { url: controlMcpUrl() } }).snippet);
     } finally {
       await getDb().update(schema.connections).set({ harness: before!.harness })
         .where(eq(schema.connections.id, fx.bob.privateConnectionId));
@@ -596,7 +599,7 @@ describe('my mcp config', () => {
     expect(body.snippet).toBe(wiringSnippet('generic', {
       client_id: 'gbrain_cl_reissue_1',
       mcp_url: 'https://reissue.example.test/mcp',
-    }, { skills: false }).snippet);
+    }, { skills: false, control: { url: controlMcpUrl() } }).snippet);
     expect(JSON.stringify(body)).not.toContain('reissue-secret-2-xxxxxxxxxxxx');
     expect(ops.calls.some((c) => c.params && 'reissue' in c.params)).toBe(false);
 

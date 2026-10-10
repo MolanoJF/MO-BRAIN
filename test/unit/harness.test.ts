@@ -154,6 +154,30 @@ describe('wiringSnippet', () => {
     const { snippet } = wiringSnippet('claude-code', {});
     expect(snippet).toBe("gbrain mcp grant already wrote this adapter's config (claude-json).");
   });
+
+  test('control omitted is byte-identical to today\'s snippet', () => {
+    for (const id of Object.keys(HARVEST_MAP)) {
+      expect(wiringSnippet(id, creds, { skills: true }).snippet)
+        .toBe(wiringSnippet(id, creds, { skills: true, control: undefined }).snippet);
+    }
+  });
+
+  test('control adds a mobrain-control server with the same bearer, for every class', () => {
+    for (const id of Object.keys(HARVEST_MAP)) {
+      const { snippet } = wiringSnippet(id, { ...creds, access_token: 'tok-123' }, { control: { url: 'https://brain.example/api/control-mcp' } });
+      const start = snippet.indexOf('{', snippet.indexOf('Mo-brain control server'));
+      const fragment = JSON.parse(snippet.slice(start, snippet.indexOf('\n}', start) + 2));
+      expect(fragment).toEqual({ mcpServers: { 'mobrain-control': {
+        type: 'http', url: 'https://brain.example/api/control-mcp', headers: { Authorization: 'Bearer tok-123' },
+      } } });
+    }
+  });
+
+  test('the data server key stays gbrain', () => {
+    const { snippet } = wiringSnippet('generic', { mcp_url: 'https://x/mcp', access_token: 't' }, { control: { url: 'https://x/api/control-mcp' } });
+    expect(snippet).toContain('"gbrain"');
+    expect(snippet).not.toContain('mobrain-data');
+  });
 });
 
 describe('annotateAdapters', () => {

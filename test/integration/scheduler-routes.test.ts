@@ -38,6 +38,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   // `src/control/spend.ts` imports this alongside the others; a mock that
   // omits a real export makes the whole graph unloadable (Slice 4 hazard (a)).
   brainUsage: async () => { throw new Error('ops unreachable'); },
+  mcpWhoami: async () => ({ ok: false, status: 401, error: 'invalid_token' }),
   callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) =>
     callOpsHandler(op, params, opts),
   patchFilePlaneConfig: async () => {},

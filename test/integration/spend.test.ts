@@ -26,6 +26,7 @@ type SpendRowBody = { key: string; label: string; runs: number; costUsd: number 
 mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async () => ({ ok: true, exitCode: 0, argv: [], stdout: '{}', stderr: '', json: {} }),
   brainUsage: async () => { throw new Error('ops unreachable'); },
+  mcpWhoami: async () => ({ ok: false, status: 401, error: 'invalid_token' }),
   opsHealthy: async () => false,
   inspectRepos: async () => [],
   writeReport: async () => ({ relPath: '', committed: false, sha: null }),

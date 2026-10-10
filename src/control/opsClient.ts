@@ -4,6 +4,7 @@ import type {
   WriteFileOutcome, WriteFileRequest,
 } from '../ops/git.ts';
 import type { BrainUsage } from '../ops/usage.ts';
+import type { WhoamiReply } from '../ops/whoami.ts';
 
 export type { ImportOutcome, ImportRequest, ReadFileResult, RepoStatus, RepoTree, WriteFileOutcome, WriteFileRequest };
 
@@ -271,6 +272,15 @@ export async function auditTail(lines = 50): Promise<string[]> {
  */
 export async function brainUsage(days: number): Promise<BrainUsage> {
   return post('/usage', { days }, 60_000);
+}
+
+/**
+ * Control MCP D2: ops presents `bearer` to gbrain's `whoami`. A refused token
+ * is a reply (`ok: false`), not a throw; this throws only when ops itself is
+ * unreachable, which the caller reports as 503, never as a bad token.
+ */
+export async function mcpWhoami(bearer: string): Promise<WhoamiReply> {
+  return post<WhoamiReply>('/mcp/whoami', { bearer }, 15_000);
 }
 
 export async function opsHealthy(): Promise<boolean> {

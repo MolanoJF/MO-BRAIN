@@ -18,6 +18,7 @@ import {
 import { resetBrainSchema } from './brainSchema.ts';
 import { pauseBrainWriters, resumeBrainWriters } from './writerGate.ts';
 import { readBrainUsage } from './usage.ts';
+import { whoamiFor } from './whoami.ts';
 import {
   clearRemote, commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
   importIntoSpace, revertRange, scaffoldFolders, setRemote,
@@ -169,6 +170,13 @@ Bun.serve({
           ? requested
           : 30;
         return json(await readBrainUsage(days));
+      }
+
+      // Control MCP (spec agent-control-mcp D2): present a member's bearer to
+      // gbrain's published `whoami`. Read-only, no lock. The body carries the
+      // bearer and nothing else; it is never logged.
+      if (url.pathname === '/mcp/whoami') {
+        return json(await whoamiFor((body as { bearer?: unknown }).bearer));
       }
 
       // A3: claim takes the ops-side --credentials-out file once, then deletes it.

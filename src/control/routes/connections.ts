@@ -150,6 +150,30 @@ connectionRoutes.post('/connections/:id/revoke', guard('admin', async (c, ctx) =
   return c.json({ ok: true });
 }));
 
+/**
+ * Spec agent-control-mcp §7: make a Connection data-only (or not). The control
+ * MCP refuses a data-only Connection's token; its data lane is unchanged, and
+ * nothing is revoked — this is a flag, not a credential change.
+ */
+connectionRoutes.post('/connections/:id/control', guard('admin', async (c, ctx) => {
+  const caller = await callerFor(ctx);
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  if (typeof body?.enabled !== 'boolean') return c.json({ error: 'enabled must be true or false' }, 400);
+  const [row] = await getDb().select({ id: schema.connections.id })
+    .from(schema.connections)
+    .leftJoin(schema.spaces, eq(schema.spaces.id, schema.connections.writeSpaceId))
+    .where(and(
+      eq(schema.connections.id, id),
+      eq(schema.connections.organizationId, caller.orgId),
+      visibleZoneSql(caller),
+    ));
+  if (!row) return c.json({ error: 'connection not found' }, 404);
+  await getDb().update(schema.connections).set({ controlEnabled: body.enabled }).where(eq(schema.connections.id, id));
+  await audit(caller.orgId, caller.userId, 'connection.control', id, { enabled: body.enabled });
+  return c.json({ ok: true, id, controlEnabled: body.enabled });
+}));
+
 connectionRoutes.post('/connections/:id/commit', guard('viewer', async (c, ctx) => {
   const caller = await callerFor(ctx);
   const { userId, orgId, role } = caller;

@@ -631,6 +631,12 @@ export function mcpUrl(): string {
   return base.endsWith('/mcp') ? base : `${base}/mcp`;
 }
 
+/** Spec agent-control-mcp D1: the control MCP lives on the install's own origin. */
+export function controlMcpUrl(): string {
+  const base = (process.env.PUBLIC_URL ?? 'http://127.0.0.1:3150').replace(/\/+$/, '');
+  return `${base}/api/control-mcp`;
+}
+
 /** The client id in an `mcp.grant` receipt (pin shape; L6/L7 parsers). */
 export function grantedClientId(json: unknown): string {
   if (!json || typeof json !== 'object') throw new Error('mcp.grant json did not include a client id');

@@ -31,6 +31,7 @@ Not a release. Not in the published `1.0.0` images.
 - Zones 5.1–5.3: personal-and-company zones, privacy, personal-first, invite login.
 - Console: Settings → Credentials tab (GitHub tokens per member and per company, admin model-provider keys; git remotes reuse the stored token), sidebar account row at the bottom, per-Source export, Source and private-Space rename, and `default` source filtering.
 - Optional Google sign-in when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. Email and password stay.
+- Not on `main` yet — Agent control MCP (`POST /api/control-mcp`, spec `docs/specs/agent-control-mcp.md`): an agent operates Mo-brain with the member's own Connection token, within their role. Tools run the console routes in-process; gated tools need a preview-and-confirm; runner tokens and data-only Connections are refused. Phase 4 (OAuth consent) is not built. This build is on branch `MolanoJF/fulmar`, unreleased and not on `main`; the spec's §8 probe is pending a stack built from this branch plus the owner credentials.
 
 Zones a caller can rely on:
 

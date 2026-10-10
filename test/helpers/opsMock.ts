@@ -69,6 +69,10 @@ export function installOpsMock(): OpsMock {
 
   mock.module('../../src/control/opsClient.ts', () => ({
     brainUsage: async () => { throw new Error('ops unreachable'); },
+    // Control MCP: `tok-<clientId>` resolves as that OAuth client; anything else is a bad token.
+    mcpWhoami: async (bearer: string) => (bearer.startsWith('tok-')
+      ? { ok: true, identity: { transport: 'oauth', client_id: bearer.slice(4) } }
+      : { ok: false, status: 401, error: 'invalid_token' }),
     callOps: async (op: string, params?: Record<string, unknown>, opts?: CallOpts) => {
       calls.push({ op, params, opts });
       const result = ok(op, opts);
