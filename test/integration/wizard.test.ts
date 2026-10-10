@@ -113,6 +113,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
     };
   },
   brainUsage: async () => { throw new Error('ops unreachable'); },
+  mcpWhoami: async () => ({ ok: false, status: 401, error: 'invalid_token' }),
   writeReport: async () => ({ relPath: '', committed: false, sha: null }),
   cancelRun: async () => ({ cancelled: false }),
   patchFilePlaneConfig: async () => {},

@@ -41,6 +41,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   //     load at all under per-file isolation. Copy verbatim from
   //     test/integration/routes.test.ts and keep in sync with opsClient.ts. ---
   brainUsage: async () => { throw new Error('ops unreachable'); },
+  mcpWhoami: async () => ({ ok: false, status: 401, error: 'invalid_token' }),
   seedSpace: async () => {},
   resetBrainSchema: async () => {},
   pauseBrainWriters: async () => {},

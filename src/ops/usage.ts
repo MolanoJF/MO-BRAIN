@@ -19,6 +19,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { callOps, deleteCredentialJournal, takeGrantCredentials } from '../control/opsClient.ts';
+import { mcpEndpoint, parseMcpMessage, readToolText, tlsOption } from './mcpLane.ts';
 
 export type BrainUsage = {
   windowDays: number;
@@ -33,29 +34,6 @@ export type BrainUsage = {
 
 /** The grant's own TTL: minutes-scale, like Slice 4's per-run mint (D8). */
 const GRANT_TTL_SECONDS = 300;
-
-/**
- * The MCP DATA-LANE endpoint this process dials for `get_usage`.
- *
- * Inside compose, ops is on `brain-net`, so it reaches `gbrain-serve` directly;
- * `PUBLIC_URL` is deliberately NOT set in the ops container, and a bare
- * `mcpUrl()` would resolve to 127.0.0.1 inside the wrong container. The
- * published dev override lets a host-run contract test reach the same endpoint
- * through Caddy by setting `GBRAIN_MCP_URL`.
- *
- * This is NOT the URL handed to `mcp.grant` — see `grantEndpoint()`.
- */
-function mcpEndpoint(): string {
-  const explicit = process.env.GBRAIN_MCP_URL?.trim();
-  if (explicit && explicit.length > 0) return explicit;
-  const publicUrl = process.env.PUBLIC_URL?.trim();
-  if (publicUrl) {
-    const base = publicUrl.replace(/\/+$/, '');
-    return base.endsWith('/mcp') ? base : `${base}/mcp`;
-  }
-  // In compose, ops is on brain-net and dials gbrain-serve directly.
-  return 'http://gbrain-serve:3131/mcp';
-}
 
 /**
  * The `--url` the `mcp.grant` carries. It is credential-delivery bookkeeping,
@@ -76,14 +54,6 @@ function mcpEndpoint(): string {
 function grantEndpoint(): string {
   const base = (process.env.PUBLIC_URL ?? 'http://127.0.0.1:3131').replace(/\/+$/, '');
   return base.endsWith('/mcp') ? base : `${base}/mcp`;
-}
-
-/** A self-signed Caddy on the dev box needs this; production is plain http on
- *  the internal network, and a real cert is never exempted. */
-function tlsOption(): { tls?: { rejectUnauthorized: boolean } } {
-  return process.env.GBRAIN_MCP_TLS_INSECURE === '1'
-    ? { tls: { rejectUnauthorized: false } }
-    : {};
 }
 
 export async function readBrainUsage(days: number): Promise<BrainUsage> {
@@ -146,47 +116,8 @@ async function callGetUsage(endpoint: string, accessToken: string, days: number)
     ...tlsOption(),
   } as RequestInit);
   if (!res.ok) throw new Error(`get_usage MCP call failed: HTTP ${res.status}`);
-  const message = parseMcpMessage(await res.text(), res.headers.get('content-type') ?? '');
-  return readToolText(message);
-}
-
-/** A single streamable-HTTP response is either a bare JSON-RPC object or an
- *  SSE stream of `data:` frames. Return the JSON-RPC message, error or result. */
-function parseMcpMessage(text: string, contentType: string): Record<string, unknown> {
-  const frames: unknown[] = [];
-  if (contentType.includes('text/event-stream')) {
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) continue;
-      const data = trimmed.slice(5).trim();
-      if (data.length === 0) continue;
-      try { frames.push(JSON.parse(data)); } catch { /* not a JSON frame */ }
-    }
-  } else {
-    try { frames.push(JSON.parse(text)); } catch { /* fall through */ }
-  }
-  for (const frame of frames) {
-    if (frame && typeof frame === 'object' && 'result' in frame) return frame as Record<string, unknown>;
-    if (frame && typeof frame === 'object' && 'error' in frame) {
-      const err = (frame as { error?: { message?: string } }).error;
-      throw new Error(`get_usage MCP error: ${err?.message ?? 'unknown'}`);
-    }
-  }
-  throw new Error('get_usage MCP call returned no JSON-RPC result');
-}
-
-/** `tools/call` envelopes the operation's JSON as a text content block. */
-function readToolText(message: Record<string, unknown>): unknown {
-  const result = message.result as { isError?: boolean; content?: { type?: string; text?: string }[] } | undefined;
-  if (!result) throw new Error('get_usage MCP result was empty');
-  const text = result.content?.find((c) => c.type === 'text')?.text;
-  if (typeof text !== 'string') throw new Error('get_usage MCP result carried no text block');
-  if (result.isError === true) throw new Error(`get_usage operation failed: ${text}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error('get_usage MCP text block was not JSON');
-  }
+  const message = parseMcpMessage(await res.text(), res.headers.get('content-type') ?? '', 'get_usage');
+  return readToolText(message, 'get_usage');
 }
 
 /** The bearer out of a grant's private handoff. A malformed handoff is a
