@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { encodePath } from './api.ts';
-import { type SettingsTab, isSettingsTab } from './settings/tabs.ts';
+import { type SettingsTab, isSettingsTab, settingsTabForSegment } from './settings/tabs.ts';
 
 /**
  * The SPA's real routes. This module replaces `pageFromPath` and
@@ -57,7 +57,8 @@ export function parseRoute(pathname: string = window.location.pathname): Route {
   const settings = path.match(/^\/settings\/([^/]+)$/);
   if (settings) {
     const tab = decodeURIComponent(settings[1]!);
-    if (isSettingsTab(tab)) return { kind: 'settings', tab };
+    const resolved = settingsTabForSegment(tab);
+    if (resolved) return { kind: 'settings', tab: resolved };
     return { kind: 'editor', sourceId: null, path: null };
   }
   if (path === '/settings') return { kind: 'editor', sourceId: null, path: null };
@@ -108,10 +109,18 @@ export function legacyRedirect(pathname: string): string | null {
     '/sources': 'sources',
     '/schedules': 'schedules',
     '/runs': 'runs',
-    '/spend': 'spend',
-    '/upgrades': 'upgrades',
+    // Spend and upgrades are sections of General now, not tabs.
+    '/spend': 'general',
+    '/upgrades': 'general',
   };
   if (path in toSettingsTab) return `/settings/${toSettingsTab[path]}`;
+  const settings = path.match(/^\/settings\/([^/]+)$/);
+  if (settings) {
+    const segment = decodeURIComponent(settings[1]!);
+    const mapped = settingsTabForSegment(segment);
+    // A retired id maps to a different live tab. A live id is already current.
+    if (mapped && !isSettingsTab(segment)) return `/settings/${mapped}`;
+  }
   if (path === '/files') return '/';
   return null;
 }

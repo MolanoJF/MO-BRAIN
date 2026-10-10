@@ -12,6 +12,7 @@ import { Button, NavItem } from '../ui/index.tsx';
  */
 const PAGES: Record<SettingsTab, ComponentType> = {
   general: lazy(() => import('../pages/General.tsx').then((m) => ({ default: m.General }))),
+  admin: lazy(() => import('../pages/Admin.tsx').then((m) => ({ default: m.Admin }))),
   mcp: lazy(() => import('../pages/Mcp.tsx').then((m) => ({ default: m.Mcp }))),
   credentials: lazy(() => import('../pages/Credentials.tsx').then((m) => ({ default: m.Credentials }))),
   sources: lazy(() => import('../pages/Sources.tsx').then((m) => ({ default: m.Sources }))),
@@ -19,20 +20,16 @@ const PAGES: Record<SettingsTab, ComponentType> = {
   members: lazy(() => import('../pages/Members.tsx').then((m) => ({ default: m.Members }))),
   access: lazy(() => import('../pages/Access.tsx').then((m) => ({ default: m.Access }))),
   schedules: lazy(() => import('../pages/Schedules.tsx').then((m) => ({ default: m.Schedules }))),
-  health: lazy(() => import('../pages/Health.tsx').then((m) => ({ default: m.Health }))),
-  spend: lazy(() => import('../pages/Spend.tsx').then((m) => ({ default: m.Spend }))),
   runs: lazy(() => import('../pages/Runs.tsx').then((m) => ({ default: m.Runs }))),
-  upgrades: lazy(() => import('../pages/Upgrades.tsx').then((m) => ({ default: m.Upgrades }))),
-  appearance: lazy(() => import('../pages/Appearance.tsx').then((m) => ({ default: m.Appearance }))),
 };
 
 const LABEL: Record<SettingsTab, string> = {
   general: 'General',
+  admin: 'Admin',
   mcp: 'MCP',
   credentials: 'Credentials',
   sources: 'Sources', schema: 'Schema', members: 'Members', access: 'Access',
-  schedules: 'Schedules', health: 'Health', spend: 'Spend', runs: 'Runs', upgrades: 'Upgrades',
-  appearance: 'Appearance',
+  schedules: 'Schedules', runs: 'Runner',
 };
 
 /**

@@ -20,8 +20,8 @@
  */
 
 export type SettingsTab =
-  | 'general' | 'sources' | 'schema' | 'mcp' | 'credentials' | 'members' | 'access' | 'schedules'
-  | 'health' | 'spend' | 'runs' | 'upgrades' | 'appearance';
+  | 'general' | 'admin' | 'sources' | 'schema' | 'mcp' | 'credentials' | 'members' | 'access'
+  | 'schedules' | 'runs';
 
 export type SettingsTabRole = 'admin' | 'viewer';
 
@@ -38,14 +38,17 @@ export interface SettingsTabEntry {
  * after `access`, not at the end, per the product owner's requested layout.
  * `credentials` sits right after `mcp`: both are per-member connection setup.
  *
- * `appearance` goes LAST, and that position is load-bearing rather than
- * aesthetic: `resolveTab(null, isAdmin)` returns the first visible tab, so
- * whatever sits at the top of this list is what opening settings lands on.
- * Putting a per-operator preference there would move every admin off General
- * and every member off Sources on the way to a tab most people open once.
+ * `general` is first and `viewer`, so `resolveTab(null, …)` lands everyone on
+ * it. Health, spend, upgrades, and appearance are sections of that page, not
+ * tabs. `admin` is the org name and the personal/company switch; it sits
+ * second so it never becomes the landing, and it is admin-only.
+ *
+ * `runs` keeps its id. The label is Runner: the page is runner status plus the
+ * run ledger, and a bookmarked `/settings/runs` still has to open it.
  */
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
-  { id: 'general', label: 'General', minRole: 'admin' },
+  { id: 'general', label: 'General', minRole: 'viewer' },
+  { id: 'admin', label: 'Admin', minRole: 'admin' },
   { id: 'sources', label: 'Sources', minRole: 'viewer' },
   { id: 'schema', label: 'Schema', minRole: 'admin' },
   { id: 'mcp', label: 'MCP', minRole: 'viewer' },
@@ -53,25 +56,34 @@ export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: 'members', label: 'Members', minRole: 'admin', companyOnly: true },
   { id: 'access', label: 'Access', minRole: 'admin', companyOnly: true },
   { id: 'schedules', label: 'Schedules', minRole: 'viewer' },
-  { id: 'health', label: 'Health', minRole: 'viewer' },
-  { id: 'spend', label: 'Spend', minRole: 'admin' },
-  { id: 'runs', label: 'Runs', minRole: 'viewer' },
-  { id: 'upgrades', label: 'Upgrades', minRole: 'viewer' },
-  { id: 'appearance', label: 'Appearance', minRole: 'viewer' },
+  { id: 'runs', label: 'Runner', minRole: 'viewer' },
 ];
+
+/**
+ * Bookmarks from when Health, Spend, Upgrades, and Appearance were tabs.
+ * They open General, where those pages now live as sections. Spend is still
+ * admin-only inside that page; the URL itself is not a permission.
+ */
+const RETIRED_SETTINGS_TABS: Readonly<Record<string, SettingsTab>> = {
+  health: 'general',
+  spend: 'general',
+  upgrades: 'general',
+  appearance: 'general',
+  mine: 'sources',
+};
 
 const SETTINGS_TAB_IDS: ReadonlySet<string> = new Set(SETTINGS_TABS.map((t) => t.id));
 
 /**
  * The tabs a caller may see. An admin in company mode (the default) sees all
- * thirteen; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
+ * ten; a non-admin sees only the `minRole === 'viewer'` tabs, hidden
  * rather than shown-and-disabled — there is no locked/greyed state to design
  * for, because a member never sees the tab exists. Personal mode additionally
  * hides `companyOnly` tabs.
  *
- * `appearance` is `viewer`, which is to say everybody: the theme is a
- * property of the person looking at the screen, not of their permissions, and
- * an admin-gated dark mode would be a member staring at the wrong one.
+ * General is `viewer`, which is to say everybody: the theme lives on that
+ * page, and an admin-gated dark mode would be a member staring at the wrong
+ * one. Spend is a section of the same page, mounted only for an admin.
  */
 export function visibleTabs(isAdmin: boolean, mode: 'personal' | 'company' = 'company'): SettingsTabEntry[] {
   return SETTINGS_TABS.filter((t) =>
@@ -84,12 +96,22 @@ export function isSettingsTab(value: string): value is SettingsTab {
 }
 
 /**
+ * A live tab id, or the page a retired bookmark now opens. `null` for a typo:
+ * the router falls back to the editor rather than inventing a tab.
+ */
+export function settingsTabForSegment(value: string): SettingsTab | null {
+  if (isSettingsTab(value)) return value;
+  return RETIRED_SETTINGS_TABS[value] ?? null;
+}
+
+/**
  * What the modal actually opens on. A valid, visible tab opens as asked.
  * An unknown segment, or a tab the caller's role cannot see, falls back to
- * the first visible tab — `general` for an admin, `sources` for a member
- * — rather than showing an empty panel. This matters most for the case
- * that looks harmless: `spend` is a real, valid tab id, so checking
- * `isSettingsTab` alone would let a member's pasted admin URL through.
+ * the first visible tab — `general` for everyone — rather than showing an
+ * empty panel. This matters most for the case that looks harmless: `admin`
+ * is a real, valid tab id, so checking `isSettingsTab` alone would let a
+ * member's pasted admin URL through. A retired id (`health`, `spend`,
+ * `upgrades`, `appearance`) is not a tab, so it takes the same fallback.
  */
 export function resolveTab(
   requested: string | null, isAdmin: boolean, mode: 'personal' | 'company' = 'company',
