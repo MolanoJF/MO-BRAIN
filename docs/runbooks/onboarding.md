@@ -4,6 +4,9 @@ Starts the moment `scripts/install.sh` has finished and the stack is healthy. Tw
 tracks run side by side: the **person** (console, host) and the **agent** (MCP).
 Install itself is in [`install.md`](install.md).
 
+> **Stages 1–3 are one agent skill,** `skills/mobrain-onboard-setup`. This runbook stays the
+> reference for the person; hand the agent the `skills/` folder and say "onboard me".
+
 ## Principles
 
 1. **The agent learns gbrain before it touches your data.** It installs gbrain's
