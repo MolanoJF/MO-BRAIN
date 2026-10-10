@@ -123,6 +123,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   putSchemaPack: async () => {},
   putSchemaPackJson: async (name: string, manifest: object) => { jsonPackWrites.push({ name, manifest }); rawPacks[name] = manifest as any; },
   readSchemaPackRaw: async () => null,
+  gitImport: async () => { throw new Error("gitImport is not mocked here"); },
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[] }) => {
     scaffoldAt = opsOrder.length;
     scaffolds.push({ sourceId: req.sourceId, entries: req.entries });

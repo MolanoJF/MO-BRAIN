@@ -833,3 +833,69 @@ describe('git write-file', () => {
   });
 });
 
+
+describe('git import', () => {
+  const actor = { name: 'Alice Example', email: 'alice@example.test' };
+  const files = [
+    { path: 'page.md', content: '# hello\n\nimported over the seed\n' },
+    { path: 'people/ana.md', content: '---\ntype: person\n---\n# Ana\n' },
+    { path: 'inbox/digest.md', content: 'quoted key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123\n' },
+    { path: '.obsidian/app.json', content: '{}' },
+    { path: 'scripts/run.sh', content: 'echo hi' },
+    { path: '../escape.md', content: 'no' },
+  ];
+
+  test('a dry run reports the plan and writes nothing', async () => {
+    const { run, sourceId } = await writeRepo('import-dry');
+    const head = await run(['rev-parse', 'HEAD']);
+    const r = await gitPost('/git/import', {
+      sourceId, source: { kind: 'files', files }, actor, message: 'import: test', dryRun: true,
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { added: number; updated: number; unchanged: number; sha: string | null; plan: { kept: number; skipped: unknown[]; redactions: unknown[] } };
+    expect(body).toMatchObject({ added: 2, updated: 1, unchanged: 0, sha: null });
+    expect(body.plan.kept).toBe(3);
+    expect(body.plan.skipped).toHaveLength(3);
+    expect(body.plan.redactions).toEqual([{ path: 'inbox/digest.md', kind: 'anthropic-key', count: 1 }]);
+    expect(await run(['rev-parse', 'HEAD'])).toBe(head);
+    expect(await run(['status', '--porcelain'])).toBe('');
+  });
+
+  test('an import is one commit by the person, redacted, and a re-import changes nothing', async () => {
+    const { run, sourceId } = await writeRepo('import-real');
+    const r = await gitPost('/git/import', { sourceId, source: { kind: 'files', files }, actor, message: 'import: test' });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { sha: string; added: number; updated: number };
+    expect(body.sha).toMatch(HEAD_RE);
+    expect(await run(['log', '-1', '--format=%an <%ae> %s']))
+      .toBe('Alice Example <alice@example.test> import: test (3 files, 1 secret redacted)');
+    expect(await run(['show', 'HEAD:inbox/digest.md'])).toBe('quoted key [REDACTED:anthropic-key]');
+    expect(await run(['ls-tree', '-r', '--name-only', 'HEAD'])).toBe('inbox/digest.md\npage.md\npeople/ana.md');
+    expect(await run(['status', '--porcelain'])).toBe('');
+
+    const again = await gitPost('/git/import', { sourceId, source: { kind: 'files', files }, actor, message: 'import: test' });
+    expect(await again.json()).toMatchObject({ sha: null, added: 0, updated: 0, unchanged: 3 });
+    expect(await run(['rev-parse', 'HEAD'])).toBe(body.sha);
+  });
+
+  test('a prefix lands every file under that folder', async () => {
+    const { run, sourceId } = await writeRepo('import-prefix');
+    await gitPost('/git/import', {
+      sourceId, source: { kind: 'files', files: [{ path: 'a.md', content: 'a' }] }, prefix: 'notion', actor, message: 'import: notion',
+    });
+    expect(await run(['ls-tree', '-r', '--name-only', 'HEAD'])).toBe('notion/a.md\npage.md');
+  });
+
+  test('a git source must be https with a real host, refused before any clone', async () => {
+    const { sourceId } = await writeRepo('import-git-refuse');
+    for (const url of ['http://github.com/a/b.git', 'file:///etc', 'https://localhost/a.git']) {
+      const r = await gitPost('/git/import', { sourceId, source: { kind: 'git', url }, actor, message: 'import' });
+      expect(r.status).toBe(400);
+    }
+  });
+
+  test('missing actor or source is 400', async () => {
+    const r = await gitPost('/git/import', { sourceId: 'x', message: 'm' });
+    expect(r.status).toBe(400);
+  });
+});

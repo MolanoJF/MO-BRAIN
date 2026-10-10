@@ -38,6 +38,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
   readSchemaPackRaw: async () => null,
+  gitImport: async () => { throw new Error("gitImport is not mocked here"); },
   gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async () => {},

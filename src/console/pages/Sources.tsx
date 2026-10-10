@@ -7,6 +7,7 @@ import {
 import { Badge, Button, Card, Empty, Icon, Input, Link, Notice, PageTitle, Select } from '../ui/index.tsx';
 import { useOrg } from '../OrgContext.tsx';
 import { useSource } from '../SourceContext.tsx';
+import { ImportPanel } from '../ImportPanel.tsx';
 import { RemotePanel, type RemoteApi } from '../RemotePanel.tsx';
 import { inheritanceNote } from './Schema.tsx';
 
@@ -302,6 +303,11 @@ function SourceRow({ src, open, onToggle, shared, agent }: {
             )}
             <p className="text-xs text-muted">Edit a schema's page types under Schema.</p>
           </div>
+
+          {src.canManage && (
+            <ImportPanel sourceId={src.sourceId} busy={!idle} onImported={async () => { await reload(); await reloadSources(); }}
+                         defaultOpen={listOk && src.pageCount === 0} />
+          )}
 
           {src.canManage && (
             <RemotePanel sourceId={src.sourceId} gitRemote={src.gitRemote} status={gitStatusText(src)}

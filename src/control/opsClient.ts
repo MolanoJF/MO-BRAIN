@@ -1,11 +1,11 @@
 import type { OpsResponse } from '../ops/dispatch.ts';
 import type {
-  GitRange, ReadFileResult, RepoStatus, RepoTree, RevertOutcome, RevertRequest, TreeProbe,
+  GitRange, ImportOutcome, ImportRequest, ReadFileResult, RepoStatus, RepoTree, RevertOutcome, RevertRequest, TreeProbe,
   WriteFileOutcome, WriteFileRequest,
 } from '../ops/git.ts';
 import type { BrainUsage } from '../ops/usage.ts';
 
-export type { ReadFileResult, RepoStatus, RepoTree, WriteFileOutcome, WriteFileRequest };
+export type { ImportOutcome, ImportRequest, ReadFileResult, RepoStatus, RepoTree, WriteFileOutcome, WriteFileRequest };
 
 /**
  * Resolve the ops endpoint at CALL time, not at module load.
@@ -148,6 +148,16 @@ export async function gitReadFile(sourceId: string, path: string): Promise<ReadF
 /** S2 — write one file and commit it as the acting member. Read-compare-write-commit under one repo lock. */
 export async function gitWriteFile(req: WriteFileRequest): Promise<WriteFileOutcome> {
   return post('/git/write-file', req, 60_000);
+}
+
+/**
+ * Import a git repo or a file list into a Space as one commit by the actor.
+ * The ops side re-plans every file (skip rules, secret redaction), so this is
+ * never trusted to have filtered. Ten minutes: a clone plus a few thousand
+ * writes, under the repo lock.
+ */
+export async function gitImport(req: ImportRequest): Promise<ImportOutcome> {
+  return post('/git/import', req, 600_000);
 }
 
 /**

@@ -20,9 +20,9 @@ import { pauseBrainWriters, resumeBrainWriters } from './writerGate.ts';
 import { readBrainUsage } from './usage.ts';
 import {
   clearRemote, commitAs, diffRange, exportRepoBundle, gitReadFile, gitTree, gitWriteFile, inspectRepos, probeTreePaths,
-  revertRange, scaffoldFolders, setRemote,
+  importIntoSpace, revertRange, scaffoldFolders, setRemote,
 } from './git.ts';
-import type { ScaffoldRequest } from './git.ts';
+import type { ImportRequest, ScaffoldRequest } from './git.ts';
 import { writeReport } from './reports.ts';
 import { withAdvisoryLock } from './lock.ts';
 
@@ -292,6 +292,19 @@ Bun.serve({
       // before the lock, so a traversing path never reaches a repo.
       if (url.pathname === '/git/scaffold') {
         return json(await scaffoldFolders(body as ScaffoldRequest, { sql }));
+      }
+
+      // Import into a Space: a git clone or a file list, planned (skip rules,
+      // secret redaction) HERE whatever the caller previewed, then one commit
+      // as the person. A git token arrives in the body and is never echoed.
+      if (url.pathname === '/git/import') {
+        const req = body as Partial<ImportRequest>;
+        const actor = req.actor as { name?: unknown; email?: unknown } | undefined;
+        if (typeof req.sourceId !== 'string' || !req.source || typeof req.message !== 'string'
+          || typeof actor?.name !== 'string' || typeof actor?.email !== 'string') {
+          return json({ error: 'sourceId, source, message and actor required' }, 400);
+        }
+        return json(await importIntoSpace(req as ImportRequest, { sql }));
       }
 
       // Space remote: repo config + credential file only. The token arrives in

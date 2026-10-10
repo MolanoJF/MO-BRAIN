@@ -335,6 +335,35 @@ export type RemoveSourceResult = {
   preview?: string;
 };
 
+/** `POST /api/sources/:id/import` (`src/control/spaceImport.ts`). */
+export type ImportNotesBody =
+  | { kind: 'git'; url: string; ref?: string; prefix?: string; dryRun?: boolean }
+  | { kind: 'files'; files: { path: string; content: string }[]; label?: string; prefix?: string; dryRun?: boolean };
+
+export type ImportNotesResult = {
+  ok: true;
+  dryRun?: true;
+  /** What was imported, in words: `github.com/you/notes`, a folder name. */
+  from: string;
+  plan: {
+    kept: number;
+    skipped: { path: string; reason: string }[];
+    redactions: { path: string; kind: string; count: number }[];
+    totalBytes: number;
+    estTokens: number;
+  };
+  added: number;
+  updated: number;
+  unchanged: number;
+  sha: string | null;
+  estUsd: number | null;
+  index?: {
+    sync: { exitCode: number; classification: string } | null;
+    embed: { exitCode: number; classification: string } | null;
+  } | null;
+  sourceStatus?: { pages: number; chunks: number; embeddedChunks: number; coveragePct: number } | null;
+};
+
 export const sourcesApi = {
   list: () =>
     api.get<{
@@ -362,6 +391,8 @@ export const sourcesApi = {
     api.delete<{ ok: true; sourceId: string }>(`/sources/${encodeURIComponent(sourceId)}/remote`),
   remove: (sourceId: string, body: { mode: 'archive' | 'remove'; confirm?: boolean }) =>
     api.delete<RemoveSourceResult>(`/sources/${encodeURIComponent(sourceId)}`, body),
+  importNotes: (sourceId: string, body: ImportNotesBody) =>
+    api.post<ImportNotesResult>(`/sources/${encodeURIComponent(sourceId)}/import`, body),
 };
 
 /**

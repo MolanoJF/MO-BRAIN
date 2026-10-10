@@ -1,8 +1,10 @@
 import { statSync } from 'node:fs';
-import { access, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import type { SQL } from 'bun';
 import { withAdvisoryLock } from './lock.ts';
+import { IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, planImport, type ImportFile, type ImportPlan } from '../contracts/importPlan.ts';
 
 const REPOS_ROOT = process.env.BRAIN_REPOS ?? '/srv/brain-repos';
 /** Same shape seedSpaceRepo enforces — no path separators, no traversal. */
@@ -774,5 +776,163 @@ export async function revertRange(
       sha: await resolveCommit(cwd, 'HEAD'),
       files: parseNameStatus(staged.stdout),
     };
+  });
+}
+
+export type ImportSource =
+  | { kind: 'files'; files: ImportFile[] }
+  | { kind: 'git'; url: string; token?: string; ref?: string };
+
+export type ImportRequest = {
+  sourceId: string;
+  source: ImportSource;
+  /** A folder inside the Space the import lands under; '' is the root. */
+  prefix?: string;
+  actor: { name: string; email: string };
+  message: string;
+  dryRun?: boolean;
+};
+
+export type ImportOutcome = {
+  plan: Omit<ImportPlan, 'files'> & { kept: number };
+  added: number;
+  updated: number;
+  unchanged: number;
+  /** The commit the import made, or null for a dry run or when nothing changed. */
+  sha: string | null;
+  /** The commit a git import read from. */
+  origin: { commit: string | null } | null;
+};
+
+const IMPORT_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+
+/**
+ * Shallow-clone a remote into a temp dir and read its files. The token goes in
+ * a throwaway credential-store file, never argv or the URL, and
+ * GIT_TERMINAL_PROMPT=0 turns a bad token into an error rather than a hang.
+ * `.git` is never walked; a file over the per-file cap is listed with empty
+ * content so the plan reports it as too large without reading it.
+ */
+async function readRemote(
+  src: { url: string; token?: string; ref?: string },
+): Promise<{ files: ImportFile[]; commit: string | null; oversize: string[] }> {
+  const { url, host } = validateRemoteUrl(src.url);
+  if (src.ref !== undefined && !IMPORT_REF.test(src.ref)) throw new Error(`invalid ref: ${src.ref}`);
+  if (src.token !== undefined && !REMOTE_TOKEN_RE.test(src.token)) {
+    throw new Error('token must be 1-512 printable characters, no whitespace');
+  }
+  const work = await mkdtemp(join(tmpdir(), 'mobrain-import-'));
+  try {
+    const helper: string[] = ['-c', 'credential.helper='];
+    if (src.token) {
+      const cred = join(work, 'credentials');
+      await writeFile(cred, `https://x-access-token:${encodeURIComponent(src.token)}@${host}\n`, { mode: 0o600 });
+      helper.push('-c', `credential.helper=store --file=${cred}`);
+    }
+    const dest = join(work, 'repo');
+    const p = Bun.spawn(
+      ['git', ...helper, 'clone', '--depth', '1', '--single-branch', ...(src.ref ? ['--branch', src.ref] : []), '--', url, dest],
+      { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+    );
+    const [stderr, exitCode] = await Promise.all([new Response(p.stderr).text(), p.exited]);
+    if (exitCode !== 0) {
+      const said = stderr.trim().split('\n').at(-1) ?? `exit ${exitCode}`;
+      throw new Error(`git clone failed: ${src.token ? said.split(src.token).join('***') : said}`);
+    }
+    const head = await git(dest, ['rev-parse', 'HEAD']);
+
+    const files: ImportFile[] = [];
+    const oversize: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        if (e.name === '.git') continue;
+        const abs = join(dir, e.name);
+        if (e.isDirectory()) { await walk(abs); continue; }
+        if (!e.isFile()) continue;
+        if (files.length + oversize.length >= IMPORT_MAX_FILES + 1) return;
+        const rel = relative(dest, abs);
+        if ((await stat(abs)).size > IMPORT_MAX_FILE_BYTES) { oversize.push(rel); continue; }
+        files.push({ path: rel, content: await readFile(abs, 'utf8') });
+      }
+    };
+    await walk(dest);
+    return { files, commit: head.exitCode === 0 ? head.stdout.trim() : null, oversize };
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Bring a folder's worth of markdown into a Space as ONE commit by the person
+ * who asked. Every file goes through `planImport` here, whatever the console
+ * previewed, so redaction and the skip rules never depend on the caller. An
+ * existing file at the same path is overwritten (re-importing is how a
+ * snapshot is refreshed); nothing is ever deleted. A dry run reads the Space
+ * and reports what would change without writing.
+ */
+export async function importIntoSpace(
+  req: ImportRequest,
+  opts: { sql: SQL; root?: string },
+): Promise<ImportOutcome> {
+  if (!SOURCE_ID_RE.test(req.sourceId)) throw new Error(`invalid sourceId: ${req.sourceId}`);
+  const cwd = join(opts.root ?? REPOS_ROOT, req.sourceId);
+
+  let input: ImportFile[];
+  let origin: ImportOutcome['origin'] = null;
+  let oversize: string[] = [];
+  if (req.source.kind === 'git') {
+    const remote = await readRemote(req.source);
+    input = remote.files;
+    oversize = remote.oversize;
+    origin = { commit: remote.commit };
+  } else if (req.source.kind === 'files' && Array.isArray(req.source.files)) {
+    input = req.source.files.filter((f) => typeof f?.path === 'string' && typeof f?.content === 'string');
+  } else {
+    throw new Error("source.kind must be 'git' or 'files'");
+  }
+
+  const plan = planImport(input, { prefix: req.prefix ?? '' });
+  for (const path of oversize) plan.skipped.push({ path, reason: 'too_large' });
+  for (const f of plan.files) assertRepoRelative(f.path);
+
+  const classify = async () => {
+    let added = 0; let updated = 0; let unchanged = 0;
+    const changed: ImportFile[] = [];
+    for (const f of plan.files) {
+      const current = await readFile(join(cwd, f.path), 'utf8').catch(() => null);
+      if (current === null) { added++; changed.push(f); } else if (current === f.content) unchanged++;
+      else { updated++; changed.push(f); }
+    }
+    return { added, updated, unchanged, changed };
+  };
+
+  const { files: _kept, ...rest } = plan;
+  const summary = { ...rest, kept: plan.files.length };
+
+  if (req.dryRun) {
+    const { added, updated, unchanged } = await classify();
+    return { plan: summary, added, updated, unchanged, sha: null, origin };
+  }
+
+  return withRepoLock(opts.sql, req.sourceId, async () => {
+    const top = await git(cwd, ['rev-parse', '--show-toplevel']);
+    if (top.exitCode !== 0) throw new Error(`${req.sourceId} has no repo: ${gitFailure(top)}`);
+    const { added, updated, unchanged, changed } = await classify();
+    if (changed.length === 0) return { plan: summary, added, updated, unchanged, sha: null, origin };
+
+    for (const f of changed) {
+      await mkdir(dirname(join(cwd, f.path)), { recursive: true });
+      await writeFile(join(cwd, f.path), f.content, 'utf8');
+    }
+    for (let i = 0; i < changed.length; i += 200) {
+      const add = await git(cwd, ['add', '--', ...changed.slice(i, i + 200).map((f) => f.path)]);
+      if (add.exitCode !== 0) throw new Error(`git add failed for ${req.sourceId}: ${gitFailure(add)}`);
+    }
+    const redacted = plan.redactions.reduce((n, r) => n + r.count, 0);
+    const counts = `${changed.length} file${changed.length === 1 ? '' : 's'}`
+      + (redacted ? `, ${redacted} secret${redacted === 1 ? '' : 's'} redacted` : '');
+    const commit = await git(cwd, commitArgs(req.actor, `${req.message} (${counts})`));
+    if (commit.exitCode !== 0) throw new Error(`git commit failed for ${req.sourceId}: ${gitFailure(commit)}`);
+    return { plan: summary, added, updated, unchanged, sha: await resolveCommit(cwd, 'HEAD'), origin };
   });
 }

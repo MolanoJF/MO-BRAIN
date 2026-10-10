@@ -15,6 +15,12 @@ type CallOpts = { json?: boolean; dryRun?: boolean; timeoutMs?: number; packOver
 let opsHandler: (op: string, params: Record<string, unknown>, opts?: CallOpts) => OpsReply;
 const opsCalls: { op: string; params: Record<string, unknown>; opts?: CallOpts }[] = [];
 const seedCalls: string[] = [];
+type ImportReq = { sourceId: string; source: { kind: string; url?: string; token?: string; files?: unknown[] }; prefix: string; message: string; dryRun: boolean; actor: { email: string } };
+const importCalls: ImportReq[] = [];
+let importReply: (req: ImportReq) => unknown = () => ({
+  plan: { kept: 0, skipped: [], redactions: [], totalBytes: 0, estTokens: 0 },
+  added: 0, updated: 0, unchanged: 0, sha: null, origin: null,
+});
 
 mock.module('../../src/control/opsClient.ts', () => ({
   callOps: async (op: string, params: Record<string, unknown> = {}, opts?: CallOpts) => {
@@ -25,6 +31,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
   putSchemaPack: async () => {},
   putSchemaPackJson: async () => {},
   readSchemaPackRaw: async () => null,
+  gitImport: async (req: ImportReq) => { importCalls.push(req); return importReply(req); },
   gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
   removeSchemaPack: async () => ({ removed: false }),
   seedSpace: async (sourceId: string) => { seedCalls.push(sourceId); },
@@ -154,6 +161,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   opsCalls.length = 0;
   seedCalls.length = 0;
+  importCalls.length = 0;
   invalidateSchemaPackCache();
   await getDb().delete(schema.auditLog);
   await getDb().delete(schema.spaces);
@@ -474,4 +482,75 @@ test('an admin cannot manage another member\'s private Space', async () => {
   expect((await hit('DELETE', '/api/sources/mem-priv', ownerCookie, { mode: 'archive' })).status).toBe(400);
   expect((await hit('POST', '/api/schema/sources/mem-priv', ownerCookie, { pack: 'mobrain-core' })).status).toBe(400);
   expect((await hit('GET', '/api/spaces/mem-priv/export', ownerCookie)).status).toBe(404);
+});
+
+const PLANNED = {
+  plan: {
+    kept: 2, skipped: [{ path: 'run.sh', reason: 'not_markdown' }],
+    redactions: [{ path: 'inbox/a.md', kind: 'anthropic-key', count: 1 }], totalBytes: 4_000_000, estTokens: 1_000_000,
+  },
+  added: 2, updated: 0, unchanged: 0, origin: null,
+};
+
+test('POST /sources/:id/import previews without writing, indexing or auditing', async () => {
+  await insertSpace('customers');
+  importReply = () => ({ ...PLANNED, sha: null });
+  opsHandler = (op) => { throw new Error(`unexpected op ${op}`); };
+  const res = await hit('POST', '/api/sources/customers/import', ownerCookie, {
+    kind: 'files', label: 'vault', dryRun: true, files: [{ path: 'a.md', content: 'a' }, { path: 'run.sh', content: 'x' }],
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json() as Record<string, unknown>;
+  expect(body).toMatchObject({ ok: true, dryRun: true, from: 'vault', added: 2 });
+  expect(importCalls[0]).toMatchObject({ sourceId: 'customers', dryRun: true, message: 'import: vault', actor: { email: 'sources-owner@example.test' } });
+  expect(opsCalls).toHaveLength(0);
+  expect(await lastAudit()).toBeUndefined();
+});
+
+test('POST /sources/:id/import commits, then syncs and embeds that Space, and audits counts only', async () => {
+  await insertSpace('customers');
+  importReply = () => ({ ...PLANNED, sha: 'c0ffee' });
+  opsHandler = (op) => {
+    if (op === 'sync' || op === 'embed') return ok('', {});
+    if (op === 'sources.status') {
+      return ok('', { sources: [{ source_id: 'customers', total_pages: 2, total_chunks: 4, embedded_chunks: 4, embed_coverage_pct: 100 }] });
+    }
+    throw new Error(`unexpected op ${op}`);
+  };
+  const res = await hit('POST', '/api/sources/customers/import', ownerCookie, {
+    kind: 'files', files: [{ path: 'a.md', content: 'secret-free' }],
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({
+    sha: 'c0ffee', index: { sync: { classification: 'ok' }, embed: { classification: 'ok' } },
+    sourceStatus: { pages: 2, coveragePct: 100 },
+  });
+  expect(opsCalls.map((c) => [c.op, c.params.source])).toEqual([
+    ['sync', 'customers'], ['embed', 'customers'], ['sources.status', undefined],
+  ]);
+  const audit = await lastAudit();
+  expect(audit?.action).toBe('source.import');
+  expect(audit?.after).toMatchObject({ kind: 'files', origin: 'uploaded folder', kept: 2, redacted: 1, sync: 'ok', embed: 'ok' });
+  expect(JSON.stringify(audit)).not.toContain('secret-free');
+});
+
+test('POST /sources/:id/import offers the stored GitHub token to github.com only', async () => {
+  await insertSpace('customers');
+  const { storeSecret } = await import('../../src/control/secrets.ts');
+  await storeSecret(orgId, 'github_token', 'ghp_' + 'z'.repeat(36));
+  importReply = () => ({ ...PLANNED, sha: null });
+  await hit('POST', '/api/sources/customers/import', ownerCookie, { kind: 'git', url: 'https://github.com/acme/notes.git', dryRun: true });
+  await hit('POST', '/api/sources/customers/import', ownerCookie, { kind: 'git', url: 'https://gitlab.example.com/acme/notes.git', dryRun: true });
+  expect(importCalls[0]!.source.token).toBe('ghp_' + 'z'.repeat(36));
+  expect(importCalls[0]!.message).toBe('import: github.com/acme/notes');
+  expect(importCalls[1]!.source).not.toHaveProperty('token');
+  await getDb().delete(schema.secrets);
+});
+
+test('POST /sources/:id/import refuses a non-https URL, a bad prefix, and a Space the caller cannot manage', async () => {
+  await insertSpace('customers');
+  expect((await hit('POST', '/api/sources/customers/import', ownerCookie, { kind: 'git', url: 'http://github.com/a/b' })).status).toBe(400);
+  expect((await hit('POST', '/api/sources/customers/import', ownerCookie, { kind: 'files', prefix: '../x', files: [{ path: 'a.md', content: 'a' }] })).status).toBe(400);
+  expect((await hit('POST', '/api/sources/customers/import', memberCookie, { kind: 'files', files: [{ path: 'a.md', content: 'a' }] })).status).toBe(400);
+  expect(importCalls).toHaveLength(0);
 });

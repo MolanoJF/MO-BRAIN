@@ -46,6 +46,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
     jsonPackWrites.push({ name, manifest }); rawPacks[name] = manifest; onJsonPackWrite();
   },
   readSchemaPackRaw: async (name: string) => storedRaw[name] ?? null,
+  gitImport: async () => { throw new Error("gitImport is not mocked here"); },
   gitScaffold: async (req: { sourceId: string; entries: { dir: string; readme: string }[]; actor: { name: string; email: string }; message: string }) => {
     scaffolds.push(req);
     return { created: req.entries.map((e) => `${e.dir}README.md`), skipped: [], sha: 'scaffold-sha' };

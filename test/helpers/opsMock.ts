@@ -78,6 +78,7 @@ export function installOpsMock(): OpsMock {
     putSchemaPack: async () => {},
     putSchemaPackJson: async () => {},
     readSchemaPackRaw: async () => null,
+    gitImport: async () => { throw new Error("gitImport is not mocked here"); },
     gitScaffold: async () => ({ created: [], skipped: [], sha: null }),
     gitSetRemote: async (r: { url: string }) => ({ url: r.url, branch: 'main' }),
     gitClearRemote: async () => ({ removed: true }),

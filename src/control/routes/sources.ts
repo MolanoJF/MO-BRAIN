@@ -6,6 +6,7 @@ import { requireRole, type Role } from '../rbac.ts';
 import { callerFor } from '../zone.ts';
 import { callOps } from '../opsClient.ts';
 import { connectRemote, disconnectRemote, pushRemote } from '../spaceRemoteOps.ts';
+import { importIntoSpaceFor } from '../spaceImport.ts';
 import { addSpaceSource, ISOLATION_NOTICE } from './wizard.ts';
 import { resolveSourcePacks } from './schema.ts';
 import { grantsFor } from '../grants.ts';
@@ -205,6 +206,14 @@ sourceRoutes.put('/sources/:sourceId/remote', guard('viewer', async (c, ctx) => 
   const space = await ownedSpace(c, ctx);
   if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
   return respond(c, await connectRemote(ctx, space, await c.req.json().catch(() => ({}))));
+}));
+
+/* Import existing notes (a git repo or an uploaded folder) into a Space the
+ * caller may manage. `dryRun: true` previews; logic in `../spaceImport.ts`. */
+sourceRoutes.post('/sources/:sourceId/import', guard('viewer', async (c, ctx) => {
+  const space = await ownedSpace(c, ctx);
+  if (!space) return c.json({ error: `unknown source ${c.req.param('sourceId') ?? ''}` }, 400);
+  return respond(c, await importIntoSpaceFor(ctx, space, await c.req.json().catch(() => ({}))));
 }));
 
 sourceRoutes.post('/sources/:sourceId/remote/push', guard('viewer', async (c, ctx) => {
