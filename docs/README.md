@@ -13,6 +13,6 @@ Operator procedure and the version promise. History is in [`archive/`](archive/)
 | [CI](runbooks/ci.md) | What runs when, and the Actions budget |
 | [Skill catalog sync](runbooks/skill-catalog-sync.md) | Curate and ship the catalog |
 | [Support policy](support-policy.md) | The supported gbrain pin, and what is not promised |
-| [Agent control MCP spec](specs/agent-control-mcp.md) | Draft, not built: let agents operate Mo-brain |
+| [Agent control MCP spec](specs/agent-control-mcp.md) | Built (v1): let agents operate Mo-brain |
 
 Start at [`../README.md`](../README.md). Agents start at [`../HANDOFF.md`](../HANDOFF.md).

@@ -1,7 +1,8 @@
 # Agent control MCP — spec
 
-Status: **draft, not built.** Nothing in this document has shipped. One load-bearing assumption (D2) is
-**unverified** and has a written probe and a fallback.
+Status: **built (v1, phases 0–3)** on branch `MolanoJF/fulmar`, unreleased. Phase 4 (OAuth consent,
+bootstrap code) is not built. The §8 probe has **not yet been run** — it needs a stack built from this
+branch plus the owner credentials. §13 records where the build departs from §3–§5.
 
 ## 1. Goal
 
