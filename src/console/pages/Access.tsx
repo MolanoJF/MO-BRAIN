@@ -25,6 +25,7 @@ type ConnectionRow = {
   state: string;
   clientName: string;
   profile: string;
+  controlEnabled: boolean;
   boundSlugPrefixes: unknown;
 };
 type Cell = { membershipId: string; spaceId: string; access: 'write' | 'read' };
@@ -206,6 +207,11 @@ export function Access() {
     await load();
   });
 
+  const setControl = (id: string, enabled: boolean) => step(async () => {
+    await api.post(`/connections/${id}/control`, { enabled });
+    await load();
+  });
+
   const grouped = useMemo(() => {
     const map = new Map<string, ConnectionRow[]>();
     for (const c of connections) {
@@ -309,6 +315,12 @@ export function Access() {
                           no tone onto it, and a Badge would have to invent one. */}
                       <span className="font-mono text-[length:var(--control-font)] text-muted">{row.state}</span>
                       {row.state !== 'revoked' && (
+                        <Button disabled={busy} onClick={() => void setControl(row.id, !row.controlEnabled)}
+                          title="Whether this Connection's token may also use the Mo-brain control server (agents operating Mo-brain).">
+                          {row.controlEnabled ? 'Make data-only' : 'Allow control'}
+                        </Button>
+                      )}
+                      {row.state !== 'revoked' && (
                         <Button variant="danger" disabled={busy} onClick={() => void revoke(row.id)}>
                           Revoke
                         </Button>
@@ -317,6 +329,9 @@ export function Access() {
                   </div>
                   <div className="text-[length:var(--control-font)] text-muted">
                     Read: {asStringArray(row.readSpaceIds).map((id) => spaceLabel(spaces, id)).join(', ') || 'none'}
+                  </div>
+                  <div className="text-[length:var(--control-font)] text-muted">
+                    Control server: {row.controlEnabled ? 'allowed (agents can operate Mo-brain within the member\'s role)' : 'data-only'}
                   </div>
                   <div className="text-[length:var(--control-font)] font-mono text-muted">
                     {row.harness} · {row.clientName}

@@ -140,6 +140,20 @@ describe('resolveCaller', () => {
       .where(eq(schema.memberships.id, fx.admin.membershipId));
   });
 
+  test('a data-only Connection is refused with control_disabled', async () => {
+    const clientId = await clientIdOf(fx.owner.privateConnectionId);
+    await getDb().update(schema.connections).set({ controlEnabled: false })
+      .where(eq(schema.connections.id, fx.owner.privateConnectionId));
+    try {
+      const r = await resolveCaller(`tok-${clientId}`, fakeWhoami().deps);
+      expect(r).toEqual({ ok: false, status: 403, error: 'control_disabled',
+        audit: { orgId: fx.orgId, actor: fx.owner.userId, clientId } });
+    } finally {
+      await getDb().update(schema.connections).set({ controlEnabled: true })
+        .where(eq(schema.connections.id, fx.owner.privateConnectionId));
+    }
+  });
+
   test('the TTL env is clamped to 60 s', async () => {
     process.env.CONTROL_MCP_IDENTITY_TTL_MS = '600000';
     const { defaultResolverDeps } = await import('../../src/control/mcp/caller.ts');

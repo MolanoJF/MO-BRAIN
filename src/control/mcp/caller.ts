@@ -4,9 +4,10 @@
  * 1. Ops presents the bearer to gbrain's `whoami` (gbrain verifies it) and we
  *    read the OAuth client id. Only that answer is cached, ≤ 60 s, keyed by a
  *    SHA-256 of the token — never the token.
- * 2. The client id must be a `connections.gbrain_client_id`. Connection state
- *    and the membership role are re-read on EVERY call, so a revoke or a role
- *    change takes effect immediately, cache or not.
+ * 2. The client id must be a `connections.gbrain_client_id`. Connection state,
+ *    the membership role and the data-only flag (`control_enabled`) are re-read
+ *    on EVERY call, so a revoke, a role change or a data-only flip takes effect
+ *    immediately, cache or not.
  * 3. A per-run token is its own OAuth client (`agent_runs.gbrain_client_id`),
  *    and `connections.server_client_id` is the server-side minting client:
  *    both are runner identities and are refused (D5).
@@ -135,6 +136,10 @@ export async function resolveCaller(bearer: string, deps: ResolverDeps = default
   }
   if (conn.state !== 'active') {
     return { ok: false, status: 403, error: 'connection_inactive',
+      audit: { orgId: conn.organizationId, actor: m.userId, clientId } };
+  }
+  if (conn.controlEnabled === false) {
+    return { ok: false, status: 403, error: 'control_disabled',
       audit: { orgId: conn.organizationId, actor: m.userId, clientId } };
   }
   return {

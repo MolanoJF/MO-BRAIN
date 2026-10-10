@@ -237,6 +237,9 @@ export const connections = pgTable('connections', {
   verifyStatus: text('verify_status'),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
   verifyMessage: text('verify_message'),
+  // Spec agent-control-mcp §7: an admin can make a Connection data-only. The
+  // control MCP refuses it; the data lane (/mcp) is untouched.
+  controlEnabled: boolean('control_enabled').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('connections_org_client_name_uq').on(t.organizationId, t.clientName),
