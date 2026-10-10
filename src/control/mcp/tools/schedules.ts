@@ -5,7 +5,7 @@ import { CONNECTION_INPUT } from './read.ts';
 
 const seg = (v: unknown) => encodeURIComponent(String(v));
 
-/** The fields `POST/PATCH /schedules` read (src/control/routes/schedules.ts). The route validates values. */
+/** The fields `POST`/`PATCH /schedules` can read (src/control/routes/schedules.ts). The route validates values; the create set below is trimmed to what `POST` actually consumes. */
 const SCHEDULE_FIELDS: Record<string, PropSchema> = {
   name: { type: 'string', description: 'Lowercase job name; becomes reports/<name>/.', maxLength: 64 },
   connectionId: { type: 'string', description: 'The Connection it runs as. A member may use only their own.', maxLength: 64 },
@@ -22,14 +22,26 @@ const SCHEDULE_FIELDS: Record<string, PropSchema> = {
   enabled: { type: 'boolean' },
   timeoutSeconds: { type: 'integer' },
   misfireGraceSeconds: { type: 'integer' },
-  notifies: { type: ['boolean', 'object', 'array'] },
+  notifies: { type: 'boolean' },
   agentPrompt: { type: 'string', maxLength: 20_000 },
   agentModel: { type: 'string', maxLength: 64 },
   agentMaxTokens: { type: 'integer' },
   agentBudgetUsd: { type: ['number', 'string'] },
 };
 
-const CREATE: InputSchema = { type: 'object', properties: SCHEDULE_FIELDS, required: ['name', 'connectionId'], additionalProperties: false };
+/**
+ * What `POST /schedules` reads: `SCHEDULE_FIELDS` minus the two arguments only
+ * `PATCH /schedules/:id` honours — `enabled` there, the timezone nowhere but
+ * `/org/schedule-settings`. A new schedule is created ENABLED and fires in the
+ * organization's timezone, so a create that passes `enabled` or `timezone`
+ * would be answered 200 with the value silently dropped;
+ * `additionalProperties: false` refuses it instead. Neither route changes.
+ */
+const CREATE_FIELDS: Record<string, PropSchema> = Object.fromEntries(
+  Object.entries(SCHEDULE_FIELDS).filter(([key]) => key !== 'enabled' && key !== 'timezone'),
+);
+
+const CREATE: InputSchema = { type: 'object', properties: CREATE_FIELDS, required: ['name', 'connectionId'], additionalProperties: false };
 const UPDATE: InputSchema = {
   type: 'object',
   properties: { id: { type: 'string', maxLength: 64 }, ...SCHEDULE_FIELDS },
@@ -40,7 +52,7 @@ const UPDATE: InputSchema = {
 export const SCHEDULE_TOOLS: ToolDef[] = [
   {
     name: 'schedule_create', minRole: 'member', mutating: true, input: CREATE,
-    description: 'Create a schedule: a gbrain command or an agent prompt that runs on an interval or calendar, as one of your Connections.',
+    description: 'Create a schedule: a gbrain command or an agent prompt that runs on an interval or calendar, as one of your Connections. It is created enabled, and fires in the organization\'s timezone.',
     route: (a) => ({ method: 'POST', path: '/api/schedules', body: a }),
   },
   {

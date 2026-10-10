@@ -68,6 +68,47 @@ describe('schedule tools', () => {
     expect((await callTool(viewer, 'schedule_create', { name: 'v', connectionId: 'x' })).structuredContent.error).toBe('unknown_tool');
   });
 
+  // Review finding 1: `enabled` and `timezone` are update-only. POST ignores
+  // both — a created schedule is ENABLED and fires in the organization's
+  // timezone — so a create that passes either must be refused, not answered
+  // 200 while the value is dropped. The plain create above still succeeds.
+  test('create refuses the arguments the route never reads', async () => {
+    const base = {
+      name: 'alice-mcp-ignored', connectionId: fx.alice.privateConnectionId,
+      kind: 'interval', intervalSeconds: 3600, operation: 'sync', params: {},
+    };
+    for (const ignored of [{ enabled: false }, { timezone: 'America/New_York' }]) {
+      const r = await callTool(alice, 'schedule_create', { ...base, ...ignored });
+      expect(r.isError).toBe(true);
+      expect(r.structuredContent.error).toBe('invalid_arguments');
+      expect((r.structuredContent.errors as string[]).some((e) => e.startsWith('unknown argument: '))).toBe(true);
+    }
+    const rows = await getDb().select().from(schema.schedules).where(eq(schema.schedules.name, 'alice-mcp-ignored'));
+    expect(rows).toEqual([]);
+  });
+
+  // Review finding 2: the route refuses any `notifies` that is not a boolean
+  // (`invalid_notifies`, routes/schedules.ts:359). The declared type is the
+  // boolean the route reads, so a non-boolean is `invalid_arguments` here.
+  test('notifies is the boolean the route reads, on create and on update', async () => {
+    const base = {
+      name: 'alice-mcp-notifies', connectionId: fx.alice.privateConnectionId,
+      kind: 'interval', intervalSeconds: 3600, operation: 'sync', params: {},
+    };
+    for (const bad of ['yes', {}]) {
+      const r = await callTool(alice, 'schedule_create', { ...base, notifies: bad });
+      expect(r.isError).toBe(true);
+      expect(r.structuredContent.error).toBe('invalid_arguments');
+      expect((r.structuredContent.errors as string[]).some((e) => e.startsWith('notifies '))).toBe(true);
+    }
+    const created = await callTool(alice, 'schedule_create', { ...base, notifies: true });
+    expect(created.isError).toBe(false);
+    const updated = await callTool(alice, 'schedule_update', { id: scheduleId, notifies: true });
+    expect(updated.isError).toBe(false);
+    const [row] = await getDb().select().from(schema.schedules).where(eq(schema.schedules.id, created.structuredContent.id));
+    expect(row!.notifies).toBe(true);
+  });
+
   // Ruling 8 / S3c: the MCP's own audit row for a write carries the argument
   // KEYS and nothing else — no values, no response body, no bearer.
   test('the control_mcp.call row for a write carries keys, never values', async () => {
