@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  doneText, gitUrlError, prefixError, previewText, redactionSummary, skipSummary, stripTopFolder,
+  collisionSummary, doneText, gitUrlError, prefixError, previewText, redactionSummary, skipSummary, stripTopFolder,
 } from '../../src/console/ImportPanel.tsx';
 import type { ImportNotesResult } from '../../src/console/api.ts';
 
 const result = (over: Partial<ImportNotesResult> = {}): ImportNotesResult => ({
   ok: true, from: 'github.com/acme/notes',
-  plan: { kept: 744, skipped: [], redactions: [], totalBytes: 4_600_000, estTokens: 1_150_000 },
+  plan: { kept: 744, skipped: [], redactions: [], collisions: [], totalBytes: 4_600_000, estTokens: 1_150_000 },
   added: 744, updated: 0, unchanged: 0, sha: 'abcdef1234567', estUsd: 0.023,
   index: { sync: { exitCode: 0, classification: 'ok' }, embed: { exitCode: 0, classification: 'ok' } },
   sourceStatus: { pages: 744, chunks: 3000, embeddedChunks: 3000, coveragePct: 100 },
@@ -46,6 +46,12 @@ describe('import panel copy', () => {
     expect(doneText(result({ index: { sync: { exitCode: 1, classification: 'failed' }, embed: null } })).text)
       .toContain('sync exit 1');
     expect(doneText(result({ sha: null })).text).toContain('already here');
+  });
+
+  test('collisions name a pair and say all files stay in git', () => {
+    expect(collisionSummary([['a.md', 'a-.md'], ['B.md', 'b.md']]))
+      .toBe('2 pairs of files share a page name, so only one of each becomes a page (e.g. a.md and a-.md). All are kept in git.');
+    expect(collisionSummary([])).toBeNull();
   });
 
   test('a git URL must be https and name a repo, with no credentials', () => {

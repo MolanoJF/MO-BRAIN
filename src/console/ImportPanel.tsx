@@ -46,6 +46,14 @@ export function redactionSummary(redactions: readonly { path: string; kind: stri
   return `${plural(total, 'secret')} redacted in ${plural(files, 'file')} (${kinds})`;
 }
 
+/** "5 pairs of files share a page name; only one of each becomes a page (e.g. a.md and A.md)", or null. */
+export function collisionSummary(collisions: readonly string[][]): string | null {
+  if (collisions.length === 0) return null;
+  const [first] = collisions;
+  const groups = collisions.every((g) => g.length === 2) ? plural(collisions.length, 'pair') : plural(collisions.length, 'group');
+  return `${groups} of files share a page name, so only one of each becomes a page (e.g. ${first!.join(' and ')}). All are kept in git.`;
+}
+
 /** The preview's headline. */
 export function previewText(r: ImportNotesResult): string {
   const changes = [
@@ -175,6 +183,7 @@ export function ImportPanel({ sourceId, busy, onImported, defaultOpen = false }:
   const localSkips = mode === 'folder' && folder && folder.localSkips > 0
     ? `${plural(folder.localSkips, 'file')} that ${folder.localSkips === 1 ? 'is' : 'are'} not Markdown stayed on this computer.` : null;
   const redacted = preview ? redactionSummary(preview.plan.redactions) : null;
+  const collided = preview ? collisionSummary(preview.plan.collisions ?? []) : null;
   const finished = done ? doneText(done) : null;
 
   return (
@@ -226,6 +235,7 @@ export function ImportPanel({ sourceId, busy, onImported, defaultOpen = false }:
               {skips && <p>{skips}.</p>}
               {localSkips && <p>{localSkips}</p>}
               {redacted && <p>{redacted}.</p>}
+              {collided && <p>{collided}</p>}
               <p className="text-xs">One commit, signed by you. Nothing is deleted; a page already at the same path is replaced.</p>
               <div className="flex gap-2">
                 <Button variant="primary" disabled={off || preview.plan.kept === 0} onClick={() => void run('import')}>

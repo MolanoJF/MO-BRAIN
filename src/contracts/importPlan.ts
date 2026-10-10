@@ -21,6 +21,12 @@ export type ImportPlan = {
   files: ImportFile[];
   skipped: { path: string; reason: SkipReason }[];
   redactions: { path: string; kind: string; count: number }[];
+  /**
+   * Files whose paths differ only in case or a trailing `-`, which gbrain
+   * turns into ONE page slug: every file is committed, but only one of each
+   * group becomes a searchable page. Reported, not skipped.
+   */
+  collisions: string[][];
   totalBytes: number;
   /** ~4 bytes per token: an estimate for the embedding cost, never a bill. */
   estTokens: number;
@@ -77,6 +83,11 @@ export function normalizeImportPath(raw: string, prefix = ''): string | null {
 
 const byteLength = (s: string) => new TextEncoder().encode(s).length;
 
+/** The page slug gbrain derives from a path, as far as collisions go: lowercase, no `.md`, no trailing `-` per segment. */
+export function slugKey(path: string): string {
+  return path.replace(MARKDOWN, '').toLowerCase().split('/').map((s) => s.replace(/-+$/, '')).join('/');
+}
+
 /**
  * Throws when the input is over the hard caps, so a caller can refuse before
  * doing any work; everything else is a per-file skip in the report.
@@ -85,7 +96,7 @@ export function planImport(input: readonly ImportFile[], opts: { prefix?: string
   if (input.length > IMPORT_MAX_FILES) {
     throw new Error(`too many files: ${input.length} (limit ${IMPORT_MAX_FILES})`);
   }
-  const plan: ImportPlan = { files: [], skipped: [], redactions: [], totalBytes: 0, estTokens: 0 };
+  const plan: ImportPlan = { files: [], skipped: [], redactions: [], collisions: [], totalBytes: 0, estTokens: 0 };
   const seen = new Set<string>();
 
   for (const f of input) {
@@ -117,6 +128,9 @@ export function planImport(input: readonly ImportFile[], opts: { prefix?: string
   if (plan.totalBytes > IMPORT_MAX_TOTAL_BYTES) {
     throw new Error(`import too large: ${plan.totalBytes} bytes (limit ${IMPORT_MAX_TOTAL_BYTES})`);
   }
+  const bySlug = new Map<string, string[]>();
+  for (const f of plan.files) bySlug.set(slugKey(f.path), [...(bySlug.get(slugKey(f.path)) ?? []), f.path]);
+  plan.collisions = [...bySlug.values()].filter((group) => group.length > 1);
   plan.estTokens = Math.ceil(plan.totalBytes / 4);
   return plan;
 }

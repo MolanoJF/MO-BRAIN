@@ -74,6 +74,21 @@ describe('planImport', () => {
     expect(plan.estTokens).toBe(Math.ceil(plan.totalBytes / 4));
   });
 
+  test('paths that become one page slug are reported, and all are still kept', () => {
+    const plan = planImport([
+      { path: 'atoms/scope-creep.md', content: 'a' },
+      { path: 'atoms/scope-creep-.md', content: 'b' },
+      { path: 'concepts/AIOS.md', content: 'c' },
+      { path: 'concepts/aios.md', content: 'd' },
+      { path: 'people/ana.md', content: 'e' },
+    ]);
+    expect(plan.files).toHaveLength(5);
+    expect(plan.collisions).toEqual([
+      ['atoms/scope-creep.md', 'atoms/scope-creep-.md'],
+      ['concepts/AIOS.md', 'concepts/aios.md'],
+    ]);
+  });
+
   test('a prefix moves every kept file under that folder', () => {
     const plan = planImport([{ path: 'a.md', content: 'a' }], { prefix: 'notion' });
     expect(plan.files[0]!.path).toBe('notion/a.md');

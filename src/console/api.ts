@@ -349,6 +349,7 @@ export type ImportNotesResult = {
     kept: number;
     skipped: { path: string; reason: string }[];
     redactions: { path: string; kind: string; count: number }[];
+    collisions: string[][];
     totalBytes: number;
     estTokens: number;
   };
