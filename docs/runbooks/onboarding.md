@@ -23,7 +23,7 @@ Install itself is in [`install.md`](install.md).
 |---|---|---|---|
 | 1 Verify health | health, wizard, backup | — | no |
 | 2 Connect MCP | paste the config | round-trip check | no |
-| 3 Ingest the brain folder | import it all | report counts | embeddings |
+| 3 Ingest the brain folder | import it all | report counts, answer from it | embeddings (~$0.02 per 1,000 pages) |
 | 4 Choose schedules | pick jobs and frequency | — | per job |
 | 5 Enable the runner | enable, confirm healthy | — | capped |
 | 6 Ingest from notes, email, calendar | connect sources, review | extract key facts | capped |
@@ -37,18 +37,46 @@ Install itself is in [`install.md`](install.md).
 
 - Open the URL `install.sh` printed and complete the wizard: sign in, OpenAI key,
   Create brain.
-- Console → Health: `ok: true` and `pin.matches: true`. `runner.state: "disabled"`
-  is expected at this point.
-- Take the first backup (`./molior.sh backup`, or the host equivalent in
-  [`backup-restore.md`](backup-restore.md)).
+- Settings → Health: "All components healthy", the **gbrain** row green with
+  "(running)", the **runner** row "off". (Unauthenticated equivalent:
+  `curl <url>/api/health` shows `ok: true`, `pin.matches: true`,
+  `runner.state: "disabled"`.)
+- Take the first backup from the install checkout:
+  `bun run scripts/backup.ts ~/backups/mobrain/$(date +%Y-%m-%dT%H%M%S)`
+  (a host may wrap this, e.g. `./molior.sh backup`). Keep `ENCRYPTION_KEY`
+  apart from the archive; see [`backup-restore.md`](backup-restore.md).
 
 **Gate:** health green, backup exists.
 
 ### Stage 2 — Connect MCP
 
-- Settings → MCP: copy the endpoint, credential JSON and snippet into the agent
-  you use. Enable agent instructions if the agent supports skills.
-- Run the agent's round-trip check (below).
+1. Settings → MCP shows four blocks: **Endpoint**, **Credentials**, **Harness
+   snippet** and **Agent instructions**.
+2. Wire the agent.
+   - Claude Code: run this on the machine the agent runs on, with the
+     `access_token` from Credentials:
+
+     ```bash
+     claude mcp add --scope user --transport http mobrain <endpoint> \
+       --header "Authorization: Bearer <access_token>"
+     claude mcp list    # mobrain: … (HTTP) - ✔ Connected
+     ```
+
+   - Other agents: paste the `mcpServers` fragment from Harness snippet.
+3. Give the agent the **Agent instructions** block as its standing instruction
+   (system prompt, `CLAUDE.md`, or project instructions), followed by the agent
+   track below.
+4. Run the agent's round-trip check (below).
+
+Things the person should know:
+
+- On a Tailscale or LAN install, the notice under the blocks reads "Not checked
+  from the server…". That is expected. The server cannot reach its own tailnet
+  address, so the round trip is the check.
+- The access token lasts **30 days** (`expires_at` in Credentials). **Issue a new
+  connection** before then. That revokes the old token, so re-run step 2.
+- The agent writes to your private Source and can write any page there. It
+  cannot change schema, schedules, connections or Sources.
 
 **Gate:** the agent writes a page and reads it back, and the page shows in the
 console editor.
@@ -56,18 +84,48 @@ console editor.
 ### Stage 3 — Ingest the brain folder
 
 Import the whole starting folder (notes, vault, existing brain) into the private
-Space as one Source, in one pass. Don't reorganize it first, and don't wait for
-the habit of capturing facts by hand: the aim is an active brain with active
-files on day one. If the folder is a git repo, add it with its git remote
-(Settings → Sources) so changes keep flowing in.
+Source in one pass. Don't reorganize it first, and don't wait for the habit of
+capturing facts by hand: the aim is an active brain with active files on day one.
 
-Then check: page count matches what you imported, three random pages open
-correctly, and embeddings finish (Health).
+1. **Private GitHub repo only:** Settings → Credentials → Your GitHub token. A
+   fine-grained token with *Contents: read* on that repo is enough.
+2. Settings → Sources → open your Source → **Import notes**. On an empty Source
+   it is already open.
+   - **From a git repo:** the `https://` clone URL, plus an optional branch.
+   - **Upload a folder:** pick the folder. Only its Markdown files leave the
+     computer.
+   - **Into folder** is optional. Leave it empty when the folder's layout
+     (`people/`, `meetings/`, …) should become the Source's layout.
+3. **Preview import**, and read it before importing. The preview lists:
+   - pages to import (new, updated, already here);
+   - what is skipped and why (hidden folders, non-Markdown, over 1 MB);
+   - **secrets that will be redacted**, which are replaced with
+     `[REDACTED:<kind>]` before anything is stored, embedded or searchable;
+   - files that share a page name, where only one of each group becomes a page;
+   - the embedding estimate.
+4. **Import.** The import is one commit signed by you, followed by sync and
+   embedding. The result line says how many pages the brain holds and how much
+   of it is embedded. 744 files took about a minute.
 
-**Gate:** search finds things you know are in the folder, with citations, and
-says "nothing" for things that aren't.
+What to expect:
+
+- **Page count** = pages imported − files marked `gbrain_exclude: true` − the
+  extra files in each shared-name group. The first real import was 744 files →
+  737 pages (2 excluded, 5 pairs).
+- **An import is a snapshot.** Later commits to the source repo do not flow in.
+  From here the brain is edited in the console and by the agent. A git remote
+  on the Source (Settings → Sources → Git remote) *pushes* the brain's copy out;
+  it never pulls. Importing again refreshes changed files, and it never
+  deletes.
+- Secrets found during the preview should also be rotated at their provider.
+  Redaction protects the brain, not the original repo.
+
+**Gate:** a fresh agent session answers a fact you know is in the folder, citing
+a page slug, and says it has nothing for something that isn't.
 
 ### Stage 4 — Choose schedules
+
+> Stages 4–7 have not yet been run end to end. Treat them as the plan.
 
 Show the user the recommended schedules and let them choose which to enable and
 how often. Nothing is on by default.
@@ -146,19 +204,25 @@ Give this to the agent verbatim, or let the console's agent instructions carry i
 
 ### Stage 2 check — the round trip
 
-1. `search` for `onboarding-test`: expect nothing.
-2. `put_page` slug `onboarding/round-trip`, one line and today's date.
-3. `get_page` it back; `search` again: expect the page.
-4. Report the endpoint, the Source written to, and the page count (`list_pages`).
+1. `search` for `onboarding round trip <today's date>`. Search always returns
+   its closest pages, so the check is that **no result contains that exact
+   phrase**.
+2. `put_page` slug `onboarding/round-trip`: one line that contains the phrase.
+3. `get_page` it back, then `search` the phrase again. The page should be the
+   top result.
+4. Report the endpoint, the Source written to (`whoami`), and the page count
+   (`sources_status`; `list_pages` is paged and stops at 100).
    Leave the page for the person to delete.
 
 On any failure, report the exact error and stop. Don't loop and don't work
-around a permission error.
+around a permission error, such as writing under a different prefix.
 
 ### Stage 3 — after the ingest
 
-Report counts, not content: pages found, skipped and why, embeddings pending.
-Don't edit imported pages.
+Report counts, not content: the pages in the Source and its last sync
+(`sources_status`), and anything held or failed. Embedding coverage is on the
+person's side (the import result, Settings → Sources). Don't edit imported pages.
+Then answer the person's two gate questions under the standing rules.
 
 ### Stage 6 — extracting from notes, email and calendar
 
@@ -198,3 +262,8 @@ you. Never fill the gap from general knowledge and present it as a brain fact.
 | Spend jumps | a dream or health run on a larger corpus | Spend page; pause the schedule ([`scheduler.md`](scheduler.md)) |
 | Runner jobs write noise | extraction instructions too broad | pause the schedule, tighten the prompt, revert the run ([`agent-runner.md`](agent-runner.md)) |
 | Agent invents answers | skill not loaded | confirm agent instructions are enabled; re-paste the MCP snippet |
+| Settings → MCP: "Not checked from the server" | Tailscale or LAN install; the server cannot reach its own address | expected; the agent round trip is the check |
+| Agent `put_page` → `permission_denied`, bound prefix `agents/…` | connection issued before private agents became `memory-writer` | Settings → MCP → Issue a new connection, re-wire the agent |
+| Agent's `list_skills` is empty | skills are not published to gbrain 0.60's per-Source catalog yet (known gap) | the agent instructions and standing rules still apply |
+| Imported N files, fewer pages | `gbrain_exclude` files and files sharing a page name | the import preview lists both |
+| Agent's MCP calls fail with 401 after a month | the 30-day access token expired | Issue a new connection, re-wire the agent |

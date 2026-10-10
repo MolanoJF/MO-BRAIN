@@ -68,6 +68,7 @@ Managed cloud, when it is built: one VM per tenant, created through a cloud prov
 - A new contract file can still be answered by a sibling's process-global `mock.module`.
 - The host-side spend read still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`.
 - `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
+- Member skills are not served on gbrain 0.60: `list_skills` (v1 and v2) is empty although `skills/` is mounted at `GBRAIN_SKILLS_DIR` and derives two entries. 0.60 publishes skills per Source (`skillpack.json` + `skills/` in the content root, adoption policy); see gbrain `docs/guides/shared-brain-skills.md`. Found in the first onboarding run, 2026-10-10.
 - Rotating the Anthropic key: [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md). Re-provision after a destructive cycle, never before.
 
 ## How to run
