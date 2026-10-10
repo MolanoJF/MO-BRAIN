@@ -63,7 +63,7 @@ function keysOf(args: unknown): string[] | undefined {
 
 function errorCode(body: unknown): string | undefined {
   const e = asObject(body).error;
-  return typeof e === 'string' ? e.slice(0, 120) : undefined;
+  return typeof e === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(e) ? e : undefined;
 }
 
 export async function runTool(opts: {
@@ -87,9 +87,9 @@ export async function runTool(opts: {
     return result({ error: 'invalid_arguments', errors: checked.errors }, true);
   }
 
-  const req = tool.route(checked.args);
   let reply: RouteReply;
   try {
+    const req = tool.route(checked.args);
     reply = await callRoute(opts.fetchRoute, caller, req.method, req.path, req.body);
   } catch {
     await audit('error', { error: 'route_threw' });

@@ -90,4 +90,37 @@ describe('runTool', () => {
     expect(r.structuredContent).toEqual({ error: 'internal_error' });
     expect((await auditRows('t_org_get'))[0]!.after).toMatchObject({ outcome: 'error', error: 'route_threw' });
   });
+
+  test('S3c: a free-text route error value never lands in the audit row', async () => {
+    const fake = () => new Response(JSON.stringify({ error: 'unknown source src-secret-123' }), {
+      status: 400, headers: { 'content-type': 'application/json' },
+    });
+    const r = await runTool({ tools: TOOLS, fetchRoute: fake, caller: callerOf(fx.owner, fx.orgId, 'owner'), name: 't_org_get', args: {} });
+    expect(r.isError).toBe(true);
+    const [row] = await auditRows('t_org_get');
+    expect(row!.after).toMatchObject({ outcome: 'error', status: 400 });
+    expect('error' in (row!.after as Record<string, unknown>)).toBe(false);
+    expect(JSON.stringify(row!.after)).not.toContain('src-secret-123');
+  });
+
+  test('S3c: a code-shaped route error is still stored', async () => {
+    const fake = () => new Response(JSON.stringify({ error: 'source_not_found' }), {
+      status: 404, headers: { 'content-type': 'application/json' },
+    });
+    const r = await runTool({ tools: TOOLS, fetchRoute: fake, caller: callerOf(fx.owner, fx.orgId, 'owner'), name: 't_org_get', args: {} });
+    expect(r.isError).toBe(true);
+    expect((await auditRows('t_org_get'))[0]!.after).toMatchObject({ outcome: 'error', error: 'source_not_found' });
+  });
+
+  test('D7: a throwing route builder is internal_error and audited as route_threw', async () => {
+    const throwing: ToolDef = {
+      name: 't_throws', description: 'test', minRole: 'viewer', mutating: false,
+      input: { type: 'object', properties: {}, additionalProperties: false },
+      route: () => { throw new Error('builder kaput'); },
+    };
+    const r = await runTool({ tools: [...TOOLS, throwing], fetchRoute, caller: callerOf(fx.owner, fx.orgId, 'owner'), name: 't_throws', args: {} });
+    expect(r.structuredContent).toEqual({ error: 'internal_error' });
+    expect((await auditRows('t_throws'))[0]!.after).toMatchObject({ outcome: 'error', error: 'route_threw' });
+    expect(fetches).toBe(0);
+  });
 });
