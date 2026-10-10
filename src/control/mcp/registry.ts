@@ -37,5 +37,6 @@ export type ToolResult = {
 
 import { READ_TOOLS } from './tools/read.ts';
 import { SOURCE_TOOLS } from './tools/sources.ts';
+import { PEOPLE_TOOLS } from './tools/people.ts';
 
-export const TOOLS: readonly ToolDef[] = [...READ_TOOLS, ...SOURCE_TOOLS];
+export const TOOLS: readonly ToolDef[] = [...READ_TOOLS, ...SOURCE_TOOLS, ...PEOPLE_TOOLS];

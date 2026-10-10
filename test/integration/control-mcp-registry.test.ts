@@ -63,15 +63,40 @@ describe('registry invariants', () => {
     }
   });
 
-  test('every gated tool declares a preview (a bare `gated: {}` would silently lose staleness protection)', () => {
-    const offenders = TOOLS.filter((t) => t.gated && typeof t.gated.preview !== 'function').map((t) => t.name);
+  test('every gated tool declares a preview, and any fingerprint it returns is non-empty', async () => {
+    const owner = callerOf(fx.owner, fx.orgId, 'owner');
+    const read = async (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) => {
+      const r = await callRoute((req, env) => app.fetch(req, env as never), owner, method, path, body);
+      return { status: r.status, body: r.body };
+    };
+    const offenders: string[] = [];
+    for (const tool of TOOLS.filter((t) => t.gated)) {
+      if (typeof tool.gated!.preview !== 'function') { offenders.push(`${tool.name}: no preview`); continue; }
+      const preview = await tool.gated!.preview(sampleArgs(tool), read);
+      if (preview.fingerprint !== undefined && preview.fingerprint.length === 0) offenders.push(`${tool.name}: empty fingerprint`);
+    }
     expect(offenders).toEqual([]);
   });
 
   test('confused deputy: no tool declares an identity argument', () => {
+    // The caller's identity, role and membership arrive out-of-band in
+    // `controlEnv` and are read by `requireRole`; an argument with one of these
+    // names can only ever name a *target*, and the enum/maxLength requirement
+    // below is what keeps that true.
+    const identityKeys = ['userId', 'actor', 'actorId', 'orgId', 'organizationId', 'clientId', 'sessionId'];
     for (const tool of TOOLS) {
       for (const key of Object.keys(tool.input.properties)) {
-        expect(['userId', 'actor', 'actorId', 'orgId', 'organizationId', 'role']).not.toContain(key);
+        expect(identityKeys).not.toContain(key);
+      }
+      const role = tool.input.properties.role;
+      if (role) {
+        expect(role.type).toBe('string');
+        expect(Array.isArray(role.enum) && role.enum.length > 0).toBe(true);
+      }
+      const membershipId = tool.input.properties.membershipId;
+      if (membershipId) {
+        expect(membershipId.type).toBe('string');
+        expect(typeof membershipId.maxLength).toBe('number');
       }
     }
   });
