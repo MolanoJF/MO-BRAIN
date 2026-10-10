@@ -17,7 +17,7 @@ to agents; any change to gbrain (it stays a pinned, unforked dependency).
 ## 2. Findings that shape the design
 
 1. **gbrain's MCP already carries a lot** (`contracts/v0.60.104.0/capability.json`, 160 tools): page and
-   search work, skills, `whoami`, `sources_list/status`, `schema_lint`, `get_active_schema_pack`, and
+   search work, `whoami`, `sources_list/status`, `schema_lint`, `get_active_schema_pack`, and
    admin-scope tools (`schema_apply_mutations`, `reload_schema_pack`, `run_doctor`, …) plus a separate
    `sources_admin` scope (`sources_add`, `sources_remove`). Mo-brain's agent allowlist
    (`src/agent/tools.ts`) deliberately leaves the admin lane out.
@@ -27,7 +27,7 @@ to agents; any change to gbrain (it stays a pinned, unforked dependency).
 
    | Bucket | Operations | Home |
    |---|---|---|
-   | A. Pure gbrain | page/search, skills, `whoami`, read the schema, `sources_list/status`, lint | existing `/mcp` |
+   | A. Pure gbrain | page/search, `whoami`, read the schema, `sources_list/status`, lint | existing `/mcp` |
    | B. gbrain action + Mo-brain state | source add/rename/archive/remove/push; pack create/fork/mutate/assign/apply/sync; Connection issue/revoke | control plane |
    | C. Mo-brain only | members, invites, org mode, `space_grants`, schedules and runs, spend, upgrades, backup, provider keys | control plane |
 
@@ -62,9 +62,9 @@ same service function the route calls, with the resolved `{userId, orgId, role}`
 agent cannot drift and there is no second permission check to maintain. `tools/list` is filtered by role:
 a `viewer` agent sees almost nothing, an `owner` agent sees everything in §5.
 
-**D4. Bucket A stays on `/mcp`.** A `mobrain-operator` skill, shipped through the existing member-skills
-channel (`skills/`, `list_skills`/`get_skill`), tells the agent which server to use for which task.
-`/my/mcp` returns both server entries in its handoff snippet.
+**D4. Bucket A stays on `/mcp`.** A `mobrain-operator` skill, shipped in Mo-brain's `skills/` folder, which the
+agent installs into its own skills folder during onboarding (Stage 3 of `docs/runbooks/onboarding.md`), tells the
+agent which server to use for which task. `/my/mcp` returns both server entries in its handoff snippet.
 
 **D5. Runner and per-run tokens are refused.** `agent-runner` reads untrusted content; a prompt-injected
 run must never be able to invite members or change schemas. The control MCP rejects any token whose

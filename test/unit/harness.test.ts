@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   HARVEST_MAP,
   SKILLS_NOTE,
-  AGENT_INSTRUCTIONS,
+  agentInstructions,
   annotateAdapters,
   autoInstall,
   connectionClass,
@@ -101,7 +101,8 @@ describe('wiringSnippet', () => {
     for (const [id, klass] of Object.entries(EXPECTED)) {
       if (klass !== 'manual') continue;
       const { snippet } = wiringSnippet(id, creds);
-      const parsed = JSON.parse(snippet.split('\n').slice(1, -1).join('\n')) as {
+      const start = snippet.indexOf('{');
+      const parsed = JSON.parse(snippet.slice(start, snippet.indexOf('\n}', start) + 2)) as {
         mcpServers: { gbrain: { type: string; url: string; headers: { Authorization: string } } };
       };
       expect(parsed.mcpServers.gbrain.type).toBe('http');
@@ -116,49 +117,46 @@ describe('wiringSnippet', () => {
     expect(snippet).not.toContain('We have not runtime-tested this adapter');
   });
 
-  test('skills omitted or false is byte-identical to the plain snippet, with no agentInstructions', () => {
-    for (const id of Object.keys(EXPECTED)) {
-      const plain = wiringSnippet(id, creds);
-      const explicitFalse = wiringSnippet(id, creds, { skills: false });
-      expect(explicitFalse.snippet).toBe(plain.snippet);
-      expect(plain.snippet).not.toContain('list_skills');
-      expect(plain.agentInstructions).toBeNull();
-      expect(explicitFalse.agentInstructions).toBeNull();
+  test('every harness snippet ends with the skills note, and agentInstructions is non-empty', () => {
+    for (const id of Object.keys(HARVEST_MAP)) {
+      const out = wiringSnippet(id, creds);
+      expect(out.snippet.endsWith(SKILLS_NOTE)).toBe(true);
+      expect(typeof out.agentInstructions).toBe('string');
+      expect(out.agentInstructions.length).toBeGreaterThan(0);
     }
   });
 
-  test('skills true appends the MCP-native skills note and returns AGENT_INSTRUCTIONS', () => {
-    for (const id of Object.keys(EXPECTED)) {
-      const plain = wiringSnippet(id, creds);
-      const withSkills = wiringSnippet(id, creds, { skills: true });
-      expect(withSkills.snippet.startsWith(plain.snippet)).toBe(true);
-      expect(withSkills.snippet.endsWith(SKILLS_NOTE)).toBe(true);
-      expect(withSkills.agentInstructions).toBe(AGENT_INSTRUCTIONS);
-    }
-  });
-
-  test('the skills note names the tools and installs nothing', () => {
-    expect(SKILLS_NOTE).toContain('list_skills');
-    expect(SKILLS_NOTE).toContain('get_skill');
-    expect(SKILLS_NOTE).toContain('unavailable_tools');
+  test('the skills note says this Connection serves no skills and names no skill tools', () => {
+    expect(SKILLS_NOTE).toContain('this Connection does not serve skills');
+    expect(SKILLS_NOTE).not.toContain('list_skills');
+    expect(SKILLS_NOTE).not.toContain('get_skill');
+    expect(SKILLS_NOTE).not.toContain('unavailable_tools');
     expect(SKILLS_NOTE).not.toMatch(/skillpack scaffold|--stub/);
   });
 
-  test('AGENT_INSTRUCTIONS names the tools and installs nothing', () => {
-    expect(AGENT_INSTRUCTIONS).toContain('list_skills');
-    expect(AGENT_INSTRUCTIONS).toContain('get_skill');
-    expect(AGENT_INSTRUCTIONS).toContain('unavailable_tools');
+  test('agentInstructions points at the health URL, pin, gbrain repo and skill-autobench, and names no skill tools', () => {
+    const text = agentInstructions('https://brain.example.com/mcp');
+    expect(text).toContain('https://brain.example.com/api/health');
+    expect(text).toContain('pin.observed');
+    expect(text).toContain('https://github.com/garrytan/gbrain.git');
+    expect(text).toContain('skill-autobench');
+    expect(text).not.toContain('list_skills');
+    expect(text).not.toContain('get_skill');
   });
 
-  test('auto-install classes are unaffected and stay a plain string message', () => {
+  test('agentInstructions without an MCP URL falls back to the <this brain> placeholder', () => {
+    expect(agentInstructions()).toContain('<this brain>/api/health');
+  });
+
+  test('auto-install classes are unaffected apart from the skills note', () => {
     const { snippet } = wiringSnippet('claude-code', {});
-    expect(snippet).toBe("gbrain mcp grant already wrote this adapter's config (claude-json).");
+    expect(snippet).toBe(`gbrain mcp grant already wrote this adapter's config (claude-json).\n${SKILLS_NOTE}`);
   });
 
   test('control omitted is byte-identical to today\'s snippet', () => {
     for (const id of Object.keys(HARVEST_MAP)) {
-      expect(wiringSnippet(id, creds, { skills: true }).snippet)
-        .toBe(wiringSnippet(id, creds, { skills: true, control: undefined }).snippet);
+      expect(wiringSnippet(id, creds).snippet)
+        .toBe(wiringSnippet(id, creds, { control: undefined }).snippet);
     }
   });
 

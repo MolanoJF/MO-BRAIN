@@ -5,7 +5,7 @@ Operator procedure and the version promise. History is in [`archive/`](archive/)
 | Document | What it is |
 |---|---|
 | [Install](runbooks/install.md) | First install, preflight refusals, air-gap, Tailscale, first admin |
-| [Onboarding](runbooks/onboarding.md) | After install: verify, MCP, ingest, schedules, runner, then schema 
+| [Onboarding](runbooks/onboarding.md) | After install: verify, MCP, gbrain skills, import, schedules, runner, then schema 
 | [Upgrade](runbooks/upgrade.md) | The host command, snapshots, rollback |
 | [Backup and restore](runbooks/backup-restore.md) | Verified backup, including a new domain |
 | [Agent runner](runbooks/agent-runner.md) | Enable, health, what a run did, revert |
@@ -13,7 +13,6 @@ Operator procedure and the version promise. History is in [`archive/`](archive/)
 | [Break-glass](runbooks/break-glass.md) | Operate when the console is down |
 | [CI](runbooks/ci.md) | What runs when, and the Actions budget |
 | [Design system](runbooks/design-system.md) | Where the console's look is set, adding a theme, fonts |
-| [Skill catalog sync](runbooks/skill-catalog-sync.md) | Curate and ship the catalog |
 | [Support policy](support-policy.md) | The supported gbrain pin, and what is not promised |
 | [Agent control MCP spec](specs/agent-control-mcp.md) | Built (v1): let agents operate Mo-brain |
 

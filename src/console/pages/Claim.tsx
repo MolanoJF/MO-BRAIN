@@ -62,13 +62,13 @@ export function Claim({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [signInNotice, setSignInNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' } | null>(null);
+  const [result, setResult] = useState<{ membershipId: string; connections: ClaimConnection[]; account: 'created' | 'existing' | 'unchanged' } | null>(null);
   const formError = claimFormError(password, confirm);
 
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; skillsPublished: boolean; account: 'created' | 'existing' | 'unchanged' }>(
+      const r = await api.post<{ membershipId: string; connections: ClaimConnection[]; account: 'created' | 'existing' | 'unchanged' }>(
         `/claim/${token}`,
         { email: normalizeClaimEmail(email), password },
       );
@@ -119,7 +119,7 @@ export function Claim({ token }: { token: string }) {
               </p>
             </Notice>
             {result.connections.map((conn) => (
-              <ClaimedConnection key={conn.connectionId} conn={conn} skills={result.skillsPublished} />
+              <ClaimedConnection key={conn.connectionId} conn={conn} />
             ))}
           </>
         )}
@@ -165,17 +165,17 @@ export function Claim({ token }: { token: string }) {
   );
 }
 
-function ClaimedConnection({ conn, skills }: { conn: ClaimConnection; skills: boolean }) {
+function ClaimedConnection({ conn }: { conn: ClaimConnection }) {
   const creds = asCreds(conn.credentials);
   const { snippet, agentInstructions } = useMemo(() => {
     try {
       return wiringSnippet(conn.harness, {
         client_id: creds.client_id, access_token: creds.access_token, mcp_url: conn.mcp_url,
-      }, { skills });
+      });
     } catch (e) {
       return { snippet: e instanceof Error ? e.message : 'unknown harness', agentInstructions: null };
     }
-  }, [conn.harness, conn.mcp_url, creds.client_id, creds.access_token, skills]);
+  }, [conn.harness, conn.mcp_url, creds.client_id, creds.access_token]);
 
   const verifyLine = conn.verify?.status === 'ok'
     ? 'Verified: this connection authenticated successfully.'

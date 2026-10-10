@@ -18,7 +18,7 @@ Two MCP servers share one token:
 
 | Server | Use it for |
 |---|---|
-| `gbrain` (data, `/mcp`) | Pages, search, skills, `whoami` |
+| `gbrain` (data, `/mcp`) | Pages, search, `whoami` |
 | `mobrain-control` (`/api/control-mcp`) | Everything below |
 
 If `mobrain-control` is not connected, tell the human to copy the control-server block from

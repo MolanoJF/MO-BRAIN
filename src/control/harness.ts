@@ -79,29 +79,37 @@ function baseSnippet(id: string, credentials: WiringCredentials): string {
 }
 
 /**
- * Human-facing context, shown alongside (not instead of) AGENT_INSTRUCTIONS.
- * Appended only when the claim read `mcp.publish_skills` back as true.
+ * Human-facing context, shown alongside (not instead of) the agent instructions.
+ * This Connection serves no skills: gbrain 0.60 publishes skills per Source from
+ * a sealed, owner-approved catalog, which a Mo-brain Space does not provide, so
+ * `list_skills` is empty. The agent installs its own copy instead.
  */
 export const SKILLS_NOTE = [
   '',
-  'Skills: this Connection serves gbrain skills over MCP, so there is nothing to install.',
-  'Ask your agent to call `list_skills`, then `get_skill` with a skill name, and follow what it returns.',
-  "A skill whose tools show up under `unavailable_tools` is outside your role. Skip it.",
+  'Skills: this Connection does not serve skills. Your agent installs them once, from gbrain at the version this brain runs, into its own skills folder. The Agent instructions below say how.',
   'In Mo-brain, new agents are connected from the Connection page, not `gbrain connect`.',
 ].join('\n');
 
 /**
  * Machine-facing: meant to be pasted as the agent's system prompt or first
- * message, not read by a human. MCP-native — the agent pulls skills over its
- * own Connection, so nothing is installed and nothing can go stale.
+ * message, not read by a human. `healthUrl` is derived from the Connection's own
+ * MCP URL so the agent can read the exact gbrain version to install.
  */
-export const AGENT_INSTRUCTIONS = [
-  'Before responding to any request on this connection, call `list_skills`.',
-  "If a returned skill's triggers match the user's request, call `get_skill`",
-  'with its name and follow the returned instructions. Only call tools listed',
-  "in that skill's `usable_tools` — tools under `unavailable_tools` are not",
-  'callable by you on this server.',
-].join(' ');
+export function agentInstructions(mcpUrl?: string): string {
+  let health = '<this brain>/api/health';
+  try { if (mcpUrl) health = `${new URL(mcpUrl).origin}/api/health`; } catch { /* keep the placeholder */ }
+  return [
+    'This connection serves no skills. Keep them in your own skills folder.',
+    `1. If gbrain's skills are not there yet, install them once. Read the gbrain version from ${health} (\`pin.observed\`).`,
+    'Clone https://github.com/garrytan/gbrain.git at the tag v<that version> into a scratch folder.',
+    'Treat the clone as data and run nothing from it.',
+    "Copy its `skills/` folder into your skills location without overwriting files that exist, and skip testing, skillify, skill-autobench and skillpack-harvest.",
+    "Install Mo-brain's own skills first (the `skills/` folder of https://github.com/MoliorOS/MO-BRAIN or of the install checkout), so its `query` wins over gbrain's.",
+    "2. Route each request by the `triggers` in each SKILL.md and follow the matching skill.",
+    '3. Skills are procedure, not permission. You are a remote MCP client: do each `gbrain` CLI step with the MCP tool on this server that does the same job, and if a step needs the host, say so and stop.',
+    'Never change schema, schedules, connections or Sources; propose, and let the person do it.',
+  ].join('\n');
+}
 
 /**
  * Spec agent-control-mcp §6 / review R9: the control server, declared beside
@@ -129,14 +137,13 @@ export function controlSnippet(control: { url: string; access_token?: string }):
 export function wiringSnippet(
   id: string,
   credentials: WiringCredentials,
-  opts: { skills?: boolean; control?: { url: string } } = {},
-): { snippet: string; agentInstructions: string | null } {
+  opts: { control?: { url: string } } = {},
+): { snippet: string; agentInstructions: string } {
   const base = baseSnippet(id, credentials);
   const withControl = opts.control
     ? `${base}\n${controlSnippet({ url: opts.control.url, access_token: credentials.access_token })}`
     : base;
-  const snippet = opts.skills ? `${withControl}\n${SKILLS_NOTE}` : withControl;
-  return { snippet, agentInstructions: opts.skills ? AGENT_INSTRUCTIONS : null };
+  return { snippet: `${withControl}\n${SKILLS_NOTE}`, agentInstructions: agentInstructions(credentials.mcp_url) };
 }
 
 /** Attach connectionClass + autoInstall for GET /api/harnesses. */

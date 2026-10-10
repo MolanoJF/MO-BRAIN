@@ -6,7 +6,6 @@ import {
   mcpUrl,
   provisionConnection,
 } from './connections.ts';
-import { skillsPublished } from './configValue.ts';
 import { setInvitePassword } from './inviteAccount.ts';
 import type { Role } from './rbac.ts';
 
@@ -21,7 +20,6 @@ export type ClaimResult = {
     mcp_url: string;
     verify: { status: string | null; message: string | null } | null;
   }>;
-  skillsPublished: boolean;
   account: 'created' | 'existing' | 'unchanged';
 };
 
@@ -155,7 +153,7 @@ export async function claim(token: string, email: string, password?: string): Pr
       ? 'unchanged' as const
       : await setInvitePassword(membership.userId, password);
 
-    return { membershipId, connections, skillsPublished: await skillsPublished(), account };
+    return { membershipId, connections, account };
   } catch (e) {
     for (const g of granted) {
       try {

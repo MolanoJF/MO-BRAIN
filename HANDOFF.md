@@ -27,7 +27,7 @@ Not a release. Not in the published `1.0.0` images.
 - Local-first install (no domain, LAN address, internal TLS) and Tailscale install mode.
 - Console shell, design system, and Space markdown editing.
 - Schema-pack management and custom packs.
-- Private member Spaces, the autopilot tripwire, member agent skills over MCP, and Space git-bundle export.
+- Private member Spaces, the autopilot tripwire, member agent skills (installed from `skills/`, not served over MCP), and Space git-bundle export.
 - Zones 5.1–5.3: personal-and-company zones, privacy, personal-first, invite login.
 - Console: Settings → Credentials tab (GitHub tokens per member and per company, admin model-provider keys; git remotes reuse the stored token), sidebar account row at the bottom, per-Source export, Source and private-Space rename, and `default` source filtering.
 - Optional Google sign-in when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. Email and password stay.
@@ -69,7 +69,7 @@ Managed cloud, when it is built: one VM per tenant, created through a cloud prov
 - A new contract file can still be answered by a sibling's process-global `mock.module`.
 - The host-side spend read still reaches `src/control/opsClient.ts` directly rather than through an injected `OpsCaller`.
 - `test/integration/agent-runs.test.ts` leaves one `capability_snapshots` row behind per run.
-- Member skills are not served on gbrain 0.60: `list_skills` (v1 and v2) is empty although `skills/` is mounted at `GBRAIN_SKILLS_DIR` and derives two entries. 0.60 publishes skills per Source (`skillpack.json` + `skills/` in the content root, adoption policy); see gbrain `docs/guides/shared-brain-skills.md`. Found in the first onboarding run, 2026-10-10.
+- Mo-brain does not serve skills over MCP, by decision (2026-10-10). On gbrain 0.60 `list_skills` serves only a per-Source sealed catalog (owner policy, `skillpack.json` in each Space, per-install enrollment), which a Space does not provide, so it returned an empty list. Agents install their own skills instead: onboarding Stage 3 in [`docs/runbooks/onboarding.md`](docs/runbooks/onboarding.md). Mo-brain's own skills are the repo's `skills/` folder.
 - Rotating the Anthropic key: [`docs/runbooks/agent-runner.md`](docs/runbooks/agent-runner.md). Re-provision after a destructive cycle, never before.
 
 ## How to run

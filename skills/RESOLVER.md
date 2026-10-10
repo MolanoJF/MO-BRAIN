@@ -1,8 +1,8 @@
 # Mo-brain Skill Resolver
 
-Skills are prose instruction sets the member's agent loads over MCP. This file
-is the human-readable dispatch map; each skill's frontmatter `triggers:` is the
-authoritative routing signal.
+Skills are prose instruction sets the member's agent keeps in its own skills folder (installed once during
+onboarding, see `docs/runbooks/onboarding.md` Stage 3). This file is the human-readable dispatch map; each
+skill's frontmatter `triggers:` is the authoritative routing signal.
 
 | Trigger | Skill |
 |---------|-------|

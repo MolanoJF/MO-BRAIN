@@ -15,7 +15,6 @@ import { getDb, schema } from '../db/client.ts';
 import { requireRole, type Role } from '../rbac.ts';
 import { callerFor, isAdminRole, type Caller } from '../zone.ts';
 import { grantsFor } from '../grants.ts';
-import { skillsPublished } from '../configValue.ts';
 import {
   controlMcpUrl,
   grantCredentialsOutPath,
@@ -222,7 +221,7 @@ async function present(
     client_id: typeof clientId === 'string' && clientId.length > 0 ? clientId : undefined,
     access_token: typeof accessToken === 'string' && accessToken.length > 0 ? accessToken : undefined,
     mcp_url,
-  }, { skills: await skillsPublished(), control: { url: control_url } });
+  }, { control: { url: control_url } });
   return {
     mcp_url, control_url, harness: connection.harness, credentials: handoff, snippet, agentInstructions,
     verify: connection.verifyStatus || connection.verifyMessage

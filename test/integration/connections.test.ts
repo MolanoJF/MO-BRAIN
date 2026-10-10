@@ -139,7 +139,7 @@ mock.module('../../src/control/opsClient.ts', () => ({
 
 const {
   previewConnection, provisionConnection, VERIFY_UNREACHABLE, revokeConnection, createPendingConnection,
-  retiredClientName, widenConnectionSurfaces,
+  retiredClientName,
 } = await import('../../src/control/connections.ts');
 const { serverClientSecretName, serverClientName, memberClientSecretName } =
   await import('../../src/control/connections.ts');
@@ -593,42 +593,6 @@ describe('provisionConnection', () => {
     expect(String(err)).toMatch(/surface/);
     const revoked = calls.filter((c) => c.op === 'auth.revokeClient').map((c) => c.params?.clientId);
     expect(revoked.sort()).toEqual(['gbrain_cl_mock', 'gbrain_cl_mock_1']);
-  });
-});
-
-describe('widenConnectionSurfaces', () => {
-  test('rescopes both clients of every active Connection to full and skips the rest', async () => {
-    const active = await insertConnection('active');
-    await getDb().update(schema.connections)
-      .set({ serverClientId: 'gbrain_cl_live_server' })
-      .where(eq(schema.connections.id, active.id));
-    await insertConnection('revoked', { clientName: 'bs-revoked-x', gbrainClientId: 'gbrain_cl_dead' });
-
-    const out = await widenConnectionSurfaces(actor);
-
-    expect(out.widened).toEqual([active.id]);
-    expect(out.failed).toEqual([]);
-    const rescopes = calls.filter((c) => c.op === 'auth.rescopeClient');
-    expect(rescopes.map((c) => c.params?.id)).toEqual(['gbrain_cl_live_server', 'gbrain_cl_live']);
-    expect(rescopes.every((c) => c.params?.surface === 'full')).toBe(true);
-    const audits = await getDb().select().from(schema.auditLog)
-      .where(eq(schema.auditLog.action, 'connection.widen_surface'));
-    expect(audits.map((a) => a.target)).toEqual([active.id]);
-  });
-
-  test('one failing Connection is reported and does not stop the rest', async () => {
-    const a = await insertConnection('active', { clientName: 'bs-a', gbrainClientId: 'gbrain_cl_a' });
-    const b = await insertConnection('active', { clientName: 'bs-b', gbrainClientId: 'gbrain_cl_b' });
-    callOpsHandler = async (op, params, opts) => {
-      if (op === 'auth.rescopeClient' && params?.id === 'gbrain_cl_a') {
-        return { ok: false, exitCode: 1, argv: [], stdout: '', stderr: 'gone', json: null };
-      }
-      return defaultOk(op, opts);
-    };
-
-    const out = await widenConnectionSurfaces(actor);
-    expect(out.widened).toEqual([b.id]);
-    expect(out.failed.map((f) => f.connectionId)).toEqual([a.id]);
   });
 });
 

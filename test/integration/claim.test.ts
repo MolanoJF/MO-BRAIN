@@ -137,11 +137,6 @@ async function insertPending(space: { id: string; sourceId: string }, harness = 
   return id;
 }
 
-async function claimFreshMember() {
-  const minted = await mintClaimLink(orgId, membershipId, EMAIL, actor);
-  return claim(minted.token, EMAIL);
-}
-
 beforeAll(async () => {
   await runMigrations();
   for (const t of [
@@ -380,21 +375,6 @@ describe('claim', () => {
       client_id: 'gbrain_cl_taken',
       client_secret: SECRET,
     });
-  });
-
-  test('skillsPublished is true only when config.get reads back exactly "true"', async () => {
-    callOpsHandler = (op, params, opts) => op === 'config.get' && params?.key === 'mcp.publish_skills'
-      ? { ok: true, exitCode: 0, argv: [], stdout: 'true\n[config] source: db', stderr: '', json: null }
-      : defaultOk(op, opts);
-    const result = await claimFreshMember();
-    expect(result.skillsPublished).toBe(true);
-  });
-
-  test('skillsPublished is false when the key is off or unreadable (fail closed)', async () => {
-    callOpsHandler = (op, params, opts) => op === 'config.get'
-      ? { ok: false, exitCode: 1, argv: [], stdout: '', stderr: 'Config key not found', json: null }
-      : defaultOk(op, opts);
-    expect((await claimFreshMember()).skillsPublished).toBe(false);
   });
 
   test('grant failure after burn compensates pending and remint retries', async () => {

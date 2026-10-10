@@ -84,9 +84,8 @@ export function compileConnection(
       readSpaces.map((s) => s.sourceId).filter((id) => id !== writeSpace.sourceId),
     ),
     boundSlugPrefixes,
-    // Member skills: `full`, not the profile's `starter` default —
-    // list_skills/get_skill are outside STARTER_OPS. Scopes still come from
-    // the profile (docs/archive/member-skills-findings.md). Applied by
+    // Mo-brain Connections are minted at `full`, not the profile's `starter`
+    // default; the profile's scopes still bound what is callable. Applied by
     // auth.rescopeClient, since mcp grant takes no --surface.
     surface: 'full',
     tokenTtl: clampTokenTtl(opts?.tokenTtl),
