@@ -18,8 +18,26 @@ type HealthAlert = { id: string; kind: string; scheduleId: string | null; at: st
 type Health = {
   ok: boolean; components: Record<string, string>;
   gbrainVersion: string | null; repos?: RepoStatus[]; scheduleAlerts?: HealthAlert[];
+  pin?: { declared: string; observed: string | null; matches: boolean | null };
+  runner?: { state: string; lastSeenAt: string | null; version: string | null };
   at: string;
 };
+
+/** The pin row: the version this release expects against what gbrain reports. Unknown is not a match. */
+export function pinText(pin: Health['pin'], declared: string | null): { tone: 'ok' | 'danger' | 'warning'; text: string } {
+  if (!pin) return { tone: 'warning', text: declared ?? 'unknown' };
+  if (pin.matches === true) return { tone: 'ok', text: `${pin.declared} (running)` };
+  if (pin.matches === false) return { tone: 'danger', text: `expects ${pin.declared}, running ${pin.observed ?? 'unknown'}` };
+  return { tone: 'warning', text: `expects ${pin.declared}, could not read the running version` };
+}
+
+/** The agent runner: off by default, and only `connected` is green. */
+export function runnerText(runner: Health['runner']): { tone: 'ok' | 'neutral' | 'warning'; text: string } {
+  if (!runner || runner.state === 'disabled') return { tone: 'neutral', text: 'off' };
+  if (runner.state === 'connected') return { tone: 'ok', text: `connected${runner.version ? ` (${runner.version})` : ''}` };
+  const seen = runner.lastSeenAt ? `, last seen ${new Date(runner.lastSeenAt).toLocaleString()}` : '';
+  return { tone: 'warning', text: `${runner.state.replace(/_/g, ' ')}${seen}` };
+}
 
 export function Health() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -104,7 +122,11 @@ export function Health() {
               ))}
               <tr>
                 <td className="font-mono">gbrain</td>
-                <td className="font-mono">{health.gbrainVersion ?? 'unknown'}</td>
+                <td><Badge tone={pinText(health.pin, health.gbrainVersion).tone}>{pinText(health.pin, health.gbrainVersion).text}</Badge></td>
+              </tr>
+              <tr>
+                <td className="font-mono">runner</td>
+                <td><Badge tone={runnerText(health.runner).tone}>{runnerText(health.runner).text}</Badge></td>
               </tr>
             </tbody>
           </Table>
