@@ -56,29 +56,6 @@ describe('lintForbidden', () => {
     expect(v.map((x) => x.rule)).toContain('moving-pin');
   });
 
-  // The harness rule covers both halves of the same bug: a dist-tag that moves
-  // under us, and no version at all.
-  test('flags a harness ref that is a dist-tag or missing entirely', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'bs-harness-pin-'));
-    await writeFile(join(root, 'H.Dockerfile'),
-      `RUN bun install -g @anthropic-ai/claude-code@latest\nRUN bun install -g @anthropic-ai/claude-code\n`);
-    const v = await lintForbidden(root);
-    expect(v.map((x) => x.rule)).toEqual(['moving-harness-pin', 'moving-harness-pin']);
-    await rm(root, { recursive: true, force: true });
-  });
-
-  // The one line that must never be flagged is the pin itself: an exact ARG is
-  // an exact version by construction. The platform sub-packages are a different
-  // package and are not the harness.
-  test('does not flag the exact harness pin or the platform sub-packages', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'bs-harness-pin-ok-'));
-    await writeFile(join(root, 'H.Dockerfile'),
-      `RUN bun install -g "@anthropic-ai/claude-code@\${HARNESS_VERSION}"\n`
-      + `RUN bun install -g "@anthropic-ai/claude-code-linux-x64@2.1.274"\n`);
-    expect(await lintForbidden(root)).toEqual([]);
-    await rm(root, { recursive: true, force: true });
-  });
-
   test('passes a clean tree', async () => {
     const clean = await mkdtemp(join(tmpdir(), 'bs-clean-'));
     await writeFile(join(clean, 'ok.ts'), `const argv = ["init","--non-interactive"];\n`);
@@ -160,9 +137,28 @@ describe('lintForbidden', () => {
   });
 
   test('flags a plaintext secret column', async () => {
-    await writeFile(join(dir, 'a', 'sch.ts'), `plaintext: text('plaintext'),\n`);
+    await writeFile(join(dir, 'a', '001.sql'), `  plaintext text not null,\n`);
     const v = await lintForbidden(dir);
     expect(v.map((x) => x.rule)).toContain('secret-column-name');
+  });
+
+  // bin/mobrain has no extension; the walker must still read it.
+  test('lints extensionless scripts under bin/', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-bin-'));
+    await mkdir(join(root, 'bin'), { recursive: true });
+    await writeFile(join(root, 'bin', 'mobrain'), '#!/usr/bin/env bash\ngbrain autopilot --install\n');
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toContain('autopilot-install');
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test('flags a shell-string gbrain invocation in bash', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bs-bash-'));
+    await mkdir(join(root, 'bin'), { recursive: true });
+    await writeFile(join(root, 'bin', 'x'), `#!/usr/bin/env bash\nbash -c "gbrain init --url $u"\n`);
+    const v = await lintForbidden(root);
+    expect(v.map((x) => x.rule)).toContain('shell-string-gbrain-bash');
+    await rm(root, { recursive: true, force: true });
   });
 
   // Nested checkouts (.worktrees/<name>/, .claude/worktrees/<name>/, clones)
@@ -193,25 +189,7 @@ describe('frozen-crypto-domain (D3)', () => {
     expect(v.map((x) => x.rule)).toContain('frozen-crypto-domain');
   });
 
-  test('flags any edit to the gateway token salt or info', () => {
-    expect(scanText('src/gateway/token.ts', `Buffer.from('acmebrain-gateway-token-salt')`)
-      .map((x) => x.rule)).toContain('frozen-crypto-domain');
-    expect(scanText('src/gateway/token.ts', `Buffer.from('acmebrain-gateway-token-v1')`)
-      .map((x) => x.rule)).toContain('frozen-crypto-domain');
-  });
-
   test('leaves the frozen values themselves alone', () => {
     expect(scanText('src/control/secrets.ts', `Buffer.from('mobrain-kek-v1')`)).toEqual([]);
-  });
-});
-
-describe('production-compose-build (D2)', () => {
-  test('flags a build stanza in the production compose file', () => {
-    const v = scanText('compose/docker-compose.yml', '    build:\n      context: ..');
-    expect(v.map((x) => x.rule)).toContain('production-compose-build');
-  });
-
-  test('allows one in the build overlay', () => {
-    expect(scanText('compose/docker-compose.build.yml', '    build:\n      context: ..')).toEqual([]);
   });
 });

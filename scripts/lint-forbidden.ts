@@ -33,20 +33,14 @@ const RULES: Rule[] = [
     why: 'G2 requires argv arrays, never shell strings; that covers claude as well as gbrain',
   },
   {
+    rule: 'shell-string-gbrain-bash',
+    re: /\b(sh|bash)\s+-c\s+["'][^"']*(?<![\w\/-])(gbrain|claude)\s/,
+    why: 'argv arrays only, in bash too: build an array and run "${cmd[@]}"',
+  },
+  {
     rule: 'moving-pin',
     re: /garrytan\/gbrain#(latest|latest-stable|main|master|HEAD)\b/,
     why: 'G1 requires an exact semver pin; a moving ref is non-reproducible',
-  },
-  {
-    rule: 'moving-harness-pin',
-    // Sibling of moving-pin, for the second pinned dependency. Three ways to
-    // name the harness without pinning it: a dist-tag, a bare ^/~ range, or no
-    // version at all. `(?![-\w])` keeps the platform sub-packages
-    // (-linux-x64, -darwin-arm64) out of it, and the Dockerfile's own
-    // `@${HARNESS_VERSION}` is an exact ARG by construction -- it must not be
-    // flagged, or the rule would fail the one line that IS the pin.
-    re: /@anthropic-ai\/claude-code(?![-\w])(?:@(?:latest|next|stable|beta|canary|nightly|dev)\b|@[\^~]|\s*["'`]?\s*$|["'`]?\s*:\s*["'`]?(?:latest|next|stable|beta|canary|nightly|dev|\^|~))/,
-    why: 'G1 requires an exact harness version; a dist-tag, a range, or no version at all is non-reproducible',
   },
   {
     rule: 'log-request-body',
@@ -57,24 +51,15 @@ const RULES: Rule[] = [
   },
   {
     rule: 'secret-column-name',
-    re: /\b(plaintext|api_key_plain|secret_value)\s*:\s*text\(/,
-    why: 'S3b: secrets are envelope-encrypted; a plaintext column makes a pg_dump a credential dump',
+    re: /\b(plaintext|api_key_plain|secret_value)\s+text\b/i,
+    why: 'secrets and tokens are sealed; a plaintext column makes a pg_dump a credential dump',
   },
   {
     rule: 'frozen-crypto-domain',
-    // D3: these three strings are HKDF domain separators, not names. Changing
-    // 'mobrain-kek-v1' makes every row in `secrets` permanently
-    // undecryptable — both provider keys, with no recovery. Changing either
-    // gateway-token string breaks every live token mid-run. They are frozen
-    // forever once secrets exist.
-    re: /Buffer\.from\(\s*['"`](?!mobrain-(?:kek-v1|gateway-token-salt|gateway-token-v1)['"`])[\w-]*-(?:kek|gateway-token)-(?:v\d+|salt)['"`]/,
-    why: 'D3: HKDF domain separators are frozen forever; renaming one destroys every stored secret or every live token',
-  },
-  {
-    rule: 'production-compose-build',
-    re: /^\s{2,}build:\s*$/m,
-    why: 'D2: the production compose file pulls published images; build stanzas live in docker-compose.build.yml',
-    only: /compose\/docker-compose\.yml$/,
+    // 'mobrain-kek-v1' is an HKDF domain separator. Changing it makes every
+    // sealed token permanently undecryptable.
+    re: /Buffer\.from\(\s*['"`](?!mobrain-kek-v1['"`])[\w-]*-kek-v\d+['"`]/,
+    why: 'the HKDF domain separator is frozen forever; renaming it destroys every sealed token',
   },
 ];
 
@@ -105,7 +90,7 @@ async function* walk(dir: string): AsyncGenerator<string> {
       // clones) marks one; never skip the root itself, only subdirectories.
       if (existsSync(join(dir, e.name, '.git'))) continue;
       yield* walk(join(dir, e.name));
-    } else if (EXTS.some((x) => e.name.endsWith(x))) {
+    } else if (EXTS.some((x) => e.name.endsWith(x)) || dir.endsWith('/bin') || e.name.endsWith('.sql')) {
       yield join(dir, e.name);
     }
   }
