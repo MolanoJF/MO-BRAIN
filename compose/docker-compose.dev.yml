@@ -1,0 +1,10 @@
+# Development overrides. Use only with COMPOSE_PROJECT_NAME=mobrain-dev.
+services:
+  gbrain:
+    # Lets host-side probes and the selftest reach MCP directly.
+    ports:
+      - "127.0.0.1:${GBRAIN_DEV_PORT:-3139}:3131"
+  autopilot:
+    environment:
+      AUTOPILOT_INTERVAL: "60"
+    command: ["gbrain", "autopilot", "--interval", "60"]

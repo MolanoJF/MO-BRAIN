@@ -1,0 +1,77 @@
+name: ${COMPOSE_PROJECT_NAME:-mobrain}
+
+x-gbrain-env: &gbrain-env
+  GBRAIN_HOME: /srv/gbrain-home
+  GBRAIN_DATABASE_URL: postgres://gbrain:${POSTGRES_PASSWORD:?required}@postgres:5432/gbrain
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:?required}
+
+x-gbrain-image: &gbrain-image
+  image: mobrain-gbrain:${GBRAIN_VERSION:?required}
+  build:
+    context: ..
+    dockerfile: docker/gbrain.Dockerfile
+    args:
+      GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [internal]
+
+  gbrain:
+    <<: *gbrain-image
+    restart: unless-stopped
+    environment:
+      <<: *gbrain-env
+      # The proxy (mobrain) is a peer container; without this every client IP
+      # collapses to the proxy's and the pre-auth rate limiter mis-buckets.
+      GBRAIN_HTTP_TRUST_PROXY: "1"
+    command: ["gbrain", "serve", "--http", "--bind", "0.0.0.0", "--port", "3131",
+              "--public-url", "${MOBRAIN_PUBLIC_URL:-http://127.0.0.1:8787}"]
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3131/health'); process.exit(r.ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 60s
+    mem_limit: 1g
+    networks: [internal]
+
+  autopilot:
+    <<: *gbrain-image
+    restart: unless-stopped
+    environment:
+      <<: *gbrain-env
+    # Foreground daemon; it spawns its own job worker. Never --install.
+    command: ["gbrain", "autopilot", "--interval", "${AUTOPILOT_INTERVAL:-300}"]
+    volumes:
+      - gbrain-home:/srv/gbrain-home
+    depends_on:
+      gbrain: { condition: service_healthy }
+    stop_grace_period: 60s
+    mem_limit: 1536m
+    networks: [internal]
+
+volumes:
+  pg-data:
+  gbrain-home:
+
+networks:
+  internal: {}
