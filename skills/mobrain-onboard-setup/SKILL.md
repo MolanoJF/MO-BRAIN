@@ -288,7 +288,7 @@ needs outbound access to `github.com`.
 | Codex, Pi, Hermes, others | that harness's own skills folder |
 
 gbrain documents no verified location for harnesses other than Claude Code. If you
-are not certain of yours, **ask the person**; do not guess. About 75 folders are
+are not certain of yours, **ask the person**; do not guess. About 77 folders are
 added, so prefer the project folder unless this agent is dedicated to the brain.
 Existing files are never overwritten.
 
@@ -347,7 +347,7 @@ the report, and includes every Mo-brain skill that shares a name with gbrain's.
 ls -d "$DEST"/*/ | wc -l
 for f in "$DEST"/*/SKILL.md; do
   grep -q '^name:' "$f" && grep -q '^description:' "$f" && grep -q '^triggers:' "$f" || echo "BAD $f"; done
-ls "$DEST"/{migrate,ingest,brain-ingest-gate,bulk-ingestion,brain-taxonomist,query,mobrain-operator,mobrain-onboard-setup}/SKILL.md
+ls "$DEST"/{migrate,ingest,brain-ingest-gate,bulk-ingestion,brain-taxonomist,query,mobrain-operator,mobrain-onboard-setup,mobrain-onboard-import}/SKILL.md
 ```
 
 The count is folders, not skills: it includes the shared `conventions/` and
@@ -407,7 +407,8 @@ Mo-brain setup: complete
   Skills:         <n> folders / <m> skills in <destination>, gbrain tag <tag>
   Skipped:        <files that already existed, or "none">
   Left for you:   delete page onboarding/round-trip in the console editor
-Next phase: import the starting folder (stage 4, skill `migrate`).
+Next phase: import the starting folder (stage 4, skill `mobrain-onboard-import`,
+which follows gbrain's `migrate`).
 ```
 
 If any gate failed, report which one and what the person must do, not a

@@ -4,14 +4,15 @@ Starts the moment `scripts/install.sh` has finished and the stack is healthy. Tw
 tracks run side by side: the **person** (console, host) and the **agent** (MCP).
 Install itself is in [`install.md`](install.md).
 
-> **Stages 1–3 are one agent skill,** `skills/mobrain-onboard-setup`. This runbook stays the
-> reference for the person; hand the agent the `skills/` folder and say "onboard me".
+> **Stages 1–3 are one agent skill,** `skills/mobrain-onboard-setup`; **stage 4 is**
+> `skills/mobrain-onboard-import`. This runbook stays the reference for the person; hand the
+> agent the `skills/` folder and say "onboard me", then "import my old brain".
 
 ## Principles
 
 1. **The agent learns gbrain before it touches your data.** It installs gbrain's
    skills into its own environment (stage 3), then ingests the way gbrain does
-   (stage 4). No file copy stands in for either.
+   (stage 4). No raw copy of the old folder stands in for either.
 2. **Start with a full brain.** Stage 4 brings in the whole starting folder, so
    the brain begins with real pages rather than an empty shell.
 3. **The user decides automation.** Schedules are offered from a recommended
@@ -29,7 +30,7 @@ Install itself is in [`install.md`](install.md).
 | 1 Verify health | health, wizard, backup | — | no |
 | 2 Connect MCP | wire the agent, restart it | round-trip check | no |
 | 3 Install the skills | approve the download | install Mo-brain's and gbrain's skills in its own environment | no |
-| 4 Import the source | point at the repo, approve the mapping | run gbrain's `migrate` skill | embeddings (~$0.02 per 1,000 pages) |
+| 4 Import the source | point at the repo, approve the mapping, import the refiled folder | run gbrain's `migrate` skill (`mobrain-onboard-import`) | embeddings (~$0.02 per 1,000 pages) |
 | 5 Choose schedules | pick jobs and frequency | — | per job |
 | 6 Enable the runner | enable, confirm healthy | — | capped |
 | 7 Ingest from notes, email, calendar | connect sources, review | extract key facts | capped |
@@ -127,7 +128,7 @@ MCP, so this is the only way an agent gets them.
   where, it asks you rather than guessing.
 - The agent works in one place (a project) or in many. For Claude Code that is the
   choice between `.claude/skills/` in the project and `~/.claude/skills/` for
-  everything. About 75 skills are added, so prefer the project unless this agent
+  everything. About 77 skill folders are added, so prefer the project unless this agent
   is dedicated to the brain.
 
 **Gate:** the agent reports the gbrain tag it copied (it must equal `pin.observed`
@@ -141,37 +142,51 @@ source.
 
 ### Stage 4 — Import the source
 
-The agent imports the starting folder (notes, vault, existing brain) by running
-gbrain's `migrate` skill, which applies gbrain's ingest gate and trial-before-bulk
-discipline. The console's **Import notes** is not the onboarding path: it copies
-files in as a snapshot, with no mapping, no dedup and no typing.
+The agent imports the starting folder (notes, vault, an earlier brain) by
+following gbrain's `migrate` skill, through `skills/mobrain-onboard-import`.
+The point is the schema. An earlier gbrain brain usually never followed one.
+The agent maps every page onto `mobrain-core`, merges each entity into one
+page, and rewrites links to the new slugs. Only then does gbrain import the
+refiled folder, which types, links and indexes it the normal way.
 
 1. **Give the agent a local checkout of the repo, read-only.** For a private
    GitHub repo, clone it yourself onto the machine the agent runs on. The agent
    never holds your GitHub token.
 2. **Review the assessment and the mapping.** Before any write the agent shows
-   you the inventory (files, types, name collisions, secrets found) and a
+   you the inventory (files, old types, name collisions, secrets found) and a
    mapping from the source's folders and types to the `mobrain-core` types,
    including every merge it proposes. Answer its questions; approve or correct.
-3. **Read the trial.** The agent writes 5–10 diverse pages, reads them back and
+3. **Import the refiled folder.** By default you do the writes. The agent builds
+   the refiled folder, and you upload it in **Sources → Import notes**: read
+   the Preview, then Import. The pages are committed to the Space's git repo,
+   synced and embedded. If your browser can't reach the agent's folder (an
+   agent on a headless host), the agent writes over MCP instead.
+4. **Read the trial.** 5–10 diverse pages first; the agent reads them back and
    shows you. Fix the approach, not the pages one by one.
-4. **Let the bulk run climb.** 10, then 100, then 500, then the rest, with a
-   check between rungs. The agent asks before each bulk write.
-5. **Read the report.** Counts match the manifest, every page is typed against
-   core, no orphans, links built.
+5. **Let the bulk run climb.** 10, then 100, then 500, then the rest, with a
+   check between rungs.
+6. **Run the link pass on the host.** `gbrain extract links` and `extract
+   timeline` for the Space. An agent on the host runs them after you approve;
+   a remote agent gives you the exact lines.
+7. **Read the report.** Counts match the manifest, every page is typed against
+   core (100% coverage, no undeclared types), no orphans, links built.
 
 What to expect:
 
-- **Fewer pages than files.** Merges, `gbrain_exclude: true` files and
-  name-collision groups lower the count; the mapping you approved lists each one.
+- **Fewer pages than files.** Merges, `gbrain_exclude: true` files and skipped
+  non-page files lower the count; the mapping you approved lists each one.
+- **Old types are kept.** A page with no core equivalent becomes a `note` with
+  `legacy_type: <old type>`. Core is never extended to fit.
 - **An import is a snapshot.** Later commits to the source repo do not flow in.
   A git remote on the Source *pushes* out and never pulls. Re-running the skill
   refreshes changed files and never deletes.
 - **Secrets never enter the brain.** The agent redacts them as
-  `[REDACTED:<kind>]`. Rotate them at their provider anyway.
+  `[REDACTED:<kind>]`, and the import preview redacts again. Rotate them at
+  their provider anyway.
 
-**Gate:** a fresh agent session answers a fact you know is in the folder, citing
-a page slug, and says it has nothing for something that isn't.
+**Gate:** `schema_stats` shows 100% core coverage with no undeclared types, and
+a fresh agent session answers a fact you know is in the folder, citing a page
+slug, and says it has nothing for something that isn't.
 
 ### Stage 5 — Choose schedules
 
@@ -323,14 +338,14 @@ from the gbrain version this brain runs.
 5. **Verify,** and report the results:
 
    ```bash
-   ls -d "$DEST"/*/ | wc -l       # at v0.60.115.0: 73 gbrain folders + 2 Mo-brain skills = 75
+   ls -d "$DEST"/*/ | wc -l       # at v0.60.115.0: 73 gbrain folders + 4 Mo-brain folders gbrain lacks = 77
    for f in "$DEST"/*/SKILL.md; do
      grep -q '^name:' "$f" && grep -q '^description:' "$f" && grep -q '^triggers:' "$f" || echo "BAD $f"; done
-   ls "$DEST"/{migrate,ingest,brain-ingest-gate,bulk-ingestion,brain-taxonomist,query,mobrain-operator}/SKILL.md
+   ls "$DEST"/{migrate,ingest,brain-ingest-gate,bulk-ingestion,brain-taxonomist,query,mobrain-operator,mobrain-onboard-import}/SKILL.md
    ```
 
-   (The 75 folders are 73 skills plus the shared `conventions/` and `migrations/`;
-   `query` counts once.)
+   (gbrain's 73 folders include the shared `conventions/` and `migrations/`;
+   `query` is Mo-brain's and counts once.)
 6. **Index them.** Read each `SKILL.md` frontmatter (`name`, `description`,
    `triggers`) and route by trigger from now on; read `RESOLVER.md`.
 7. **Report:** the tag copied, the destination, how many folders and skills, any
@@ -353,40 +368,15 @@ Notes:
   a new scratch folder and diff against `$DEST`. Review what changed; never
   overwrite files the person edited.
 
-### Stage 4 — import the source with gbrain's `migrate` skill
+### Stage 4 — import the source
 
-Read `skills/migrate/SKILL.md`, then follow it for a plain Markdown directory,
-with these Mo-brain constraints:
-
-- **Target:** the member's private Space, schema `mobrain-core`. File each page
-  into one core type and folder, by primary subject
-  (`_brain-filing-rules.md`, `brain-taxonomist`). Core entries are locked
-  (`CORE_LOCKED`); if a page fits no core type, list it and ask. Don't invent
-  types.
-- **Order, as the skill gives it:** assess the source; plan the mapping; test
-  5–10 diverse files; bulk; verify; build links.
-- **Before any write, show the person** the inventory (counts, types, name
-  collisions, secrets found) and the mapping with every proposed merge. Wait for
-  approval. This is the "ask before any bulk write" rule.
-- **Gate each page** with `brain-ingest-gate`: resolve the entity against what
-  the brain holds, read the top hit, then link, cross-link or write. A raw copy
-  is a bug.
-- **Write with `put_pages`** (up to 50 pages per call), one `request_id` per
-  batch, reading back each trial page. Keep the provenance line
-  (`[Source: …]`) and a back-link for every entity.
-- **Ladder:** trial, then 10, 100, 500, all, with a quality check between rungs
-  (`bulk-ingestion`, `conventions/test-before-bulk.md`). Keep the manifest of
-  source files and their status; completion is checked against the source, not
-  against what you wrote.
-- **Secrets:** never write one. Redact as `[REDACTED:<kind>]` and report it.
-- **Source repo:** read-only. Never modify, move or delete it.
-- **After:** run the post-passes your connection allows (link extraction,
-  backlink check, orphan and lint checks, schema stats) and report any that
-  need the host.
-
-Report counts, not content: files seen, pages written, merged, skipped (with
-the reason), typed against core, links created, orphans. Then answer the
-person's two gate questions under the standing rules.
+Run `skills/mobrain-onboard-import`. It follows gbrain's `migrate` skill phase by
+phase (assess, plan the mapping, test 5–10, bulk, verify, build links) and
+adds only the Mo-brain parts: the `mobrain-core` target, `brain-ingest-gate`
+on every page, the 10/100/500 ramp from gbrain's `test-before-bulk` convention,
+and the two lanes (folder import through the console, or `put_pages`), with
+gbrain's link passes on the host. Report counts, not content, in `migrate`'s
+report format.
 
 ### Stage 7 — extracting from notes, email and calendar
 
@@ -430,6 +420,7 @@ you. Never fill the gap from general knowledge and present it as a brain fact.
 | Agent `put_page` → `permission_denied`, bound prefix `agents/…` | connection issued before private agents became `memory-writer` | Settings → MCP → Issue a new connection, re-wire the agent |
 | Agent doesn't use gbrain's skills | stage 3 not done, or copied to a folder the harness doesn't read | redo stage 3; confirm the harness's skills location |
 | Agent calls `list_skills` and gets nothing | Mo-brain does not serve skills over MCP | install them yourself: stage 3 |
-| Imported N files, fewer pages | merges, `gbrain_exclude` files and files sharing a page name | the approved mapping lists each one |
+| Imported N files, fewer pages | merges, `gbrain_exclude` files and skipped non-page files | the approved mapping lists each one |
+| Pages with types core doesn't declare | the old folder was imported as it was, not refiled | redo stage 4 with `mobrain-onboard-import`; `schema_stats` lists `undeclared_pages` |
 | Agent's MCP calls fail with 401 | the 30-day token expired, the connection was reissued elsewhere, or a restore predates it | Issue a new connection, re-wire the agent (stage 2) |
 | Agent is connected but sees no brain tools | the session started before the wiring | restart the agent session |
