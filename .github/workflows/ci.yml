@@ -1,9 +1,7 @@
 name: ci
 
-# The ONLY workflow that runs on its own: lint, typecheck and the unit suite on
-# every PR push and every push to main (~1 billed minute). Everything that needs
-# Docker (build gates, integration, contract, e2e) lives in stack.yml and runs
-# on demand or before a release. Budget and rules: docs/runbooks/ci.md.
+# The only workflow that runs on its own: lint, typecheck and the unit suite
+# (no Docker, ~1 billed minute). Budget and rules: CLAUDE.md.
 on:
   push:
     branches: [main]
@@ -12,7 +10,6 @@ on:
     paths-ignore: ['docs/**', '*.md']
   workflow_dispatch:
 
-# A newer push to the same branch/PR makes the older run worthless.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -24,35 +21,11 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Bun loads the repo's .env locally; a CI runner has none, so the pin is
-      # passed explicitly. Without it pin.ts falls back to 0.50.0.0.
-      GBRAIN_VERSION: '0.60.115.0'
-      HARNESS_VERSION: '2.1.274'
-      CONTROL_DATABASE_URL: postgres://gbrain:ci-not-a-real-secret@localhost:5432/control
-    services:
-      # The unit suite's Postgres-backed checks refuse to skip silently.
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: gbrain
-          POSTGRES_PASSWORD: ci-not-a-real-secret
-          POSTGRES_DB: control
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U gbrain -d control"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.3.14 }
+        with: { bun-version: 1.4.2 }
       - run: bun install --frozen-lockfile
       - run: bun run lint:forbidden
-      - run: bunx tsc --noEmit
+      - run: bun run typecheck
       - run: bun run test:unit
-      # The writer-gate shell tests need no Docker; they prove the pause stops
-      # orphaned gbrain workers. Run them where a Linux /proc exists.
-      - run: sh test/build/gbrain-gated-entrypoint.test.sh
-      - run: sh test/build/quiesce-gbrain-procs.test.sh

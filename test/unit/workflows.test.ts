@@ -40,15 +40,7 @@ describe('workflow budget rules', () => {
     const automatic = Object.entries(workflows())
       .filter(([, wf]) => triggers(wf).some((t) => t === 'push' || t === 'pull_request'))
       .map(([name]) => name);
-    // release.yml's tag push is the one allowed exception: it is a release.
-    expect(automatic.filter((n) => n !== 'release.yml')).toEqual(['ci.yml']);
-  });
-
-  test('release.yml pushes only on v* tags, never on branches', () => {
-    const on = workflows()['release.yml']!.on as Record<string, { tags?: string[]; branches?: string[] }>;
-    expect(on.push!.tags).toEqual(['v*']);
-    expect(on.push!.branches).toBeUndefined();
-    expect(on.pull_request).toBeUndefined();
+    expect(automatic).toEqual(['ci.yml']);
   });
 
   test('ci.yml cancels superseded runs and skips docs-only changes', () => {
@@ -61,8 +53,12 @@ describe('workflow budget rules', () => {
     }
   });
 
-  test('stack.yml runs only on demand or from another workflow', () => {
-    expect(triggers(workflows()['stack.yml']!).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
+  test('stack.yml runs only on demand', () => {
+    expect(triggers(workflows()['stack.yml']!)).toEqual(['workflow_dispatch']);
+  });
+
+  test('the workflow set is exactly ci.yml and stack.yml', () => {
+    expect(Object.keys(workflows()).sort()).toEqual(['ci.yml', 'stack.yml']);
   });
 
   test('no workflow runs on a schedule', () => {
@@ -82,10 +78,4 @@ describe('workflow budget rules', () => {
     expect(missing).toEqual([]);
   });
 
-  test('release.yml publishes only after the stack suite passes', () => {
-    const { jobs } = workflows()['release.yml']!;
-    expect(jobs.stack!.uses).toBe('./.github/workflows/stack.yml');
-    expect(jobs.stack!.with?.gbrain_version).toBe('0.50.5.0');
-    expect([jobs.publish!.needs].flat()).toContain('stack');
-  });
 });
