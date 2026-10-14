@@ -1,1 +1,0 @@
-ALTER TABLE "agent_runs" ADD COLUMN "gbrain_client_id" text;
