@@ -1,0 +1,11 @@
+{
+  "api_version": "gbrain-schema-pack-v1",
+  "name": "mobrain-brain",
+  "version": "1.0.0",
+  "description": "This brain's own schema layer. Extend it through gbrain's schema tools and the mobrain-schema skill; never redefine a mobrain-core or mobrain-personal entry.",
+  "gbrain_min_version": "0.60.230",
+  "extends": "mobrain-personal",
+  "borrow_from": [],
+  "page_types": [],
+  "link_types": []
+}
