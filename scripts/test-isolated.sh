@@ -13,6 +13,7 @@ set -uo pipefail
 
 dir="${1:?usage: test-isolated.sh <test-dir>}"
 mapfile -t files < <(find "$dir" -maxdepth 1 -name '*.test.ts' | sort)
+if [ "${#files[@]}" -eq 0 ]; then echo "no tests in $dir"; exit 0; fi
 
 failed=()
 for f in "${files[@]}"; do

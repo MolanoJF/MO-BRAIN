@@ -1,3 +1,7 @@
+> **Rebuild in progress (2026-10-14).** v1 is frozen at tag `v1-final`. The new shape is
+> `docs/superpowers/specs/2026-10-14-mobrain-simple-design.md`, built by
+> `docs/superpowers/plans/2026-10-14-mobrain-simple/`. Everything below describes v1.
+
 # Handoff — read this first
 
 **Mo-brain 1.0.0 is the tagged release.** `main` has moved since that tag. Nothing since `v1.0.0` has been tagged or published. Published digests are in [`CHANGELOG.md`](CHANGELOG.md).
