@@ -13,12 +13,15 @@ export class FakeGbrainAdmin implements GbrainAdmin {
     this.calls.push(op);
     if (this.failNext === op) { this.failNext = null; throw new Error(`fake ${op} failure`); }
   }
+
+  constructor(private now: () => Date = () => new Date()) {}
+
   async createClient(spec: ClientSpec): Promise<IssuedClient> {
     this.maybeFail('createClient');
     const clientId = `c${++this.n}`;
     const token = `tok-${clientId}`;
     this.clients.set(clientId, { spec, token, revoked: false });
-    return { clientId, token, expiresAt: new Date(Date.now() + 90 * 86400_000) };
+    return { clientId, token, expiresAt: new Date(this.now().getTime() + 90 * 86400_000) };
   }
   async rescopeClient(clientId: string, spec: ClientSpec): Promise<void> {
     this.maybeFail('rescopeClient');

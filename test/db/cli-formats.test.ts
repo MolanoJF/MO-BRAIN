@@ -30,7 +30,7 @@ test('client issue env and clients tsv with days left', async () => {
   expect(e).toMatch(/^token=tok-.+\nmcp_url=http:\/\/127\.0\.0\.1:8787\/mcp\nname=gbrain\nexpires_at=.+\n$/);
   const t = await (await w.req('/api/clients/me?format=tsv', { as: key })).text();
   expect(t.split('\n').filter(Boolean).map((l) => l.split('\t')[0]).sort()).toEqual(['agent', 'ui']);
-  expect(t).toMatch(/agent\tp-own\t\S+\t(89|90)\n/);
+  expect(t).toMatch(/agent\tp-own\t\S+\t90\n/);
 });
 
 test('due?slug returns that collector even when not due', async () => {

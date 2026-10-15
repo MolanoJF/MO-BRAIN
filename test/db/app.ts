@@ -26,8 +26,8 @@ export async function world(opts: { mcp?: (token: string) => McpCaller; cli?: (a
     await mkdir(join(home, '.gbrain', 'schema-packs', name!), { recursive: true });
     await cp(join(packs, file!), join(home, '.gbrain', 'schema-packs', name!, 'pack.json'));
   }
-  const admin = new FakeGbrainAdmin();
   let clock = new Date('2026-10-14T12:00:00Z');
+  const admin = new FakeGbrainAdmin(() => clock);
   const deps: Deps = {
     sql,
     env: {
