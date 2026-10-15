@@ -7,6 +7,7 @@ import type { runGbrain } from './gbrain/cli.ts';
 import { authenticate, onError, type AppEnv } from './http.ts';
 import { authRoutes } from './routes/auth.ts';
 import { healthRoutes } from './routes/health.ts';
+import { peopleRoutes } from './routes/people.ts';
 import { proxyRoutes } from './routes/proxy.ts';
 
 export type Deps = {
@@ -26,5 +27,6 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.use('/api/*', authenticate(deps.sql, deps.now));
   app.route('/', healthRoutes(deps));
   app.route('/', authRoutes(deps));
+  app.route('/', peopleRoutes(deps));
   return app;
 }
