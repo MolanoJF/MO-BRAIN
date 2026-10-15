@@ -6,6 +6,7 @@ import type { McpCaller } from './gbrain/mcp.ts';
 import type { runGbrain } from './gbrain/cli.ts';
 import { authenticate, onError, type AppEnv } from './http.ts';
 import { authRoutes } from './routes/auth.ts';
+import { brainRoutes } from './routes/brain.ts';
 import { healthRoutes } from './routes/health.ts';
 import { peopleRoutes } from './routes/people.ts';
 import { proxyRoutes } from './routes/proxy.ts';
@@ -32,5 +33,6 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route('/', peopleRoutes(deps));
   app.route('/', schemaRoutes(deps));
   app.route('/', runnerRoutes(deps));
+  app.route('/', brainRoutes(deps));
   return app;
 }
