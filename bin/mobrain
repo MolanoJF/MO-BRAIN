@@ -376,6 +376,47 @@ cmd_client() {
   esac
 }
 
+# ---- schema ---------------------------------------------------------------------
+
+BRAIN_PACK="$PACK_DIR/mobrain-brain/pack.json"
+SCHEMA_EXEC_ALLOWED=" active show stats lint validate explain graph sync review-orphans review-candidates detect suggest unify-types "
+
+schema_lock_ok() {
+  local h; h="$(api GET /api/admin/health)"
+  if printf '%s' "$h" | grep -q '"coreLock":{"ok":true'; then return 0; fi
+  printf '%s\n' "$h" | grep -o '"problems":\[[^]]*\]' || true
+  return 1
+}
+
+cmd_schema() {
+  local sub=${1:-}; shift || true
+  case "$sub" in
+    show) need_runner; api GET /api/schema; echo ;;
+    check) need_runner; schema_lock_ok && echo "core lock ok" ;;
+    edit)
+      need_stack; [ "${1:-}" = --out ] && [ -n "${2:-}" ] || usage
+      dc exec -T gbrain cat "$BRAIN_PACK" > "$2"; echo "wrote $2; edit it, then: mobrain schema apply $2" ;;
+    apply)
+      need_stack; need_runner; [ -f "${1:-}" ] || usage
+      dc exec -T gbrain cp "$BRAIN_PACK" "$BRAIN_PACK.bak"
+      dc cp "$1" "gbrain:$BRAIN_PACK"
+      if dc exec -T gbrain gbrain schema validate mobrain-brain \
+         && dc exec -T gbrain gbrain schema lint mobrain-brain \
+         && schema_lock_ok; then
+        dc restart gbrain autopilot
+        echo "applied; gbrain reloaded"
+      else
+        dc exec -T gbrain cp "$BRAIN_PACK.bak" "$BRAIN_PACK"
+        die "rejected; the previous mobrain-brain pack is restored" 1
+      fi ;;
+    exec)
+      need_stack; [ "${1:-}" = -- ] && shift
+      [ $# -ge 1 ] && [[ "$SCHEMA_EXEC_ALLOWED" == *" $1 "* ]] || { echo "allowed: $SCHEMA_EXEC_ALLOWED" >&2; exit 64; }
+      dc exec -T gbrain gbrain schema "$@" ;;
+    *) usage ;;
+  esac
+}
+
 # ---- main ----------------------------------------------------------------------
 
 main() {
