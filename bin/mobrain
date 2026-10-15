@@ -143,6 +143,108 @@ cmd_status() {
   [ "$code" = 200 ] || exit 1
 }
 
+# ---- install -------------------------------------------------------------------
+
+host_tz() {
+  if command -v timedatectl >/dev/null && timedatectl show -p Timezone --value >/dev/null 2>&1; then timedatectl show -p Timezone --value
+  elif [ -f /etc/timezone ]; then cat /etc/timezone
+  else echo UTC; fi
+}
+
+preflight() {
+  local proj=$1 port=$2 v
+  v="$(docker compose version --short 2>/dev/null)" || die "docker compose v2 is required" 17
+  version_ge "${v#v}" 2.20.0 || die "docker compose >= 2.20 is required (found $v)" 17
+  [ "$(nproc 2>/dev/null || echo 2)" -ge 2 ] || die "at least 2 CPUs are required" 17
+  local mem; mem="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 9999999)"
+  [ "$mem" -ge 3800000 ] || die "at least 4 GB of RAM is required" 17
+  if docker compose ls --all -q 2>/dev/null | grep -qx "$proj"; then die "compose project $proj already exists; refusing to reuse it" 17; fi
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then die "port $port is already in use" 17; fi
+}
+
+write_env() {
+  local proj=$1 port=$2 url=$3 key=$4
+  ( umask 077
+    cat > "$ENV_FILE" <<EOF
+COMPOSE_PROJECT_NAME=$proj
+GBRAIN_VERSION=$PIN
+MOBRAIN_PORT=$port
+MOBRAIN_PUBLIC_URL=$url
+POSTGRES_PASSWORD=$(rand_hex 16)
+ENCRYPTION_KEY=$(rand_b64 32)
+GBRAIN_ADMIN_BOOTSTRAP_TOKEN=$(rand_hex 32)
+OPENAI_API_KEY=$key
+TZ=$(host_tz)
+EOF
+  )
+}
+
+PACK_DIR=/srv/gbrain-home/.gbrain/schema-packs
+
+install_packs() {
+  local name
+  for name in mobrain-core mobrain-personal mobrain-brain; do
+    dc run --rm --no-deps gbrain mkdir -p "$PACK_DIR/$name"
+  done
+  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-core.json "$PACK_DIR/mobrain-core/pack.json"
+  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-personal.json "$PACK_DIR/mobrain-personal/pack.json"
+  # The brain layer is the agent's; create it once, never overwrite it.
+  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp -n /packs/mobrain-brain.template.json "$PACK_DIR/mobrain-brain/pack.json"
+}
+
+write_runner_env() {
+  mkdir -p "$CONF_DIR"
+  ( umask 077; printf 'MOBRAIN_URL=%s\nMOBRAIN_API_KEY=%s\n' "$1" "$2" > "$RUNNER_ENV" )
+}
+
+cmd_install() {
+  local email="" name="" keyfile="" keyless=0 port=8787 url="" proj=mobrain key=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --owner-email) email=$2; shift 2 ;;
+      --name) name=$2; shift 2 ;;
+      --openai-key-file) keyfile=$2; shift 2 ;;
+      --keyless) keyless=1; shift ;;
+      --port) port=$2; shift 2 ;;
+      --public-url) url=$2; shift 2 ;;
+      --project) proj=$2; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [ -f "$REPO/compose/docker-compose.yml" ] || die "install runs from a Mo-brain checkout" 17
+  [ -n "$email" ] || usage
+  { [ -n "$keyfile" ] || [ "$keyless" = 1 ]; } || usage
+  [ -e "$ENV_FILE" ] && die "$ENV_FILE exists; refusing to overwrite an install" 17
+  if [ -n "$keyfile" ]; then key="$(tr -d '\r\n' < "$keyfile")"; [ -n "$key" ] || die "$keyfile is empty" 64; fi
+  url="${url:-http://127.0.0.1:$port}"
+  preflight "$proj" "$port"
+  write_env "$proj" "$port" "$url" "$key"
+
+  echo "building images (gbrain $PIN first)..." >&2
+  dc build gbrain
+  dc build mobrain
+  dc up -d --wait postgres
+  # Probe P1: these flags are accepted. `--search-mode balanced` is not stored; do not invent a flag.
+  # Init finishes only after compose/initdb/01-dbs.sh grants BYPASSRLS and pre-creates
+  # auto_enable_rls (owned by gbrain) plus the auto_rls_on_create_table event trigger.
+  local init=(gbrain init --non-interactive --search-mode balanced --json)
+  [ -n "$key" ] && init+=(--embedding-model openai:text-embedding-3-small)
+  dc run --rm --no-deps gbrain "${init[@]}"
+  install_packs
+  dc run --rm --no-deps gbrain gbrain config set schema_pack mobrain-brain
+  dc up -d --wait
+
+  local boot=(bun src/server/admin-cli.ts bootstrap --email "$email" --format env)
+  [ -n "$name" ] && boot+=(--name "$name")
+  local out; out="$(dc exec -T mobrain "${boot[@]}")" || die "owner bootstrap failed" 1
+  local api_key password
+  api_key="$(kv_get "$out" MOBRAIN_API_KEY)"; password="$(kv_get "$out" MOBRAIN_OWNER_PASSWORD)"
+  write_runner_env "http://127.0.0.1:$port" "$api_key"
+
+  printf 'ui_url=%s\nlocal_url=http://127.0.0.1:%s\nowner_email=%s\nowner_password=%s\nrunner_env=%s\nnext=mobrain client issue agent --register\n' \
+    "$url" "$port" "$email" "$password" "$RUNNER_ENV"
+}
+
 # ---- main ----------------------------------------------------------------------
 
 main() {
