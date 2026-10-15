@@ -567,6 +567,31 @@ cmd_timers() {
   esac
 }
 
+# ---- skills ---------------------------------------------------------------------------
+
+cmd_skills() {
+  [ "${1:-}" = install ] && [ "${2:-}" = --dir ] && [ -n "${3:-}" ] || usage
+  need_runner
+  local dest=$3 tmp; tmp="$(mktemp -d)"
+  curl -fsS -H "authorization: Bearer $MOBRAIN_API_KEY" "${MOBRAIN_URL%/}/install/skills.tar.gz" -o "$tmp/s.tgz" || die "cannot download skills" 2
+  mkdir -p "$tmp/x" "$dest"; tar -xzf "$tmp/s.tgz" -C "$tmp/x"
+  local manifest="$dest/.mobrain-skills.tsv" rel src dst new old have
+  : > "$tmp/m.tsv"
+  while IFS= read -r rel; do
+    rel=${rel#./}; src="$tmp/x/$rel"; dst="$dest/$rel"; new="$(sha256 "$src")"
+    if [ ! -e "$dst" ]; then
+      mkdir -p "$(dirname "$dst")"; cp "$src" "$dst"; printf '%s\t%s\n' "$new" "$rel" >> "$tmp/m.tsv"; continue
+    fi
+    have="$(sha256 "$dst")"
+    old="$( [ -f "$manifest" ] && awk -F'\t' -v p="$rel" '$2 == p {print $1}' "$manifest" || true)"
+    if [ "$have" = "$new" ]; then printf '%s\t%s\n' "$new" "$rel" >> "$tmp/m.tsv"
+    elif [ -n "$old" ] && [ "$have" = "$old" ]; then cp "$src" "$dst"; printf '%s\t%s\n' "$new" "$rel" >> "$tmp/m.tsv"
+    else echo "kept your edited $rel"; printf '%s\t%s\n' "${old:-$have}" "$rel" >> "$tmp/m.tsv"; fi
+  done < <(cd "$tmp/x" && find . -type f | sort)
+  mv "$tmp/m.tsv" "$manifest"; rm -rf "$tmp"
+  echo "skills installed in $dest"
+}
+
 # ---- main ----------------------------------------------------------------------
 
 main() {
