@@ -323,6 +323,59 @@ cmd_source() {
   esac
 }
 
+# ---- clients and the harness ------------------------------------------------------
+
+runner_set() {
+  local k=$1 v=$2
+  mkdir -p "$CONF_DIR"; touch "$RUNNER_ENV"; chmod 600 "$RUNNER_ENV"
+  local tmp; tmp="$(mktemp)"
+  grep -v "^$k=" "$RUNNER_ENV" > "$tmp" || true
+  printf '%s=%s\n' "$k" "$v" >> "$tmp"
+  mv "$tmp" "$RUNNER_ENV"; chmod 600 "$RUNNER_ENV"
+}
+
+harness_register() {
+  local name=$1 url=$2 token=$3
+  case "${MOBRAIN_HARNESS:-claude-code}" in
+    claude-code)
+      ( cd "${MOBRAIN_WORKDIR:-$HOME}"
+        claude mcp remove --scope "${MOBRAIN_MCP_SCOPE:-user}" "$name" >/dev/null 2>&1 || true
+        claude mcp add --scope "${MOBRAIN_MCP_SCOPE:-user}" --transport http "$name" "$url" --header "Authorization: Bearer $token" >/dev/null ) ;;
+    *) die "harness ${MOBRAIN_HARNESS} is not supported yet" 64 ;;
+  esac
+}
+
+cmd_client() {
+  need_runner
+  local sub=${1:-}; shift || true
+  case "$sub" in
+    issue)
+      local what=${1:-} source="" register=0 body; shift || true
+      if [ "$what" = company-writer ]; then source=${1:-}; shift || true; [ -n "$source" ] || usage; fi
+      [ "${1:-}" = --register ] && register=1
+      case "$what" in
+        agent) body='{"purpose":"agent"}' ;;
+        company-writer) body="{\"purpose\":\"company_writer\",\"sourceId\":$(json_str "$source")}" ;;
+        *) usage ;;
+      esac
+      local out; out="$(api POST '/api/clients/issue?format=env' "$body")"
+      if [ "$register" = 1 ]; then
+        harness_register "$(kv_get "$out" name)" "$(kv_get "$out" mcp_url)" "$(kv_get "$out" token)"
+        [ "$what" = agent ] && runner_set MOBRAIN_REGISTERED 1
+        echo "registered $(kv_get "$out" name) in ${MOBRAIN_HARNESS:-claude-code}; expires $(kv_get "$out" expires_at)"
+      else
+        printf '%s\n' "$out"
+      fi ;;
+    rotate-if-expiring)
+      local days=14; [ "${1:-}" = --days ] && days=${2:-14}
+      local left; left="$(api GET '/api/clients/me?format=tsv' | awk -F'\t' '$1 == "agent" {print $4}' | head -1)"
+      if [ -n "$left" ] && [ "$left" != - ] && [ "$left" -gt "$days" ]; then return 0; fi
+      if [ "${MOBRAIN_REGISTERED:-0}" != 1 ]; then echo "mobrain: agent token expires in ${left:-?} days but is not registered by mobrain; run 'mobrain client issue agent --register'" >&2; return 0; fi
+      cmd_client issue agent --register ;;
+    *) usage ;;
+  esac
+}
+
 # ---- main ----------------------------------------------------------------------
 
 main() {
