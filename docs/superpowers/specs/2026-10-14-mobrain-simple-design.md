@@ -161,6 +161,7 @@ gbrain_clients(id uuid pk, user_id uuid references users,   -- null for instance
                write_source text references sources,
                gbrain_client_id text not null,
                token_enc text,                  -- stored for 'ui' and 'instance' only
+               expires_at timestamptz,          -- token rotation
                created_at timestamptz not null default now(), revoked_at timestamptz)
 
 api_keys      (key_hash text pk, user_id uuid not null references users,
@@ -170,7 +171,8 @@ collector_runs(id uuid pk, user_id uuid not null references users,
                source_id text not null, collector text not null,   -- page slug
                started_at timestamptz not null, finished_at timestamptz,
                status text not null check (status in ('running','ok','partial','error','timeout')),
-               exit_code int, log_tail text)
+               exit_code int, timeout_s int not null default 1200,
+               summary text, log_tail text)
 
 audit_log     (id bigserial pk, at timestamptz not null default now(),
                actor_user_id uuid, action text not null, target text, detail jsonb)
