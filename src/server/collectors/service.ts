@@ -52,6 +52,14 @@ export class CollectorService {
     return new Map(rows.map((r) => [`${r.sourceId}|${r.collector}`, r]));
   }
 
+  async one(user: User, slug: string): Promise<{ config: CollectorConfig; mode: 'backfill' | 'incremental' } | null> {
+    const sources = await this.runnableSources(user);
+    const hit = (await this.collectors(user, sources)).find((e) => e.slug === slug);
+    if (!hit || !hit.ok) return null;
+    const [ok] = await this.d.sql`select 1 from collector_runs where source_id = ${hit.source} and collector = ${slug} and status = 'ok' limit 1`;
+    return { config: hit.config, mode: ok ? 'incremental' : 'backfill' };
+  }
+
   async due(user: User): Promise<{ config: CollectorConfig; mode: 'backfill' | 'incremental' }[]> {
     const sources = await this.runnableSources(user);
     const runs = await this.lastRuns(sources);

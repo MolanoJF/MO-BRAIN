@@ -16,6 +16,9 @@ export function peopleRoutes(deps: Deps): Hono<AppEnv> {
 
   r.get('/api/people', managers, async (c) => {
     const users = await deps.sql`select id, email, name, role, status, created_at from users order by created_at`;
+    if (c.req.query('format') === 'tsv') {
+      return c.text(users.map((u) => [u.id, u.email, u.role, u.status].join('\t')).join('\n') + '\n');
+    }
     const grants = await deps.sql<{ userId: string; sourceId: string; agentReads: boolean }[]>`select user_id, source_id, agent_reads from grants`;
     const sources = await deps.sql`select id, kind, owner_user_id, name, status from sources order by kind, id`;
     return c.json({
@@ -94,12 +97,25 @@ export function peopleRoutes(deps: Deps): Hono<AppEnv> {
   r.post('/api/clients/issue', async (c) => {
     const user = requireUser(c);
     const { purpose, sourceId } = await jsonBody<{ purpose?: string; sourceId?: string }>(c);
-    if (purpose === 'agent') return c.json(await people.issueAgent(user));
-    if (purpose === 'company_writer' && sourceId) return c.json(await people.issueCompanyWriter(user, sourceId));
-    throw new HttpError(400, 'invalid_purpose');
+    let issued: { token: string; mcpUrl: string; expiresAt: Date | null; registrationName: string };
+    if (purpose === 'agent') issued = await people.issueAgent(user);
+    else if (purpose === 'company_writer' && sourceId) issued = await people.issueCompanyWriter(user, sourceId);
+    else throw new HttpError(400, 'invalid_purpose');
+    if (c.req.query('format') === 'env') {
+      return c.text(`token=${issued.token}\nmcp_url=${issued.mcpUrl}\nname=${issued.registrationName}\nexpires_at=${issued.expiresAt?.toISOString() ?? ''}\n`);
+    }
+    return c.json(issued);
   });
 
-  r.get('/api/clients/me', async (c) => c.json({ clients: await people.myClients(requireUser(c)) }));
+  r.get('/api/clients/me', async (c) => {
+    const clients = await people.myClients(requireUser(c));
+    if (c.req.query('format') === 'tsv') {
+      const now = deps.now().getTime();
+      return c.text(clients.map((k) => [k.purpose, k.writeSource ?? '', k.expiresAt?.toISOString() ?? '-',
+        k.expiresAt ? String(Math.floor((k.expiresAt.getTime() - now) / 86400_000)) : '-'].join('\t')).join('\n') + '\n');
+    }
+    return c.json({ clients });
+  });
 
   return r;
 }

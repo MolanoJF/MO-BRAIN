@@ -14,7 +14,11 @@ export async function runAdminCli(argv: string[], deps: Deps): Promise<string> {
   if (cmd === 'bootstrap') {
     const email = flag(argv, 'email');
     if (!email) throw new Error('usage: bootstrap --email <e> [--name <n>]');
-    return JSON.stringify(await people.bootstrapOwner({ email, name: flag(argv, 'name') }));
+    const r = await people.bootstrapOwner({ email, name: flag(argv, 'name') });
+    if (flag(argv, 'format') === 'env') {
+      return `MOBRAIN_USER_ID=${r.userId}\nMOBRAIN_API_KEY=${r.apiKey}\nMOBRAIN_OWNER_PASSWORD=${r.password}`;
+    }
+    return JSON.stringify(r);
   }
   if (cmd === 'reset-password') {
     const email = flag(argv, 'email');

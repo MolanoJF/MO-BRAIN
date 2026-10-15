@@ -59,6 +59,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *gbrain-env
+      TZ: ${TZ:-UTC}
     # Probe P6: `gbrain autopilot` exits "No repo path" and does not tick. Spec §8.5 loop.
     # Never --install. The script is not in the image; mount it read-only. Not an sh -c string.
     command: ["/usr/local/bin/autopilot-loop.sh"]
@@ -86,6 +87,7 @@ services:
       GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
       MOBRAIN_PUBLIC_URL: ${MOBRAIN_PUBLIC_URL:-http://127.0.0.1:8787}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
+      TZ: ${TZ:-UTC}
     ports:
       - "127.0.0.1:${MOBRAIN_PORT:-8787}:3000"
     # Shared read-write with gbrain so the admin CLI and the server use one home and one writer lock. Not the Docker socket.
