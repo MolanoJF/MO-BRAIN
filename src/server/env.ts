@@ -7,6 +7,8 @@ export type Env = {
   gbrainVersion: string;
   uiDir: string;
   secureCookies: boolean;
+  packsDir: string;
+  gbrainHome: string;
 };
 
 type Source = Record<string, string | undefined>;
@@ -30,5 +32,7 @@ export function loadEnv(src: Source = process.env): Env {
     gbrainVersion: required(src, 'GBRAIN_VERSION'),
     uiDir: src.MOBRAIN_UI_DIR?.trim() || 'dist/ui',
     secureCookies: publicUrl.startsWith('https://'),
+    packsDir: src.PACKS_DIR?.trim() || '/app/packs',
+    gbrainHome: src.GBRAIN_HOME?.trim() || '/srv/gbrain-home',
   };
 }
