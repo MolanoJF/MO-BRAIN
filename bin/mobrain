@@ -82,16 +82,46 @@ version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; 
 cmd_up() { need_stack; dc up -d --wait "$@"; }
 cmd_ps() { need_stack; dc ps "$@"; }
 cmd_logs() { need_stack; dc logs "$@"; }
+# A wipe is -v / -v=* / --volumes / --volumes=*. The project docker will use is
+# argv -p / --project / --project-name (space or =value; also -pNAME), else ambient
+# COMPOSE_PROJECT_NAME, else the env file. Refuse unless that name is allowlisted
+# and is the same name the env file names. Never wipe another project.
 cmd_down() {
   need_stack
-  for a in "$@"; do
+  local wipe=0 have_flag=0 name="" a
+  local -a args=("$@")
+  local i=0 n=${#args[@]}
+  while [ "$i" -lt "$n" ]; do
+    a=${args[$i]}
     case "$a" in
-      -v|--volumes)
-        case "$(project)" in mobrain-dev|mobrain-selftest) ;;
-          *) die "refusing to delete volumes of $(project); only mobrain-dev and mobrain-selftest may be wiped" 17 ;;
-        esac ;;
+      -v|-v=*|--volumes|--volumes=*) wipe=1 ;;
+      -p|--project|--project-name)
+        have_flag=1
+        i=$((i + 1))
+        if [ "$i" -lt "$n" ]; then name=${args[$i]}; else name=""; fi
+        ;;
+      -p=*|--project=*|--project-name=*)
+        have_flag=1
+        name=${a#*=}
+        ;;
+      -p?*)
+        have_flag=1
+        name=${a#-p}
+        ;;
     esac
+    i=$((i + 1))
   done
+  if [ "$wipe" = 1 ]; then
+    if [ "$have_flag" = 0 ]; then
+      if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then name=$COMPOSE_PROJECT_NAME
+      else name=$(project); fi
+    fi
+    case "$name" in
+      mobrain-dev|mobrain-selftest) ;;
+      *) die "refusing to delete volumes of ${name}; only mobrain-dev and mobrain-selftest may be wiped" 17 ;;
+    esac
+    [ "$name" = "$(project)" ] || die "refusing to delete volumes of ${name}; .env names $(project)" 17
+  fi
   dc down "$@"
 }
 

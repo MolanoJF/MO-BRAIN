@@ -41,6 +41,64 @@ describe('basics', () => {
     expect(await c.calls('docker')).toEqual([]);
   });
 
+  test('down -v refuses ambient COMPOSE_PROJECT_NAME=mobrain-molior', async () => {
+    const repo = await stackHost('mobrain-dev');
+    await c.stub('docker');
+    const r = await c.run(['down', '-v'], { MOBRAIN_REPO: repo, COMPOSE_PROJECT_NAME: 'mobrain-molior' });
+    expect(r.code).toBe(17);
+    expect(r.stderr).toContain('refusing to delete volumes');
+    expect(await c.calls('docker')).toEqual([]);
+  });
+
+  test('down -v refuses -p mobrain-molior even when the env file says mobrain-dev', async () => {
+    const repo = await stackHost('mobrain-dev');
+    await c.stub('docker');
+    for (const args of [
+      ['down', '-v', '-p', 'mobrain-molior'],
+      ['down', '-v', '-p=mobrain-molior'],
+      ['down', '-v', '-pmobrain-molior'],
+      ['down', '-v', '--project', 'mobrain-molior'],
+      ['down', '-v', '--project=mobrain-molior'],
+      ['down', '-v', '--project-name', 'mobrain-molior'],
+      ['down', '-v', '--project-name=mobrain-molior'],
+    ]) {
+      const r = await c.run(args, { MOBRAIN_REPO: repo });
+      expect(r.code).toBe(17);
+      expect(r.stderr).toContain('mobrain-molior');
+      expect(await c.calls('docker')).toEqual([]);
+    }
+  });
+
+  test('down -v refuses an allowlisted project flag that differs from the env file', async () => {
+    const repo = await stackHost('mobrain-molior');
+    await c.stub('docker');
+    const r = await c.run(['down', '-v', '-p', 'mobrain-dev'], { MOBRAIN_REPO: repo });
+    expect(r.code).toBe(17);
+    expect(r.stderr).toContain('refusing to delete volumes');
+    expect(await c.calls('docker')).toEqual([]);
+  });
+
+  test('down refuses --volumes=true and -v=true on a molior env file', async () => {
+    const repo = await stackHost('mobrain-molior');
+    await c.stub('docker');
+    for (const args of [['down', '--volumes=true'], ['down', '-v=true'], ['down', '--volumes=false']]) {
+      const r = await c.run(args, { MOBRAIN_REPO: repo });
+      expect(r.code).toBe(17);
+      expect(r.stderr).toContain('refusing to delete volumes');
+      expect(await c.calls('docker')).toEqual([]);
+    }
+  });
+
+  test('down -v on mobrain-dev still calls docker compose', async () => {
+    const repo = await stackHost('mobrain-dev');
+    await c.stub('docker');
+    const r = await c.run(['down', '-v'], { MOBRAIN_REPO: repo });
+    expect(r.code).toBe(0);
+    const [call] = await c.calls('docker');
+    expect(call).toEqual(['compose', '--env-file', join(repo, '.env'), '-f', join(repo, 'compose/docker-compose.yml'),
+      '-f', join(repo, 'compose/docker-compose.dev.yml'), 'down', '-v']);
+  });
+
   test('stack commands refuse off a stack host', async () => {
     const r = await c.run(['ps']);
     expect(r.code).toBe(17);
