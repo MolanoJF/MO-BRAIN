@@ -205,7 +205,7 @@ PACK_DIR=/srv/gbrain-home/.gbrain/schema-packs
 idc() { dc -p "$proj" "$@"; }
 
 install_packs() {
-  local proj=$1 name
+  local proj=${1:-$(project)} name
   for name in mobrain-core mobrain-personal mobrain-brain; do
     idc run --rm --no-deps gbrain mkdir -p "$PACK_DIR/$name"
   done
@@ -266,6 +266,93 @@ cmd_install() {
 
   printf 'ui_url=%s\nlocal_url=http://127.0.0.1:%s\nowner_email=%s\nowner_password=%s\nrunner_env=%s\nnext=mobrain client issue agent --register\n' \
     "$url" "$port" "$email" "$password" "$RUNNER_ENV"
+}
+
+# ---- backup, restore, upgrade -----------------------------------------------------------
+
+backup_base() { printf '%s/%s' "${MOBRAIN_BACKUP_DIR:-$HOME/backups/mobrain}" "$(project)"; }
+vol() { printf '%s_gbrain-home' "$(project)"; }
+gbrain_image() { printf 'mobrain-gbrain:%s' "$(env_get GBRAIN_VERSION)"; }
+
+# Probe P8: pg_restore exits 1 and ignores these. They are not a failed restore.
+pg_restore_ok() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      'pg_restore: error:'*)
+        case "$line" in
+          *'must be owner of extension vector'*|*'must be owner of extension citext'*|*'permission denied to create event trigger "auto_rls_on_create_table"'*) ;;
+          *) return 1 ;;
+        esac ;;
+    esac
+  done
+  return 0
+}
+
+restore_db() {
+  local db=$1 dump=$2 log
+  log="$(mktemp)"
+  set +e
+  dc exec -T postgres pg_restore -U postgres -d "$db" --no-owner --role="$db" < "$dump" >"$log" 2>&1
+  set -e
+  if ! pg_restore_ok < "$log"; then cat "$log" >&2; rm -f "$log"; die "pg_restore $db failed" 1; fi
+  rm -f "$log"
+}
+
+cmd_backup() {
+  need_stack
+  local prune=0; [ "${1:-}" = --prune ] && prune=1
+  local dest; dest="$(backup_base)/$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$dest"
+  dc exec -T postgres pg_dump -U postgres -Fc gbrain > "$dest/gbrain.dump"
+  dc exec -T postgres pg_dump -U postgres -Fc mobrain > "$dest/mobrain.dump"
+  docker run --rm -v "$(vol):/v:ro" -v "$dest:/b" "$(gbrain_image)" tar -C /v -czf /b/gbrain-home.tgz .
+  env_get GBRAIN_VERSION > "$dest/GBRAIN_VERSION"
+  git -C "$REPO" rev-parse HEAD > "$dest/COMMIT" 2>/dev/null || echo unknown > "$dest/COMMIT"
+  sha256 "$ENV_FILE" > "$dest/env.sha256"
+  ( cd "$dest" && for f in gbrain.dump mobrain.dump gbrain-home.tgz GBRAIN_VERSION COMMIT; do printf '%s  %s\n' "$(sha256 "$f")" "$f"; done > MANIFEST.sha256 )
+  if [ "$prune" = 1 ]; then
+    ls -1d "$(backup_base)"/*/ 2>/dev/null | sort | head -n -7 | while read -r old; do rm -rf "$old"; done
+  fi
+  echo "$dest"
+}
+
+cmd_restore() {
+  need_stack
+  local dir=${1:-} yes=0 allow=0; shift || true
+  for a in "$@"; do case "$a" in --yes) yes=1 ;; --allow-version-change) allow=1 ;; *) usage ;; esac; done
+  [ -d "$dir" ] && [ "$yes" = 1 ] || usage
+  [ -f "$dir/gbrain.dump" ] && [ -f "$dir/mobrain.dump" ] && [ -f "$dir/gbrain-home.tgz" ] || die "$dir is not a Mo-brain backup" 17
+  local bv; bv="$(tr -d '\n' < "$dir/GBRAIN_VERSION")"
+  [ "$bv" = "$(env_get GBRAIN_VERSION)" ] || [ "$allow" = 1 ] || die "backup is gbrain $bv, .env pins $(env_get GBRAIN_VERSION); pass --allow-version-change" 17
+  [ "$(sha256 "$ENV_FILE")" = "$(cat "$dir/env.sha256" 2>/dev/null)" ] || echo "mobrain: warning: .env differs from the one at backup time; stored tokens may not open" >&2
+  dc stop autopilot gbrain mobrain
+  local db
+  for db in gbrain mobrain; do
+    dc exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c "drop database if exists $db with (force)" -c "create database $db owner $db"
+    restore_db "$db" "$dir/$db.dump"
+  done
+  docker run --rm -v "$(vol):/v" "$(gbrain_image)" find /v -mindepth 1 -delete
+  docker run --rm -v "$(vol):/v" -v "$dir:/b:ro" "$(gbrain_image)" tar -C /v -xzf /b/gbrain-home.tgz
+  dc up -d --wait
+  cmd_status
+}
+
+cmd_upgrade() {
+  need_stack
+  [ "${1:-}" = --gbrain ] && [ -n "${2:-}" ] || usage
+  local to=$2 from; from="$(env_get GBRAIN_VERSION)"
+  local b; b="$(cmd_backup | tail -1)"
+  echo "backup: $b" >&2
+  sed -i.bak "s/^GBRAIN_VERSION=.*/GBRAIN_VERSION=$to/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  if ! { dc build gbrain && dc build mobrain && dc stop autopilot mobrain && dc up -d --wait gbrain \
+         && dc exec -T gbrain gbrain apply-migrations --yes --non-interactive && install_packs && dc up -d --wait; }; then
+    echo "mobrain: upgrade $from -> $to failed. To roll back:" >&2
+    echo "  sed -i 's/^GBRAIN_VERSION=.*/GBRAIN_VERSION=$from/' $ENV_FILE && mobrain restore $b --yes" >&2
+    exit 1
+  fi
+  echo "upgraded gbrain $from -> $to. Read gbrain's skills/migrations notes for every version crossed, then re-run 'mobrain skills install'." >&2
+  cmd_status
 }
 
 # ---- people, sources, mode -------------------------------------------------------
