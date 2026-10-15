@@ -63,7 +63,9 @@ kv_get() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 # api METHOD PATH [JSON] -> body on stdout; HTTP >= 400 is an error.
 api() {
   local method=$1 path=$2 body=${3:-} out code
-  local args=(-sS -X "$method" -H "authorization: Bearer $MOBRAIN_API_KEY" -w $'\n%{http_code}')
+  # -w takes the two-character escape \n, not a literal newline: curl turns it into
+  # the separator, and no argv element then carries a newline.
+  local args=(-sS -X "$method" -H "authorization: Bearer $MOBRAIN_API_KEY" -w '\n%{http_code}')
   [ -n "$body" ] && args+=(-H 'content-type: application/json' --data-binary "$body")
   out="$(curl "${args[@]}" "${MOBRAIN_URL%/}$path")" || die "cannot reach $MOBRAIN_URL" 2
   code="${out##*$'\n'}"; out="${out%$'\n'*}"
@@ -136,7 +138,7 @@ cmd_status() {
   local detail=0 url out code
   [ "${1:-}" = --detail ] && detail=1
   url="$(status_url)"
-  out="$(curl -sS -w $'\n%{http_code}' "$url/api/health" 2>/dev/null)" || { echo '{"ok":false,"error":"unreachable"}'; exit 2; }
+  out="$(curl -sS -w '\n%{http_code}' "$url/api/health" 2>/dev/null)" || { echo '{"ok":false,"error":"unreachable"}'; exit 2; }
   code="${out##*$'\n'}"; out="${out%$'\n'*}"
   printf '%s\n' "$out"
   if [ "$detail" = 1 ]; then need_runner; api GET /api/admin/health; echo; fi
@@ -264,6 +266,61 @@ cmd_install() {
 
   printf 'ui_url=%s\nlocal_url=http://127.0.0.1:%s\nowner_email=%s\nowner_password=%s\nrunner_env=%s\nnext=mobrain client issue agent --register\n' \
     "$url" "$port" "$email" "$password" "$RUNNER_ENV"
+}
+
+# ---- people, sources, mode -------------------------------------------------------
+
+user_id() {
+  local id; id="$(api GET '/api/people?format=tsv' | awk -F'\t' -v e="$1" 'tolower($2) == tolower(e) {print $1}')"
+  [ -n "$id" ] || die "no such member: $1" 1
+  printf '%s' "$id"
+}
+
+cmd_mode() {
+  need_runner
+  case "${1:-}" in company|personal) ;; *) usage ;; esac
+  api POST /api/people/mode "{\"mode\":\"$1\"}" >/dev/null && echo "mode: $1"
+}
+
+cmd_member() {
+  need_runner
+  local sub=${1:-}; shift || true
+  case "$sub" in
+    list) api GET '/api/people?format=tsv'; echo ;;
+    invite)
+      local email=${1:-} role=member; shift || true
+      [ "${1:-}" = --role ] && role=${2:-member}
+      [ -n "$email" ] || usage
+      api POST /api/people/invite "{\"email\":$(json_str "$email"),\"role\":$(json_str "$role")}" \
+        | sed -n 's/.*"claimUrl":"\([^"]*\)".*/\1/p' ;;
+    role) [ $# -eq 2 ] || usage; api POST "/api/people/$(user_id "$1")/role" "{\"role\":$(json_str "$2")}" >/dev/null && echo ok ;;
+    offboard) [ $# -eq 1 ] || usage; api POST "/api/people/$(user_id "$1")/offboard" '{}' >/dev/null && echo "offboarded $1" ;;
+    *) usage ;;
+  esac
+}
+
+cmd_grant() {
+  need_runner
+  [ $# -ge 2 ] || usage
+  local reads=true; [ "${3:-}" = --no-agent-reads ] && reads=false
+  api PUT "/api/people/$(user_id "$1")/grants/$2" "{\"agentReads\":$reads}" >/dev/null && echo "granted $2 to $1"
+}
+
+cmd_revoke() {
+  need_runner
+  [ $# -eq 2 ] || usage
+  api DELETE "/api/people/$(user_id "$1")/grants/$2" >/dev/null && echo "revoked $2 from $1"
+}
+
+cmd_source() {
+  need_runner
+  local sub=${1:-}; shift || true
+  case "$sub" in
+    add) [ $# -ge 1 ] || usage; api POST /api/sources/company "{\"name\":$(json_str "$*")}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' ;;
+    list) api GET /api/sources; echo ;;
+    archive) [ $# -eq 1 ] || usage; api POST "/api/sources/$1/archive" '{}' >/dev/null && echo "archived $1" ;;
+    *) usage ;;
+  esac
 }
 
 # ---- main ----------------------------------------------------------------------
