@@ -358,7 +358,8 @@ cmd_client() {
         company-writer) body="{\"purpose\":\"company_writer\",\"sourceId\":$(json_str "$source")}" ;;
         *) usage ;;
       esac
-      local out; out="$(api POST '/api/clients/issue?format=env' "$body")"
+      local out rc=0; out="$(api POST '/api/clients/issue?format=env' "$body")" || rc=$?
+      [ "$rc" = 0 ] || return "$rc"
       if [ "$register" = 1 ]; then
         harness_register "$(kv_get "$out" name)" "$(kv_get "$out" mcp_url)" "$(kv_get "$out" token)"
         [ "$what" = agent ] && runner_set MOBRAIN_REGISTERED 1
@@ -415,6 +416,94 @@ cmd_schema() {
       dc exec -T gbrain gbrain schema "$@" ;;
     *) usage ;;
   esac
+}
+
+# ---- collect ------------------------------------------------------------------------
+
+urlenc() { local s=$1 out="" c i; for ((i = 0; i < ${#s}; i++)); do c=${s:i:1}; case "$c" in [a-zA-Z0-9._~-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac; done; printf '%s' "$out"; }
+
+acquire_lock() {
+  local d=$1 ttl=$2
+  mkdir -p "$(dirname "$d")"
+  mkdir "$d" 2>/dev/null && return 0
+  # A lock older than the timeout belongs to a run that died.
+  if [ -n "$(find "$d" -maxdepth 0 -mmin "+$(( ttl / 60 + 1 ))" 2>/dev/null)" ]; then rm -rf "$d"; mkdir "$d" && return 0; fi
+  return 1
+}
+
+harness_run() {
+  local slug=$1 source=$2 mode=$3 tools=$4 model=$5 timeout=$6
+  local allowed="mcp__gbrain__*" via="gbrain"
+  if [[ "$source" == c-* ]]; then allowed+=",mcp__gbrain-company-${source}__*"; via="gbrain-company-$source"; fi
+  [ -n "$tools" ] && allowed+=",$tools"
+  local prompt="Use the mobrain-collect skill to run collector $slug in source $source (mode: $mode). Write through the $via MCP server. Finish with the MOBRAIN_STATUS and MOBRAIN_SUMMARY lines the skill specifies."
+  case "${MOBRAIN_HARNESS:-claude-code}" in
+    claude-code)
+      # Probe P4: systemd user PATH does not include ~/.local/bin. Bare `claude` is exit 127.
+      local claude_bin="${CLAUDE_BIN:-$(command -v claude || true)}"
+      [ -n "$claude_bin" ] || { echo "claude not found; set CLAUDE_BIN or PATH (systemd user PATH omits ~/.local/bin)" >&2; return 127; }
+      local cmd=("$claude_bin" -p "$prompt" --allowedTools "$allowed" --output-format text)
+      [ -n "$model" ] && cmd+=(--model "$model")
+      ( cd "${MOBRAIN_WORKDIR:-$HOME}" && tmo "${timeout}s" "${cmd[@]}" ) ;;
+    stub)
+      tmo "${timeout}s" "${MOBRAIN_STUB_HARNESS:?MOBRAIN_STUB_HARNESS is required for the stub harness}" "$slug" "$source" "$mode" ;;
+    *) echo "unsupported harness ${MOBRAIN_HARNESS}"; return 2 ;;
+  esac
+}
+
+run_one() {
+  local slug=$1 source=$2 kind=$3 tools=$4 model=$5 timeout=$6 mode=$7
+  [ "$mode" = backfill ] && [ "$timeout" -lt 7200 ] && timeout=7200
+  local safe=${slug//\//_}
+  local lock="$STATE_DIR/locks/$safe.lock.d" logdir="$STATE_DIR/collect/$safe"
+  if ! acquire_lock "$lock" "$timeout"; then echo "$slug: already running here"; return 0; fi
+  mkdir -p "$logdir"
+  local log; log="$logdir/$(date -u +%Y%m%dT%H%M%SZ).log"
+  local start run_id rc=0 status summary tailtxt
+  start="$(api POST /api/runner/start "{\"slug\":$(json_str "$slug"),\"source\":$(json_str "$source"),\"timeoutS\":$timeout}")" \
+    || { rm -rf "$lock"; return 1; }
+  run_id="$(printf '%s' "$start" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p')"
+  harness_run "$slug" "$source" "$mode" "$tools" "$model" "$timeout" > "$log" 2>&1 || rc=$?
+  status="$(sed -n 's/^.*MOBRAIN_STATUS: *\(ok\|partial\|error\).*$/\1/p' "$log" | tail -1)"
+  if [ "$rc" = 124 ]; then status=timeout; elif [ "$rc" != 0 ] || [ -z "$status" ]; then status=error; fi
+  summary="$(sed -n 's/^.*MOBRAIN_SUMMARY: *//p' "$log" | tail -1)"
+  tailtxt="$(tail -c 4096 "$log" | tr -d '\000-\010\013\014\016-\037')"
+  api POST /api/runner/finish "{\"runId\":$(json_str "$run_id"),\"status\":\"$status\",\"exitCode\":$rc,\"summary\":$(json_str "$summary"),\"logTail\":$(json_str "$tailtxt")}" >/dev/null || true
+  ls -1t "$logdir" | tail -n +51 | while read -r old; do rm -f "$logdir/$old"; done
+  rm -rf "$lock"
+  echo "$slug: $status${summary:+ ($summary)}"
+  [ "$status" = ok ] || [ "$status" = partial ]
+}
+
+cmd_collect() {
+  need_runner
+  local mode_due=0 backfill=0 slug="" list
+  while [ $# -gt 0 ]; do
+    case "$1" in --due) mode_due=1 ;; --backfill) backfill=1 ;; -*) usage ;; *) slug=$1 ;; esac; shift
+  done
+  { [ "$mode_due" = 1 ] || [ -n "$slug" ]; } || usage
+  if [ "$mode_due" = 1 ]; then
+    # rotate-if-expiring calls api(), which dies (exit 1) inside a command substitution.
+    # `|| true` cannot catch that, so contain it in a subshell and capture the status: a
+    # failed rotation warns once and the collector cycle still runs.
+    local rot=0
+    ( cmd_client rotate-if-expiring ) || rot=$?
+    [ "$rot" = 0 ] || echo "mobrain: agent token rotation failed (exit $rot); collecting anyway" >&2
+  fi
+  if [ -n "$slug" ]; then list="$(api GET "/api/runner/due?slug=$(urlenc "$slug")")"; else list="$(api GET /api/runner/due)"; fi
+  [ -n "${list//[$'\n\t ']/}" ] || { echo "nothing due"; return 0; }
+  local rc=0 s src kind tools model timeout mode line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # A tab is IFS whitespace, so `IFS=$'\t' read` would collapse an empty model field
+    # (a collector with no `model:` in its frontmatter) and shift every field after it.
+    # Split on a non-whitespace separator instead, which keeps empty fields empty.
+    IFS=$'\x1f' read -r s src kind tools model timeout mode <<< "${line//$'\t'/$'\x1f'}"
+    [ -n "$s" ] || continue
+    [ "$backfill" = 1 ] && mode=backfill
+    run_one "$s" "$src" "$kind" "$tools" "$model" "$timeout" "$mode" || rc=1
+  done <<< "$list"
+  return "$rc"
 }
 
 # ---- main ----------------------------------------------------------------------
