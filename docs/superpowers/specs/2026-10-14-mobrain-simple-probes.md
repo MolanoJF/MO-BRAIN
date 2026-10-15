@@ -2,6 +2,8 @@
 
 Stack: compose project mobrain-dev, Postgres engine. Commands are the ones that worked.
 
+Fix round (2026-10-15): the v120 stall was an ownership gap, not the finished probe. After `auto_enable_rls` was owned by `gbrain` and the event trigger existed, schema version was 243 and the blocked writes were re-run. Final results for those checks are in **Fix round** at the end. They supersede the schema-blocked FAIL lines in P2 (unfenced write), P3, P6, P7, and P8.
+
 `OPENAI_API_KEY` was empty, so no embedding-model flag was passed. Host MCP for probes is `http://127.0.0.1:3139/mcp` (compose dev port). Inside the gbrain container the server listens on `http://127.0.0.1:3131/mcp`. `MOBRAIN_PUBLIC_URL` is `http://127.0.0.1:8788`, which is not reachable from inside the container.
 
 Pre-P1: an exited v1 `mobrain-dev` project still held `mobrain-dev_pg-data` and `mobrain-dev_gbrain-home`, so initdb would not re-run and `gbrain init` would not be clean. One wipe: `docker compose --env-file .env -f compose/docker-compose.yml -f compose/docker-compose.dev.yml down -v --remove-orphans`. `--remove-orphans` was required; without it the v1 containers still held the volumes. Removed only `mobrain-dev_pg-data` and `mobrain-dev_gbrain-home`. Left `mobrain-dev_brain-repos`, `mobrain-dev_caddy-config`, and `mobrain-dev_caddy-data`. Did not touch any volume whose name does not start with `mobrain-dev`.
@@ -279,7 +281,7 @@ gbrain-probe: http://127.0.0.1:3139/mcp (HTTP) - ✔ Connected
 Removed MCP server gbrain-probe from local config
 ```
 
-Result: FAIL -> fallback taken: grant `--url http://127.0.0.1:3131/mcp` (8788 is admin-unreachable in-container); rescope `--federated-read p-probe-a` instead of `''` (`read_source_inactive`). Grant, that rescope, revoke, 401, and `claude mcp list` connected all worked. No profile is `read,write,admin` with a demonstrated unfenced write.
+Result: FAIL -> fallback taken: grant `--url http://127.0.0.1:3131/mcp` (8788 is admin-unreachable in-container); rescope `--federated-read p-probe-a` instead of `''` (`read_source_inactive`). Grant, that rescope, revoke, 401, and `claude mcp list` connected all worked. No profile has scopes `read,write,admin`. The unfenced write was not demonstrated until the fix round: `operator` then wrote `notes/probe-admin-op` with the slug unchanged.
 
 ## P3
 
@@ -312,7 +314,7 @@ ADM `sources_list`:
 
 That is the federated-read source only (name and count). It did not list `p-probe-b` or page content. It also did not list the write source `p-probe-a`.
 
-Result: FAIL -> fallback taken: none for isolation itself. Writes never committed (`schema_missing` from the stalled v120 migration), so content isolation was not observable. Empty search/list and `page_not_found` are consistent with no rows, not with a proved fence.
+Result: FAIL on this attempt only (`schema_missing`). Superseded by the fix round: isolation holds. Neither A nor ADM saw `notes/secret-b` or the text `zebracorn-b`; both found `zebracorn-c`.
 
 ## P6
 
@@ -326,7 +328,7 @@ No repo path. Use --repo or run gbrain sync --repo first.
 
 `gbrain put --help` also says remote callers' existing-page wikilinks become mentions, and `gbrain serve --http` does not self-sweep. The sweep was supposed to be autopilot. Autopilot exited before any tick could cover a remote write, and there was no committed remote write.
 
-Result: FAIL -> fallback taken: none. Remote writes did not commit, and autopilot crash-loops on missing repo path plus the stalled migration.
+Result: FAIL on this attempt only (writes did not commit). Superseded by the fix round: the remote write committed and the backlink was visible, but autopilot itself still exits `No repo path` and does not tick.
 
 ## P7
 
@@ -359,7 +361,7 @@ printf -- '---\ntype: collector\nkind: fixture\nenabled: false\ncadence: 1h\n---
 
 Exit 1. `--source` was not reported as an unknown flag. Failure was the same schema error: `column "admitter_version" of relation "persistence_requests" does not exist`. The page was not written, so the follow-up `get_page` was not run as a success check.
 
-Result: FAIL -> fallback taken: none that made the write succeed. `schema show --json` on a read-only home mount works. `list_pages` has no `prefix` (use `source_id`, `type`, `tag`, `limit`). `get_page` takes `include_content` but a live page's content and frontmatter were not observed. `gbrain put` source flag in `--help` is `--source-id`.
+Result: FAIL on this attempt only (no live page). Superseded by the fix round: `get_page` returns content and frontmatter; `list_pages` `prefix` is ignored; `gbrain put --source <id>` writes stdin into that source.
 
 ## P4
 
@@ -436,8 +438,97 @@ No other ownership errors were printed. Compose warned that `mobrain-dev_gbrain-
 
 `get_page notes/meets-ada` with token A: `page_not_found`. That page was never written (P6), so restore did not lose it; it was not in the dump. `whoami` with the same token A after restore: HTTP 200, `client_name` `probe-p3-a`, `profile` `memory-writer`, `source_id` `p-probe-a`, `federated_read` `["c-company"]`. The client row survived.
 
-Result: FAIL -> fallback taken: none. Restore commands are the ones above. Token A still works. The page does not survive because it was never stored. `pg_restore` reports vector-extension comment ownership and event-trigger permission on `gbrain`, and citext comment ownership on `mobrain`, then ignores those errors.
+Result: FAIL on this attempt only (the page was never stored). Superseded by the fix round: `notes/meets-ada` survived restore and token A still worked. The same ignored `pg_restore` errors remain.
 
 ## After the probes
 
 `dc down` (no `-v`). Dev stack stopped. Volumes `mobrain-dev_pg-data` and `mobrain-dev_gbrain-home` remain from the P8 restore.
+
+## Fix round
+
+The first P8 restore used `pg_restore --role=gbrain`. That left `public.auto_enable_rls()` owned by `gbrain`. The event trigger was missing (restore cannot `CREATE EVENT TRIGGER` as a non-superuser). On the next gbrain start, `config.version` was already `243` and `persistence_requests.admitter_version` existed. A fresh `dc up` after `down -v` also recreates the `gbrain` role without `BYPASSRLS`.
+
+Commands, mobrain-dev only:
+
+```sql
+ALTER FUNCTION public.auto_enable_rls() OWNER TO gbrain;
+-- event trigger was absent; created as postgres (CREATE EVENT TRIGGER is superuser-only).
+-- Trigger owner stays postgres. Function owner is gbrain.
+CREATE EVENT TRIGGER auto_rls_on_create_table
+  ON ddl_command_end
+  WHEN TAG IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+  EXECUTE FUNCTION public.auto_enable_rls();
+ALTER ROLE gbrain BYPASSRLS;
+```
+
+Then `dc run --rm gbrain gbrain apply-migrations --yes` exit 0. `config.version` stayed `243`. Shared-skills printed `db_only_export_required` for the four sources and did not fail the migration. Not the same ownership error.
+
+### Page write
+
+Client A `put_page` `notes/probe-admin` committed. `slug` stayed `notes/probe-admin`, `source_id` `p-probe-a`, `persistence.mode` `database`, `write_through.skipped` `no_repo_configured`. `operator` `put_page` of the same slug then returned `revision_required` (page already exists). A new slug worked:
+
+```text
+slug: notes/probe-admin-op
+status: created_or_updated
+source_id: p-probe-a
+```
+
+The slug was not forced under `agents/`. `operator` still has scopes `admin` and `skills_member_self`, not `read,write,admin`. `boundSlugPrefixes` was null.
+
+### P3
+
+B wrote `notes/secret-b` (`source_id` `p-probe-b`). W wrote `notes/company-x` (`source_id` `c-company`). Both `created_or_updated`.
+
+A and ADM `get_page notes/secret-b`: `page_not_found`. Their `search` for `zebracorn-b` returned one hit, `notes/company-x` / `c-company` (score 0.1216), and did not contain the text `zebracorn-b only in B` or the slug `notes/secret-b`. `search` for `zebracorn-c` returned `notes/company-x` (score 0.7792). `list_pages` limit 100, before A was rescoped, returned only `notes/company-x` (slug, `source_id`, `type`, `title`, timestamps; no frontmatter object, no `p-probe-b` slug).
+
+ADM `get_stats`: `page_count` 1, `chunk_count` 1, `embedded_count` 0, `pages_by_type` `{"note": 1}`. ADM `sources_list`: only `c-company`, `page_count` 1, `local_path` null. No other source name and no page body.
+
+Result: PASS. A keyword hit on the shared token `zebracorn` is not a read of B. `list_pages` without `source_id` listed the federated-read source, not the write source and not B.
+
+### P6
+
+A wrote `people/ada-probe` and `notes/meets-ada`. Both committed. `auto_links.skipped` `remote`, `mention_links` `queued`. After 150 seconds, `get_page people/ada-probe` `include_content: true` had no `links` or `backlinks` field and did not mention `meets-ada`. `get_backlinks` did:
+
+```json
+[{
+  "from_slug": "notes/meets-ada",
+  "from_source_id": "p-probe-a",
+  "to_slug": "people/ada-probe",
+  "to_source_id": "p-probe-a",
+  "link_type": "mentions",
+  "link_source": "mcp-remote-mention"
+}]
+```
+
+Autopilot never ticked. `dc ps` showed `Restarting (1)`. The only log line was `No repo path. Use --repo or run gbrain sync --repo first.` `gbrain autopilot --help` requires `--repo` or `sync.repo_path`. No embedding key; put receipts said `embedding_state: queued`.
+
+Result: FAIL -> fallback taken: none. The backlink is visible via `get_backlinks` (not via a field on `get_page`) within 150 seconds, from the queued remote-mention effect, not from an autopilot cycle. Autopilot still cannot start on a DB-only brain.
+
+### P7
+
+Before the write source was in `federated_read`, client A `get_page system/collectors/probe` was `page_not_found`, and `list_pages` / `get_page` with `source_id: p-probe-a` was `permission_denied`: `Requested source is outside your granted sources`. The error named `gbrain auth rescope-client <id> --federated-read c-company,p-probe-a`. That rescope exited 0 (`federatedRead` became `["c-company", "p-probe-a"]`).
+
+After that, `get_page` with `include_content: true` (with or without `source_id`) returned the page. Top-level `type` is `collector`. `content` is the markdown, including the frontmatter block, and gbrain added `title: Probe` and `trust_tier: agent_written`. `frontmatter` is `{"kind":"fixture","cadence":"1h","enabled":true,"trust_tier":"agent_written"}` (no `type` key; `type` is the top-level field).
+
+`list_pages` `{"prefix":"system/collectors/","limit":50}` returned 7 slugs, including `notes/meets-ada` and `notes/company-x`. `prefix` is accepted and ignored. `list_pages` `{"source_id":"p-probe-a","limit":50}` returned 6 slugs, all in `p-probe-a`, and not `notes/company-x`. Item keys: `slug`, `source_id`, `type`, `title`, `updated_at`, `updated_at_iso`. No frontmatter object.
+
+CLI stdin write, the brief's flag:
+
+```bash
+printf -- '---\ntype: collector\nkind: fixture\nenabled: false\ncadence: 1h\n---\nvia cli\n' \
+  | dc exec -T gbrain gbrain put system/collectors/probe-cli --source p-probe-a
+```
+
+Exit 0. `source_id` `p-probe-a`, `state` `committed`, `persistence.mode` `database`. Follow-up `get_page` with `source_id` returned content `via cli` and frontmatter `enabled: false`. `--help` still documents `--source-id` as "Write source." `--source` was the flag that worked on this local exec.
+
+Result: FAIL -> fallback taken: rescope `--federated-read` to include the write source, or the caller cannot read what it wrote. `prefix` is not a filter. `source_id` is. `get_page` `include_content: true` returns `content` and `frontmatter`. `gbrain put <slug> --source <id>` reads stdin and writes that source.
+
+### P8
+
+Backup `/tmp/mobrain-probe-backup/20261015T003058Z`. Same commands as the first P8. `pg_restore` exit 1, errors ignored, same three messages (vector extension COMMENT ownership, event-trigger permission, citext COMMENT ownership). gbrain became healthy. Compose again warned that `mobrain-dev_gbrain-home` already existed.
+
+`get_page notes/meets-ada` `include_content: true` with token A: HTTP 200, `slug` `notes/meets-ada`, `source_id` `p-probe-a`, content contains `[[people/ada-probe]]`. `whoami`: `client_name` `probe-p3-a`, `federated_read` `["c-company", "p-probe-a"]` (the fix-round rescope is in the restored row).
+
+Result: PASS. The page and token A survive. `pg_restore` still ignores the extension-comment and event-trigger errors.
+
+`dc down` (no `-v`) after this restore. Dev stack stopped.
