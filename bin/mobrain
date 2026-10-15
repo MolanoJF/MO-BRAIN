@@ -151,14 +151,31 @@ host_tz() {
   else echo UTC; fi
 }
 
+# Same order as down -v: explicit argv project, else ambient COMPOSE_PROJECT_NAME,
+# else the env file, else the install default. A default name is not argv.
+install_effective_project() {
+  local explicit=$1 fallback=$2 from_file
+  if [ -n "$explicit" ]; then printf '%s' "$explicit"; return; fi
+  if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then printf '%s' "$COMPOSE_PROJECT_NAME"; return; fi
+  if [ -f "$ENV_FILE" ]; then
+    from_file="$(env_get COMPOSE_PROJECT_NAME)"
+    if [ -n "$from_file" ]; then printf '%s' "$from_file"; return; fi
+  fi
+  printf '%s' "$fallback"
+}
+
 preflight() {
-  local proj=$1 port=$2 v
-  v="$(docker compose version --short 2>/dev/null)" || die "docker compose v2 is required" 17
+  local proj=$1 port=$2 effective=$3 v listed
+  v="$(docker compose -p "$proj" version --short 2>/dev/null)" || die "docker compose v2 is required" 17
   version_ge "${v#v}" 2.20.0 || die "docker compose >= 2.20 is required (found $v)" 17
   [ "$(nproc 2>/dev/null || echo 2)" -ge 2 ] || die "at least 2 CPUs are required" 17
   local mem; mem="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 9999999)"
   [ "$mem" -ge 3800000 ] || die "at least 4 GB of RAM is required" 17
-  if docker compose ls --all -q 2>/dev/null | grep -qx "$proj"; then die "compose project $proj already exists; refusing to reuse it" 17; fi
+  # Unscoped so this check can see a project other than $proj. A failed list is
+  # not "no such project".
+  listed="$(docker compose ls --all -q)" || die "cannot list compose projects; refusing to install" 17
+  if printf '%s\n' "$listed" | grep -qxF -- "$proj"; then die "compose project $proj already exists; refusing to reuse it" 17; fi
+  if [ "$effective" != "$proj" ] && printf '%s\n' "$listed" | grep -qxF -- "$effective"; then die "compose project $effective already exists; refusing to reuse it" 17; fi
   if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then die "port $port is already in use" 17; fi
 }
 
@@ -181,15 +198,19 @@ EOF
 
 PACK_DIR=/srv/gbrain-home/.gbrain/schema-packs
 
+# Pin -p. dc() alone lets ambient COMPOSE_PROJECT_NAME select another project.
+# $proj is the caller's local (cmd_install, or install_packs).
+idc() { dc -p "$proj" "$@"; }
+
 install_packs() {
-  local name
+  local proj=$1 name
   for name in mobrain-core mobrain-personal mobrain-brain; do
-    dc run --rm --no-deps gbrain mkdir -p "$PACK_DIR/$name"
+    idc run --rm --no-deps gbrain mkdir -p "$PACK_DIR/$name"
   done
-  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-core.json "$PACK_DIR/mobrain-core/pack.json"
-  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-personal.json "$PACK_DIR/mobrain-personal/pack.json"
+  idc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-core.json "$PACK_DIR/mobrain-core/pack.json"
+  idc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp /packs/mobrain-personal.json "$PACK_DIR/mobrain-personal/pack.json"
   # The brain layer is the agent's; create it once, never overwrite it.
-  dc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp -n /packs/mobrain-brain.template.json "$PACK_DIR/mobrain-brain/pack.json"
+  idc run --rm --no-deps -v "$REPO/packs:/packs:ro" gbrain cp -n /packs/mobrain-brain.template.json "$PACK_DIR/mobrain-brain/pack.json"
 }
 
 write_runner_env() {
@@ -198,7 +219,7 @@ write_runner_env() {
 }
 
 cmd_install() {
-  local email="" name="" keyfile="" keyless=0 port=8787 url="" proj=mobrain key=""
+  local email="" name="" keyfile="" keyless=0 port=8787 url="" proj=mobrain key="" explicit=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --owner-email) email=$2; shift 2 ;;
@@ -207,7 +228,7 @@ cmd_install() {
       --keyless) keyless=1; shift ;;
       --port) port=$2; shift 2 ;;
       --public-url) url=$2; shift 2 ;;
-      --project) proj=$2; shift 2 ;;
+      --project) proj=$2; explicit=$2; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -217,26 +238,26 @@ cmd_install() {
   [ -e "$ENV_FILE" ] && die "$ENV_FILE exists; refusing to overwrite an install" 17
   if [ -n "$keyfile" ]; then key="$(tr -d '\r\n' < "$keyfile")"; [ -n "$key" ] || die "$keyfile is empty" 64; fi
   url="${url:-http://127.0.0.1:$port}"
-  preflight "$proj" "$port"
+  preflight "$proj" "$port" "$(install_effective_project "$explicit" "$proj")"
   write_env "$proj" "$port" "$url" "$key"
 
   echo "building images (gbrain $PIN first)..." >&2
-  dc build gbrain
-  dc build mobrain
-  dc up -d --wait postgres
+  idc build gbrain
+  idc build mobrain
+  idc up -d --wait postgres
   # Probe P1: these flags are accepted. `--search-mode balanced` is not stored; do not invent a flag.
   # Init finishes only after compose/initdb/01-dbs.sh grants BYPASSRLS and pre-creates
   # auto_enable_rls (owned by gbrain) plus the auto_rls_on_create_table event trigger.
   local init=(gbrain init --non-interactive --search-mode balanced --json)
   [ -n "$key" ] && init+=(--embedding-model openai:text-embedding-3-small)
-  dc run --rm --no-deps gbrain "${init[@]}"
-  install_packs
-  dc run --rm --no-deps gbrain gbrain config set schema_pack mobrain-brain
-  dc up -d --wait
+  idc run --rm --no-deps gbrain "${init[@]}"
+  install_packs "$proj"
+  idc run --rm --no-deps gbrain gbrain config set schema_pack mobrain-brain
+  idc up -d --wait
 
   local boot=(bun src/server/admin-cli.ts bootstrap --email "$email" --format env)
   [ -n "$name" ] && boot+=(--name "$name")
-  local out; out="$(dc exec -T mobrain "${boot[@]}")" || die "owner bootstrap failed" 1
+  local out; out="$(idc exec -T mobrain "${boot[@]}")" || die "owner bootstrap failed" 1
   local api_key password
   api_key="$(kv_get "$out" MOBRAIN_API_KEY)"; password="$(kv_get "$out" MOBRAIN_OWNER_PASSWORD)"
   write_runner_env "http://127.0.0.1:$port" "$api_key"

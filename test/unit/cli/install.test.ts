@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { cliWorld, type Cli } from './harness.ts';
 
 let c: Cli; let repo: string;
-const dockerOk = `case "$1 $2" in
-  "compose version") echo 2.29.1;;
-  "compose ls") ${'cat "$STUB_LS" 2>/dev/null || true'};;
+const dockerOk = `case "$*" in
+  *version*) echo 2.29.1;;
+  *" ls "*|" ls") ${'cat "$STUB_LS" 2>/dev/null || true'};;
 esac
 case "$*" in
   *admin-cli.ts*bootstrap*) printf 'MOBRAIN_USER_ID=u1\\nMOBRAIN_API_KEY=mbk_abc\\nMOBRAIN_OWNER_PASSWORD=pw123\\n';;
@@ -45,6 +45,28 @@ describe('install', () => {
     expect(r.code).toBe(17);
   });
 
+  test('refuses ambient COMPOSE_PROJECT_NAME when that project already exists', async () => {
+    await writeFile(join(c.root, 'ls.txt'), 'mobrain-molior\n');
+    const r = await install([], { STUB_LS: join(c.root, 'ls.txt'), COMPOSE_PROJECT_NAME: 'mobrain-molior' });
+    expect(r.code).toBe(17);
+    expect(r.stderr).toContain('mobrain-molior');
+    expect((await c.calls('docker')).filter((a) => !a.includes('version') && !a.includes('ls'))).toEqual([]);
+    await expect(readFile(join(repo, '.env'), 'utf8')).rejects.toThrow();
+  });
+
+  test('refuses when compose ls fails instead of treating that as no project', async () => {
+    await c.stub('docker', `case "$*" in
+  *version*) echo 2.29.1;;
+  *" ls "*|" ls") echo 'ls failed' >&2; exit 1;;
+esac
+exit 0`);
+    const r = await install();
+    expect(r.code).toBe(17);
+    expect(r.stderr).toContain('cannot list compose projects');
+    expect((await c.calls('docker')).filter((a) => !a.includes('version') && !a.includes('ls'))).toEqual([]);
+    await expect(readFile(join(repo, '.env'), 'utf8')).rejects.toThrow();
+  });
+
   test('requires a key file or --keyless', async () => {
     const r = await c.run(['install', '--owner-email', 'a@x.io'], { MOBRAIN_REPO: repo });
     expect(r.code).toBe(64);
@@ -59,7 +81,17 @@ describe('install', () => {
     expect(env).toContain('OPENAI_API_KEY=sk-test-123456789');
     expect(env).toMatch(/ENCRYPTION_KEY=\S{40,}/);
     expect((await stat(join(repo, '.env'))).mode & 0o777).toBe(0o600);
-    const cmds = (await c.calls('docker')).map((a) => a.filter((x) => !x.startsWith('-f') && !x.endsWith('.yml') && !x.endsWith('.env') && x !== '--env-file').join(' '));
+    const calls = await c.calls('docker');
+    for (const a of calls) {
+      if (a.includes('ls')) continue;
+      expect(a[a.indexOf('-p') + 1]).toBe('mobrain-dev');
+    }
+    const cmds = calls.map((a) => a.filter((x, i, arr) => {
+      if (x === '-p' || x === '--project' || x === '--project-name') return false;
+      const prev = i > 0 ? arr[i - 1] : '';
+      if (prev === '-p' || prev === '--project' || prev === '--project-name') return false;
+      return !x.startsWith('-f') && !x.endsWith('.yml') && !x.endsWith('.env') && x !== '--env-file';
+    }).join(' '));
     const order = ['compose build gbrain', 'compose build mobrain', 'compose up -d --wait postgres',
       'gbrain init --non-interactive --search-mode balanced', 'gbrain config set schema_pack mobrain-brain', 'compose up -d --wait', 'admin-cli.ts bootstrap'];
     let last = -1;
@@ -76,7 +108,12 @@ describe('install', () => {
   test('--keyless installs without a key and without the embedding flag', async () => {
     const r = await c.run(['install', '--owner-email', 'a@x.io', '--keyless', '--port', '18998'], { MOBRAIN_REPO: repo });
     expect(r.code).toBe(0);
-    const init = (await c.calls('docker')).find((a) => a.includes('init'))!;
+    const calls = await c.calls('docker');
+    const init = calls.find((a) => a.includes('init'))!;
     expect(init).not.toContain('--embedding-model');
+    for (const a of calls) {
+      if (a.includes('ls')) continue;
+      expect(a[a.indexOf('-p') + 1]).toBe('mobrain');
+    }
   });
 });
