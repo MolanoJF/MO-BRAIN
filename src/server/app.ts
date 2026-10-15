@@ -12,6 +12,7 @@ import { peopleRoutes } from './routes/people.ts';
 import { proxyRoutes } from './routes/proxy.ts';
 import { runnerRoutes } from './routes/runner.ts';
 import { schemaRoutes } from './routes/schema.ts';
+import { staticRoutes } from './routes/static.ts';
 
 export type Deps = {
   sql: Sql;
@@ -34,5 +35,6 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route('/', schemaRoutes(deps));
   app.route('/', runnerRoutes(deps));
   app.route('/', brainRoutes(deps));
+  app.route('/', staticRoutes(deps.env.uiDir));
   return app;
 }

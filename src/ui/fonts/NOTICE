@@ -1,0 +1,12 @@
+Satoshi
+=======
+
+Designed by Deni Anggara for the Indian Type Foundry (ITF).
+Distributed on Fontshare: https://www.fontshare.com/fonts/satoshi
+Licence: ITF Free Font License, as Fontshare lists it for this family.
+
+The files in this directory are the Light (300), Regular (400), Medium (500)
+and Bold (700) WOFF2 files that Fontshare's CSS API serves for web use. They
+are declared with @font-face in src/console/styles/themes/molior.css.
+
+Satoshi has no 600 weight. A request for semibold is answered by Bold.

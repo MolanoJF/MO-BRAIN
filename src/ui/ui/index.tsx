@@ -1,0 +1,592 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  badgeClass, buttonClass, confirmDisarmsOnBlur, confirmPress, eyebrowClass, fieldClass, linkClass,
+  metricClass, navItemClass, noticeClass, pageTitleClass, progressFillClass, progressTrackClass,
+  sectionTitleClass, tableClass, toneClass,
+  type ButtonLayout, type ButtonVariant, type ColumnAlign, type LinkSurface,
+  type NoticeLayout, type Tone,
+} from './classes.ts';
+
+/**
+ * The console's primitives — one module, mirroring `qm/plugins/admin/ui/shared.ts`
+ * rather than a `components/` tree, because there are a dozen of these and a
+ * dozen files to hold them is a filing system, not an abstraction.
+ *
+ * Everything here is a thin wrapper. The styling decisions live in
+ * `./classes.ts`, which is pure and unit-tested; nothing in this file decides
+ * anything a test would want to assert, which is deliberate — this repo has no
+ * DOM harness (no jsdom, no testing-library), so a decision made in a
+ * component is a decision no test can reach.
+ *
+ * Specs are qm's, from `qm/plugins/admin/public/admin-components.css` and the
+ * base rules in `qm/plugins/admin/public/index.html`.
+ */
+
+export {
+  badgeClass, buttonClass, eyebrowClass, fieldClass, linkClass, metricClass, navItemClass, noticeClass,
+  pageTitleClass, progressFillClass, progressTrackClass, sectionTitleClass, tableClass, toneClass,
+};
+export type { ButtonLayout, ButtonVariant, ColumnAlign, LinkSurface, NoticeLayout, Tone };
+export { Icon } from './Icon.tsx';
+
+/* ------------------------------------------------------------------ Button */
+
+export function Button({
+  variant = 'secondary', layout = 'center', className, type = 'button', children, ...rest
+}: {
+  variant?: ButtonVariant;
+  /** How the button distributes its own children. `between` is what a
+   *  disclosure row wants — a label left, a badge right — and passing
+   *  `justify-between` through `className` instead would leave two
+   *  `justify-content` utilities fighting over an emit order the class
+   *  attribute does not control. */
+  layout?: ButtonLayout;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type={type} className={buttonClass(variant, className, layout)} {...rest}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A row in a vertical nav rail — the settings modal's section list, and the
+ * last live `.nav-item` in the console.
+ *
+ * It is not a `Button` with props turned off: see `navItemClass` for why a
+ * left-aligned borderless full-width row is a different control rather than a
+ * `Button` wearing three overrides that may or may not win.
+ */
+export function NavItem({
+  active = false, className, type = 'button', children, ...rest
+}: {
+  active?: boolean;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const base = navItemClass(active);
+  return (
+    <button
+      type={type}
+      // `aria-current` is what actually tells a screen reader which section is
+      // open; the CTA colour alone never does.
+      aria-current={active ? 'page' : undefined}
+      className={className ? `${base} ${className}` : base}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A real anchor. `<Button variant="link">` is a `<button>` and cannot be one:
+ * it has no `href`, so it is invisible to "open in a new tab", to a middle
+ * click and to a crawler — and its hover underline is `enabled:hover:`, which
+ * never matches an `<a>` at all.
+ *
+ * `surface` is not decoration. See `linkClass`: `text-cta` is unsafe on a
+ * warning notice's fill in some themes, so a link there inherits the notice's
+ * own legible copy colour instead.
+ */
+export function Link({
+  surface = 'page', className, children, ...rest
+}: {
+  surface?: LinkSurface;
+  className?: string;
+} & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return (
+    <a className={linkClass(surface, className)} {...rest}>
+      {children}
+    </a>
+  );
+}
+
+/**
+ * An icon-only button, square on the control height so a row of them lines up
+ * with the text controls beside them. `label` is required and becomes
+ * `aria-label`: the glyph itself is `aria-hidden` (see `Icon`), so without it
+ * the button announces as nothing at all.
+ */
+export function IconButton({
+  label, className, type = 'button', children, ...rest
+}: {
+  label: string;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const base =
+    'inline-flex items-center justify-center h-[var(--control-height)] w-[var(--control-height)] ' +
+    'rounded-[var(--control-radius)] border border-border bg-surface text-text ' +
+    'enabled:hover:bg-subtle disabled:opacity-45 disabled:cursor-not-allowed';
+  return (
+    <button type={type} aria-label={label} title={label} className={className ? `${base} ${className}` : base} {...rest}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The press-twice confirmation, as one primitive instead of the three
+ * hand-rolled copies in `Schedules.tsx`, `Sources.tsx` and `Runs.tsx`.
+ *
+ * It works two ways, and the second one is not a convenience.
+ *
+ * **Uncontrolled** (no `armed` prop): arming is local and disappears on blur.
+ * An armed destructive button left sitting in the page is a trap for whoever
+ * clicks it next, and the operator who walked away from it is exactly the
+ * person who will not remember it is armed.
+ *
+ * **Controlled** (`armed` + `onArm` + `onCancel`): the caller owns the state,
+ * which is what lets it render an explicit way out — a "Keep it" button — beside
+ * the armed control. Phase 1 had only the uncontrolled form, and that quietly
+ * removed `Schedules.tsx`'s "Keep it": the only remaining way to back out of an
+ * armed delete was to blur the button, which is not an affordance anyone can
+ * see. Blur-to-disarm is therefore OFF while controlled (see
+ * `confirmDisarmsOnBlur`): moving the pointer toward "Keep it" blurs this
+ * button, and disarming there would pull the escape hatch out from under it.
+ */
+export function ConfirmButton({
+  label, confirmLabel, onConfirm, onArm, onCancel, armed: armedProp,
+  variant = 'danger', className, disabled,
+}: {
+  label: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  /** Fired by the first press. Supply it with `armed` to own the state. */
+  onArm?: () => void;
+  /** Fired when the button disarms itself — today, only on blur. */
+  onCancel?: () => void;
+  /** Supplying this makes the component controlled. */
+  armed?: boolean;
+  variant?: ButtonVariant;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [selfArmed, setSelfArmed] = useState(false);
+  const controlled = armedProp !== undefined;
+  const armed = controlled ? armedProp : selfArmed;
+
+  return (
+    <Button
+      variant={variant}
+      className={className}
+      disabled={disabled}
+      aria-live="polite"
+      onBlur={confirmDisarmsOnBlur(controlled)
+        ? () => { setSelfArmed(false); onCancel?.(); }
+        : undefined}
+      onClick={() => {
+        if (confirmPress(armed) === 'arm') {
+          if (!controlled) setSelfArmed(true);
+          onArm?.();
+          return;
+        }
+        if (!controlled) setSelfArmed(false);
+        onConfirm();
+      }}
+    >
+      {armed ? confirmLabel : label}
+    </Button>
+  );
+}
+
+/* ------------------------------------------------------------------- Field */
+
+/**
+ * A labelled control. qm's label is `13px/400` with `margin-bottom: 4px` and
+ * its hint is the same size in `--muted`; the error, when present, replaces the
+ * hint rather than stacking under it, because two lines of small text under one
+ * input is where people stop reading.
+ *
+ * `invalid` drives both the border colour and `aria-invalid` from one prop, so
+ * the two can never disagree — a red border a screen reader cannot see is not
+ * an error message.
+ */
+export function Field({
+  label, hint, error, id, children, className,
+}: {
+  label?: ReactNode;
+  hint?: ReactNode;
+  error?: ReactNode;
+  id?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className ? `flex flex-col ${className}` : 'flex flex-col'}>
+      {label !== undefined && (
+        <label htmlFor={id} className="mb-1 text-[length:var(--control-font)] font-normal leading-[1.4] text-text">
+          {label}
+        </label>
+      )}
+      {children}
+      {error !== undefined ? (
+        <p className="mt-1 text-[length:var(--control-font)] font-normal leading-[1.5] text-danger">{error}</p>
+      ) : hint !== undefined ? (
+        <p className="mt-1 text-[length:var(--control-font)] font-normal leading-[1.5] text-muted">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function Input({
+  invalid, className, ...rest
+}: { invalid?: boolean; className?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  const base = fieldClass(invalid);
+  return <input aria-invalid={invalid || undefined} className={className ? `${base} ${className}` : base} {...rest} />;
+}
+
+export function Select({
+  invalid, className, children, ...rest
+}: { invalid?: boolean; className?: string } & React.SelectHTMLAttributes<HTMLSelectElement>) {
+  const base = fieldClass(invalid);
+  return (
+    <select aria-invalid={invalid || undefined} className={className ? `${base} ${className}` : base} {...rest}>
+      {children}
+    </select>
+  );
+}
+
+export function Textarea({
+  invalid, className, ...rest
+}: { invalid?: boolean; className?: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  // qm gives textareas a 90px floor and vertical-only resize: a horizontally
+  // resizable textarea escapes the card it sits in.
+  const base = `${fieldClass(invalid)} min-h-[90px] resize-y`;
+  return <textarea aria-invalid={invalid || undefined} className={className ? `${base} ${className}` : base} {...rest} />;
+}
+
+/* -------------------------------------------------------------------- Card */
+
+/**
+ * A card: 24px inside on every side, a hairline border, `--radius`, on
+ * `--surface`. It has no shadow; the brand draws its edges with borders.
+ *
+ * qm's own rule also carries `margin: 0 0 22px`. That is left off here on
+ * purpose — a primitive that owns its outer margin cannot be laid out by its
+ * container, and every page in this console stacks cards in a flex/gap column.
+ */
+export function Card({
+  title, subtitle, head, foot, footEnd = false, className, children,
+}: {
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  head?: ReactNode;
+  foot?: ReactNode;
+  /** qm right-aligns a footer that holds a primary action. */
+  footEnd?: boolean;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const base = 'p-6 border border-border rounded-[var(--radius)] bg-surface';
+  return (
+    <section className={className ? `${base} ${className}` : base}>
+      {(title !== undefined || subtitle !== undefined || head !== undefined) && (
+        <div className="mb-3">
+          {title !== undefined && (
+            <h2 className="m-0 text-[length:var(--section-font)] font-medium leading-[1.5] text-text">{title}</h2>
+          )}
+          {subtitle !== undefined && (
+            <p className="mt-1 max-w-[70ch] text-[length:var(--control-font)] font-normal leading-[1.5] text-muted">
+              {subtitle}
+            </p>
+          )}
+          {head}
+        </div>
+      )}
+      {children}
+      {foot !== undefined && (
+        <div
+          className={
+            footEnd
+              ? 'mt-4 flex flex-wrap items-center justify-end gap-[var(--control-gap)]'
+              : 'mt-4 flex flex-wrap items-center gap-[var(--control-gap)]'
+          }
+        >
+          {foot}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* -------------------------------------------------- Headings, labels, metrics */
+
+/**
+ * The page's heading. It is an `h1`, so a page has one. Its look is the theme's
+ * (`--heading-size`, `--heading-weight`), which is why no page writes a size.
+ */
+export function PageTitle({ children, className }: { children: ReactNode; className?: string }) {
+  const base = pageTitleClass();
+  return <h1 className={className ? `${base} ${className}` : base}>{children}</h1>;
+}
+
+/** A heading inside a page or a notice. It is an `h2`, and inherits its colour. */
+export function SectionTitle({ children, className }: { children: ReactNode; className?: string }) {
+  const base = sectionTitleClass();
+  return <h2 className={className ? `${base} ${className}` : base}>{children}</h2>;
+}
+
+/**
+ * A large figure. A `div`, so it can sit anywhere a number would: in a card's
+ * body, beside a label, in a row of totals.
+ */
+export function Metric({ children, className }: { children: ReactNode; className?: string }) {
+  const base = metricClass();
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * The uppercase micro-label that names a thing: a field group, a column, a
+ * count. Table headers share its declarations without going through this
+ * component, so a header never needs a wrapper.
+ */
+export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+  const base = eyebrowClass();
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * A determinate progress bar: a 2px hairline track with an accent fill. It is a
+ * `progressbar` with its value stated, so a screen reader hears the number rather
+ * than being left to infer it from the width.
+ */
+export function ProgressBar({ value, label }: { value: number; label: string }) {
+  const pct = Math.min(100, Math.max(0, value));
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pct)}
+      className={progressTrackClass()}
+    >
+      <div className={progressFillClass()} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------- Badge */
+
+export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
+  return <span className={badgeClass(tone)}>{children}</span>;
+}
+
+/* ------------------------------------------------------------------- Table */
+
+/**
+ * `overflow-x: auto` with `overscroll-behavior-x: contain`, so a sideways
+ * scroll inside a wide table does not turn into a browser back-navigation
+ * gesture halfway through reading a row.
+ */
+export function TableWrap({ children, className }: { children: ReactNode; className?: string }) {
+  const base = 'w-full max-w-full overflow-x-auto overscroll-x-contain';
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * qm styles bare `th`/`td` globally; this repo cannot, so the same declarations
+ * are attached as descendant variants on the table itself. That keeps `Table`
+ * one component rather than forcing every call site to import a `Th` and a `Td`
+ * and remember to use them — the version of this that relies on remembering is
+ * the version where one page's table ends up 2px out of step with every other.
+ *
+ * `align` is the per-column escape hatch, and it is the reason `tableClass`
+ * exists: the header rule compiles to a selector that outranks a `text-right`
+ * written on the `th` itself, so `Spend`'s money column silently drifted left
+ * and two call sites grew their own descendant variants to out-specify it.
+ * Nobody calling `Table` should have to know that; they say which columns are
+ * numbers.
+ */
+export function Table({
+  children, className, align,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Positional: entry *i* aligns column *i + 1*. `left` is the default. */
+  align?: readonly ColumnAlign[];
+}) {
+  const base = tableClass(align);
+  return <table className={className ? `${base} ${className}` : base}>{children}</table>;
+}
+
+/* ------------------------------------------------- Empty / Notice / Toolbar */
+
+/** qm's `.empty`: left-aligned, never centred — a centred empty state reads as
+ *  a failure, where a quiet line of muted text reads as "nothing here yet". */
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="py-4 text-left text-[length:var(--control-font)] text-muted">{children}</p>;
+}
+
+/**
+ * The standing warning card, which is what the 21 `.card border-warning` call
+ * sites actually are.
+ *
+ * `layout="stack"` is the warning CARD the plan's Layer 2 table named
+ * `<Card tone="warning">`. It is a variant here rather than a prop on `Card`
+ * because both would paint the same surface out of the same three tokens, and
+ * two primitives painting one surface is how the two drift apart. The skin and
+ * the two layouts live in `noticeClass`, where a test can read them.
+ */
+export function Notice({
+  tone = 'warning', layout = 'row', children, className,
+}: {
+  tone?: Tone;
+  /** `row` is an icon beside one line; `stack` is a block of stacked lines,
+   *  which needs no `w-full` wrapper and no `flex-col` passed through. */
+  layout?: NoticeLayout;
+  children: ReactNode;
+  className?: string;
+}) {
+  const base = noticeClass(tone, layout);
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
+  const base = 'flex flex-wrap items-center gap-[var(--control-gap)]';
+  return <div className={className ? `${base} ${className}` : base}>{children}</div>;
+}
+
+/**
+ * A busy indicator, `aria-hidden` because the surface that owns it is what
+ * should be announcing its state — a spinner that announces itself says
+ * "loading" forever to a screen reader and never says it stopped.
+ */
+export function Spinner({ size = 16 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block animate-spin rounded-full border-2 border-border border-t-accent"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ Dialog */
+
+/**
+ * A modal shell: a backdrop and a card, portalled to `<body>`.
+ *
+ * This is `settings/SettingsModal.tsx` generalized, and every mechanic below is
+ * carried over unchanged — each one exists because a simpler version of it
+ * broke something in production, and the reason is kept here rather than left
+ * to be rediscovered. The only thing Phase 1 changed is who can call it.
+ *
+ * The class-name defaults are the settings modal's because it is still the only
+ * caller; the CSS in `styles.css` is already the generic modal shell in
+ * everything but its name, and gets renamed when the last caller moves.
+ *
+ * The card carries `--shadow-overlay`. It is the only shadow the console draws:
+ * everything else is separated by a hairline border, which is the brand's rule.
+ */
+export function Dialog({
+  label, onClose, children,
+  backdropClass = 'modal-backdrop settings-backdrop',
+  cardClass = 'settings-modal',
+  initialFocus = '.settings-close',
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+  backdropClass?: string;
+  cardClass?: string;
+  /** A selector, resolved inside the card. The caller renders the visible close
+   *  button, so this shell finds it rather than duplicating a hidden one. */
+  initialFocus?: string;
+}) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const openerRef = useRef<Element | null>(null);
+  const pressedOnBackdrop = useRef(false);
+
+  useEffect(() => {
+    // Focus moves in on open, and back out on close. A keyboard user who
+    // opened settings from the sidebar's gear button is never dropped back
+    // at the top of the page — they land exactly where they were.
+    openerRef.current = document.activeElement;
+    cardRef.current?.querySelector<HTMLElement>(initialFocus)?.focus();
+    return () => {
+      const opener = openerRef.current as HTMLElement | null;
+      // The opener can be gone from the DOM by the time this runs (e.g. the
+      // sidebar re-rendered while settings was open), so this is guarded
+      // rather than assumed.
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [initialFocus]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // "Is a surface stacked above us?" — asked by node identity rather than
+      // by the `.modal-backdrop:not(.settings-backdrop)` class literal this
+      // check used while there was exactly one dialog in the console. For that
+      // single caller the two are the same query; for two dialogs they are
+      // not, and the class version would have let both close on one keypress
+      // — the very failure the guard was written to prevent.
+      const stackedSurfaceOpen = Array.from(document.querySelectorAll('.modal-backdrop, .context-menu'))
+        .some((el) => el !== backdropRef.current);
+      if (shouldCloseOnEscape(stackedSurfaceOpen)) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      ref={backdropRef}
+      className={backdropClass}
+      onMouseDown={(e) => { pressedOnBackdrop.current = e.target === backdropRef.current; }}
+      onMouseUp={(e) => {
+        const close = shouldCloseOnBackdropClick(pressedOnBackdrop.current, e.target === backdropRef.current);
+        pressedOnBackdrop.current = false;
+        if (close) onClose();
+      }}
+    >
+      <div
+        ref={cardRef}
+        className={`${cardClass} shadow-[var(--shadow-overlay)]`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Does this Esc keypress belong to us, or to a surface stacked above us?
+ *
+ * Nothing in this console currently renders a `.modal-backdrop` or
+ * `.context-menu` on top of the settings modal — `Sources.tsx`'s archive/remove
+ * confirm and `Runs.tsx`'s revert confirm are both inline two-click
+ * confirmations (a first click that probes and gets `confirmation_required`
+ * back, a second that confirms), not a modal, a backdrop, or a `role="dialog"`
+ * surface. This guard is inert today. It stays anyway, at the cost of two
+ * lines, so that the first surface to actually stack above a dialog does not
+ * silently break Esc: without this check, that surface's Esc handler and the
+ * dialog's would both fire on the same keypress, closing the dialog out from
+ * under it.
+ */
+export function shouldCloseOnEscape(stackedSurfaceOpen: boolean): boolean {
+  return !stackedSurfaceOpen;
+}
+
+/**
+ * Did this click start AND end on the backdrop itself?
+ *
+ * A plain `click` handler on the backdrop is not enough: selecting text in a
+ * settings field and dragging the mouse-up past the card's edge fires a
+ * `click` whose target is the backdrop, even though the press began inside
+ * the card. Tracking press and release separately — and requiring both to
+ * land on the backdrop, not merely somewhere outside the card — is what
+ * keeps that drag from silently closing the dialog on top of the operator's
+ * in-progress selection.
+ */
+export function shouldCloseOnBackdropClick(pressedBackdrop: boolean, targetIsBackdrop: boolean): boolean {
+  return pressedBackdrop && targetIsBackdrop;
+}
