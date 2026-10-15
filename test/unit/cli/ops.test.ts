@@ -78,3 +78,31 @@ test('upgrade backs up first, sets the pin, migrates, reinstalls packs', async (
   expect(i('apply-migrations')).toBeGreaterThan(i('build mobrain'));
   expect(i('mobrain-core.json')).toBeGreaterThan(i('apply-migrations'));
 });
+
+test('backup and restore pin the compose project, ignoring ambient COMPOSE_PROJECT_NAME', async () => {
+  const molior = { ...env(), COMPOSE_PROJECT_NAME: 'mobrain-molior' };
+  const r = await c.run(['backup'], molior);
+  const dir = r.stdout.trim().split('\n').at(-1)!;
+  await c.run(['restore', dir, '--yes'], molior);
+  const calls = await c.calls('docker');
+  const compose = calls.filter((a) => a[0] === 'compose');
+  expect(compose.length).toBeGreaterThan(0);
+  for (const a of compose) {
+    const p = a.indexOf('-p');
+    expect(p).toBeGreaterThan(-1);
+    expect(a[p + 1]).toBe('mobrain-dev');
+  }
+  expect(calls.some((a) => a.includes('mobrain-molior'))).toBe(false);
+});
+
+test('restore fails when pg_restore exits non-zero without a pg_restore error line', async () => {
+  await c.stub('docker', `case "$*" in
+  *pg_dump*) echo DUMP;;
+  *"-czf /b/gbrain-home.tgz"*) for a in "$@"; do case "$a" in *:/b) : > "\${a%:/b}/gbrain-home.tgz";; esac; done;;
+  *pg_restore*) echo 'Error response from daemon: container mobrain-postgres is not running' >&2; exit 125;;
+  esac
+  exit 0`);
+  const r = await c.run(['backup'], env());
+  const dir = r.stdout.trim().split('\n').at(-1)!;
+  expect((await c.run(['restore', dir, '--yes'], env())).code).not.toBe(0);
+});

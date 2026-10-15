@@ -42,6 +42,11 @@ dc() {
   docker compose --env-file "$ENV_FILE" "${files[@]}" "$@"
 }
 
+# dc() alone lets ambient COMPOSE_PROJECT_NAME select another project. Destructive
+# verbs (restore drops databases and wipes the volume) and backup must always use
+# the project the env file names.
+sdc() { dc -p "$(project)" "$@"; }
+
 load_runner() {
   if [ -f "$RUNNER_ENV" ]; then set -a; . "$RUNNER_ENV"; set +a; fi
   : "${MOBRAIN_URL:=}" "${MOBRAIN_API_KEY:=}"
@@ -290,11 +295,17 @@ pg_restore_ok() {
 }
 
 restore_db() {
-  local db=$1 dump=$2 log
+  local db=$1 dump=$2 log rc=0
   log="$(mktemp)"
   set +e
-  dc exec -T postgres pg_restore -U postgres -d "$db" --no-owner --role="$db" < "$dump" >"$log" 2>&1
+  sdc exec -T postgres pg_restore -U postgres -d "$db" --no-owner --role="$db" < "$dump" >"$log" 2>&1
+  rc=$?
   set -e
+  # A non-zero exit with no pg_restore error line is not the expected P8 failure:
+  # a docker exec failure, a failed < "$dump" redirect, or a killed pg_restore.
+  if [ "$rc" != 0 ] && ! grep -q '^pg_restore: error:' "$log"; then
+    cat "$log" >&2; rm -f "$log"; die "pg_restore $db failed (exit $rc)" 1
+  fi
   if ! pg_restore_ok < "$log"; then cat "$log" >&2; rm -f "$log"; die "pg_restore $db failed" 1; fi
   rm -f "$log"
 }
@@ -304,8 +315,8 @@ cmd_backup() {
   local prune=0; [ "${1:-}" = --prune ] && prune=1
   local dest; dest="$(backup_base)/$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$dest"
-  dc exec -T postgres pg_dump -U postgres -Fc gbrain > "$dest/gbrain.dump"
-  dc exec -T postgres pg_dump -U postgres -Fc mobrain > "$dest/mobrain.dump"
+  sdc exec -T postgres pg_dump -U postgres -Fc gbrain > "$dest/gbrain.dump"
+  sdc exec -T postgres pg_dump -U postgres -Fc mobrain > "$dest/mobrain.dump"
   docker run --rm -v "$(vol):/v:ro" -v "$dest:/b" "$(gbrain_image)" tar -C /v -czf /b/gbrain-home.tgz .
   env_get GBRAIN_VERSION > "$dest/GBRAIN_VERSION"
   git -C "$REPO" rev-parse HEAD > "$dest/COMMIT" 2>/dev/null || echo unknown > "$dest/COMMIT"
@@ -326,15 +337,15 @@ cmd_restore() {
   local bv; bv="$(tr -d '\n' < "$dir/GBRAIN_VERSION")"
   [ "$bv" = "$(env_get GBRAIN_VERSION)" ] || [ "$allow" = 1 ] || die "backup is gbrain $bv, .env pins $(env_get GBRAIN_VERSION); pass --allow-version-change" 17
   [ "$(sha256 "$ENV_FILE")" = "$(cat "$dir/env.sha256" 2>/dev/null)" ] || echo "mobrain: warning: .env differs from the one at backup time; stored tokens may not open" >&2
-  dc stop autopilot gbrain mobrain
+  sdc stop autopilot gbrain mobrain
   local db
   for db in gbrain mobrain; do
-    dc exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c "drop database if exists $db with (force)" -c "create database $db owner $db"
+    sdc exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c "drop database if exists $db with (force)" -c "create database $db owner $db"
     restore_db "$db" "$dir/$db.dump"
   done
   docker run --rm -v "$(vol):/v" "$(gbrain_image)" find /v -mindepth 1 -delete
   docker run --rm -v "$(vol):/v" -v "$dir:/b:ro" "$(gbrain_image)" tar -C /v -xzf /b/gbrain-home.tgz
-  dc up -d --wait
+  sdc up -d --wait
   cmd_status
 }
 
@@ -345,8 +356,8 @@ cmd_upgrade() {
   local b; b="$(cmd_backup | tail -1)"
   echo "backup: $b" >&2
   sed -i.bak "s/^GBRAIN_VERSION=.*/GBRAIN_VERSION=$to/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  if ! { dc build gbrain && dc build mobrain && dc stop autopilot mobrain && dc up -d --wait gbrain \
-         && dc exec -T gbrain gbrain apply-migrations --yes --non-interactive && install_packs && dc up -d --wait; }; then
+  if ! { sdc build gbrain && sdc build mobrain && sdc stop autopilot mobrain && sdc up -d --wait gbrain \
+         && sdc exec -T gbrain gbrain apply-migrations --yes --non-interactive && install_packs && sdc up -d --wait; }; then
     echo "mobrain: upgrade $from -> $to failed. To roll back:" >&2
     echo "  sed -i 's/^GBRAIN_VERSION=.*/GBRAIN_VERSION=$from/' $ENV_FILE && mobrain restore $b --yes" >&2
     exit 1
