@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# mobrain: install and operate a Mo-brain stack, and run its collectors.
+# Stack commands need a Mo-brain checkout (compose/). Runner commands need only
+# curl and the agent harness. Argv arrays only; never a shell string.
+set -euo pipefail
+
+PIN=0.60.230.0
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+REPO="${MOBRAIN_REPO:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+CONF_DIR="${MOBRAIN_CONFIG_DIR:-$HOME/.config/mobrain}"
+STATE_DIR="${MOBRAIN_STATE_DIR:-$HOME/.local/state/mobrain}"
+RUNNER_ENV="$CONF_DIR/runner.env"
+ENV_FILE="${MOBRAIN_ENV_FILE:-$REPO/.env}"
+
+die() { local code="${2:-1}"; echo "mobrain: $1" >&2; exit "$code"; }
+
+usage() {
+  cat >&2 <<'EOF'
+usage: mobrain <command> [args]
+stack host:  install | up | down | ps | logs <svc> | backup | restore <dir> --yes | upgrade --gbrain <v>
+             schema edit --out <file> | schema apply <file> | schema exec -- <args> | selftest
+anywhere:    status [--detail] | join --url <u> --key <k> | client issue agent|company-writer <src> [--register]
+             client rotate-if-expiring [--days n] | collect --due | collect <slug> [--backfill]
+             timers install|remove|status | skills install --dir <d> | schema show | schema check
+             mode company|personal | member invite <email> --role <r> | member list | member role <email> <r>
+             member offboard <email> | source add <name> | source list | source archive <id>
+             grant <email> <source> [--no-agent-reads] | revoke <email> <source>
+EOF
+  exit 64
+}
+
+# ---- helpers ---------------------------------------------------------------
+
+is_stack_host() { [ -f "$REPO/compose/docker-compose.yml" ] && [ -f "$ENV_FILE" ]; }
+need_stack() { is_stack_host || die "this command runs on the stack host, from a Mo-brain checkout with a .env" 17; }
+env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -1; }
+project() { env_get COMPOSE_PROJECT_NAME; }
+
+dc() {
+  local files=(-f "$REPO/compose/docker-compose.yml")
+  [ "$(project)" = mobrain-dev ] && files+=(-f "$REPO/compose/docker-compose.dev.yml")
+  docker compose --env-file "$ENV_FILE" "${files[@]}" "$@"
+}
+
+load_runner() {
+  if [ -f "$RUNNER_ENV" ]; then set -a; . "$RUNNER_ENV"; set +a; fi
+  : "${MOBRAIN_URL:=}" "${MOBRAIN_API_KEY:=}"
+}
+
+need_runner() {
+  load_runner
+  [ -n "$MOBRAIN_URL" ] && [ -n "$MOBRAIN_API_KEY" ] || die "no $RUNNER_ENV; run 'mobrain install' or 'mobrain join' first" 17
+}
+
+json_str() {
+  local s=$1
+  s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}; s=${s//$'\t'/\\t}
+  printf '"%s"' "$s"
+}
+
+kv_get() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
+
+# api METHOD PATH [JSON] -> body on stdout; HTTP >= 400 is an error.
+api() {
+  local method=$1 path=$2 body=${3:-} out code
+  local args=(-sS -X "$method" -H "authorization: Bearer $MOBRAIN_API_KEY" -w $'\n%{http_code}')
+  [ -n "$body" ] && args+=(-H 'content-type: application/json' --data-binary "$body")
+  out="$(curl "${args[@]}" "${MOBRAIN_URL%/}$path")" || die "cannot reach $MOBRAIN_URL" 2
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  if [ "$code" -ge 400 ] 2>/dev/null; then printf '%s\n' "$out" >&2; die "$method $path -> HTTP $code" 1; fi
+  printf '%s' "$out"
+}
+
+rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
+tmo() { if command -v timeout >/dev/null; then timeout "$@"; else gtimeout "$@"; fi; }
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
+# ---- stack verbs -------------------------------------------------------------
+
+cmd_up() { need_stack; dc up -d --wait "$@"; }
+cmd_ps() { need_stack; dc ps "$@"; }
+cmd_logs() { need_stack; dc logs "$@"; }
+cmd_down() {
+  need_stack
+  for a in "$@"; do
+    case "$a" in
+      -v|--volumes)
+        case "$(project)" in mobrain-dev|mobrain-selftest) ;;
+          *) die "refusing to delete volumes of $(project); only mobrain-dev and mobrain-selftest may be wiped" 17 ;;
+        esac ;;
+    esac
+  done
+  dc down "$@"
+}
+
+status_url() {
+  load_runner
+  if [ -n "$MOBRAIN_URL" ]; then printf '%s' "${MOBRAIN_URL%/}"
+  elif is_stack_host; then printf 'http://127.0.0.1:%s' "$(env_get MOBRAIN_PORT)"
+  else die "no Mo-brain URL configured" 17; fi
+}
+
+cmd_status() {
+  local detail=0 url out code
+  [ "${1:-}" = --detail ] && detail=1
+  url="$(status_url)"
+  out="$(curl -sS -w $'\n%{http_code}' "$url/api/health" 2>/dev/null)" || { echo '{"ok":false,"error":"unreachable"}'; exit 2; }
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  printf '%s\n' "$out"
+  if [ "$detail" = 1 ]; then need_runner; api GET /api/admin/health; echo; fi
+  [ "$code" = 200 ] || exit 1
+}
+
+# ---- main ----------------------------------------------------------------------
+
+main() {
+  [ $# -ge 1 ] || usage
+  local cmd=$1; shift
+  case "$cmd" in
+    up) cmd_up "$@" ;;
+    down) cmd_down "$@" ;;
+    ps) cmd_ps "$@" ;;
+    logs) cmd_logs "$@" ;;
+    status) cmd_status "$@" ;;
+    -h|--help|help) usage ;;
+    *) if declare -F "cmd_$cmd" >/dev/null; then "cmd_$cmd" "$@"; else usage; fi ;;
+  esac
+}
+
+main "$@"
