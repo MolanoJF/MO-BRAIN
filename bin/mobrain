@@ -586,7 +586,12 @@ cmd_skills() {
     old="$( [ -f "$manifest" ] && awk -F'\t' -v p="$rel" '$2 == p {print $1}' "$manifest" || true)"
     if [ "$have" = "$new" ]; then printf '%s\t%s\n' "$new" "$rel" >> "$tmp/m.tsv"
     elif [ -n "$old" ] && [ "$have" = "$old" ]; then cp "$src" "$dst"; printf '%s\t%s\n' "$new" "$rel" >> "$tmp/m.tsv"
-    else echo "kept your edited $rel"; printf '%s\t%s\n' "${old:-$have}" "$rel" >> "$tmp/m.tsv"; fi
+    else
+      echo "kept your edited $rel"
+      # A file mobrain never installed is not "unchanged since the last install": recording
+      # its hash as installed would let the next run overwrite it silently.
+      if [ -n "$old" ]; then printf '%s\t%s\n' "$old" "$rel" >> "$tmp/m.tsv"; fi
+    fi
   done < <(cd "$tmp/x" && find . -type f | sort)
   mv "$tmp/m.tsv" "$manifest"; rm -rf "$tmp"
   echo "skills installed in $dest"
