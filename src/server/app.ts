@@ -9,6 +9,7 @@ import { authRoutes } from './routes/auth.ts';
 import { healthRoutes } from './routes/health.ts';
 import { peopleRoutes } from './routes/people.ts';
 import { proxyRoutes } from './routes/proxy.ts';
+import { runnerRoutes } from './routes/runner.ts';
 import { schemaRoutes } from './routes/schema.ts';
 
 export type Deps = {
@@ -30,5 +31,6 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route('/', authRoutes(deps));
   app.route('/', peopleRoutes(deps));
   app.route('/', schemaRoutes(deps));
+  app.route('/', runnerRoutes(deps));
   return app;
 }
