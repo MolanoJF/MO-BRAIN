@@ -5,8 +5,8 @@
   "type": "module",
   "engines": { "bun": ">=1.4.2" },
   "scripts": {
-    "test:unit": "bash scripts/test-isolated.sh test/unit && bash scripts/test-isolated.sh test/unit/cli",
-    "test:db": "bash scripts/test-db.sh",
+    "test:unit": "TZ=UTC bash scripts/test-isolated.sh test/unit && TZ=UTC bash scripts/test-isolated.sh test/unit/cli",
+    "test:db": "TZ=UTC bash scripts/test-db.sh",
     "lint:forbidden": "bun run scripts/lint-forbidden.ts",
     "typecheck": "tsc --noEmit",
     "ui:build": "vite build",
