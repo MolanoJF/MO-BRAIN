@@ -273,6 +273,21 @@ cmd_install() {
     "$url" "$port" "$email" "$password" "$RUNNER_ENV"
 }
 
+# ---- join (a member's machine) ------------------------------------------------------------
+
+cmd_join() {
+  local url="" key="" skills="$HOME/.claude/skills"
+  while [ $# -gt 0 ]; do
+    case "$1" in --url) url=$2; shift 2 ;; --key) key=$2; shift 2 ;; --skills-dir) skills=$2; shift 2 ;; *) usage ;; esac
+  done
+  [ -n "$url" ] && [ -n "$key" ] || usage
+  write_runner_env "${url%/}" "$key"
+  cmd_client issue agent --register
+  cmd_skills install --dir "$skills"
+  cmd_timers install
+  echo "joined ${url%/}. Restart your agent session once so it loads the gbrain MCP server and skills."
+}
+
 # ---- backup, restore, upgrade -----------------------------------------------------------
 
 backup_base() { printf '%s/%s' "${MOBRAIN_BACKUP_DIR:-$HOME/backups/mobrain}" "$(project)"; }
