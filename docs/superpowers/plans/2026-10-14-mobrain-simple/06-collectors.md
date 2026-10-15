@@ -14,7 +14,7 @@
 - Create: `src/server/gbrain/pages.ts`
 - Test: `test/unit/gbrain-pages.test.ts`
 
-Probe P7 recorded the real argument and field names of `list_pages` and `get_page`. They live only in this file. `list_pages` has no working `prefix` filter; `source_id` filters. Items have no frontmatter object. `get_page` with `include_content: true` returns `content` and `frontmatter`. A client cannot read its own write unless the write source is included in federated read (`source_id` outside the grant is `permission_denied`). `search` argument names were not in the P7 tools list; this file does not invent one.
+Probe P7 recorded the real argument and field names of `list_pages` and `get_page`. They live only in this file. `list_pages` has no working `prefix` filter; `source_id` filters; the schema has `offset`. One `limit` page is not the source: page with `offset` until a short page, then apply a slug prefix locally. Items have no frontmatter object. `get_page` with `include_content: true` returns `content` and `frontmatter`. A client cannot read its own write unless the write source is included in federated read (`source_id` outside the grant is `permission_denied`). `search` argument names were not in the P7 tools list; this file does not invent one.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -37,8 +37,23 @@ describe('gbrain page helpers', () => {
       { slug: 'notes/x', source_id: 'p-x', title: 'X', type: 'note' },
     ] });
     const rows = await listPages(call, { prefix: 'a/', source: 'p-x', limit: 10 });
-    expect(calls[0]).toEqual(['list_pages', { source_id: 'p-x', limit: 10 }]);
+    expect(calls).toEqual([['list_pages', { source_id: 'p-x', limit: 10, offset: 0 }]]);
     expect(rows).toEqual([{ slug: 'a/b', source: 'p-x', title: 'B', type: 'note', frontmatter: null }]);
+  });
+
+  test('listPages pages offset until a short page, then keeps the prefix', async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    const call = (async (_tool: string, args: Record<string, unknown>) => {
+      calls.push(['list_pages', args]);
+      if (args.offset === 0) return { pages: [
+        { slug: 'notes/0', source_id: 'p-x', title: '0', type: 'note' },
+        { slug: 'notes/1', source_id: 'p-x', title: '1', type: 'note' },
+      ] };
+      return { pages: [{ slug: 'system/collectors/mail', source_id: 'p-x', title: 'Mail', type: 'collector' }] };
+    }) as McpCaller;
+    const rows = await listPages(call, { prefix: 'system/collectors/', source: 'p-x', limit: 2 });
+    expect(calls.map((c) => c[1].offset)).toEqual([0, 2]);
+    expect(rows.map((r) => r.slug)).toEqual(['system/collectors/mail']);
   });
 
   test('getPage asks for include_content and source_id, and prefers the frontmatter object', async () => {
@@ -82,7 +97,7 @@ import type { McpCaller } from './mcp.ts';
 
 // Argument and field names, as recorded by probe P7. Change them here only.
 // list_pages/get_page filter is source_id. prefix is ignored by gbrain. search's source name was not recorded.
-const A = { sourceId: 'source_id', limit: 'limit', slug: 'slug', includeContent: 'include_content', query: 'query', searchSource: 'source' };
+const A = { sourceId: 'source_id', limit: 'limit', offset: 'offset', slug: 'slug', includeContent: 'include_content', query: 'query', searchSource: 'source' };
 const rowSource = (r: Record<string, unknown>) => (r.source_id ?? r.source ?? r.sourceId ?? null) as string | null;
 
 export type PageRow = { slug: string; source: string | null; title: string | null; type: string | null; frontmatter: Record<string, unknown> | null };
@@ -102,16 +117,23 @@ function rows(reply: unknown, key: string): Record<string, unknown>[] {
   return (r?.[key] ?? r?.items ?? []) as Record<string, unknown>[];
 }
 
-export async function listPages(call: McpCaller, q: { prefix?: string; source?: string; limit?: number }): Promise<PageRow[]> {
-  const args: Record<string, unknown> = { [A.limit]: q.limit ?? 200 };
-  if (q.source) args[A.sourceId] = q.source;
-  const listed = rows(await call('list_pages', args), 'pages').map((r) => ({
-    slug: String(r.slug),
-    source: rowSource(r),
-    title: (r.title as string) ?? null,
-    type: (r.type ?? null) as string | null,
-    frontmatter: null,
-  }));
+const PAGE = 200;
+
+/** One source, every page. `limit` is the page size. Probe P7: `prefix` is ignored; stop when a page is short. */
+export async function listPages(call: McpCaller, q: { prefix?: string; source: string; limit?: number }): Promise<PageRow[]> {
+  const limit = q.limit ?? PAGE;
+  const listed: PageRow[] = [];
+  for (let offset = 0; ; offset += limit) {
+    const page = rows(await call('list_pages', { [A.sourceId]: q.source, [A.limit]: limit, [A.offset]: offset }), 'pages').map((r) => ({
+      slug: String(r.slug),
+      source: rowSource(r),
+      title: (r.title as string) ?? null,
+      type: (r.type ?? null) as string | null,
+      frontmatter: null,
+    }));
+    listed.push(...page);
+    if (page.length < limit) break;
+  }
   return q.prefix ? listed.filter((row) => row.slug.startsWith(q.prefix)) : listed;
 }
 
@@ -445,12 +467,15 @@ export class CollectorService {
   async collectors(user: User, sources: string[]): Promise<CollectorEntry[]> {
     const call = this.d.mcp(await this.people.uiToken(user));
     const out: CollectorEntry[] = [];
-    for (const row of await listPages(call, { prefix: PREFIX, limit: 200 })) {
-      if (!row.source || !sources.includes(row.source)) continue;
-      const fm = row.frontmatter ?? (await getPage(call, row.source, row.slug)).frontmatter;
-      const parsed = parseCollector(row.slug, row.source, fm);
-      out.push(parsed.ok ? { slug: row.slug, source: row.source, ok: true, config: parsed.config }
-                         : { slug: row.slug, source: row.source, ok: false, errors: parsed.errors });
+    // Probe P7: prefix is not a filter and one limit page is not the source. List each runnable source.
+    for (const source of sources) {
+      for (const row of await listPages(call, { source, prefix: PREFIX })) {
+        if (row.source !== source) continue;
+        const fm = row.frontmatter ?? (await getPage(call, row.source, row.slug)).frontmatter;
+        const parsed = parseCollector(row.slug, row.source, fm);
+        out.push(parsed.ok ? { slug: row.slug, source: row.source, ok: true, config: parsed.config }
+                           : { slug: row.slug, source: row.source, ok: false, errors: parsed.errors });
+      }
     }
     return out;
   }
@@ -689,7 +714,8 @@ export function brainRoutes(deps: Deps): Hono<AppEnv> {
     const call = deps.mcp(await people.uiToken(user));
     const q = c.req.query('q');
     if (q) return c.json({ hits: await searchPages(call, q, source) });
-    return c.json({ pages: await listPages(call, { source, prefix: c.req.query('prefix') ?? undefined, limit: 500 }) });
+    // Same paging as listPages: source_id plus offset until a short page. prefix is local. Not one page of 500.
+    return c.json({ pages: await listPages(call, { source, prefix: c.req.query('prefix') ?? undefined }) });
   });
 
   r.get('/api/pages/:source/*', async (c) => {
