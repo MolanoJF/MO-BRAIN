@@ -118,8 +118,8 @@ import type { ClientPurpose, ClientSpec, Grant, Source, User } from '../types.ts
 export const PROFILE_READER = 'memory-reader';
 export const PROFILE_WRITER = 'memory-writer';
 export const PROFILE_INSTANCE = 'coding-agent';
-/** Owner and admin agents. memory-writer unless P2 found an unfenced admin profile. */
-export const ADMIN_AGENT_PROFILE: string = PROFILE_WRITER;
+/** Owner and admin agents. Probe P2: no profile is read,write,admin. `operator` wrote unfenced (`notes/probe-admin-op`, slug unchanged). P3 passed: do not fall back to memory-writer. */
+export const ADMIN_AGENT_PROFILE = 'operator';
 
 const RANK: Record<string, number> = { [PROFILE_READER]: 0, [PROFILE_WRITER]: 1, [ADMIN_AGENT_PROFILE]: 2, [PROFILE_INSTANCE]: 3 };
 
@@ -1439,7 +1439,7 @@ if (import.meta.main) {
   await migrate(sql);
   try {
     console.log(await runAdminCli(process.argv.slice(2), {
-      sql, env, admin: new CliGbrainAdmin(runGbrain, env.publicUrl),
+      sql, env, admin: new CliGbrainAdmin(runGbrain, env.gbrainUrl),
       mcp: (t) => mcpCaller(`${env.gbrainUrl}/mcp`, t), cli: runGbrain, fetch, now: () => new Date(),
     }));
   } catch (e) {

@@ -62,8 +62,8 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
             └──┬───────┬───┘
      /mcp etc. │       │ owner admin API, CLI reads (schema show, autopilot status)
             ┌──▼───────▼──┐        ┌────────────┐
-            │   gbrain    │        │ autopilot  │ gbrain autopilot (foreground)
-            │ serve --http│        │ + jobs work│ sync, embed, extract, maintenance
+            │   gbrain    │        │ autopilot  │ §8.5 sweep loop (foreground)
+            │ serve --http│        │            │ sweep --once, embed --stale
             └──────┬──────┘        └─────┬──────┘
                    └──────────┬──────────┘
                         ┌─────▼─────┐
@@ -77,14 +77,14 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 |---|---|---|---|---|
 | `postgres` | `pgvector/pgvector:pg16` | postgres | `pg-data`, `compose/initdb` | `internal` |
 | `gbrain` | `mobrain-gbrain:${GBRAIN_VERSION}` | `gbrain serve --http --bind 0.0.0.0 --port 3131 --public-url ${MOBRAIN_PUBLIC_URL}` | `gbrain-home` (rw) | `internal` |
-| `autopilot` | same | `gbrain autopilot --interval 300` in the foreground (never `--install`) | `gbrain-home` (rw) | `internal` |
+| `autopilot` | same | spec §8.5 loop: `gbrain sweep --once` then `gbrain embed --stale`, sleep `${AUTOPILOT_INTERVAL:-300}` (never `gbrain autopilot`, never `--install`) | `gbrain-home` (rw) | `internal` |
 | `mobrain` | `mobrain-app:local` (FROM the gbrain image) | `bun src/server/main.ts` on 3000 | `gbrain-home` (ro) | `internal`; the only published port, `127.0.0.1:${MOBRAIN_PORT:-8787}:3000` |
 
 - The `mobrain` image is built from the gbrain image so the server can run gbrain's read-only CLI (`schema show --json`, `autopilot --status --json`) and `gbrain mcp grant` against the owner admin API.
 - `mobrain` proxies `/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/*`, and `/health` to `gbrain:3131`. gbrain's `/admin` dashboard is not proxied. `mobrain` calls the owner admin API on the internal network.
 - Compose sets `GBRAIN_HTTP_TRUST_PROXY=1` on `gbrain`, because the proxy is a peer container.
 - Stop grace is 60 seconds for `autopilot` and `gbrain`. Memory limits: `autopilot` 1.5 GB, `gbrain` 1 GB, `mobrain` 512 MB.
-- Removed: Caddy, `control-plane`, `gbrain-ops`, `scheduler`, `gbrain-worker` (autopilot runs the worker), and `agent-runner`. Four networks become one.
+- Removed: Caddy, `control-plane`, `gbrain-ops`, `scheduler`, `gbrain-worker`, and `agent-runner`. The `autopilot` container runs the §8.5 sweep loop, not `gbrain autopilot` (probe P6). Four networks become one.
 
 ### 4.2 Configuration (`.env`, never regenerated once written)
 
@@ -107,7 +107,7 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 |---|---|---|
 | Init brain, set config, install packs, `apply-migrations` | CLI in `gbrain` container (`docker compose exec -T gbrain gbrain ...`) | `bin/mobrain` |
 | Create, archive sources | CLI `gbrain sources add\|archive`, run in the `mobrain` container (4.4) | `mobrain` server |
-| Issue, rescope, revoke clients | owner admin HTTP API (`gbrain mcp grant\|admin ...` with `--admin-token-file`) | `mobrain` server |
+| Issue, rescope, revoke clients | owner admin HTTP API (`gbrain mcp grant\|admin ...` with `--admin-token-file`). `--url` is the gbrain listen address the caller can reach: `http://gbrain:3131/mcp` from the `mobrain` container, `http://127.0.0.1:3131/mcp` from inside the `gbrain` container. `MOBRAIN_PUBLIC_URL` (port 8788 in dev) is admin-unreachable from inside a container (probe P2). | `mobrain` server |
 | Read pages, search, schema read ops, sources list and status | MCP over HTTP with the reader's own `ui` client | `mobrain` server |
 | Jobs, health, stats, doctor | MCP with the instance client (admin scope) | `mobrain` server, owner and admin views only |
 | Full schema manifest, autopilot status | CLI read in the `mobrain` container | `mobrain` server |
@@ -117,7 +117,7 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 
 The `mobrain` container holds `GBRAIN_HOME` read-only and the gbrain `DATABASE_URL`, so it runs gbrain CLI commands itself. It cannot reach Docker (no socket is ever mounted), so nothing it does may need another container's filesystem:
 
-- Source creation and archive: the server runs `gbrain sources add|archive` itself. Both write only to the database if probe P5 confirms DB-only sources (section 16). If P5 shows a source needs a path under `GBRAIN_HOME`, the `mobrain` mount becomes read-write.
+- Source creation and archive: the server runs `gbrain sources add|archive` itself. Probe P5: DB-only sources exist with no path and no checkout (`local_path: null`). `sources add` must not pass `--json` (unknown flag). The `mobrain` mount stays read-only.
 - Pack file installs and edits happen only from `bin/mobrain` on the host (`docker compose cp` plus `exec`), never from the server.
 
 Every CLI call is an argv array through one helper with a timeout, captured stdout and stderr, and secrets scrubbed from errors (ported from `src/contracts/exec.ts` and `src/docker/host.ts`).
@@ -182,7 +182,7 @@ Passwords use `Bun.password` (argon2id). Session and invite tokens are 32 random
 
 | Role | Private source | `agent` client | `ui` client |
 |---|---|---|---|
-| owner | yes, `p-<slug>` | scopes `read,write,admin`; writes own private; reads own private + every active company source | `read`; same read set as agent |
+| owner | yes, `p-<slug>` | profile `operator` (scopes `admin`, `skills_member_self`); writes own private; reads own private + every active company source | `read`; same read set as agent |
 | admin | yes | same as owner | same |
 | member | yes | scopes `read,write`; writes own private; reads own private + granted company sources where `agent_reads` | `read`; own private + all granted company sources |
 | viewer | no | scopes `read`; reads granted company sources where `agent_reads` | `read`; granted company sources |
@@ -190,7 +190,8 @@ Passwords use `Bun.password` (argon2id). Session and invite tokens are 32 random
 - Private source ids are `p-<slug>`, where the slug is the email's local part lowercased to `[a-z0-9-]`, with `-2`, `-3` and so on appended on a collision. Company source ids are `c-<slug>` from the name; the first is `c-company`.
 - gbrain requires every client to name a write source. A viewer's read-only clients name their first granted source; the `read` scope keeps them from writing.
 - `company_writer` clients: one per (owner or admin, company source), on request, scopes `read,write`, writing that company source. Company-level collectors use it, under a second MCP registration named `gbrain-company-<source>`.
-- The `instance` client (scopes `read,admin`, naming the owner's private source) serves the owner and admin views: jobs, health, stats, doctor.
+- No profile's scope list is `read,write,admin`. Owner and admin agents use `operator`. Probe P3 passed: an `operator` client did not see another source's pages. A client cannot read its own write unless that write source is included in `--federated-read` (probe P7). Empty `--federated-read ''` fails with `read_source_inactive` (probe P2).
+- The `instance` client (naming the owner's private source) serves the owner and admin views: jobs, health, stats, doctor. Those operations were present on `operator`, not on `coding-agent` (`coding-agent` is `read`,`write` and requires `--bound-slug-prefixes`). The plan still names `coding-agent` for the instance client; see the probes file.
 - `ui` and `instance` tokens are stored sealed. `agent` and `company_writer` tokens are shown once and never stored. Re-issuing rotates them.
 - "Compile" is one pure function: `(user, role, sources, grants, mode) -> ClientSpec[]`. A change to any input recompiles the person's specs and applies the difference through `mcp grant` (rescope when the client exists, create otherwise). This replaces `src/contracts/compile.ts` and the grant logic in `src/control/connections.ts`.
 
@@ -273,7 +274,7 @@ Built from `gbrain schema show --json` (full resolved manifest, run in the `mobr
 
 1. Preflight: Docker Compose 2.20 or newer, at least 2 vCPUs and 4 GB RAM, the port free, no existing compose project of that name (refuse rather than reuse).
 2. Asks the one batch (7.1 step 2). For each chosen source, maps it to a tool it can already call (6 kinds, see 8.4) and lists what is missing.
-3. `bin/mobrain install --owner-email <e> --openai-key-file <f>|--keyless`. This writes `.env`, builds both images, starts Postgres, creates the `gbrain` and `mobrain` databases, runs `gbrain init` on Postgres with `--search-mode balanced` (and the OpenAI embedding model when a key is given), installs the packs and activates `mobrain-brain`, starts the stack, creates the owner (generated password unless given), the owner's private source, the instance client, the owner's `ui` and `agent` clients and an API key. It prints one JSON receipt: UI URL, owner password, MCP URL and bearer, runner config path.
+3. `bin/mobrain install --owner-email <e> --openai-key-file <f>|--keyless`. This writes `.env`, builds both images, starts Postgres, creates the `gbrain` and `mobrain` databases, runs `gbrain init` on Postgres with `--search-mode balanced` (and the OpenAI embedding model when a key is given), installs the packs and activates `mobrain-brain`, starts the stack, creates the owner (generated password unless given), the owner's private source, the instance client, the owner's `ui` and `agent` clients and an API key. It prints one JSON receipt: UI URL, owner password, MCP URL and bearer, runner config path. Init flags are accepted. `--search-mode balanced` is not stored (`search_mode` config key not found); do not invent a flag that stores it. A fresh role cannot finish init unless `compose/initdb/01-dbs.sh` has granted `BYPASSRLS` and pre-created the v35 `auto_enable_rls` function (owned by `gbrain`) and `auto_rls_on_create_table` event trigger as the superuser.
 4. Writes `~/.config/mobrain/runner.env` (`MOBRAIN_URL`, `MOBRAIN_API_KEY`; mode `0600`).
 5. Registers gbrain in the harness under the name `gbrain`, so gbrain skills' tool names resolve (Claude Code: `claude mcp add --scope user --transport http gbrain <url>/mcp --header "Authorization: Bearer <token>"`).
 6. `bin/mobrain skills install --dir <harness skills dir>` (section 10).
@@ -330,7 +331,7 @@ Validation (shared by the API and the skill): `kind` known; `cadence` parses and
 - `mobrain collect --due` (the timer): `GET /api/runner/due` returns the caller's due collectors as TSV (`slug, source, kind, allowed_tools, model, timeout_s`). Due means enabled, cadence elapsed since the last finished run (or `daily@HH:MM` passed today, or `once` never run), and no run in `running` state newer than its timeout.
 - For each due collector, one at a time on the host: take `flock ~/.cache/mobrain/locks/<slug>.lock`, `POST /api/runner/start`, run the harness adapter with a timeout (default 20 minutes; backfill 2 hours), `POST /api/runner/finish` with status, exit code and the last 4 KB of output. A timeout or crash still records a finish, so the UI shows it.
 - `mobrain collect <slug> [--backfill]` runs one collector now.
-- Harness adapter `claude-code`: `claude -p "<prompt>" --allowedTools "mcp__gbrain__*,<allowed_tools...>" [--model <m>] --output-format json`, run with the person's environment from the timer. The prompt names the skill and the collector: "Use the mobrain-collect skill to run collector <slug> in source <source> (mode: incremental|backfill)." Exact flags are fixed by probe P4. Other harnesses (`codex exec`) are adapters added later behind the same interface.
+- Harness adapter `claude-code`: `claude -p "<prompt>" --allowedTools "mcp__gbrain__*,<allowed_tools...>" [--model <m>] --output-format json`, run with the person's environment from the timer. The prompt names the skill and the collector: "Use the mobrain-collect skill to run collector <slug> in source <source> (mode: incremental|backfill)." Exact flags are fixed by probe P4: `--allowedTools` is honored. The systemd user PATH does not include `~/.local/bin`; bare `claude` exits 127. The timer must set PATH or invoke claude by absolute path. Other harnesses (`codex exec`) are adapters added later behind the same interface.
 - Logs go to `~/.local/state/mobrain/collect/<slug>/<timestamp>.log`, keeping the last 50.
 
 ### 8.4 The `mobrain-collect` skill
@@ -356,7 +357,13 @@ Kind references inside the skill, each short:
 
 ### 8.5 What gbrain schedules itself
 
-`autopilot` covers sync, embedding, link and timeline extraction for remote writes, and the maintenance cycle. Mo-brain adds no gbrain schedules. If probe P6 shows remote writes are not swept by autopilot alone, the `autopilot` container's command gains an explicit sweep loop.
+Probe P6: `gbrain autopilot` exits `No repo path` on a DB-only brain and does not tick. Remote-mention backlinks can still appear via `get_backlinks` (not a field on `get_page`) from the queued effect, not from an autopilot cycle. The `autopilot` container therefore does not run `gbrain autopilot`. Its command is this foreground loop (never `--install`):
+
+```sh
+while true; do gbrain sweep --once; gbrain embed --stale; sleep "${AUTOPILOT_INTERVAL:-300}"; done
+```
+
+Mo-brain adds no other gbrain schedules.
 
 ## 9. The `mobrain` service
 
@@ -430,7 +437,7 @@ test/selftest/                 the stack self-test driver
 | `schema show\|check\|edit\|exec` | stack host for `edit` and `exec` | section 6 |
 | `skills install --dir` | any | section 10 |
 | `collect --due\|<slug> [--backfill]` | any | section 8.3 |
-| `timers install\|remove\|status` | any | systemd user timers when `systemctl --user` works and lingering is on; otherwise crontab entries marked `# mobrain` |
+| `timers install\|remove\|status` | any | systemd user timers when `systemctl --user` works and lingering is on; otherwise crontab entries marked `# mobrain`. The unit sets `PATH` to include `~/.local/bin` (and the directory of `claude`); the systemd user PATH does not (probe P4). |
 | `backup`, `restore <dir> --yes` | stack host | section 12 |
 | `upgrade --gbrain <version>` | stack host | section 12 |
 | `selftest [--keep]` | stack host, dev project only | section 13 |
@@ -440,7 +447,7 @@ It reads `MOBRAIN_URL` and `MOBRAIN_API_KEY` from `~/.config/mobrain/runner.env`
 ## 12. Backup, restore, upgrade
 
 - `backup`: into `~/backups/mobrain/<project>/<UTC timestamp>/`: `pg_dump -Fc` of `gbrain` and `mobrain`, a tar of the `gbrain-home` volume, `GBRAIN_VERSION`, the repo commit, and a manifest with sizes and SHA-256. `.env` is not copied (it holds `ENCRYPTION_KEY`); the manifest records its SHA-256 so a restore can warn on a mismatch. The daily timer keeps 7 backups.
-- `restore <dir> --yes`: stops `autopilot`, `gbrain` and `mobrain`, restores both databases and the volume, starts the stack, runs `status`. Refuses without `--yes`, and refuses when the backup's gbrain version differs from `.env` unless `--allow-version-change`.
+- `restore <dir> --yes`: stops `autopilot`, `gbrain` and `mobrain`, restores both databases and the volume, starts the stack, runs `status`. Refuses without `--yes`, and refuses when the backup's gbrain version differs from `.env` unless `--allow-version-change`. Probe P8: `pg_restore` exits 1 and these errors are not a failed restore: `must be owner of extension vector` (`COMMENT ON EXTENSION vector`), `permission denied to create event trigger "auto_rls_on_create_table"`, and `must be owner of extension citext` (`COMMENT ON EXTENSION citext`). Any other `pg_restore: error:` fails the restore.
 - `upgrade --gbrain <v>`: backup; set `GBRAIN_VERSION`; build; stop `autopilot`; start `gbrain`; `gbrain apply-migrations --yes --non-interactive`; reinstall packs (hash checked); start everything; `status`. On failure it prints the restore command for the backup it just took. The install skill tells the agent to read gbrain's `skills/migrations/v<version>.md` for every crossed version and re-run `skills install`.
 - Mo-brain's own updates: `git pull` (or `git merge --ff-only` on the live worktree), then `mobrain up --build`. Mo-brain migrations are numbered SQL files applied at server start inside one transaction each.
 
@@ -481,6 +488,8 @@ Each runs against a scratch `mobrain-dev` stack on gbrain `0.60.230.0`, and the 
 | P6 | `gbrain autopilot --interval 300` in the foreground in a container: worker runs; a remote `put_page` gets its links and embedding within two ticks | links and embedding present | add `gbrain sweep --once` and `gbrain embed --stale` to a loop in the `autopilot` command |
 | P7 | The `ui` client: `list_pages` filtered to `system/collectors/` returns frontmatter; `get_page` returns content and frontmatter; `schema show --json` runs in the `mobrain` container | all three | read collector pages one by one with `get_page` |
 | P8 | Backup and restore round trip on dev: both databases and the volume | a page and a person survive restore | adjust the dump and restore commands |
+
+Results: docs/superpowers/specs/2026-10-14-mobrain-simple-probes.md (2026-10-15). Fallbacks taken: P1 `ALTER ROLE gbrain BYPASSRLS` and pre-created v35 `auto_enable_rls` plus `auto_rls_on_create_table` as the superuser, function owned by `gbrain` (`search_mode balanced` was not stored; no flag invented); P2 in-container grant URL `http://127.0.0.1:3131/mcp` (8788 is admin-unreachable) and `ADMIN_AGENT_PROFILE=operator` (no `read,write,admin` profile; empty `--federated-read` is `read_source_inactive`); P4 timers invoke claude by absolute path or set PATH (`~/.local/bin` is not on the systemd user PATH); P5 omit `--json` on `sources add`; P6 autopilot command is the §8.5 `gbrain sweep --once` / `gbrain embed --stale` loop; P7 `list_pages` filters on `source_id` not `prefix`, `gbrain put --source`, and federated read must include the write source; P8 ignore `pg_restore` errors for the vector extension comment, the `auto_rls_on_create_table` event trigger, and the citext extension comment. P3 passed.
 
 ## 17. Cutover on this host
 

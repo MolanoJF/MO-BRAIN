@@ -5,6 +5,6 @@ services:
     ports:
       - "127.0.0.1:${GBRAIN_DEV_PORT:-3139}:3131"
   autopilot:
+    # Shorter tick for dev. Do not override command; the base file is the §8.5 loop.
     environment:
       AUTOPILOT_INTERVAL: "60"
-    command: ["gbrain", "autopilot", "--interval", "60"]

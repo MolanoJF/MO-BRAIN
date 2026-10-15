@@ -14,7 +14,7 @@
 - Create: `src/server/gbrain/pages.ts`
 - Test: `test/unit/gbrain-pages.test.ts`
 
-Probe P7 recorded the real argument and field names of `list_pages`, `get_page` and `search`. They live only in this file.
+Probe P7 recorded the real argument and field names of `list_pages` and `get_page`. They live only in this file. `list_pages` has no working `prefix` filter; `source_id` filters. Items have no frontmatter object. `get_page` with `include_content: true` returns `content` and `frontmatter`. A client cannot read its own write unless the write source is included in federated read (`source_id` outside the grant is `permission_denied`). `search` argument names were not in the P7 tools list; this file does not invent one.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -31,14 +31,29 @@ function recorder(reply: unknown) {
 }
 
 describe('gbrain page helpers', () => {
-  test('listPages passes prefix and source and normalises rows', async () => {
-    const { calls, call } = recorder({ pages: [{ slug: 'a/b', source_id: 'p-x', title: 'B', type: 'note', frontmatter: { type: 'note' } }] });
+  test('listPages filters with source_id and applies prefix locally', async () => {
+    const { calls, call } = recorder({ pages: [
+      { slug: 'a/b', source_id: 'p-x', title: 'B', type: 'note', updated_at: 't', updated_at_iso: 't' },
+      { slug: 'notes/x', source_id: 'p-x', title: 'X', type: 'note' },
+    ] });
     const rows = await listPages(call, { prefix: 'a/', source: 'p-x', limit: 10 });
-    expect(calls[0]).toEqual(['list_pages', { prefix: 'a/', source: 'p-x', limit: 10 }]);
-    expect(rows).toEqual([{ slug: 'a/b', source: 'p-x', title: 'B', type: 'note', frontmatter: { type: 'note' } }]);
+    expect(calls[0]).toEqual(['list_pages', { source_id: 'p-x', limit: 10 }]);
+    expect(rows).toEqual([{ slug: 'a/b', source: 'p-x', title: 'B', type: 'note', frontmatter: null }]);
   });
 
-  test('getPage asks for content and reads frontmatter from content when the reply has none', async () => {
+  test('getPage asks for include_content and source_id, and prefers the frontmatter object', async () => {
+    const { calls, call } = recorder({
+      slug: 's', source_id: 'p-x', type: 'collector',
+      content: '---\ntype: collector\nkind: fixture\n---\nbody',
+      frontmatter: { kind: 'fixture', cadence: '2h' },
+    });
+    const p = await getPage(call, 'p-x', 's');
+    expect(calls[0]).toEqual(['get_page', { slug: 's', include_content: true, source_id: 'p-x' }]);
+    expect(p.frontmatter).toEqual({ kind: 'fixture', cadence: '2h' });
+    expect(p.body.trim()).toBe('body');
+  });
+
+  test('getPage reads frontmatter from content when the reply has none', async () => {
     const { call } = recorder({ slug: 's', source_id: 'p-x', content: '---\ntype: collector\ncadence: 2h\n---\nbody' });
     const p = await getPage(call, 'p-x', 's');
     expect(p.frontmatter).toEqual({ type: 'collector', cadence: '2h' });
@@ -66,7 +81,8 @@ import { parse } from 'yaml';
 import type { McpCaller } from './mcp.ts';
 
 // Argument and field names, as recorded by probe P7. Change them here only.
-const A = { prefix: 'prefix', source: 'source', limit: 'limit', slug: 'slug', includeContent: 'include_content', query: 'query' };
+// list_pages/get_page filter is source_id. prefix is ignored by gbrain. search's source name was not recorded.
+const A = { sourceId: 'source_id', limit: 'limit', slug: 'slug', includeContent: 'include_content', query: 'query', searchSource: 'source' };
 const rowSource = (r: Record<string, unknown>) => (r.source_id ?? r.source ?? r.sourceId ?? null) as string | null;
 
 export type PageRow = { slug: string; source: string | null; title: string | null; type: string | null; frontmatter: Record<string, unknown> | null };
@@ -87,22 +103,21 @@ function rows(reply: unknown, key: string): Record<string, unknown>[] {
 }
 
 export async function listPages(call: McpCaller, q: { prefix?: string; source?: string; limit?: number }): Promise<PageRow[]> {
-  const args: Record<string, unknown> = {};
-  if (q.prefix) args[A.prefix] = q.prefix;
-  if (q.source) args[A.source] = q.source;
-  args[A.limit] = q.limit ?? 200;
-  return rows(await call('list_pages', args), 'pages').map((r) => ({
+  const args: Record<string, unknown> = { [A.limit]: q.limit ?? 200 };
+  if (q.source) args[A.sourceId] = q.source;
+  const listed = rows(await call('list_pages', args), 'pages').map((r) => ({
     slug: String(r.slug),
     source: rowSource(r),
     title: (r.title as string) ?? null,
-    type: (r.type ?? r.page_type ?? null) as string | null,
-    frontmatter: (r.frontmatter as Record<string, unknown>) ?? null,
+    type: (r.type ?? null) as string | null,
+    frontmatter: null,
   }));
+  return q.prefix ? listed.filter((row) => row.slug.startsWith(q.prefix)) : listed;
 }
 
 export async function getPage(call: McpCaller, source: string | null, slug: string): Promise<Page> {
   const args: Record<string, unknown> = { [A.slug]: slug, [A.includeContent]: true };
-  if (source) args[A.source] = source;
+  if (source) args[A.sourceId] = source;
   const r = (await call('get_page', args)) as Record<string, unknown>;
   const content = String(r.content ?? r.compiled_truth ?? '');
   const parsed = frontmatterOf(content);
@@ -112,7 +127,7 @@ export async function getPage(call: McpCaller, source: string | null, slug: stri
 
 export async function searchPages(call: McpCaller, query: string, source?: string): Promise<Hit[]> {
   const args: Record<string, unknown> = { [A.query]: query };
-  if (source) args[A.source] = source;
+  if (source) args[A.searchSource] = source;
   args[A.limit] = 30;
   return rows(await call('search', args), 'results').map((r) => ({
     slug: String(r.slug), source: rowSource(r), title: (r.title as string) ?? null, snippet: (r.snippet ?? r.chunk_text ?? null) as string | null,
@@ -665,7 +680,7 @@ export function brainRoutes(deps: Deps): Hono<AppEnv> {
   r.get('/api/sources/:id/status', async (c) => {
     const user = requireUser(c);
     const id = await guard(user, c.req.param('id'));
-    return c.json(await deps.mcp(await people.uiToken(user))('sources_status', { source: id }));
+    return c.json(await deps.mcp(await people.uiToken(user))('sources_status', { id }));
   });
 
   r.get('/api/pages', async (c) => {

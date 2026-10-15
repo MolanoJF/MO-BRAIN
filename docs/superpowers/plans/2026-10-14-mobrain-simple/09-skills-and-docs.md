@@ -62,7 +62,7 @@ export function collectorMarkdown(fields: Record<string, unknown>, notes: string
   return `---\n${stringify({ type: 'collector', ...fields }).trimEnd()}\n---\n${notes.trim()}\n`;
 }
 
-/** Trusted local write (probe P7). The page text is passed on stdin. */
+/** Trusted local write. Probe P7: `--source` writes stdin into that source (`--help` documents `--source-id`; `--source` is the flag that worked). The writing client cannot read the page back unless that source is in its federated read. */
 export function putPageArgv(slug: string, source: string): string[] {
   return ['put', slug, '--source', source];
 }
@@ -635,7 +635,7 @@ bin/mobrain status && bin/mobrain schema check && bin/mobrain collector list
 bin/mobrain search "<a real term from a source>"
 ```
 
-Fix anything that fails before reporting. gbrain's own maintenance (sync, embeddings, links, nightly cycle) runs in the `autopilot` container; you do not schedule it.
+Fix anything that fails before reporting. gbrain maintenance runs in the `autopilot` container as the spec §8.5 loop (`gbrain sweep --once` and `gbrain embed --stale`). `gbrain autopilot` exits `No repo path` and does not tick (probe P6). You do not schedule it.
 
 ## Phase 8: Report
 
@@ -927,8 +927,8 @@ Read the installed gbrain skill `schema-author/SKILL.md` and follow its phases i
 1. Frontmatter: `name: mobrain-import`; description: "Import a folder - an earlier gbrain brain, an Obsidian vault, a Notion export or any Markdown repo - into the person's private source by following gbrain's own `migrate` skill, refiling every page into the mobrain-core schema so gbrain types, links and indexes it. Runs as a `notes-import` collector or when the person asks." Keep the triggers; remove `onboarding stage 4`.
 2. Title: `# Import notes into Mo-brain`. Remove every reference to onboarding stages, the console, "Sources → Import notes", lane A, `gbrain-ops`, `./molior.sh`, Spaces and Connections. Use "source" for Space and "agent client" for Connection.
 3. Replace the "Lanes" section with one lane: **write through gbrain MCP with `put_pages`** (at most 50 pages and 8 MB per call, one `request_id` UUID per batch), reading and checking over MCP.
-4. Replace the Phase 6 host commands with: "autopilot extracts links, timeline and embeddings for remote writes within a few minutes. Check with `get_backlinks` on two pages you know link to each other. If they are missing after 15 minutes, on the stack host run `mobrain brain exec -- extract links --source db --source-id <id> --include-frontmatter` and `mobrain brain exec -- extract timeline --source db --source-id <id>`."
-5. In "Tools Used", replace the `sync_brain` row with: "not needed; autopilot syncs."
+4. Replace the Phase 6 host commands with: "The autopilot container runs `gbrain sweep --once` and `gbrain embed --stale` on an interval (spec §8.5). `gbrain autopilot` does not tick on a DB-only brain. Remote-mention backlinks can appear via `get_backlinks` (not a field on `get_page`) from the queued effect. Check with `get_backlinks` on two pages you know link to each other. If they are missing after 15 minutes, on the stack host run `mobrain brain exec -- extract links --source db --source-id <id> --include-frontmatter` and `mobrain brain exec -- extract timeline --source db --source-id <id>`."
+5. In "Tools Used", replace the `sync_brain` row with: "not needed; the autopilot container's sweep loop covers sync."
 6. Keep everything else (assess, plan the mapping, merges shown first, sample of 5 to 10, ramp, verify, anti-patterns, output format) as written; it already mirrors gbrain `migrate`.
 7. Add at the end of the Output Format: the two `MOBRAIN_STATUS` / `MOBRAIN_SUMMARY` lines from `mobrain-collect` when the run came from a collector.
 
@@ -973,7 +973,7 @@ It asks you one batch of questions (an OpenAI key, your email, which sources to 
 |---|---|
 | `postgres` | the brain and Mo-brain's small people database |
 | `gbrain` | gbrain's MCP server |
-| `autopilot` | gbrain's own sync, embedding, linking and nightly maintenance |
+| `autopilot` | spec §8.5 loop: `gbrain sweep --once` and `gbrain embed --stale` (not `gbrain autopilot`, which exits `No repo path`) |
 | `mobrain` | the review UI, people and access, the collector API, and the `/mcp` proxy |
 
 Collectors run on the host from a timer: `bin/mobrain collect --due` wakes your agent headless with the `mobrain-collect` skill.

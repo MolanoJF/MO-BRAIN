@@ -59,8 +59,9 @@ services:
     restart: unless-stopped
     environment:
       <<: *gbrain-env
-    # Foreground daemon; it spawns its own job worker. Never --install.
-    command: ["gbrain", "autopilot", "--interval", "${AUTOPILOT_INTERVAL:-300}"]
+    # Probe P6: `gbrain autopilot` exits "No repo path" and does not tick. Spec §8.5 loop.
+    # Never --install. $$ so Compose leaves ${AUTOPILOT_INTERVAL} for the container.
+    command: ["sh", "-c", "while true; do gbrain sweep --once; gbrain embed --stale; sleep $${AUTOPILOT_INTERVAL:-300}; done"]
     volumes:
       - gbrain-home:/srv/gbrain-home
     depends_on:

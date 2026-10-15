@@ -802,12 +802,12 @@ const spec: ClientSpec = {
 };
 
 describe('argv builders', () => {
-  test('grant argv names source, federated read, profile, ttl, credentials file and url', () => {
+  test('grant argv names source, federated read including the write source, profile, ttl, credentials file and url', () => {
     expect(grantArgv(spec, '/tmp/c.json', 'https://b.ts.net/mcp')).toEqual([
       'mcp', 'grant', 'mb-agent-u1',
       '--profile', 'memory-writer',
       '--source', 'p-ada',
-      '--federated-read', 'c-company,c-eng',
+      '--federated-read', 'c-company,c-eng,p-ada',
       '--token-ttl', '7776000',
       '--credentials-out', '/tmp/c.json',
       '--url', 'https://b.ts.net/mcp',
@@ -815,21 +815,22 @@ describe('argv builders', () => {
     ]);
   });
 
-  test('grant argv omits federated read when empty', () => {
-    expect(grantArgv({ ...spec, readSources: [] }, '/tmp/c.json', 'u')).not.toContain('--federated-read');
+  test('grant argv still names the write source when there are no extra reads', () => {
+    const argv = grantArgv({ ...spec, readSources: [] }, '/tmp/c.json', 'u');
+    expect(argv[argv.indexOf('--federated-read') + 1]).toBe('p-ada');
   });
 
-  test('rescope argv always states federated read, clearing it with an empty value', () => {
+  test('rescope argv names the write source; an empty string is read_source_inactive', () => {
     expect(rescopeArgv('cid', { ...spec, readSources: [] })).toEqual([
-      'auth', 'rescope-client', 'cid', '--source', 'p-ada', '--profile', 'memory-writer', '--federated-read', '', '--json',
+      'auth', 'rescope-client', 'cid', '--source', 'p-ada', '--profile', 'memory-writer', '--federated-read', 'p-ada', '--json',
     ]);
   });
 });
 
 describe('parseCredentials', () => {
-  test('reads token and expiry', () => {
-    const c = parseCredentials({ client_id: 'abc', access_token: 'tok', expires_at: '2027-01-01T00:00:00Z' });
-    expect(c).toEqual({ clientId: 'abc', token: 'tok', expiresAt: new Date('2027-01-01T00:00:00Z') });
+  test('reads token and unix-seconds expiry from the credentials file', () => {
+    const c = parseCredentials({ client_id: 'abc', access_token: 'tok', expires_at: 1799799166 });
+    expect(c).toEqual({ clientId: 'abc', token: 'tok', expiresAt: new Date('2027-01-13T00:12:46Z') });
   });
   test('refuses a file without a token', () => {
     expect(() => parseCredentials({ client_id: 'abc' })).toThrow(/token/);
@@ -845,8 +846,10 @@ describe('CliGbrainAdmin', () => {
       await Bun.write(out, JSON.stringify({ client_id: 'cid-1', access_token: 'secret', expires_at: '2027-01-01T00:00:00Z' }));
       return { exitCode: 0, stdout: '{"client_id":"cid-1"}', stderr: '' };
     };
-    const admin = new CliGbrainAdmin(run, 'http://127.0.0.1:8787');
+    const admin = new CliGbrainAdmin(run, 'http://gbrain:3131');
     const issued = await admin.createClient(spec);
+    expect(calls[0]).toContain('http://gbrain:3131/mcp');
+    expect(calls[0]).not.toContain('8788');
     expect(issued.clientId).toBe('cid-1');
     expect(issued.token).toBe('secret');
     const file = calls[0]![calls[0]!.indexOf('--credentials-out') + 1]!;
@@ -885,16 +888,22 @@ export const CLIENT_TTL_SECONDS = 7_776_000;
 
 type Run = (argv: string[], opts?: { timeoutMs?: number }) => Promise<CliResult>;
 
+/** Write source plus extra reads. Probe P7: without the write source the client cannot read its own write. Probe P2: `--federated-read ''` is `read_source_inactive`. */
+export function federatedReadIds(spec: ClientSpec): string[] {
+  return [...new Set([spec.writeSource, ...spec.readSources])].filter((id) => id.length > 0).sort();
+}
+
 export function grantArgv(spec: ClientSpec, credentialsOut: string, mcpUrl: string): string[] {
   const argv = ['mcp', 'grant', spec.name, '--profile', spec.profile, '--source', spec.writeSource];
-  if (spec.readSources.length > 0) argv.push('--federated-read', spec.readSources.join(','));
+  const reads = federatedReadIds(spec);
+  if (reads.length > 0) argv.push('--federated-read', reads.join(','));
   argv.push('--token-ttl', String(CLIENT_TTL_SECONDS), '--credentials-out', credentialsOut, '--url', mcpUrl, '--json');
   return argv;
 }
 
 export function rescopeArgv(clientId: string, spec: ClientSpec): string[] {
   return ['auth', 'rescope-client', clientId, '--source', spec.writeSource, '--profile', spec.profile,
-    '--federated-read', spec.readSources.join(','), '--json'];
+    '--federated-read', federatedReadIds(spec).join(','), '--json'];
 }
 
 export function parseCredentials(json: unknown): IssuedClient {
@@ -908,15 +917,19 @@ export function parseCredentials(json: unknown): IssuedClient {
   const clientId = pick('client_id', 'clientId');
   if (!token) throw new Error('credentials file has no token');
   if (!clientId) throw new Error('credentials file has no client id');
-  const exp = pick('expires_at', 'expiresAt');
-  return { clientId, token, expiresAt: exp ? new Date(exp) : null };
+  const exp = [o, nested].map((src) => src.expires_at ?? src.expiresAt).find((v) => v != null);
+  let expiresAt: Date | null = null;
+  if (typeof exp === 'number') expiresAt = new Date(exp * 1000);
+  else if (typeof exp === 'string' && exp) expiresAt = /^\d+$/.test(exp) ? new Date(Number(exp) * 1000) : new Date(exp);
+  return { clientId, token, expiresAt };
 }
 
 export class CliGbrainAdmin implements GbrainAdmin {
-  constructor(private run: Run = runGbrain, private publicUrl: string) {}
+  /** mcpBase is the gbrain origin this process can reach, not MOBRAIN_PUBLIC_URL. */
+  constructor(private run: Run = runGbrain, private mcpBase: string) {}
 
   private mcpUrl(): string {
-    return this.publicUrl.endsWith('/mcp') ? this.publicUrl : `${this.publicUrl}/mcp`;
+    return this.mcpBase.endsWith('/mcp') ? this.mcpBase : `${this.mcpBase}/mcp`;
   }
 
   async createClient(spec: ClientSpec): Promise<IssuedClient> {
@@ -940,7 +953,8 @@ export class CliGbrainAdmin implements GbrainAdmin {
   }
 
   async addSource(id: string, name: string): Promise<void> {
-    const r = await this.run(['sources', 'add', id, '--name', name, '--json']);
+    // Probe P5: `--json` is an unknown flag on `sources add`. No path; DB-only sources have local_path null.
+    const r = await this.run(['sources', 'add', id, '--name', name]);
     if (r.exitCode !== 0 && !/already exists/i.test(r.stderr + r.stdout)) assertOk('sources add', r);
   }
 
@@ -1555,7 +1569,8 @@ if (applied.length) console.log(`migrations applied: ${applied.join(', ')}`);
 const app = createApp({
   sql,
   env,
-  admin: new CliGbrainAdmin(runGbrain, env.publicUrl),
+  // Probe P2: 127.0.0.1:8788/mcp is admin_unreachable inside a container. Listen address inside gbrain is http://127.0.0.1:3131/mcp; this process is in mobrain, so use GBRAIN_URL.
+  admin: new CliGbrainAdmin(runGbrain, env.gbrainUrl),
   mcp: (token) => mcpCaller(`${env.gbrainUrl}/mcp`, token),
   cli: runGbrain,
   fetch,
@@ -1652,7 +1667,7 @@ CMD ["bun", "src/server/main.ts"]
     networks: [internal]
 ```
 
-If probe P5 recorded that sources need a path under `GBRAIN_HOME`, drop `:ro` here and say so in a comment.
+Probe P5: no path is created and `--json` is rejected. Keep `:ro`.
 
 - [ ] **Step 4: Build and start on dev, check health**
 

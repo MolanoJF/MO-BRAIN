@@ -599,6 +599,9 @@ cmd_install() {
   dc build gbrain
   dc build mobrain
   dc up -d --wait postgres
+  # Probe P1: these flags are accepted. `--search-mode balanced` is not stored; do not invent a flag.
+  # Init finishes only after compose/initdb/01-dbs.sh grants BYPASSRLS and pre-creates
+  # auto_enable_rls (owned by gbrain) plus the auto_rls_on_create_table event trigger.
   local init=(gbrain init --non-interactive --search-mode balanced --json)
   [ -n "$key" ] && init+=(--embedding-model openai:text-embedding-3-small)
   dc run --rm --no-deps gbrain "${init[@]}"
@@ -618,7 +621,7 @@ cmd_install() {
 }
 ```
 
-(Use the `init` flags recorded by probe P1 if they differ.)
+(Probe P1 accepted these flags. `--search-mode balanced` is not stored. Init still depends on `compose/initdb/01-dbs.sh` for `BYPASSRLS` and the v35 function owned by `gbrain`.)
 
 - [ ] **Step 3: Run** — `bash scripts/test-isolated.sh test/unit/cli` — Expected: PASS.
 
@@ -1131,7 +1134,10 @@ harness_run() {
   local prompt="Use the mobrain-collect skill to run collector $slug in source $source (mode: $mode). Write through the $via MCP server. Finish with the MOBRAIN_STATUS and MOBRAIN_SUMMARY lines the skill specifies."
   case "${MOBRAIN_HARNESS:-claude-code}" in
     claude-code)
-      local cmd=(claude -p "$prompt" --allowedTools "$allowed" --output-format text)
+      # Probe P4: systemd user PATH does not include ~/.local/bin. Bare `claude` is exit 127.
+      local claude_bin="${CLAUDE_BIN:-$(command -v claude || true)}"
+      [ -n "$claude_bin" ] || { echo "claude not found; set CLAUDE_BIN or PATH (systemd user PATH omits ~/.local/bin)" >&2; return 127; }
+      local cmd=("$claude_bin" -p "$prompt" --allowedTools "$allowed" --output-format text)
       [ -n "$model" ] && cmd+=(--model "$model")
       ( cd "${MOBRAIN_WORKDIR:-$HOME}" && tmo "${timeout}s" "${cmd[@]}" ) ;;
     stub)
@@ -1222,6 +1228,7 @@ test('systemd user timers when the user bus works and lingering is on', async ()
   const unit = await readFile(join(c.home, '.config/systemd/user/mobrain-collect.service'), 'utf8');
   expect(unit).toMatch(/ExecStart=.*bin\/mobrain collect --due/);
   expect(unit).toContain('Environment=PATH=');
+  expect(unit).toContain('.local/bin');
   expect(await readFile(join(c.home, '.config/systemd/user/mobrain-collect.timer'), 'utf8')).toContain('OnCalendar=*:0/15');
   expect((await c.calls('systemctl')).map((a) => a.join(' '))).toContain('--user enable --now mobrain-collect.timer');
 });
@@ -1257,10 +1264,18 @@ systemd_ok() {
   [ "$linger" = yes ]
 }
 
+timer_path() {
+  # Probe P4: user-manager PATH omits ~/.local/bin. Include it, and the directory of claude if found.
+  local p="$HOME/.local/bin:${PATH:-/usr/bin:/bin}" bin
+  bin="$(command -v claude 2>/dev/null || true)"
+  [ -n "$bin" ] && p="$(dirname "$bin"):$p"
+  printf '%s' "$p"
+}
+
 write_unit() { # name description exec calendar
   mkdir -p "$UNIT_DIR"
   printf '[Unit]\nDescription=%s\n\n[Service]\nType=oneshot\nEnvironment=PATH=%s\nEnvironment=HOME=%s\nExecStart=%s\n' \
-    "$2" "$PATH" "$HOME" "$3" > "$UNIT_DIR/$1.service"
+    "$2" "$(timer_path)" "$HOME" "$3" > "$UNIT_DIR/$1.service"
   printf '[Unit]\nDescription=%s\n\n[Timer]\nOnCalendar=%s\nPersistent=true\nRandomizedDelaySec=60\n\n[Install]\nWantedBy=timers.target\n' \
     "$2" "$4" > "$UNIT_DIR/$1.timer"
 }
@@ -1279,8 +1294,8 @@ cmd_timers() {
         echo "timers installed (systemd user units)"
       else
         { crontab -l 2>/dev/null | grep -v '# mobrain$' || true
-          echo "*/15 * * * * PATH=$PATH $SELF collect --due >> $STATE_DIR/cron.log 2>&1 # mobrain"
-          if is_stack_host; then echo "30 3 * * * PATH=$PATH $SELF backup --prune >> $STATE_DIR/cron.log 2>&1 # mobrain"; fi
+          echo "*/15 * * * * PATH=$(timer_path) $SELF collect --due >> $STATE_DIR/cron.log 2>&1 # mobrain"
+          if is_stack_host; then echo "30 3 * * * PATH=$(timer_path) $SELF backup --prune >> $STATE_DIR/cron.log 2>&1 # mobrain"; fi
         } | crontab -
         echo "timers installed (crontab)"
       fi ;;
@@ -1459,6 +1474,26 @@ test('restore refuses without --yes and on a version mismatch', async () => {
   expect((await c.run(['restore', dir, '--yes'], env())).code).toBe(17);
 });
 
+test('restore ignores the probe P8 pg_restore errors and fails on any other', async () => {
+  const ignored = `case "$*" in
+  *pg_dump*) echo DUMP;;
+  *"-czf /b/gbrain-home.tgz"*) for a in "$@"; do case "$a" in *:/b) : > "\${a%:/b}/gbrain-home.tgz";; esac; done;;
+  *pg_restore*)
+    echo 'pg_restore: error: could not execute query: ERROR:  must be owner of extension vector' >&2
+    echo 'pg_restore: error: could not execute query: ERROR:  permission denied to create event trigger "auto_rls_on_create_table"' >&2
+    echo 'pg_restore: error: could not execute query: ERROR:  must be owner of extension citext' >&2
+    echo 'pg_restore: warning: errors ignored on restore: 2' >&2
+    exit 1;;
+  esac
+  exit 0`;
+  await c.stub('docker', ignored);
+  const r = await c.run(['backup'], env());
+  const dir = r.stdout.trim().split('\n').at(-1)!;
+  expect((await c.run(['restore', dir, '--yes'], env())).code).toBe(0);
+  await c.stub('docker', ignored.replace('must be owner of extension vector', 'relation "pages" already exists'));
+  expect((await c.run(['restore', dir, '--yes'], env())).code).not.toBe(0);
+});
+
 test('upgrade backs up first, sets the pin, migrates, reinstalls packs', async () => {
   await mkdir(join(repo, 'packs'), { recursive: true });
   const r = await c.run(['upgrade', '--gbrain', '0.60.240.0'], env());
@@ -1482,6 +1517,31 @@ Run — Expected: FAIL.
 backup_base() { printf '%s/%s' "${MOBRAIN_BACKUP_DIR:-$HOME/backups/mobrain}" "$(project)"; }
 vol() { printf '%s_gbrain-home' "$(project)"; }
 gbrain_image() { printf 'mobrain-gbrain:%s' "$(env_get GBRAIN_VERSION)"; }
+
+# Probe P8: pg_restore exits 1 and ignores these. They are not a failed restore.
+pg_restore_ok() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      'pg_restore: error:'*)
+        case "$line" in
+          *'must be owner of extension vector'*|*'must be owner of extension citext'*|*'permission denied to create event trigger "auto_rls_on_create_table"'*) ;;
+          *) return 1 ;;
+        esac ;;
+    esac
+  done
+  return 0
+}
+
+restore_db() {
+  local db=$1 dump=$2 log
+  log="$(mktemp)"
+  set +e
+  dc exec -T postgres pg_restore -U postgres -d "$db" --no-owner --role="$db" < "$dump" >"$log" 2>&1
+  set -e
+  if ! pg_restore_ok < "$log"; then cat "$log" >&2; rm -f "$log"; die "pg_restore $db failed" 1; fi
+  rm -f "$log"
+}
 
 cmd_backup() {
   need_stack
@@ -1514,7 +1574,7 @@ cmd_restore() {
   local db
   for db in gbrain mobrain; do
     dc exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c "drop database if exists $db with (force)" -c "create database $db owner $db"
-    dc exec -T postgres pg_restore -U postgres -d "$db" --no-owner --role="$db" < "$dir/$db.dump"
+    restore_db "$db" "$dir/$db.dump"
   done
   docker run --rm -v "$(vol):/v" "$(gbrain_image)" find /v -mindepth 1 -delete
   docker run --rm -v "$(vol):/v" -v "$dir:/b:ro" "$(gbrain_image)" tar -C /v -xzf /b/gbrain-home.tgz
