@@ -71,6 +71,31 @@ services:
     mem_limit: 1536m
     networks: [internal]
 
+  mobrain:
+    image: mobrain-app:${GBRAIN_VERSION:?required}
+    build:
+      context: ..
+      dockerfile: docker/mobrain.Dockerfile
+      args:
+        GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
+    restart: unless-stopped
+    environment:
+      <<: *gbrain-env
+      DATABASE_URL: postgres://mobrain:${POSTGRES_PASSWORD:?required}@postgres:5432/mobrain
+      GBRAIN_URL: http://gbrain:3131
+      GBRAIN_VERSION: ${GBRAIN_VERSION:?required}
+      MOBRAIN_PUBLIC_URL: ${MOBRAIN_PUBLIC_URL:-http://127.0.0.1:8787}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
+    ports:
+      - "127.0.0.1:${MOBRAIN_PORT:-8787}:3000"
+    volumes:
+      - gbrain-home:/srv/gbrain-home:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      gbrain: { condition: service_healthy }
+    mem_limit: 512m
+    networks: [internal]
+
 volumes:
   pg-data:
   gbrain-home:
