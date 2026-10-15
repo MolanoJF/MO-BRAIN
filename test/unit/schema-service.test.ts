@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 afterAll(async () => rm(home, { recursive: true, force: true }));
 
-const activeCli = async () => ({ exitCode: 0, stdout: '{"name":"mobrain-brain","version":"1.0.0"}', stderr: '' });
+const activeCli = async () => ({ exitCode: 0, stdout: '{"pack":"mobrain-brain","version":"1.0.0"}', stderr: '' });
 
 describe('schema service', () => {
   test('a fresh install passes the lock', async () => {

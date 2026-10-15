@@ -21,7 +21,10 @@ export async function activePackName(cli: Cli): Promise<string | null> {
   const r = await cli(['schema', 'active', '--json'], { timeoutMs: 20_000 });
   if (r.exitCode !== 0) return null;
   const j = lastJson(r.stdout) as Record<string, unknown> | null;
-  const pick = j?.name ?? j?.pack_name ?? (j?.pack as Record<string, unknown> | undefined)?.name;
+  // Probe: `schema active --json` sets `pack` to a string. Object `pack.name` stays a fallback.
+  const pack = j?.pack;
+  const packName = typeof pack === 'string' ? pack : (pack as Record<string, unknown> | undefined)?.name;
+  const pick = j?.name ?? j?.pack_name ?? packName;
   return typeof pick === 'string' ? pick : null;
 }
 
