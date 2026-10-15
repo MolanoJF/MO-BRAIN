@@ -6,7 +6,7 @@
 
 **Spec sections:** §6, §9.1.
 
-**Where the pack files are, inside the `mobrain` container:** shipped copies at `/app/packs/` (with `SHA256SUMS`); installed copies at `$GBRAIN_HOME/.gbrain/schema-packs/<name>/pack.json` (`/srv/gbrain-home` is mounted read-only). Both paths come from `PACKS_DIR` (default `/app/packs`) and `GBRAIN_HOME` (default `/srv/gbrain-home`) so tests can point them at temp dirs.
+**Where the pack files are, inside the `mobrain` container:** shipped copies at `/app/packs/` (with `SHA256SUMS`); installed copies at `$GBRAIN_HOME/.gbrain/schema-packs/<name>/pack.json` (`/srv/gbrain-home` is mounted read-write so the admin CLI and gbrain share one writer lock). Both paths come from `PACKS_DIR` (default `/app/packs`) and `GBRAIN_HOME` (default `/srv/gbrain-home`) so tests can point them at temp dirs.
 
 ---
 

@@ -78,7 +78,7 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 | `postgres` | `pgvector/pgvector:pg16` | postgres | `pg-data`, `compose/initdb` | `internal` |
 | `gbrain` | `mobrain-gbrain:${GBRAIN_VERSION}` | `gbrain serve --http --bind 0.0.0.0 --port 3131 --public-url ${MOBRAIN_PUBLIC_URL}` | `gbrain-home` (rw) | `internal` |
 | `autopilot` | same | `compose/autopilot-loop.sh` mounted read-only: `gbrain sweep --once` then `gbrain embed --stale`, sleep `${AUTOPILOT_INTERVAL:-300}` (never `gbrain autopilot`, never `--install`, never an `sh -c` string) | `gbrain-home` (rw), script (ro) | `internal` |
-| `mobrain` | `mobrain-app:local` (FROM the gbrain image) | `bun src/server/main.ts` on 3000 | `gbrain-home` (ro) | `internal`; the only published port, `127.0.0.1:${MOBRAIN_PORT:-8787}:3000` |
+| `mobrain` | `mobrain-app:local` (FROM the gbrain image) | `bun src/server/main.ts` on 3000 | `gbrain-home` (rw, shared writer lock; not the Docker socket) | `internal`; the only published port, `127.0.0.1:${MOBRAIN_PORT:-8787}:3000` |
 
 - The `mobrain` image is built from the gbrain image so the server can run gbrain's read-only CLI (`schema show --json`, `autopilot --status --json`) and `gbrain mcp grant` against the owner admin API.
 - `mobrain` proxies `/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/*`, and `/health` to `gbrain:3131`. gbrain's `/admin` dashboard is not proxied. `mobrain` calls the owner admin API on the internal network.
@@ -107,7 +107,7 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 |---|---|---|
 | Init brain, set config, install packs, `apply-migrations` | CLI in `gbrain` container (`docker compose exec -T gbrain gbrain ...`) | `bin/mobrain` |
 | Create, archive sources | CLI `gbrain sources add\|archive`, run in the `mobrain` container (4.4) | `mobrain` server |
-| Issue, rescope, revoke clients | owner admin HTTP API (`gbrain mcp grant\|admin ...` with `--admin-token-file`). `--url` is the gbrain listen address the caller can reach: `http://gbrain:3131/mcp` from the `mobrain` container, `http://127.0.0.1:3131/mcp` from inside the `gbrain` container. `MOBRAIN_PUBLIC_URL` (port 8788 in dev) is admin-unreachable from inside a container (probe P2). | `mobrain` server |
+| Issue, rescope, revoke clients | owner admin HTTP API (`gbrain mcp grant\|admin ...` with `--admin-token-file`). `--url` is the gbrain listen address the caller can reach: `http://gbrain:3131/mcp` from the `mobrain` container, `http://127.0.0.1:3131/mcp` from inside the `gbrain` container. `MOBRAIN_PUBLIC_URL` (port 8788 in dev) is admin-unreachable from inside a container (probe P2). Live in-container bootstrap is blocked on that addressing: `http://gbrain:3131` fails gbrain's HTTP loopback check, and `http://127.0.0.1:3000/mcp` is the mobrain proxy, not the admin grant endpoint. Do not substitute another URL. | `mobrain` server |
 | Read pages, search, schema read ops, sources list and status | MCP over HTTP with the reader's own `ui` client | `mobrain` server |
 | Jobs, health, stats, doctor | MCP with the instance client (admin scope) | `mobrain` server, owner and admin views only |
 | Full schema manifest, autopilot status | CLI read in the `mobrain` container | `mobrain` server |
@@ -115,9 +115,9 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 
 ### 4.4 Running gbrain CLI from the `mobrain` server
 
-The `mobrain` container holds `GBRAIN_HOME` read-only and the gbrain `DATABASE_URL`, so it runs gbrain CLI commands itself. It cannot reach Docker (no socket is ever mounted), so nothing it does may need another container's filesystem:
+The `mobrain` container holds `GBRAIN_HOME` read-write (shared with `gbrain`, one writer lock; not the Docker socket) and the gbrain `DATABASE_URL`, so it runs gbrain CLI commands itself. It cannot reach Docker (no socket is ever mounted), so nothing it does may need another container's filesystem:
 
-- Source creation and archive: the server runs `gbrain sources add|archive` itself. Probe P5: DB-only sources exist with no path and no checkout (`local_path: null`). `sources add` must not pass `--json` (unknown flag). The `mobrain` mount stays read-only.
+- Source creation and archive: the server runs `gbrain sources add|archive` itself. Probe P5: DB-only sources exist with no path and no checkout (`local_path: null`). `sources add` must not pass `--json` (unknown flag). A `:ro` mount fails the writer lock with `EROFS`.
 - Pack file installs and edits happen only from `bin/mobrain` on the host (`docker compose cp` plus `exec`), never from the server.
 
 Every CLI call is an argv array through one helper with a timeout, captured stdout and stderr, and secrets scrubbed from errors (ported from `src/contracts/exec.ts` and `src/docker/host.ts`).

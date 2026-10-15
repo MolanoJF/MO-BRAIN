@@ -1659,7 +1659,7 @@ CMD ["bun", "src/server/main.ts"]
     ports:
       - "127.0.0.1:${MOBRAIN_PORT:-8787}:3000"
     volumes:
-      - gbrain-home:/srv/gbrain-home:ro
+      - gbrain-home:/srv/gbrain-home
     depends_on:
       postgres: { condition: service_healthy }
       gbrain: { condition: service_healthy }
@@ -1667,7 +1667,7 @@ CMD ["bun", "src/server/main.ts"]
     networks: [internal]
 ```
 
-Probe P5: no path is created and `--json` is rejected. Keep `:ro`.
+Probe P5: no path is created and `--json` is rejected. The mount is read-write anyway: the admin CLI and the gbrain server must share one home and one writer lock. A `:ro` mount fails that lock with `EROFS`. Do not mount the Docker socket.
 
 - [ ] **Step 4: Build and start on dev, check health**
 

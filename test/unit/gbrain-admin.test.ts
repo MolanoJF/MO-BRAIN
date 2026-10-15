@@ -56,7 +56,11 @@ describe('CliGbrainAdmin', () => {
     };
     const admin = new CliGbrainAdmin(run, 'http://gbrain:3131');
     const issued = await admin.createClient(spec);
+    // Parked live check: do not replace this origin. http://gbrain:3131 fails
+    // gbrain's HTTP loopback check; host port 8788 is unreachable in-container;
+    // http://127.0.0.1:3000/mcp is the mobrain proxy and grant admin returns 404.
     expect(calls[0]).toContain('http://gbrain:3131/mcp');
+    expect(calls[0]).not.toContain('http://127.0.0.1:3000/mcp');
     expect(calls[0]).not.toContain('8788');
     expect(issued.clientId).toBe('cid-1');
     expect(issued.token).toBe('secret');

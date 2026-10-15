@@ -88,8 +88,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?required}
     ports:
       - "127.0.0.1:${MOBRAIN_PORT:-8787}:3000"
+    # Shared read-write with gbrain so the admin CLI and the server use one home and one writer lock. Not the Docker socket.
     volumes:
-      - gbrain-home:/srv/gbrain-home:ro
+      - gbrain-home:/srv/gbrain-home
     depends_on:
       postgres: { condition: service_healthy }
       gbrain: { condition: service_healthy }

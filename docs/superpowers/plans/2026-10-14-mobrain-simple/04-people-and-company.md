@@ -1475,6 +1475,8 @@ dc down
 
 Expected: a `whoami` result naming client `mb-agent-…` and source `p-dev`. If the stack was bootstrapped already, wipe dev first with `dc down -v` (dev only).
 
+Live check parked: in-container bootstrap cannot pass with the current container split. `http://gbrain:3131` fails gbrain's HTTP loopback check, host port 8788 is unreachable inside the container, and `127.0.0.1:3000` is not the admin grant endpoint. Do not try another URL. Production grant `--url` stays `env.gbrainUrl`. The read-write `gbrain-home` mount is required (`sources add` needs the writer lock); do not mount the Docker socket.
+
 - [ ] **Step 5: Commit**
 
 ```bash
