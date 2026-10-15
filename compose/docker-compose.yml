@@ -60,10 +60,11 @@ services:
     environment:
       <<: *gbrain-env
     # Probe P6: `gbrain autopilot` exits "No repo path" and does not tick. Spec §8.5 loop.
-    # Never --install. $$ so Compose leaves ${AUTOPILOT_INTERVAL} for the container.
-    command: ["sh", "-c", "while true; do gbrain sweep --once; gbrain embed --stale; sleep $${AUTOPILOT_INTERVAL:-300}; done"]
+    # Never --install. The script is not in the image; mount it read-only. Not an sh -c string.
+    command: ["/usr/local/bin/autopilot-loop.sh"]
     volumes:
       - gbrain-home:/srv/gbrain-home
+      - ./autopilot-loop.sh:/usr/local/bin/autopilot-loop.sh:ro
     depends_on:
       gbrain: { condition: service_healthy }
     stop_grace_period: 60s

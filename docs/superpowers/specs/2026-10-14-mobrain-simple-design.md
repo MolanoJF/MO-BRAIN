@@ -77,7 +77,7 @@ Unchanged rules: gbrain is never forked, and is driven only through its CLI (arg
 |---|---|---|---|---|
 | `postgres` | `pgvector/pgvector:pg16` | postgres | `pg-data`, `compose/initdb` | `internal` |
 | `gbrain` | `mobrain-gbrain:${GBRAIN_VERSION}` | `gbrain serve --http --bind 0.0.0.0 --port 3131 --public-url ${MOBRAIN_PUBLIC_URL}` | `gbrain-home` (rw) | `internal` |
-| `autopilot` | same | spec §8.5 loop: `gbrain sweep --once` then `gbrain embed --stale`, sleep `${AUTOPILOT_INTERVAL:-300}` (never `gbrain autopilot`, never `--install`) | `gbrain-home` (rw) | `internal` |
+| `autopilot` | same | `compose/autopilot-loop.sh` mounted read-only: `gbrain sweep --once` then `gbrain embed --stale`, sleep `${AUTOPILOT_INTERVAL:-300}` (never `gbrain autopilot`, never `--install`, never an `sh -c` string) | `gbrain-home` (rw), script (ro) | `internal` |
 | `mobrain` | `mobrain-app:local` (FROM the gbrain image) | `bun src/server/main.ts` on 3000 | `gbrain-home` (ro) | `internal`; the only published port, `127.0.0.1:${MOBRAIN_PORT:-8787}:3000` |
 
 - The `mobrain` image is built from the gbrain image so the server can run gbrain's read-only CLI (`schema show --json`, `autopilot --status --json`) and `gbrain mcp grant` against the owner admin API.
@@ -359,11 +359,7 @@ Kind references inside the skill, each short:
 
 ### 8.5 What gbrain schedules itself
 
-Probe P6: `gbrain autopilot` exits `No repo path` on a DB-only brain and does not tick. Remote-mention backlinks can still appear via `get_backlinks` (not a field on `get_page`) from the queued effect, not from an autopilot cycle. The `autopilot` container therefore does not run `gbrain autopilot`. Its command is this foreground loop (never `--install`):
-
-```sh
-while true; do gbrain sweep --once; gbrain embed --stale; sleep "${AUTOPILOT_INTERVAL:-300}"; done
-```
+Probe P6: `gbrain autopilot` exits `No repo path` on a DB-only brain and does not tick. Remote-mention backlinks can still appear via `get_backlinks` (not a field on `get_page`) from the queued effect, not from an autopilot cycle. The `autopilot` container therefore does not run `gbrain autopilot`. Its command is `compose/autopilot-loop.sh`, mounted read-only because the script is not in the image. The script is a foreground loop (never `--install`, and never an `sh -c` or `bash -c` string containing `gbrain`): it runs `gbrain sweep --once`, then `gbrain embed --stale`, then sleeps `${AUTOPILOT_INTERVAL:-300}`.
 
 Mo-brain adds no other gbrain schedules.
 
@@ -487,11 +483,11 @@ Each runs against a scratch `mobrain-dev` stack on gbrain `0.60.230.0`, and the 
 | P3 | Isolation: a `read,write` client and a `read,write,admin` client bound to source A cannot read pages in source B through search, `get_page`, `list_pages` or admin read ops | no page content or slug from B returned | owners and admins get no admin scope on `agent`; admin work uses the `instance` client through the CLI only |
 | P4 | `claude -p` from a systemd user timer: calls `mcp__gbrain__*` over HTTP and a claude.ai connector tool; `--allowedTools` honored; exit codes and timeout behave | a fixture collector completes from the timer with nobody logged in | crontab with an explicit `PATH`; if connectors are unavailable headless, document gateway MCPs as the headless path |
 | P5 | `gbrain sources add <id>` without a path on Postgres; `put_page` into it with a client bound to it; `sources archive` | page written and readable; archive hides it | sources get a path under `gbrain-home/content/<id>`; `mobrain` mounts `gbrain-home` read-write |
-| P6 | `gbrain autopilot --interval 300` in the foreground in a container: worker runs; a remote `put_page` gets its links and embedding within two ticks | links and embedding present | add `gbrain sweep --once` and `gbrain embed --stale` to a loop in the `autopilot` command |
+| P6 | `gbrain autopilot --interval 300` in the foreground in a container: worker runs; a remote `put_page` gets its links and embedding within two ticks | links and embedding present | run `compose/autopilot-loop.sh` (`gbrain sweep --once` then `gbrain embed --stale`; not an `sh -c` string) |
 | P7 | The `ui` client: `list_pages` filtered to `system/collectors/` returns frontmatter; `get_page` returns content and frontmatter; `schema show --json` runs in the `mobrain` container | all three | read collector pages one by one with `get_page` |
 | P8 | Backup and restore round trip on dev: both databases and the volume | a page and a person survive restore | adjust the dump and restore commands |
 
-Results: docs/superpowers/specs/2026-10-14-mobrain-simple-probes.md (2026-10-15). Fallbacks taken: P1 `ALTER ROLE gbrain BYPASSRLS` and pre-created v35 `auto_enable_rls` plus `auto_rls_on_create_table` as the superuser, function owned by `gbrain` (`search_mode balanced` was not stored; no flag invented); P2 in-container grant URL `http://127.0.0.1:3131/mcp` (8788 is admin-unreachable) and `ADMIN_AGENT_PROFILE=operator` (no `read,write,admin` profile; empty `--federated-read` is `read_source_inactive`); P4 timers invoke claude by absolute path or set PATH (`~/.local/bin` is not on the systemd user PATH); P5 omit `--json` on `sources add`; P6 autopilot command is the §8.5 `gbrain sweep --once` / `gbrain embed --stale` loop; P7 `list_pages` filters on `source_id` not `prefix`, `gbrain put --source`, and federated read must include the write source; P8 ignore `pg_restore` errors for the vector extension comment, the `auto_rls_on_create_table` event trigger, and the citext extension comment. P3 passed.
+Results: docs/superpowers/specs/2026-10-14-mobrain-simple-probes.md (2026-10-15). Fallbacks taken: P1 `ALTER ROLE gbrain BYPASSRLS` and pre-created v35 `auto_enable_rls` plus `auto_rls_on_create_table` as the superuser, function owned by `gbrain` (`search_mode balanced` was not stored; no flag invented); P2 in-container grant URL `http://127.0.0.1:3131/mcp` (8788 is admin-unreachable) and `ADMIN_AGENT_PROFILE=operator` (no `read,write,admin` profile; empty `--federated-read` is `read_source_inactive`); P4 timers invoke claude by absolute path or set PATH (`~/.local/bin` is not on the systemd user PATH); P5 omit `--json` on `sources add`; P6 autopilot runs `compose/autopilot-loop.sh` (`gbrain sweep --once` / `gbrain embed --stale`; not an `sh -c` string); P7 `list_pages` filters on `source_id` not `prefix`, `gbrain put --source`, and federated read must include the write source; P8 ignore `pg_restore` errors for the vector extension comment, the `auto_rls_on_create_table` event trigger, and the citext extension comment. P3 passed.
 
 ## 17. Cutover on this host
 

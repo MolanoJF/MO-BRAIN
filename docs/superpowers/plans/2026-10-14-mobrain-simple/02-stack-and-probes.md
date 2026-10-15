@@ -605,7 +605,7 @@ For every probe, make exactly these edits when the recorded value differs from w
 | P3 | admin-scope clients do not see other sources' content | if FAIL: `04` task 4.1 sets `ADMIN_AGENT_PROFILE = 'memory-writer'` and spec §5.2 says so |
 | P4 | `claude -p ... --allowedTools ... --output-format json`; systemd user timers with lingering | `07-cli.md` tasks 7.7, 7.8 (`harness_claude_code`, `timers_install`) |
 | P5 | `gbrain sources add <id> --name <n>` with no path | `03` task 3.6 (`addSource`); if a path is needed, `compose` mounts `gbrain-home` rw on `mobrain` (phase 3, task 3.10) |
-| P6 | autopilot alone sweeps remote writes | if FAIL: `compose/docker-compose.yml` `autopilot.command` becomes the loop in spec §8.5 |
+| P6 | autopilot alone sweeps remote writes | if FAIL: `autopilot` runs `compose/autopilot-loop.sh` as in spec §8.5; do not put the loop in an `sh -c` string |
 | P7 | `list_pages` takes `prefix` and `source`; returns `frontmatter`; `get_page` takes `include_content` | `06` task 6.1 (the `A` constant in `src/server/gbrain/pages.ts`) |
 | P7 | `gbrain put <slug> --source <id>` reads the page from stdin | `09-skills-and-docs.md` task 9.1 (`putPageArgv`) |
 | P8 | restore commands as in step 8 | `07` task 7.10 |
