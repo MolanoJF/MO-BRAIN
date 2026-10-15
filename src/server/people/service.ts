@@ -335,4 +335,59 @@ export class PeopleService {
     });
     await audit(this.d.sql, actor.id, 'member.role', target.email, { from: target.role, to: role });
   }
+
+  /** Idempotent and resumable: each step acts only on what is left (rule 9). */
+  async offboard(actor: User, userId: string): Promise<void> {
+    const target = await this.user(userId);
+    assertCanOffboard(actor, target);
+    if (target.status === 'disabled') return;
+    await this.d.sql`update users set status = 'offboarding' where id = ${userId}`;
+    await audit(this.d.sql, actor.id, 'member.offboard.start', target.email);
+
+    for (const row of await this.liveClients(userId, ['agent', 'ui', 'company_writer'])) await this.revokeRow(row);
+    for (const s of await this.d.sql<{ id: string }[]>`select id from sources where owner_user_id = ${userId} and status = 'active'`) {
+      await this.d.admin.archiveSource(s.id);
+      await this.d.sql`update sources set status = 'archived' where id = ${s.id}`;
+    }
+    await this.d.sql.begin(async (tx) => {
+      await tx`delete from grants where user_id = ${userId}`;
+      await tx`delete from sessions where user_id = ${userId}`;
+      await tx`update api_keys set revoked_at = now() where user_id = ${userId} and revoked_at is null`;
+      await tx`update users set status = 'disabled' where id = ${userId}`;
+    });
+    await audit(this.d.sql, actor.id, 'member.offboard.done', target.email);
+  }
+
+  // ---- issuing clients to people ---------------------------------------------
+
+  private mcpUrl(): string { return `${this.d.env.publicUrl}/mcp`; }
+
+  async issueAgent(user: User): Promise<{ token: string; mcpUrl: string; expiresAt: Date | null; registrationName: string }> {
+    const want = compileUserClients(user, await this.state()).find((s) => s.purpose === 'agent');
+    if (!want) throw new HttpError(409, 'no_agent_access');
+    const old = await this.liveClients(user.id, ['agent']);
+    const issued = await this.d.admin.createClient(want);
+    await this.storeClient(want, issued, false);
+    for (const r of old) await this.revokeRow(r);
+    await audit(this.d.sql, user.id, 'client.issue', 'agent');
+    return { token: issued.token, mcpUrl: this.mcpUrl(), expiresAt: issued.expiresAt, registrationName: 'gbrain' };
+  }
+
+  async issueCompanyWriter(user: User, sourceId: string) {
+    assertCompanyMode(await getMode(this.d.sql));
+    this.assertManager(user);
+    await this.companySource(sourceId);
+    const spec = companyWriterSpec(user, sourceId);
+    const old = (await this.liveClients(user.id, ['company_writer'])).filter((r) => r.writeSource === sourceId);
+    const issued = await this.d.admin.createClient(spec);
+    await this.storeClient(spec, issued, false);
+    for (const r of old) await this.revokeRow(r);
+    await audit(this.d.sql, user.id, 'client.issue', `company_writer:${sourceId}`);
+    return { token: issued.token, mcpUrl: this.mcpUrl(), expiresAt: issued.expiresAt, registrationName: `gbrain-company-${sourceId}` };
+  }
+
+  async myClients(user: User): Promise<{ purpose: ClientPurpose; writeSource: string | null; expiresAt: Date | null }[]> {
+    return (await this.liveClients(user.id, ['agent', 'ui', 'company_writer']))
+      .map(({ purpose, writeSource, expiresAt }) => ({ purpose, writeSource, expiresAt }));
+  }
 }
