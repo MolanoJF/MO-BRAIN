@@ -506,6 +506,67 @@ cmd_collect() {
   return "$rc"
 }
 
+# ---- timers -----------------------------------------------------------------------------
+
+UNIT_DIR="$HOME/.config/systemd/user"
+
+systemd_ok() {
+  command -v systemctl >/dev/null || return 1
+  systemctl --user show-environment >/dev/null 2>&1 || return 1
+  local linger; linger="$(loginctl show-user "${USER:-$(id -un)}" -p Linger --value 2>/dev/null || true)"
+  if [ "$linger" != yes ]; then loginctl enable-linger "${USER:-$(id -un)}" >/dev/null 2>&1 || true
+    linger="$(loginctl show-user "${USER:-$(id -un)}" -p Linger --value 2>/dev/null || true)"; fi
+  [ "$linger" = yes ]
+}
+
+timer_path() {
+  # Probe P4: user-manager PATH omits ~/.local/bin. Include it, and the directory of claude if found.
+  local p="$HOME/.local/bin:${PATH:-/usr/bin:/bin}" bin
+  bin="$(command -v claude 2>/dev/null || true)"
+  [ -n "$bin" ] && p="$(dirname "$bin"):$p"
+  printf '%s' "$p"
+}
+
+write_unit() { # name description exec calendar
+  mkdir -p "$UNIT_DIR"
+  printf '[Unit]\nDescription=%s\n\n[Service]\nType=oneshot\nEnvironment=PATH=%s\nEnvironment=HOME=%s\nExecStart=%s\n' \
+    "$2" "$(timer_path)" "$HOME" "$3" > "$UNIT_DIR/$1.service"
+  printf '[Unit]\nDescription=%s\n\n[Timer]\nOnCalendar=%s\nPersistent=true\nRandomizedDelaySec=60\n\n[Install]\nWantedBy=timers.target\n' \
+    "$2" "$4" > "$UNIT_DIR/$1.timer"
+}
+
+cmd_timers() {
+  local sub=${1:-}
+  mkdir -p "$STATE_DIR"
+  case "$sub" in
+    install)
+      if systemd_ok; then
+        write_unit mobrain-collect "Mo-brain collectors" "$SELF collect --due" '*:0/15'
+        is_stack_host && write_unit mobrain-backup "Mo-brain daily backup" "$SELF backup --prune" '*-*-* 03:30'
+        systemctl --user daemon-reload
+        systemctl --user enable --now mobrain-collect.timer
+        is_stack_host && systemctl --user enable --now mobrain-backup.timer
+        echo "timers installed (systemd user units)"
+      else
+        { crontab -l 2>/dev/null | grep -v '# mobrain$' || true
+          echo "*/15 * * * * PATH=$(timer_path) $SELF collect --due >> $STATE_DIR/cron.log 2>&1 # mobrain"
+          if is_stack_host; then echo "30 3 * * * PATH=$(timer_path) $SELF backup --prune >> $STATE_DIR/cron.log 2>&1 # mobrain"; fi
+        } | crontab -
+        echo "timers installed (crontab)"
+      fi ;;
+    remove)
+      if command -v systemctl >/dev/null; then
+        systemctl --user disable --now mobrain-collect.timer mobrain-backup.timer >/dev/null 2>&1 || true
+        rm -f "$UNIT_DIR"/mobrain-collect.* "$UNIT_DIR"/mobrain-backup.*
+      fi
+      if command -v crontab >/dev/null; then { crontab -l 2>/dev/null | grep -v '# mobrain$' || true; } | crontab -; fi
+      echo "timers removed" ;;
+    status)
+      systemctl --user list-timers 'mobrain-*' 2>/dev/null || crontab -l 2>/dev/null | grep '# mobrain$' || echo "no timers" ;;
+    *) usage ;;
+  esac
+}
+
 # ---- main ----------------------------------------------------------------------
 
 main() {
