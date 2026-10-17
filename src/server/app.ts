@@ -8,6 +8,7 @@ import { authenticate, onError, type AppEnv } from './http.ts';
 import { authRoutes } from './routes/auth.ts';
 import { brainRoutes } from './routes/brain.ts';
 import { healthRoutes } from './routes/health.ts';
+import { installRoutes } from './routes/install.ts';
 import { peopleRoutes } from './routes/people.ts';
 import { proxyRoutes } from './routes/proxy.ts';
 import { runnerRoutes } from './routes/runner.ts';
@@ -29,12 +30,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.onError(onError);
   app.route('/', proxyRoutes(deps.env.gbrainUrl, deps.fetch));
   app.use('/api/*', authenticate(deps.sql, deps.now));
+  app.use('/install/*', authenticate(deps.sql, deps.now));
   app.route('/', healthRoutes(deps));
   app.route('/', authRoutes(deps));
   app.route('/', peopleRoutes(deps));
   app.route('/', schemaRoutes(deps));
   app.route('/', runnerRoutes(deps));
   app.route('/', brainRoutes(deps));
+  app.route('/', installRoutes(deps));
   app.route('/', staticRoutes(deps.env.uiDir));
   return app;
 }

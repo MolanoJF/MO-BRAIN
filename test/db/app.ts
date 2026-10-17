@@ -34,6 +34,7 @@ export async function world(opts: { mcp?: (token: string) => McpCaller; cli?: (a
       port: 0, databaseUrl: '', gbrainUrl: 'http://gbrain.test', publicUrl: 'http://127.0.0.1:8787',
       encryptionKey: 'e'.repeat(44), gbrainVersion: '0.60.230.0', uiDir: '/nonexistent', secureCookies: false,
       packsDir: packs, gbrainHome: home, gbrainAdminToken: 'admin-token',
+      gbrainSkillsDir: '/nonexistent', appDir: '/nonexistent',
     },
     admin,
     mcp: opts.mcp ?? (() => (async () => ({})) as McpCaller),

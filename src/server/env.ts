@@ -10,6 +10,8 @@ export type Env = {
   secureCookies: boolean;
   packsDir: string;
   gbrainHome: string;
+  gbrainSkillsDir: string;
+  appDir: string;
 };
 
 type Source = Record<string, string | undefined>;
@@ -36,5 +38,7 @@ export function loadEnv(src: Source = process.env): Env {
     secureCookies: publicUrl.startsWith('https://'),
     packsDir: src.PACKS_DIR?.trim() || '/app/packs',
     gbrainHome: src.GBRAIN_HOME?.trim() || '/srv/gbrain-home',
+    gbrainSkillsDir: src.GBRAIN_SKILLS_DIR?.trim() || '/opt/gbrain/skills',
+    appDir: src.MOBRAIN_APP_DIR?.trim() || '/app',
   };
 }

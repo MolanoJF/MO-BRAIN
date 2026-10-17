@@ -18,6 +18,7 @@ describe('loadEnv', () => {
     expect(e.uiDir).toBe('dist/ui');
     expect(e.secureCookies).toBe(false);
     expect(e.packsDir).toBe('/app/packs'); expect(e.gbrainHome).toBe('/srv/gbrain-home');
+    expect(e.gbrainSkillsDir).toBe('/opt/gbrain/skills'); expect(e.appDir).toBe('/app');
   });
 
   test('https public url turns on secure cookies and strips a trailing slash', () => {
