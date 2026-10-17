@@ -583,7 +583,7 @@ run_one() {
   start="$(api POST /api/runner/start "{\"slug\":$(json_str "$slug"),\"source\":$(json_str "$source"),\"timeoutS\":$timeout}")" \
     || { rm -rf "$lock"; return 1; }
   run_id="$(printf '%s' "$start" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p')"
-  harness_run "$slug" "$source" "$mode" "$tools" "$model" "$timeout" > "$log" 2>&1 || rc=$?
+  harness_run "$slug" "$source" "$mode" "$tools" "$model" "$timeout" < /dev/null > "$log" 2>&1 || rc=$?
   status="$(sed -n 's/^.*MOBRAIN_STATUS: *\(ok\|partial\|error\).*$/\1/p' "$log" | tail -1)"
   if [ "$rc" = 124 ]; then status=timeout; elif [ "$rc" != 0 ] || [ -z "$status" ]; then status=error; fi
   summary="$(sed -n 's/^.*MOBRAIN_SUMMARY: *//p' "$log" | tail -1)"

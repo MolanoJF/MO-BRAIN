@@ -195,6 +195,22 @@ describe('HttpGbrainAdmin edits', () => {
     expect(calls.at(-1)!.body).toEqual({ clientId: 'cid-1' });
   });
 
+  test('revokeClient tolerates an unknown client (404) and an already-revoked one (409)', async () => {
+    for (const status of [404, 409]) {
+      const { fetch } = fakeFetch([
+        login(() => json({ status: 'authenticated' }, 200)),
+        authed('/admin/api/revoke-client', () => json({ error: 'client_not_found' }, status)),
+      ]);
+      await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').revokeClient('cid-1');
+    }
+    const { fetch } = fakeFetch([
+      login(() => json({ status: 'authenticated' }, 200)),
+      authed('/admin/api/revoke-client', () => json({ error: 'boom' }, 500)),
+    ]);
+    await expect(new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').revokeClient('cid-1'))
+      .rejects.toThrow(/HTTP 500/);
+  });
+
   test('a failed rescope is an error, not a silent no-op', async () => {
     const { fetch } = fakeFetch([
       login(() => json({ status: 'authenticated' }, 200)),

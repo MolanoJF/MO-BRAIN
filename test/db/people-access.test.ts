@@ -110,6 +110,20 @@ describe('grants (rules 5, 6, 7)', () => {
   });
 });
 
+describe('a rescope failure in reconcile (P1-1)', () => {
+  test('revokes in gbrain before recording it, so the ui recreate and agent issue still work', async () => {
+    const { claimUrl } = await people.invite(owner, 'flaky-scope@x.io', 'member');
+    // ui client live, agent spec compiled (granted with agent reads), no agent client yet:
+    // the forced rescope failure hits the ui loop and its end-of-reconcile recreate.
+    const { user } = await people.claim(tokenFrom(claimUrl), 'a-long-password', null);
+    await people.grant(owner, user.id, 'c-company', true);
+    w.admin.failNext = 'rescopeClient';
+    await people.reconcile(user.id);
+    expect((await people.uiToken(user)).startsWith('tok-')).toBe(true);
+    expect((await people.issueAgent(user)).token.startsWith('tok-')).toBe(true);
+  });
+});
+
 describe('roles', () => {
   test('the owner promotes a member to admin; the admin then reads every company source', async () => {
     const m = await people.userByEmail('m2@x.io');

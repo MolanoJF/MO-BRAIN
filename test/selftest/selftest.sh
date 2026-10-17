@@ -75,8 +75,8 @@ mcp "$W1" put_page '{"slug":"notes/shared","content":"---\ntype: note\n---\nzebr
 mcp "$W2" put_page '{"slug":"notes/secret","content":"---\ntype: note\n---\nzebrasecret"}' > /dev/null
 MEMBER_SEES="$(search_until "$MEMBER_TOKEN" zebrashared notes/shared)"
 check "member finds the granted company page" grep -q notes/shared <<< "$MEMBER_SEES"
-check "member cannot find an ungranted company page" lacks notes/secret "$(mcp "$MEMBER_TOKEN" search '{"query":"zebrasecret"}')"
 check "the secret page exists for its writer" grep -q notes/secret <<< "$(search_until "$W2" zebrasecret notes/secret)"
+check "member cannot find an ungranted company page" lacks notes/secret "$(mcp "$MEMBER_TOKEN" search '{"query":"zebrasecret"}')"
 check "member cannot read the owner's private page" lacks selftest-private-marker "$(mcp "$MEMBER_TOKEN" get_page '{"slug":"notes/selftest-private","include_content":true}')"
 check "member's page list has no owner pages" lacks selftest-private "$(mcp "$MEMBER_TOKEN" list_pages '{"limit":500}')"
 

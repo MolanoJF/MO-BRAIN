@@ -17,6 +17,11 @@ export const CLIENT_TTL_SECONDS = 7_776_000;
 
 type Run = (argv: string[], opts?: { timeoutMs?: number }) => Promise<CliResult>;
 
+/** A non-OK admin response; the status is kept so callers can tolerate specific ones. */
+class GbrainHttpError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 /** Write source plus extra reads. Probe P7: without the write source the client cannot read its own write. Probe P2: `--federated-read ''` is `read_source_inactive`. */
 export function federatedReadIds(spec: ClientSpec): string[] {
   return [...new Set([spec.writeSource, ...spec.readSources])].filter((id) => id.length > 0).sort();
@@ -104,7 +109,7 @@ export class HttpGbrainAdmin implements GbrainAdmin {
     const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     if (!res.ok) {
       const detail = json && (json.message ?? json.error);
-      throw new Error(`${label} failed: HTTP ${res.status}${detail ? ` ${scrub(String(detail))}` : ''}`);
+      throw new GbrainHttpError(`${label} failed: HTTP ${res.status}${detail ? ` ${scrub(String(detail))}` : ''}`, res.status);
     }
     if (!json || typeof json !== 'object') throw new Error(`${label} returned no JSON`);
     return json;
@@ -139,8 +144,13 @@ export class HttpGbrainAdmin implements GbrainAdmin {
   }
 
   async revokeClient(clientId: string): Promise<void> {
-    // Silent when the client is unknown, matching the CLI's tolerance.
-    await this.request('/admin/api/revoke-client', 'auth revoke-client', { clientId });
+    // Silent when the client is unknown (404) or already revoked (409),
+    // matching the CLI's tolerance.
+    try {
+      await this.request('/admin/api/revoke-client', 'auth revoke-client', { clientId });
+    } catch (e) {
+      if (!(e instanceof GbrainHttpError && (e.status === 404 || e.status === 409))) throw e;
+    }
   }
 
   addSource(id: string, name: string): Promise<void> {

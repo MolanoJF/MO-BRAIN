@@ -61,8 +61,15 @@ export class PeopleService {
 
   private async storeClient(spec: ClientSpec, issued: IssuedClient, keepToken: boolean, tx: Sql = this.d.sql): Promise<void> {
     const tokenEnc = keepToken ? seal(this.d.env.encryptionKey, issued.token) : null;
-    await tx`insert into gbrain_clients (user_id, purpose, write_source, gbrain_client_id, token_enc, expires_at)
-             values (${spec.userId}, ${spec.purpose}, ${spec.writeSource}, ${issued.clientId}, ${tokenEnc}, ${issued.expiresAt})`;
+    try {
+      await tx`insert into gbrain_clients (user_id, purpose, write_source, gbrain_client_id, token_enc, expires_at)
+               values (${spec.userId}, ${spec.purpose}, ${spec.writeSource}, ${issued.clientId}, ${tokenEnc}, ${issued.expiresAt})`;
+    } catch (e) {
+      // The grant exists in gbrain but not in our DB. Revoke it before
+      // rethrowing so the deterministic name is free for the next attempt.
+      await this.d.admin.revokeClient(issued.clientId).catch(() => {});
+      throw e;
+    }
   }
 
   private async revokeRow(row: ClientRow, tx: Sql = this.d.sql): Promise<void> {
@@ -98,8 +105,11 @@ export class PeopleService {
             await this.d.sql`update gbrain_clients set write_source = ${want.writeSource} where id = ${r.id}`;
           }
         } catch {
-          // A client gbrain no longer knows (revoked out of band, or a crashed
-          // narrow step) is replaced: ui silently, agent by the person re-issuing.
+          // A client whose rescope failed is replaced: ui silently, agent by the
+          // person re-issuing. Revoke it in gbrain first — a gbrain error is not
+          // proof it is gone, and gbrain keeps the deterministic name until the
+          // grant is revoked, so the recreation below would 409.
+          await this.d.admin.revokeClient(r.gbrainClientId).catch(() => {});
           await this.d.sql`update gbrain_clients set revoked_at = now() where id = ${r.id}`;
         }
       }
