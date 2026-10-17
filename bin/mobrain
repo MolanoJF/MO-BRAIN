@@ -134,6 +134,11 @@ cmd_down() {
   dc down "$@"
 }
 
+cmd_selftest() {
+  [ -f "$REPO/test/selftest/selftest.sh" ] || die "selftest runs from a Mo-brain checkout" 17
+  exec bash "$REPO/test/selftest/selftest.sh" "$@"
+}
+
 status_url() {
   load_runner
   if [ -n "$MOBRAIN_URL" ]; then printf '%s' "${MOBRAIN_URL%/}"

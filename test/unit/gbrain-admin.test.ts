@@ -72,6 +72,18 @@ describe('CliGbrainAdmin', () => {
     const err = await new CliGbrainAdmin(run, 'u').createClient(spec).catch((e) => e);
     expect(String(err)).not.toContain('pw@');
   });
+
+  test('archiveSource passes no --yes: gbrain 0.60.230.0 rejects it as invalid_params', async () => {
+    const calls: string[][] = [];
+    const run = async (argv: string[]): Promise<CliResult> => { calls.push(argv); return { exitCode: 0, stdout: '', stderr: '' }; };
+    await new CliGbrainAdmin(run, 'http://gbrain:3131').archiveSource('p-ada');
+    expect(calls).toEqual([['sources', 'archive', 'p-ada']]);
+  });
+
+  test('an already archived source is not an error', async () => {
+    const run = async (): Promise<CliResult> => ({ exitCode: 1, stdout: '', stderr: 'already archived: p-ada' });
+    await new CliGbrainAdmin(run, 'u').archiveSource('p-ada');
+  });
 });
 
 // ---- HttpGbrainAdmin (gbrain's owner admin HTTP API) -----------------------

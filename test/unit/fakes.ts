@@ -16,8 +16,19 @@ export class FakeGbrainAdmin implements GbrainAdmin {
 
   constructor(private now: () => Date = () => new Date()) {}
 
+  /** gbrain registers a grant name once: mcp-provision.ts rejects a create whose
+   * `oauth_clients.client_name` has `deleted_at is null` with 409
+   * client_already_exists. A revoked client frees the name (oauth-grants.ts sets
+   * deleted_at), so a replacement must revoke the old grant before it creates. */
+  private liveName(name: string): boolean {
+    return [...this.clients.values()].some((c) => !c.revoked && c.spec.name === name);
+  }
+
   async createClient(spec: ClientSpec): Promise<IssuedClient> {
     this.maybeFail('createClient');
+    if (this.liveName(spec.name)) {
+      throw new Error(`mcp grant failed: HTTP 409 client_already_exists: resume delivery with --resume --client <id>; no secret was rotated`);
+    }
     const clientId = `c${++this.n}`;
     const token = `tok-${clientId}`;
     this.clients.set(clientId, { spec, token, revoked: false });

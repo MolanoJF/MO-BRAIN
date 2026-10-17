@@ -70,6 +70,19 @@ export class PeopleService {
     await tx`update gbrain_clients set revoked_at = now() where id = ${row.id}`;
   }
 
+  /**
+   * gbrain registers a grant name once (mcp-provision.ts: a create whose
+   * `oauth_clients.client_name` has `deleted_at is null` is 409
+   * client_already_exists), and a revoked client frees the name. A replacement
+   * for a name this brain already holds must revoke that client first.
+   */
+  private async replaceClient(old: ClientRow[], spec: ClientSpec, keepToken: boolean): Promise<IssuedClient> {
+    for (const r of old) await this.revokeRow(r);
+    const issued = await this.d.admin.createClient(spec);
+    await this.storeClient(spec, issued, keepToken);
+    return issued;
+  }
+
   /** Bring a person's live agent and ui clients to their compiled specs (widening allowed). */
   async reconcile(userId: string): Promise<void> {
     const user = await this.user(userId);
@@ -96,13 +109,11 @@ export class PeopleService {
   }
 
   private async storedToken(purpose: 'ui' | 'instance', userId: string | null, spec: () => Promise<ClientSpec>): Promise<string> {
-    const [row] = await this.liveClients(userId, [purpose]);
+    const rows = await this.liveClients(userId, [purpose]);
+    const row = rows[0];
     const soon = this.d.now().getTime() + ROTATE_STORED_MS;
     if (row?.tokenEnc && (!row.expiresAt || row.expiresAt.getTime() > soon)) return open(this.d.env.encryptionKey, row.tokenEnc);
-    const s = await spec();
-    const issued = await this.d.admin.createClient(s);
-    await this.storeClient(s, issued, true);
-    if (row) await this.revokeRow(row);
+    const issued = await this.replaceClient(rows, await spec(), true);
     return issued.token;
   }
 
@@ -377,10 +388,7 @@ export class PeopleService {
   async issueAgent(user: User): Promise<{ token: string; mcpUrl: string; expiresAt: Date | null; registrationName: string }> {
     const want = compileUserClients(user, await this.state()).find((s) => s.purpose === 'agent');
     if (!want) throw new HttpError(409, 'no_agent_access');
-    const old = await this.liveClients(user.id, ['agent']);
-    const issued = await this.d.admin.createClient(want);
-    await this.storeClient(want, issued, false);
-    for (const r of old) await this.revokeRow(r);
+    const issued = await this.replaceClient(await this.liveClients(user.id, ['agent']), want, false);
     await audit(this.d.sql, user.id, 'client.issue', 'agent');
     return { token: issued.token, mcpUrl: this.mcpUrl(), expiresAt: issued.expiresAt, registrationName: 'gbrain' };
   }
@@ -391,9 +399,7 @@ export class PeopleService {
     await this.companySource(sourceId);
     const spec = companyWriterSpec(user, sourceId);
     const old = (await this.liveClients(user.id, ['company_writer'])).filter((r) => r.writeSource === sourceId);
-    const issued = await this.d.admin.createClient(spec);
-    await this.storeClient(spec, issued, false);
-    for (const r of old) await this.revokeRow(r);
+    const issued = await this.replaceClient(old, spec, false);
     await audit(this.d.sql, user.id, 'client.issue', `company_writer:${sourceId}`);
     return { token: issued.token, mcpUrl: this.mcpUrl(), expiresAt: issued.expiresAt, registrationName: `gbrain-company-${sourceId}` };
   }

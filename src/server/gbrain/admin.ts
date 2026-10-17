@@ -187,7 +187,10 @@ export class CliGbrainAdmin implements GbrainAdmin {
   }
 
   async archiveSource(id: string): Promise<void> {
-    const r = await this.run(['sources', 'archive', id, '--yes']);
+    // Probe P5: `--yes` is invalid_params on `sources archive` (it takes
+    // --request-id/--expected-incarnation/--json/--dry-run); the archive itself
+    // is not interactive.
+    const r = await this.run(['sources', 'archive', id]);
     if (r.exitCode !== 0 && !/already archived|not found/i.test(r.stderr + r.stdout)) assertOk('sources archive', r);
   }
 }

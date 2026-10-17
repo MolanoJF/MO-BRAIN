@@ -36,4 +36,9 @@ test('a company writer needs company mode and an admin', async () => {
   const cw = await people.issueCompanyWriter(owner, 'c-company');
   expect(w.admin.live(owner.id).find((s) => s.purpose === 'company_writer')!.writeSource).toBe('c-company');
   expect(cw.registrationName).toBe('gbrain-company-c-company');
+  // Same grant name as the client just issued, so the replacement only succeeds
+  // if the previous writer is revoked first.
+  const again = await people.issueCompanyWriter(owner, 'c-company');
+  expect(again.token).not.toBe(cw.token);
+  expect((await w.sql`select count(*)::int as n from gbrain_clients where purpose = 'company_writer' and revoked_at is null`)[0]!.n).toBe(1);
 });
