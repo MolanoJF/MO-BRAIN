@@ -3,6 +3,7 @@ export type Env = {
   databaseUrl: string;
   gbrainUrl: string;
   publicUrl: string;
+  gbrainAdminToken: string;
   encryptionKey: string;
   gbrainVersion: string;
   uiDir: string;
@@ -28,6 +29,7 @@ export function loadEnv(src: Source = process.env): Env {
     databaseUrl: required(src, 'DATABASE_URL'),
     gbrainUrl: (src.GBRAIN_URL?.trim() || 'http://gbrain:3131').replace(/\/+$/, ''),
     publicUrl,
+    gbrainAdminToken: required(src, 'GBRAIN_ADMIN_BOOTSTRAP_TOKEN'),
     encryptionKey,
     gbrainVersion: required(src, 'GBRAIN_VERSION'),
     uiDir: src.MOBRAIN_UI_DIR?.trim() || 'dist/ui',

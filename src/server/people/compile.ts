@@ -3,11 +3,12 @@ import type { ClientPurpose, ClientSpec, Grant, Source, User } from '../types.ts
 // gbrain grant profiles (confirmed by probe P2; see the probes file).
 export const PROFILE_READER = 'memory-reader';
 export const PROFILE_WRITER = 'memory-writer';
-export const PROFILE_INSTANCE = 'coding-agent';
+/** The instance client serves list_jobs, run_doctor, get_stats and `schema active`, all admin-scope; probe P2: `operator` is the admin profile. */
+export const PROFILE_INSTANCE = 'operator';
 /** Owner and admin agents. Probe P2: no profile is read,write,admin. `operator` wrote unfenced (`notes/probe-admin-op`, slug unchanged). P3 passed: do not fall back to memory-writer. */
 export const ADMIN_AGENT_PROFILE = 'operator';
 
-const RANK: Record<string, number> = { [PROFILE_READER]: 0, [PROFILE_WRITER]: 1, [ADMIN_AGENT_PROFILE]: 2, [PROFILE_INSTANCE]: 3 };
+const RANK: Record<string, number> = { [PROFILE_READER]: 0, [PROFILE_WRITER]: 1, [ADMIN_AGENT_PROFILE]: 2 };
 
 export type AccessState = { sources: Source[]; grants: Grant[] };
 

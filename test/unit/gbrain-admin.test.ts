@@ -1,6 +1,6 @@
 // test/unit/gbrain-admin.test.ts
 import { describe, expect, test } from 'bun:test';
-import { CliGbrainAdmin, grantArgv, parseCredentials, rescopeArgv } from '../../src/server/gbrain/admin.ts';
+import { CliGbrainAdmin, HttpGbrainAdmin, grantArgv, parseCredentials, rescopeArgv } from '../../src/server/gbrain/admin.ts';
 import type { CliResult } from '../../src/server/gbrain/cli.ts';
 import type { ClientSpec } from '../../src/server/types.ts';
 
@@ -56,9 +56,8 @@ describe('CliGbrainAdmin', () => {
     };
     const admin = new CliGbrainAdmin(run, 'http://gbrain:3131');
     const issued = await admin.createClient(spec);
-    // Parked live check: do not replace this origin. http://gbrain:3131 fails
-    // gbrain's HTTP loopback check; host port 8788 is unreachable in-container;
-    // http://127.0.0.1:3000/mcp is the mobrain proxy and grant admin returns 404.
+    // The CLI lane is retained for source ops; its grant argv still targets the
+    // gbrain origin this process can reach, never the public URL or host port.
     expect(calls[0]).toContain('http://gbrain:3131/mcp');
     expect(calls[0]).not.toContain('http://127.0.0.1:3000/mcp');
     expect(calls[0]).not.toContain('8788');
@@ -72,5 +71,136 @@ describe('CliGbrainAdmin', () => {
     const run = async (): Promise<CliResult> => ({ exitCode: 2, stdout: '', stderr: 'bad postgres://g:pw@h/db' });
     const err = await new CliGbrainAdmin(run, 'u').createClient(spec).catch((e) => e);
     expect(String(err)).not.toContain('pw@');
+  });
+});
+
+// ---- HttpGbrainAdmin (gbrain's owner admin HTTP API) -----------------------
+
+type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
+type Handler = { match: (url: string, method: string) => boolean; respond: (body: unknown) => Response };
+
+/** A fetch that records exact paths, headers and bodies. */
+function fakeFetch(handlers: Handler[]): { fetch: typeof fetch; calls: Call[] } {
+  const calls: Call[] = [];
+  const fn = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = (init.method ?? 'GET').toUpperCase();
+    const headers: Record<string, string> = {};
+    new Headers(init.headers as HeadersInit).forEach((value, key) => { headers[key] = value; });
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+    calls.push({ url, method, headers, body });
+    const handler = handlers.find((h) => h.match(url, method));
+    if (!handler) throw new Error(`unexpected fetch ${method} ${url}`);
+    return handler.respond(body);
+  }) as unknown as typeof fetch;
+  return { fetch: fn, calls };
+}
+
+const login = (respond?: (body: unknown) => Response): Handler => ({
+  match: (url, method) => url.endsWith('/admin/login') && method === 'POST',
+  respond: (body) => {
+    const res = respond ? respond(body) : json({ status: 'authenticated' });
+    if (!res.headers.get('set-cookie')) res.headers.set('set-cookie', 'gbrain_admin=SESS; Path=/; HttpOnly');
+    return res;
+  },
+});
+const authed = (path: string, respond: (body: unknown) => Response): Handler => ({
+  match: (url, method) => url.endsWith(path) && method === 'POST', respond,
+});
+const json = (value: unknown, status = 200): Response =>
+  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+
+describe('HttpGbrainAdmin.createClient', () => {
+  test('logs in with the bootstrap token, then grants with the public MCP url and a token TTL', async () => {
+    const { fetch, calls } = fakeFetch([
+      login(() => new Response('{"status":"authenticated"}', { status: 200, headers: { 'set-cookie': 'gbrain_admin=SESS; Path=/; HttpOnly' } })),
+      authed('/admin/api/grants', () => json({ grant: { clientId: 'cid-1' }, credentials: { client_id: 'cid-1', access_token: 'tok', expires_at: 1799799166 } })),
+    ]);
+    const admin = new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://127.0.0.1:8788', 'bootstrap-secret');
+    const issued = await admin.createClient(spec);
+    expect(issued).toEqual({ clientId: 'cid-1', token: 'tok', expiresAt: new Date('2027-01-13T00:12:46Z') });
+    expect(calls.map((c) => c.url)).toEqual(['http://gbrain:3131/admin/login', 'http://gbrain:3131/admin/api/grants']);
+    expect(calls[0]!.body).toEqual({ token: 'bootstrap-secret' });
+    expect(calls[1]!.headers.cookie).toBe('gbrain_admin=SESS');
+    expect(calls[1]!.body).toEqual({
+      name: 'mb-agent-u1', harness: 'generic', profile: 'memory-writer', sourceId: 'p-ada',
+      url: 'http://127.0.0.1:8788/mcp',
+      patch: { federatedRead: ['c-company', 'c-eng', 'p-ada'], tokenTtlSeconds: 7_776_000 },
+    });
+  });
+
+  test('a rejected login fails before any admin call', async () => {
+    const { fetch, calls } = fakeFetch([login(() => json({ error: 'Owner credential rejected' }, 401))]);
+    const err = await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 'bad').createClient(spec).catch((e) => e);
+    expect(String(err)).toContain('login failed: HTTP 401');
+    expect(calls).toHaveLength(1);
+  });
+
+  test('a rejected grant throws a scrubbed error without leaking credentials', async () => {
+    const { fetch } = fakeFetch([
+      login(() => json({ status: 'authenticated' }, 200)),
+      authed('/admin/api/grants', () => json({ error: 'invalid_grant', message: 'bad postgres://g:pw@h/db' }, 400)),
+    ]);
+    const err = await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').createClient(spec).catch((e) => e);
+    expect(String(err)).toContain('mcp grant failed: HTTP 400');
+    expect(String(err)).not.toContain('pw@');
+  });
+
+  test('re-authenticates once when gbrain drops the admin session', async () => {
+    let logins = 0;
+    const { fetch, calls } = fakeFetch([
+      login(() => { logins++; return new Response('{}', { status: 200, headers: { 'set-cookie': `gbrain_admin=S${logins}; Path=/` } }); }),
+      authed('/admin/api/grants', () => logins === 1
+        ? json({ error: 'Admin authentication required' }, 401)
+        : json({ credentials: { client_id: 'cid', access_token: 'tok' } })),
+    ]);
+    const issued = await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').createClient(spec);
+    expect(issued.clientId).toBe('cid');
+    expect(calls.filter((c) => c.url.endsWith('/admin/login'))).toHaveLength(2);
+  });
+});
+
+describe('HttpGbrainAdmin edits', () => {
+  test('rescopeClient sends the extended edit body, profile included', async () => {
+    const { fetch, calls } = fakeFetch([
+      login(() => json({ status: 'authenticated' }, 200)),
+      authed('/admin/api/rescope-client', () => json({ after: {} })),
+    ]);
+    await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').rescopeClient('cid-1', spec);
+    expect(calls.at(-1)!.url).toBe('http://gbrain:3131/admin/api/rescope-client');
+    expect(calls.at(-1)!.body).toEqual({
+      clientId: 'cid-1', sourceId: 'p-ada', federatedRead: ['c-company', 'c-eng', 'p-ada'], profile: 'memory-writer',
+    });
+  });
+
+  test('revokeClient uses the idempotent legacy revoke-client route', async () => {
+    const { fetch, calls } = fakeFetch([
+      login(() => json({ status: 'authenticated' }, 200)),
+      authed('/admin/api/revoke-client', () => json({ revoked: true })),
+    ]);
+    await new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').revokeClient('cid-1');
+    expect(calls.at(-1)!.url).toBe('http://gbrain:3131/admin/api/revoke-client');
+    expect(calls.at(-1)!.body).toEqual({ clientId: 'cid-1' });
+  });
+
+  test('a failed rescope is an error, not a silent no-op', async () => {
+    const { fetch } = fakeFetch([
+      login(() => json({ status: 'authenticated' }, 200)),
+      authed('/admin/api/rescope-client', () => json({ error: 'client_not_found', message: 'gone' }, 404)),
+    ]);
+    await expect(new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't').rescopeClient('cid-1', spec))
+      .rejects.toThrow(/HTTP 404/);
+  });
+
+  test('sources keep using the CLI runner (no admin parity)', async () => {
+    const calls: string[][] = [];
+    const sourceAdmin = {
+      addSource: async () => { calls.push(['add']); },
+      archiveSource: async () => { calls.push(['archive']); },
+    };
+    const admin = new HttpGbrainAdmin(fetch, 'http://gbrain:3131', 'http://p', 't', sourceAdmin);
+    await admin.addSource('p-x', 'X (private)');
+    await admin.archiveSource('p-x');
+    expect(calls).toEqual([['add'], ['archive']]);
   });
 });

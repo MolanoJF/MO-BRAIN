@@ -59,6 +59,7 @@ describe('compileUserClients', () => {
 describe('instance and company writer', () => {
   test('instance reads company sources from the owner private source', () => {
     const s = instanceSpec(u('own', 'owner'), { sources, grants: [] });
+    expect(s.profile).toBe(ADMIN_AGENT_PROFILE);
     expect([s.purpose, s.name, s.writeSource, s.readSources]).toEqual(['instance', 'mb-instance', 'p-own', ['c-a', 'c-b']]);
   });
   test('company writer writes one company source', () => {

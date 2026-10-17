@@ -6,6 +6,7 @@ const base = {
   DATABASE_URL: 'postgres://mobrain:x@postgres:5432/mobrain',
   ENCRYPTION_KEY: 'k'.repeat(44),
   GBRAIN_VERSION: '0.60.230.0',
+  GBRAIN_ADMIN_BOOTSTRAP_TOKEN: 'admin-token',
 };
 
 describe('loadEnv', () => {
@@ -36,5 +37,11 @@ describe('loadEnv', () => {
     expect(() => loadEnv(noDb)).toThrow(/DATABASE_URL/);
     const { GBRAIN_VERSION: __, ...noPin } = base;
     expect(() => loadEnv(noPin)).toThrow(/GBRAIN_VERSION/);
+  });
+
+  test('loads the gbrain admin bootstrap token but refuses a missing one', () => {
+    expect(loadEnv(base).gbrainAdminToken).toBe('admin-token');
+    const { GBRAIN_ADMIN_BOOTSTRAP_TOKEN: _, ...noToken } = base;
+    expect(() => loadEnv(noToken)).toThrow(/GBRAIN_ADMIN_BOOTSTRAP_TOKEN/);
   });
 });

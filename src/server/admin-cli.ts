@@ -36,7 +36,7 @@ if (import.meta.main) {
   const { loadEnv } = await import('./env.ts');
   const { connect } = await import('./db/index.ts');
   const { migrate } = await import('./db/migrate.ts');
-  const { CliGbrainAdmin } = await import('./gbrain/admin.ts');
+  const { HttpGbrainAdmin } = await import('./gbrain/admin.ts');
   const { runGbrain } = await import('./gbrain/cli.ts');
   const { mcpCaller } = await import('./gbrain/mcp.ts');
   const env = loadEnv();
@@ -44,7 +44,7 @@ if (import.meta.main) {
   await migrate(sql);
   try {
     console.log(await runAdminCli(process.argv.slice(2), {
-      sql, env, admin: new CliGbrainAdmin(runGbrain, env.gbrainUrl),
+      sql, env, admin: new HttpGbrainAdmin(fetch, env.gbrainUrl, env.publicUrl, env.gbrainAdminToken),
       mcp: (t) => mcpCaller(`${env.gbrainUrl}/mcp`, t), cli: runGbrain, fetch, now: () => new Date(),
     }));
   } catch (e) {

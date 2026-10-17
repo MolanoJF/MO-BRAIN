@@ -46,6 +46,19 @@ describe('invite and claim (rule 8)', () => {
     const { claimUrl } = await people.invite(owner, 'short@x.io', 'member');
     await expect(people.claim(tokenFrom(claimUrl), 'short', null)).rejects.toMatchObject({ code: 'password_too_short' });
   });
+
+  test('a failed client reconcile leaves the invite usable and the user still invited', async () => {
+    const { claimUrl } = await people.invite(owner, 'flaky@x.io', 'member');
+    const token = tokenFrom(claimUrl);
+    w.admin.failNext = 'createClient';
+    await expect(people.claim(token, 'a-long-password', 'Fl')).rejects.toThrow();
+    const [u] = await w.sql`select status, password_hash from users where email = 'flaky@x.io'`;
+    expect(u).toMatchObject({ status: 'invited', passwordHash: null });
+    expect(await people.inviteInfo(token)).toMatchObject({ email: 'flaky@x.io', role: 'member' });
+    const retry = await people.claim(token, 'a-long-password', 'Fl');
+    expect(retry.user.status).toBe('active');
+    expect(w.admin.live(retry.user.id).map((c) => c.purpose)).toEqual(['ui']);
+  });
 });
 
 describe('grants (rules 5, 6, 7)', () => {

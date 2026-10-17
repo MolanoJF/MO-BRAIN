@@ -274,8 +274,20 @@ export class PeopleService {
       return row.userId;
     });
     const user = await this.user(userId);
-    if (user.role !== 'viewer') await this.ensurePrivateSource(user);
-    await this.reconcile(user.id);
+    try {
+      if (user.role !== 'viewer') await this.ensurePrivateSource(user);
+      await this.reconcile(user.id);
+    } catch (e) {
+      // The claim is not real until the member's client exists; a reconcile
+      // failure must not burn the invite or leave an active member with no
+      // client. Put the placeholder back so the same link can be retried. A
+      // private source already created is reused by the next attempt.
+      await this.d.sql.begin(async (tx) => {
+        await tx`update users set status = 'invited', password_hash = null where id = ${userId}`;
+        await tx`update invites set used_at = null where token_hash = ${sha256Hex(token)}`;
+      });
+      throw e;
+    }
     const joinKey = await createApiKey(this.d.sql, user.id, 'join');
     await audit(this.d.sql, user.id, 'member.claim', user.email);
     return { user, joinKey };
