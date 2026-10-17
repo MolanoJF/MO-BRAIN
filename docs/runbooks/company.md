@@ -70,9 +70,9 @@ bin/mobrain revoke colleague@example.com c-deals
 ```
 
 A grant always gives the person's `ui` client read access; `agent_reads` adds the source to
-their agent client's read set. The member can flip their own switch on the Sources page
-(`PATCH /api/me/grants/<source>`); owners and admins read every active company source by
-role and have no grant row to toggle.
+their agent client's read set. The member can flip their own switch on the Connect your
+agent page (`PATCH /api/me/grants/<source>`); owners and admins read every active company
+source by role and have no grant row to toggle.
 
 Adding or removing a grant, changing a role, or flipping `agent_reads` **recompiles that
 person's client specs and rescopes their existing gbrain clients before the request

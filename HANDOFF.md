@@ -22,7 +22,7 @@ Four containers (`postgres`, `gbrain`, `autopilot`, `mobrain`), one bash CLI (`b
 - No separate Mo-brain MCP. Brain work goes through gbrain's MCP; people and stack work through `bin/mobrain`.
 - Collectors run in the person's own harness on a host timer. gbrain's subagents cannot reach external tools, so nothing server-side runs collectors.
 - One schema per brain: `mobrain-core` ← `mobrain-personal` ← `mobrain-brain`. Only the last is edited.
-- The UI is read-only except People & access.
+- The UI is read-only except People & access and Connect your agent (plus sign-in and claim).
 
 ## Known gaps
 

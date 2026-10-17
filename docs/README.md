@@ -1,19 +1,20 @@
 # Docs
 
-Operator procedure and the version promise. History is in [`archive/`](archive/) and is not current.
+Operator runbooks for the shipped repo.
 
-| Document | What it is |
+| Runbook | What it is |
 |---|---|
-| [Install](runbooks/install.md) | First install, preflight refusals, air-gap, Tailscale, first admin |
-| [Onboarding](runbooks/onboarding.md) | After install: verify, MCP, gbrain skills, import, schedules, runner, then schema 
-| [Upgrade](runbooks/upgrade.md) | The host command, snapshots, rollback |
+| [Operate](runbooks/operate.md) | Day-to-day host commands: `bin/mobrain` verbs and the API |
+| [Collectors](runbooks/collectors.md) | Pages an agent owns, run history, and host timers |
+| [Company mode](runbooks/company.md) | Shared brain: company sources, invites, roles, grants |
 | [Backup and restore](runbooks/backup-restore.md) | Verified backup, including a new domain |
-| [Agent runner](runbooks/agent-runner.md) | Enable, health, what a run did, revert |
-| [Scheduler](runbooks/scheduler.md) | Pause, diagnose, alerts |
-| [Break-glass](runbooks/break-glass.md) | Operate when the console is down |
+| [Upgrade](runbooks/upgrade.md) | The host command, snapshots, rollback |
 | [CI](runbooks/ci.md) | What runs when, and the Actions budget |
-| [Design system](runbooks/design-system.md) | Where the console's look is set, adding a theme, fonts |
-| [Support policy](support-policy.md) | The supported gbrain pin, and what is not promised |
-| [Agent control MCP spec](specs/agent-control-mcp.md) | Built (v1): let agents operate Mo-brain |
 
-Start at [`../README.md`](../README.md). Agents start at [`../HANDOFF.md`](../HANDOFF.md).
+Start at [`../README.md`](../README.md). To install, use
+[`../INSTALL_FOR_AGENTS.md`](../INSTALL_FOR_AGENTS.md).
+
+Agents start at [`../HANDOFF.md`](../HANDOFF.md) and [`../CLAUDE.md`](../CLAUDE.md).
+The design of record is
+[`superpowers/specs/2026-10-14-mobrain-simple-design.md`](superpowers/specs/2026-10-14-mobrain-simple-design.md).
+History lives in [`archive/`](archive/) and is not current.
