@@ -31,4 +31,8 @@ describe('runGbrain', () => {
     const r = await runGbrain(['5'], { bin: 'sleep', timeoutMs: 200 });
     expect(r.exitCode).not.toBe(0);
   });
+  test('passes stdin', async () => {
+    const r = await runGbrain([], { bin: 'cat', stdin: 'hello' });
+    expect(r.stdout).toBe('hello');
+  });
 });

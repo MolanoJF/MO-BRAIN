@@ -18,7 +18,7 @@ const defaultCli = async (argv: string[]): Promise<CliResult> => {
 };
 
 /** A full app over a fresh DB, a fake gbrain admin, a scriptable MCP and CLI. */
-export async function world(opts: { mcp?: (token: string) => McpCaller; cli?: (argv: string[]) => Promise<CliResult> } = {}) {
+export async function world(opts: { mcp?: (token: string) => McpCaller; cli?: (argv: string[], opts?: { stdin?: string }) => Promise<CliResult> } = {}) {
   const { sql, drop } = await freshDb();
   const home = await mkdtemp(join(tmpdir(), 'mb-home-'));
   const packs = join(import.meta.dir, '..', '..', 'packs');

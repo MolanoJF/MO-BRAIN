@@ -3,11 +3,12 @@ export type CliResult = { exitCode: number; stdout: string; stderr: string };
 /** Run gbrain with an argv array. Never a shell string. */
 export async function runGbrain(
   argv: string[],
-  opts: { timeoutMs?: number; env?: Record<string, string>; bin?: string } = {},
+  opts: { timeoutMs?: number; env?: Record<string, string>; bin?: string; stdin?: string } = {},
 ): Promise<CliResult> {
   const proc = Bun.spawn([opts.bin ?? process.env.GBRAIN_BIN ?? 'gbrain', ...argv], {
     stdout: 'pipe',
     stderr: 'pipe',
+    stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
     env: { ...process.env, ...opts.env },
   });
   const timer = setTimeout(() => proc.kill(), opts.timeoutMs ?? 120_000);

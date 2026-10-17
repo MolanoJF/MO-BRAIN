@@ -19,9 +19,11 @@ usage() {
 usage: mobrain <command> [args]
 stack host:  install | up | down | ps | logs <svc> | backup | restore <dir> --yes | upgrade --gbrain <v>
              schema edit --out <file> | schema apply <file> | schema exec -- <args> | selftest
+             brain exec -- <extract|embed|doctor|stats|sync ...>
 anywhere:    status [--detail] | join --url <u> --key <k> | client issue agent|company-writer <src> [--register]
              client rotate-if-expiring [--days n] | collect --due | collect <slug> [--backfill]
              timers install|remove|status | skills install --dir <d> | schema show | schema check
+             collector add|set|list | search <q> [--source <s>]
              mode company|personal | member invite <email> --role <r> | member list | member role <email> <r>
              member offboard <email> | source add <name> | source list | source archive <id>
              grant <email> <source> [--no-agent-reads] | revoke <email> <source>
@@ -617,6 +619,59 @@ cmd_collect() {
     run_one "$s" "$src" "$kind" "$tools" "$model" "$timeout" "$mode" || rc=1
   done <<< "$list"
   return "$rc"
+}
+
+# ---- collectors, search, brain passes --------------------------------------------------
+
+cmd_collector() {
+  need_runner
+  local sub=${1:-}; shift || true
+  case "$sub" in
+    add)
+      local title="" kind="" cadence="" tools="" model="" days=90 source="" notes=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --title) title=$2 ;; --kind) kind=$2 ;; --cadence) cadence=$2 ;; --tools) tools=$2 ;; --model) model=$2 ;;
+          --backfill-days) days=$2 ;; --source) source=$2 ;; --notes) notes=$2 ;; *) usage ;;
+        esac; shift 2
+      done
+      [ -n "$title" ] && [ -n "$kind" ] && [ -n "$cadence" ] || usage
+      local arr="[]"
+      if [ -n "$tools" ]; then arr="["; local t first=1; IFS=',' read -ra parts <<< "$tools"
+        for t in "${parts[@]}"; do [ $first = 1 ] || arr+=","; arr+="$(json_str "$t")"; first=0; done; arr+="]"; fi
+      local body="{\"title\":$(json_str "$title"),\"kind\":$(json_str "$kind"),\"cadence\":$(json_str "$cadence"),\"allowedTools\":$arr,\"backfillDays\":$days,\"notes\":$(json_str "$notes")"
+      [ -n "$model" ] && body+=",\"model\":$(json_str "$model")"
+      [ -n "$source" ] && body+=",\"source\":$(json_str "$source")"
+      api POST /api/collectors "$body}" | sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' ;;
+    set)
+      local slug=${1:-} source="" enabled="" cadence=""; shift || true
+      while [ $# -gt 0 ]; do case "$1" in --source) source=$2 ;; --enabled) enabled=$2 ;; --cadence) cadence=$2 ;; *) usage ;; esac; shift 2; done
+      [ -n "$slug" ] || usage
+      [ -n "$source" ] || source="$(api GET "/api/runner/due?slug=$(urlenc "$slug")" | cut -f2)"
+      local body="{"; [ -n "$enabled" ] && body+="\"enabled\":$enabled"
+      [ -n "$cadence" ] && { [ "$body" = "{" ] || body+=","; body+="\"cadence\":$(json_str "$cadence")"; }
+      api PATCH "/api/collectors/$source/$slug" "$body}" >/dev/null && echo "updated $slug" ;;
+    list)
+      local source=${2:-}; [ "${1:-}" = --source ] || source="$(api GET /api/sources | sed -n 's/.*"id":"\(p-[^"]*\)".*/\1/p' | head -1)"
+      api GET "/api/sources/$source/collectors"; echo ;;
+    *) usage ;;
+  esac
+}
+
+cmd_search() {
+  need_runner
+  [ $# -ge 1 ] || usage
+  local q=$1 source=""; [ "${2:-}" = --source ] && source=${3:-}
+  [ -n "$source" ] || source="$(api GET /api/sources | sed -n 's/.*"id":"\(p-[^"]*\)".*/\1/p' | head -1)"
+  api GET "/api/pages?source=$source&q=$(urlenc "$q")"; echo
+}
+
+BRAIN_EXEC_ALLOWED=" extract embed doctor stats sync "
+cmd_brain() {
+  need_stack
+  [ "${1:-}" = exec ] || usage; shift; [ "${1:-}" = -- ] && shift
+  [ $# -ge 1 ] && [[ "$BRAIN_EXEC_ALLOWED" == *" $1 "* ]] || { echo "allowed: $BRAIN_EXEC_ALLOWED" >&2; exit 64; }
+  dc exec -T gbrain gbrain "$@"
 }
 
 # ---- timers -----------------------------------------------------------------------------

@@ -247,7 +247,7 @@ The `mobrain-schema` skill mirrors gbrain's `schema-author` skill (phases in the
 - It only ever edits `mobrain-brain`.
 - Before any batch, it runs the core lock check (6.3) on the proposed result and stops on a violation.
 - Types, aliases, prefixes and link types change through MCP `schema_apply_mutations` with the agent client (admin scope). Owners and admins only.
-- Settings gbrain accepts only as file edits (frontmatter links, enrichable types, filing rules, subtypes, mapping rules, cardinality, temporal) go through `bin/mobrain schema edit`. It copies `mobrain-brain` out of the container, opens it for the agent to edit, runs `gbrain schema validate` and `gbrain schema lint`, the core lock check, copies it back, and calls `reload_schema_pack`. Host only.
+- Settings gbrain accepts only as file edits (frontmatter links, enrichable types, filing rules, subtypes, mapping rules, cardinality, temporal) go through the two-step `bin/mobrain schema edit --out <file>` / `bin/mobrain schema apply <file>`. `edit` copies `mobrain-brain` out of the container for the agent to edit; `apply` copies it back, runs `gbrain schema validate` and `gbrain schema lint`, the core lock check, and calls `reload_schema_pack`. Host only.
 - Backfills after a change use gbrain's own `schema sync`, `review-orphans` and `unify-types` flows, through `bin/mobrain schema exec -- <gbrain schema args>` (host only, argv passthrough with an allowlist of `schema` subcommands).
 
 ### 6.3 Core lock
@@ -386,6 +386,7 @@ POST /api/auth/login | /api/auth/logout        GET /api/me
 POST /api/claim/:token                          (set password on an invited user)
 GET  /api/pages?source&prefix&q                 GET /api/pages/:source/*slug
 GET  /api/sources                               GET /api/sources/:id/collectors
+POST /api/collectors                            PATCH /api/collectors/:source/*slug
 GET  /api/schema                                GET /api/activity      GET /api/health
 GET|POST|PATCH|DELETE /api/people/*             (section 5.4)
 POST /api/clients/issue
@@ -429,16 +430,21 @@ test/selftest/                 the stack self-test driver
 | Command | Where | Does |
 |---|---|---|
 | `install` | stack host | section 7.2 step 3 |
-| `up`, `down`, `ps`, `logs <svc>` | stack host | compose verbs with the right files and env; `down` never takes `-v` |
+| `up`, `down`, `ps`, `logs <svc>` | stack host | compose verbs with the right files and env; `down -v` is allowed only for `mobrain-dev` and `mobrain-selftest`, and only when the flag's project matches `.env` |
 | `status [--json]` | any | `GET /api/health`; exit 0 ok, 1 degraded, 2 down |
+| `join --url <u> --key <k>` | a member's machine | section 7.3 |
 | `member ...`, `source ...`, `grant`, `revoke`, `mode`, `client issue` | any | section 5.4 through the API |
-| `schema show\|check\|edit\|exec` | stack host for `edit` and `exec` | section 6 |
+| `collector add\|set\|list` | any | create and edit collector pages (8.1) and list a source's collectors (9.2), through the API |
+| `search <q> [--source <s>]` | any | `GET /api/pages?source&q` (9.2) |
+| `schema show\|check` | any | section 6 |
+| `schema edit --out <file>`, `schema apply <file>`, `schema exec -- <args>` | stack host | section 6 |
+| `brain exec -- <extract\|embed\|doctor\|stats\|sync ...>` | stack host | gbrain passes in the container; argv passthrough with an allowlist |
 | `skills install --dir` | any | section 10 |
 | `collect --due\|<slug> [--backfill]` | any | section 8.3 |
 | `timers install\|remove\|status` | any | systemd user timers when `systemctl --user` works and lingering is on; otherwise crontab entries marked `# mobrain`. The unit sets `PATH` to include `~/.local/bin` (and the directory of `claude`); the systemd user PATH does not (probe P4). |
 | `backup`, `restore <dir> --yes` | stack host | section 12 |
 | `upgrade --gbrain <version>` | stack host | section 12 |
-| `selftest [--keep]` | stack host, dev project only | section 13 |
+| `selftest [--keep]` | stack host | section 13; its own compose project `mobrain-selftest`, env file `.env.selftest` and port 8790 |
 
 It reads `MOBRAIN_URL` and `MOBRAIN_API_KEY` from `~/.config/mobrain/runner.env`, and the compose files from the repo checkout it lives in. `--project` overrides the compose project, and stack commands refuse a project name other than the one in `.env`.
 
@@ -453,7 +459,7 @@ It reads `MOBRAIN_URL` and `MOBRAIN_API_KEY` from `~/.config/mobrain/runner.env`
 
 - **Unit (`bun run test:unit`)**: compile (role and grants to client specs), each rule in 5.3, the route authorization table, cadence parsing and due computation, collector frontmatter validation, `checkCoreLock` (pass, tampered core, shadowed type, wrong chain), resolver merge and the skills manifest, password and session handling, token sealing. gbrain is replaced by a fake adapter behind the same interface the server uses.
 - **CLI tests**: run `bin/mobrain` with stub `docker`, `curl` and `claude` on `PATH`, asserting the exact argv each command produces and its exit codes.
-- **`mobrain selftest`** (local only, dev project `mobrain-dev`, keyless): install fresh; `status` ok; `checkCoreLock` ok; agent client `put_page` and `get_page`; switch to company; invite and claim a member; grant one company source; prove the member reads it and cannot read the owner's private source or an ungranted company source (search, `get_page`, `list_pages`); run a `fixture` collector through the runner with a stub harness that writes through MCP with curl, and check the run row and the pages; check every UI API route as each role; backup; tear down with `down -v` (dev project only, refused for any other). `--real-harness` runs the fixture collector through `claude -p` instead.
+- **`mobrain selftest`** (local only, its own compose project `mobrain-selftest`, env file `.env.selftest`, port 8790, keyless): install fresh; `status` ok; `checkCoreLock` ok; agent client `put_page` and `get_page`; switch to company; invite and claim a member; grant one company source; prove the member reads it and cannot read the owner's private source or an ungranted company source (search, `get_page`, `list_pages`); run a `fixture` collector through the runner with a stub harness that writes through MCP with curl, and check the run row and the pages; check every UI API route as each role; backup; tear down with `down -v` (allowed only for `mobrain-dev` and `mobrain-selftest`, refused for any other project). `--real-harness` runs the fixture collector through `claude -p` instead.
 - **CI**: `ci.yml` keeps running `lint:forbidden` and `test:unit` on push and pull request. `stack.yml` stays manual dispatch only and runs `selftest`. The release workflows are deleted; `test/unit/workflows.test.ts` is updated to match. No new push or PR workflows, no `schedule:`.
 
 ## 14. What is kept, ported and deleted
