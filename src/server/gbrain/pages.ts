@@ -43,14 +43,27 @@ export async function listPages(call: McpCaller, q: { prefix?: string; source: s
   return q.prefix ? listed.filter((row) => row.slug.startsWith(q.prefix!)) : listed;
 }
 
+/**
+ * The page's frontmatter: the reply's own `frontmatter` object under the `---`
+ * fence in `content`, which wins per key.
+ *
+ * The reply's `frontmatter` is not the fence — it carries only what gbrain did
+ * not lift into columns. Measured live on 0.60.230.0, a page whose fence held
+ * `type`, `title`, `tags` and `trust_tier` came back with `{"trust_tier": ...}`
+ * alone, so preferring it loses the title and type a reader sees.
+ */
+function pageFrontmatter(reply: Record<string, unknown>, content: string): Record<string, unknown> {
+  const record = (reply.frontmatter && typeof reply.frontmatter === 'object') ? reply.frontmatter as Record<string, unknown> : {};
+  return { ...record, ...frontmatterOf(content).frontmatter };
+}
+
 export async function getPage(call: McpCaller, source: string | null, slug: string): Promise<Page> {
   const args: Record<string, unknown> = { [A.slug]: slug, [A.includeContent]: true };
   if (source) args[A.sourceId] = source;
   const r = (await call('get_page', args)) as Record<string, unknown>;
   const content = String(r.content ?? r.compiled_truth ?? '');
   const parsed = frontmatterOf(content);
-  const fm = (r.frontmatter && typeof r.frontmatter === 'object') ? r.frontmatter as Record<string, unknown> : parsed.frontmatter;
-  return { slug, source: rowSource(r) ?? source, frontmatter: fm, body: parsed.body, raw: r };
+  return { slug, source: rowSource(r) ?? source, frontmatter: pageFrontmatter(r, content), body: parsed.body, raw: r };
 }
 
 export async function searchPages(call: McpCaller, query: string, source?: string): Promise<Hit[]> {

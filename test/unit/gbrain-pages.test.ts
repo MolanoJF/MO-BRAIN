@@ -35,15 +35,17 @@ describe('gbrain page helpers', () => {
     expect(rows.map((r) => r.slug)).toEqual(['system/collectors/mail']);
   });
 
-  test('getPage asks for include_content and source_id, and prefers the frontmatter object', async () => {
+  test('getPage asks for include_content and source_id, and merges the reply frontmatter under the content fence', async () => {
+    // Measured live on 0.60.230.0: the reply's frontmatter held `trust_tier` alone
+    // for a page whose fence also carried `type`, `title` and `tags`.
     const { calls, call } = recorder({
-      slug: 's', source_id: 'p-x', type: 'collector',
-      content: '---\ntype: collector\nkind: fixture\n---\nbody',
-      frontmatter: { kind: 'fixture', cadence: '2h' },
+      slug: 's', source_id: 'p-x', type: 'note', title: 'Welcome',
+      content: '---\ntype: note\ntitle: Welcome\ntrust_tier: agent_written\n---\nbody',
+      frontmatter: { trust_tier: 'agent_written' },
     });
     const p = await getPage(call, 'p-x', 's');
     expect(calls[0]).toEqual(['get_page', { slug: 's', include_content: true, source_id: 'p-x' }]);
-    expect(p.frontmatter).toEqual({ kind: 'fixture', cadence: '2h' });
+    expect(p.frontmatter).toEqual({ trust_tier: 'agent_written', type: 'note', title: 'Welcome' });
     expect(p.body.trim()).toBe('body');
   });
 
@@ -52,6 +54,13 @@ describe('gbrain page helpers', () => {
     const p = await getPage(call, 'p-x', 's');
     expect(p.frontmatter).toEqual({ type: 'collector', cadence: '2h' });
     expect(p.body.trim()).toBe('body');
+  });
+
+  test('getPage keeps the reply frontmatter for a page with no fence', async () => {
+    const { call } = recorder({ slug: 's', source_id: 'p-x', content: 'just text', frontmatter: { trust_tier: 'agent_written' } });
+    const p = await getPage(call, 'p-x', 's');
+    expect(p.frontmatter).toEqual({ trust_tier: 'agent_written' });
+    expect(p.body).toBe('just text');
   });
 
   test('searchPages maps hits', async () => {

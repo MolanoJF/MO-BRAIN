@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Me, type Source } from '../api.ts';
+import { api, ApiError, type Me, type Source } from '../api.ts';
 import { buildTree, encodeSlug, pageSlugFromPath, type TreeNode } from '../lib.ts';
 import { renderMarkdown } from '../markdown.ts';
 import { interceptLinks, navigate } from '../router.ts';
@@ -45,7 +45,8 @@ export function Pages({ me: _me, path }: { me: Me; path: string }) {
   }, [source]);
   useEffect(() => {
     if (!source || !slug) { setPage(null); return; }
-    api<Page>(`/api/pages/${encodeSlug(source)}/${encodeSlug(slug)}`).then(setPage, () => setPage({ slug, frontmatter: {}, body: '_This page could not be loaded._' }));
+    api<Page>(`/api/pages/${encodeSlug(source)}/${encodeSlug(slug)}`)
+      .then(setPage, (e) => setPage({ slug, frontmatter: {}, body: e instanceof ApiError && e.status === 404 ? '_This page does not exist._' : '_This page could not be loaded._' }));
   }, [source, slug]);
   useEffect(() => {
     if (!source || q.trim().length < 2) { setHits(null); return; }

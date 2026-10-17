@@ -1,7 +1,16 @@
 export type McpCaller = <T = unknown>(tool: string, args: Record<string, unknown>) => Promise<T>;
 
 export class McpError extends Error {
-  constructor(message: string, readonly status: number, readonly tool: string) { super(message); }
+  constructor(message: string, readonly status: number, readonly tool: string, readonly code: string | null = null) { super(message); }
+}
+
+/** gbrain's tool failures are JSON carrying a machine `code`; keep it so a route can pick a status. */
+function toolErrorCode(text: string): string | null {
+  try {
+    const j = JSON.parse(text) as { code?: unknown; error?: unknown };
+    const c = j.code ?? j.error;
+    return typeof c === 'string' ? c : null;
+  } catch { return null; }
 }
 
 function parseMessage(text: string, contentType: string): Record<string, unknown> {
@@ -42,7 +51,7 @@ export function mcpCaller(url: string, token: string, fetchImpl: typeof fetch = 
     }
     const result = msg.result as { isError?: boolean; content?: { type?: string; text?: string }[] };
     const text = result.content?.find((c) => c.type === 'text')?.text ?? '';
-    if (result.isError) throw new McpError(`${tool}: ${text}`, 422, tool);
+    if (result.isError) throw new McpError(`${tool}: ${text}`, 422, tool, toolErrorCode(text));
     try { return JSON.parse(text) as T; } catch { return text as T; }
   };
 }

@@ -37,6 +37,17 @@ describe('mcpCaller', () => {
     expect(err).toBeInstanceOf(McpError);
     if (!(err instanceof McpError)) throw err;
     expect(String(err.message)).toContain('source_not_readable');
+    expect(err.code).toBe(null);
+  });
+
+  test('a JSON isError body exposes its machine code', async () => {
+    const text = JSON.stringify({ error: 'page_not_found', code: 'page_not_found', message: 'Page not found: notes/x' });
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text }] } });
+    const err = await mcpCaller('http://x/mcp', 't', fakeFetch({ body }))('get_page', {}).catch((e) => e);
+    if (!(err instanceof McpError)) throw err;
+    expect(err.code).toBe('page_not_found');
+    expect(err.status).toBe(422);
+    expect(err.tool).toBe('get_page');
   });
 
   test('a non-JSON text block is returned as a string', async () => {

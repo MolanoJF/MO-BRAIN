@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Deps } from '../app.ts';
+import { McpError } from '../gbrain/mcp.ts';
 import { getPage, listPages, searchPages } from '../gbrain/pages.ts';
 import { HttpError, requireRole, requireUser, type AppEnv } from '../http.ts';
 import { compileUserClients } from '../people/compile.ts';
@@ -50,8 +51,14 @@ export function brainRoutes(deps: Deps): Hono<AppEnv> {
     const source = await guard(user, c.req.param('source'));
     const slug = c.req.path.slice(`/api/pages/${source}/`.length);
     if (!slug) throw new HttpError(400, 'slug_required');
-    const p = await getPage(deps.mcp(await people.uiToken(user)), source, decodeURIComponent(slug));
-    return c.json({ slug: p.slug, source: p.source, frontmatter: p.frontmatter, body: p.body });
+    try {
+      const p = await getPage(deps.mcp(await people.uiToken(user)), source, decodeURIComponent(slug));
+      return c.json({ slug: p.slug, source: p.source, frontmatter: p.frontmatter, body: p.body });
+    } catch (e) {
+      // A page gbrain does not have is the console's 404, not an internal failure.
+      if (e instanceof McpError && e.code === 'page_not_found') throw new HttpError(404, 'page_not_found');
+      throw e;
+    }
   });
 
   r.get('/api/activity', requireRole('owner', 'admin'), async (c) => {

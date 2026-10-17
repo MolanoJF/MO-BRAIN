@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { world, type TestWorld } from './app.ts';
 import { PeopleService } from '../../src/server/people/service.ts';
-import type { McpCaller } from '../../src/server/gbrain/mcp.ts';
+import { McpError, type McpCaller } from '../../src/server/gbrain/mcp.ts';
 
 const calls: [string, Record<string, unknown>][] = [];
 let w: TestWorld; let ownerKey: string; let memberKey: string;
@@ -11,6 +11,7 @@ beforeAll(async () => {
     mcp: () => (async (tool: string, args: Record<string, unknown>) => {
       calls.push([tool, args]);
       if (tool === 'list_pages') return { pages: [{ slug: 'people/ada', source_id: 'p-own', title: 'Ada', type: 'person' }] };
+      if (tool === 'get_page' && args.slug === 'notes/missing') throw new McpError('get_page: page_not_found', 422, 'get_page', 'page_not_found');
       if (tool === 'get_page') return { slug: args.slug, source_id: 'p-own', content: '---\ntype: person\n---\n# Ada' };
       if (tool === 'search') return { results: [{ slug: 'people/ada', source_id: 'p-own', title: 'Ada', snippet: 'Ada' }] };
       if (tool === 'sources_status') return { ok: true };
@@ -47,6 +48,12 @@ describe('brain read routes', () => {
     const p = await (await w.req('/api/pages/p-own/people/ada', { as: ownerKey })).json();
     expect(p).toMatchObject({ slug: 'people/ada', frontmatter: { type: 'person' } });
     expect(p.body).toContain('# Ada');
+  });
+
+  test('a page gbrain does not have is a 404, not a 500', async () => {
+    const res = await w.req('/api/pages/p-own/notes/missing', { as: ownerKey });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'page_not_found' });
   });
 
   test('activity is owner/admin only', async () => {
