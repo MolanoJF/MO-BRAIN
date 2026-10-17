@@ -12,6 +12,37 @@ export function wikiToLinks(md: string, source: string): string {
 
 export type TreeNode = { name: string; slug?: string; children?: TreeNode[] };
 
+/**
+ * A page slug as it must appear inside a URL path: the `/` separators stay,
+ * every other character is escaped.
+ *
+ * Both an `href` and a `fetch` want this form. A slug is page content, so it can
+ * hold a space, a `?` or a `%`, and interpolating it raw turns the rest of the
+ * URL into a query string or, worse, into an escape the server rejects.
+ */
+export function encodeSlug(slug: string): string {
+  return slug.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
+ * The page slug in a `/pages/<source>/<slug>` path, decoded back to the slug
+ * gbrain stores. `null` when the path names no page — the picker root, a
+ * source with no page selected, a non-Pages route — or when the escape is
+ * malformed.
+ *
+ * The malformed case is why this is a function and not a `decodeURIComponent`
+ * call at the call site: `decodeURIComponent('%zz')` throws `URIError`, and a
+ * throw during render is a blank console that re-blanks on every reload, since
+ * the bad URL is still the URL. Nothing above a page can catch it — there is no
+ * error boundary in this SPA — so the escape has to fail into a value, not a
+ * throw.
+ */
+export function pageSlugFromPath(path: string): string | null {
+  const raw = /^\/pages\/[^/]+\/(.+)$/.exec(path)?.[1];
+  if (!raw) return null;
+  try { return decodeURIComponent(raw); } catch { return null; }
+}
+
 export function buildTree(slugs: string[]): TreeNode[] {
   const root: TreeNode = { name: '', children: [] };
   for (const slug of slugs) {
@@ -44,6 +75,32 @@ export function navFor(role: Role, mode: Mode): NavEntry[] {
   if (role === 'owner' || (role === 'admin' && mode === 'company')) out.push({ path: '/people', label: 'People & access' });
   out.push({ path: '/connect', label: 'Connect your agent' });
   return out;
+}
+
+/**
+ * The fields gbrain's `sources_status` reports for one source, measured from
+ * probe P5's `sources_list` sample: the id and name, how many pages it holds,
+ * whether it is federated, and when it last synced. Every field is optional
+ * because the reply is gbrain's, not ours, and the console must not invent one.
+ */
+export type SourceStatus = {
+  id?: string; name?: string; federated?: boolean; page_count?: number | null; last_sync_at?: string | null;
+};
+
+/**
+ * One line for a source card: what gbrain knows about the source, or that it
+ * said nothing usable — `error` is the failed fetch's message, when there was
+ * one. A source whose record is present but carries none of the counters reads
+ * as unavailable too, rather than as "0 pages", which would be a fact gbrain
+ * never stated.
+ */
+export function sourceStatusLine(s: SourceStatus | null, error?: string | null): string {
+  const bits: string[] = [];
+  if (typeof s?.page_count === 'number') bits.push(`${s.page_count} page${s.page_count === 1 ? '' : 's'}`);
+  if (s?.last_sync_at) bits.push(`last sync ${ago(s.last_sync_at)}`);
+  if (s?.federated) bits.push('federated');
+  if (bits.length) return `gbrain: ${bits.join(' · ')}`;
+  return error ? `gbrain status unavailable (${error}).` : 'gbrain status unavailable.';
 }
 
 export function ago(iso: string | null | undefined, now = new Date()): string {

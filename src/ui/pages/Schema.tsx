@@ -14,13 +14,22 @@ const layerTone = (l: string) => (l === 'brain' ? 'ok' : 'neutral') as 'ok' | 'n
 
 export function Schema() {
   const [v, setV] = useState<SchemaView | null>(null);
-  useEffect(() => { api<SchemaView>('/api/schema').then(setV); }, []);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api<SchemaView>('/api/schema').then(setV, (e) => setError(String(e.message))); }, []);
+  if (error !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageTitle>Schema</PageTitle>
+        <Notice tone="danger">Could not read the schema: {error}. Ask your agent to run <code>mobrain schema check</code>.</Notice>
+      </div>
+    );
+  }
   if (!v) return <Spinner />;
   return (
     <div className="flex flex-col gap-4">
       <PageTitle>Schema</PageTitle>
       {v.coreLock.ok
-        ? <Notice tone="ok">Core schema intact. Active pack: {v.active}.</Notice>
+        ? <Notice tone="ok">{v.active ? `Core schema intact. Active pack: ${v.active}.` : 'Core schema intact. No active pack.'}</Notice>
         : <Notice tone="danger">The core schema lock is broken: {v.coreLock.problems.join(', ')}. Ask your agent to run <code>mobrain schema check</code> and fix it.</Notice>}
       <p className="text-muted">Read-only. Your agent changes the schema through gbrain, in the <code>mobrain-brain</code> layer.</p>
       <Card title="Layers">
