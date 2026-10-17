@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { setCookie } from 'hono/cookie';
 import type { Deps } from '../app.ts';
-import { createSession } from '../auth.ts';
+import { createApiKey, createSession } from '../auth.ts';
 import { getMode } from '../db/index.ts';
 import { HttpError, jsonBody, requireRole, requireUser, SESSION_COOKIE, type AppEnv } from '../http.ts';
 import { PeopleService } from '../people/service.ts';
@@ -81,6 +81,15 @@ export function peopleRoutes(deps: Deps): Hono<AppEnv> {
     if (typeof agentReads !== 'boolean') throw new HttpError(400, 'agentReads_required');
     await people.setAgentReads(requireUser(c), c.req.param('sourceId'), agentReads);
     return c.json({ ok: true });
+  });
+
+  r.post('/api/me/join-key', async (c) => {
+    const user = requireUser(c);
+    await deps.sql`update api_keys set revoked_at = now() where user_id = ${user.id} and label = 'join' and revoked_at is null`;
+    const key = await createApiKey(deps.sql, user.id, 'join');
+    const url = deps.env.publicUrl;
+    const command = `mkdir -p ~/.local/bin && curl -fsSL ${url}/install/mobrain -o ~/.local/bin/mobrain && chmod +x ~/.local/bin/mobrain && ~/.local/bin/mobrain join --url ${url} --key ${key}`;
+    return c.json({ key, command, say: `Join Mo-brain at ${url} with key ${key}. Follow the mobrain-join skill; the first step is: ${command}` });
   });
 
   r.get('/api/claim/:token', async (c) => c.json(await people.inviteInfo(c.req.param('token'))));

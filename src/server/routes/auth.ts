@@ -33,7 +33,10 @@ export function authRoutes(deps: Deps): Hono<AppEnv> {
 
   r.get('/api/me', async (c) => {
     const user = requireUser(c);
-    return c.json({ user, mode: await getMode(deps.sql) });
+    const grants = await deps.sql<{ sourceId: string; name: string; agentReads: boolean }[]>`
+      select g.source_id, s.name, g.agent_reads from grants g join sources s on s.id = g.source_id
+      where g.user_id = ${user.id} and s.status = 'active' order by s.name`;
+    return c.json({ user, mode: await getMode(deps.sql), grants, publicUrl: deps.env.publicUrl });
   });
 
   return r;
