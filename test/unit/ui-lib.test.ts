@@ -1,6 +1,7 @@
 // test/unit/ui-lib.test.ts
 import { describe, expect, test } from 'bun:test';
-import { ago, buildTree, encodeSlug, navFor, pageSlugFromPath, sourceStatusLine, wikiToLinks } from '../../src/ui/lib.ts';
+import { ApiError } from '../../src/ui/api.ts';
+import { ago, buildTree, encodeSlug, message, navFor, pageSlugFromPath, sourceStatusLine, wikiToLinks } from '../../src/ui/lib.ts';
 
 describe('wikiToLinks', () => {
   test('plain, labelled and anchored wiki links become app links in the same source', () => {
@@ -70,6 +71,23 @@ describe('navFor', () => {
     expect(navFor('owner', 'personal').map((n) => n.path)).toEqual(['/pages', '/sources', '/schema', '/activity', '/health', '/people', '/connect']);
     expect(navFor('admin', 'personal').map((n) => n.path)).not.toContain('/people');
     expect(navFor('admin', 'company').map((n) => n.path)).toContain('/people');
+  });
+});
+
+describe('message', () => {
+  test('turns an API code into the sentence the page shows', () => {
+    expect(message(new ApiError(403, 'forbidden'))).toBe('You do not have permission for that.');
+    expect(message(new ApiError(409, 'user_exists'))).toBe('That person already has an account.');
+    expect(message(new ApiError(400, 'name_required'))).toBe('Give the source a name.');
+    expect(message(new ApiError(409, 'user_inactive'))).toBe('That person is being offboarded, so nothing can be changed.');
+  });
+
+  // A code with no sentence shows as itself — a bare `source_archived` still
+  // names the problem — and a failure that is not an API reply at all (a
+  // dropped connection rejects with a TypeError) has no code to show.
+  test('falls back to the code, then to `error`', () => {
+    expect(message(new ApiError(409, 'source_archived'))).toBe('source_archived');
+    expect(message(new TypeError('Failed to fetch'))).toBe('error');
   });
 });
 

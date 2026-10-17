@@ -1,3 +1,5 @@
+import { ApiError } from './api.ts';
+
 export type Role = 'owner' | 'admin' | 'member' | 'viewer';
 export type Mode = 'personal' | 'company';
 
@@ -101,6 +103,33 @@ export function sourceStatusLine(s: SourceStatus | null, error?: string | null):
   if (s?.federated) bits.push('federated');
   if (bits.length) return `gbrain: ${bits.join(' · ')}`;
   return error ? `gbrain status unavailable (${error}).` : 'gbrain status unavailable.';
+}
+
+/**
+ * The failed API call's code, as a sentence to show a person.
+ *
+ * The server answers with a machine code (`HttpError(409, 'user_inactive')`),
+ * and rendering that verbatim is what the people page's review caught. The
+ * sentences live here rather than in a page so the two pages that share these
+ * flows — People & access and Connect your agent — say the same thing about the
+ * same failure, and so the mapping is testable without a DOM.
+ *
+ * A code with no sentence is shown as itself: a bare `source_archived` still
+ * names the problem, and inventing a generic "something went wrong" would hide
+ * which one it was.
+ */
+const MESSAGES: Record<string, string> = {
+  not_sole_member: 'Switch back only when you are the only person left.',
+  company_mode_required: 'Switch to company mode first.',
+  forbidden: 'You do not have permission for that.',
+  user_exists: 'That person already has an account.',
+  user_inactive: 'That person is being offboarded, so nothing can be changed.',
+  name_required: 'Give the source a name.',
+};
+
+export function message(e: unknown): string {
+  const code = e instanceof ApiError ? e.code : 'error';
+  return MESSAGES[code] ?? code;
 }
 
 export function ago(iso: string | null | undefined, now = new Date()): string {

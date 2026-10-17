@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type Me, type Role, type Source } from '../api.ts';
+import { api, type Me, type Role, type Source } from '../api.ts';
+import { message } from '../lib.ts';
 import { Button, Card, ConfirmButton, Empty, Field, Input, Notice, PageTitle, Select, Spinner, Table, TableWrap } from '../ui/index.tsx';
 
 type Person = { id: string; email: string; name: string | null; role: Role; status: string; grants: { sourceId: string; agentReads: boolean }[] };
 type PeopleData = { mode: 'personal' | 'company'; users: Person[]; sources: (Source & { ownerUserId: string | null })[] };
-
-const message = (e: unknown) => {
-  const code = e instanceof ApiError ? e.code : 'error';
-  return ({ not_sole_member: 'Switch back only when you are the only person left.', company_mode_required: 'Switch to company mode first.',
-    forbidden: 'You do not have permission for that.', user_exists: 'That person already has an account.' } as Record<string, string>)[code] ?? code;
-};
 
 export function People({ me, onChange }: { me: Me; onChange: () => void }) {
   const [d, setD] = useState<PeopleData | null>(null); const [err, setErr] = useState<string | null>(null);
@@ -66,13 +61,13 @@ export function People({ me, onChange }: { me: Me; onChange: () => void }) {
                   const g = u.grants.find((x) => x.sourceId === s.id);
                   return <td key={s.id}>{fixed ? 'all' : (
                     <label className="flex items-center gap-1 text-sm">
-                      <input type="checkbox" checked={!!g} onChange={() => act(() => g
+                      <input type="checkbox" aria-label={`${u.name ?? u.email}: ${s.name}`} checked={!!g} onChange={() => act(() => g
                         ? api(`/api/people/${u.id}/grants/${s.id}`, { method: 'DELETE' })
                         : api(`/api/people/${u.id}/grants/${s.id}`, { method: 'PUT', json: { agentReads: true } }))} />
                       {g && <span className="text-muted">{g.agentReads ? 'agent' : 'ui only'}</span>}
                     </label>)}</td>;
                 })}
-                <td>{u.role !== 'owner' && u.id !== me.user.id && (
+                <td>{u.role !== 'owner' && u.id !== me.user.id && (owner || u.role !== 'admin') && (
                   <ConfirmButton label="Offboard" confirmLabel="Revoke all access?" onConfirm={() => act(() => api(`/api/people/${u.id}/offboard`, { json: {} }))} />)}</td>
               </tr>);
             })}</tbody></Table></TableWrap>
