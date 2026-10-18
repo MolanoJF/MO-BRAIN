@@ -5,7 +5,10 @@ export function staticRoutes(uiDir: string): Hono {
   const r = new Hono();
   r.all('/api/*', (c) => c.json({ error: 'not_found' }, 404));
   r.get('*', async (c) => {
-    const rel = normalize(decodeURIComponent(c.req.path)).replace(/^(\.\.(\/|$))+/, '');
+    // A malformed escape (%zz) is an app route, not a server error.
+    let decoded = '/';
+    try { decoded = decodeURIComponent(c.req.path); } catch { /* serve the app shell */ }
+    const rel = normalize(decoded).replace(/^(\.\.(\/|$))+/, '');
     if (rel !== '/' && !rel.includes('..')) {
       const f = Bun.file(join(uiDir, rel));
       if (await f.exists()) {

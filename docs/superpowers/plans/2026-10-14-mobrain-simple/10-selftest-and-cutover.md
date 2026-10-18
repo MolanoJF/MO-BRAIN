@@ -240,81 +240,38 @@ git merge --ff-only simplify
 
 ---
 
-### Task 10.5: Cutover of the live brain (`mobrain-molior`)
+### Task 10.5: Fresh live install
 
-> **Superseded 2026-10-18.** The live v1 stack, its volumes and all backups were deleted at the owner's request, and the `molior` worktree and branch are gone. There is nothing to cut over: skip steps 1–4 and 9's v1 notes, and do a fresh `bin/mobrain install` (steps 5–8, 11) when the owner wants a live brain.
+There is no v1 stack to cut over (deleted 2026-10-18; v1 is frozen at tag `v1-final`). A live brain is a fresh install under its own compose project, kept apart from any dev stack. Every step marked **ASK** stops for the user's yes.
 
-Live paths (from `CLAUDE.local.md`): worktree `~/mobrain-molior` on branch `molior`, compose project `mobrain-molior`, live URL `https://molior-vps.meerkat-kingsnake.ts.net:8443` via `tailscale serve` to Caddy on `127.0.0.1:19443`.
+- [ ] **Step 1: Choose names (ASK)** — "Live project name (suggest `mobrain-live`), loopback port (suggest 19443), public URL (suggest `https://molior-vps.meerkat-kingsnake.ts.net:8443`), and which OpenAI key?" Check nothing is running first: `docker compose ls -a`, `tailscale serve status`.
 
-- [ ] **Step 1: Look before touching**
-
-```bash
-cd ~/mobrain-molior && git status --short && git log --oneline -1
-docker compose ls -a
-tailscale serve status
-```
-
-Report what you see to the user (including the live brain's page count from the old console's health or `docker compose -p mobrain-molior exec -T gbrain-ops gbrain stats`, read-only).
-
-- [ ] **Step 2: Back up v1** — `cd ~/mobrain-molior && ./molior.sh backup`. Record the backup path. Confirm it contains both databases.
-
-- [ ] **Step 3: ASK** — "v1 is backed up at <path> (<page count> pages). I'll now stop the v1 live stack (volumes kept, nothing deleted), fast-forward `molior` to the new `main`, install the new stack as project `mobrain-molior` on port 19443, and then ask you before switching `tailscale serve`. The v1 volumes stay until you tell me to remove them. Go ahead?
-
-  This also replaces the live `.env`: `ENCRYPTION_KEY` changes, so secrets sealed by v1 stay readable only with `.env.v1`. `CLAUDE.local.md` forbids regenerating `.env`; the user's yes here is the explicit override, so say so in the question."
-
-- [ ] **Step 4: Stop v1, keep its volumes**
+- [ ] **Step 2: Live worktree** — keep live apart from dev so a dev edit never reaches it:
 
 ```bash
-cd ~/mobrain-molior
-./molior.sh down          # no -v
-docker compose ls -a      # mobrain-molior shows exited or is gone; volumes remain (docker volume ls | grep mobrain-molior)
+cd ~/MO-BRAIN
+git worktree add ~/mobrain-live -b live main
 ```
 
-v1's volume names (`mobrain-molior_pg-data`, `mobrain-molior_gbrain-home`, `mobrain-molior_brain-repos`; the last holds the live brain git repo and owner credential files, so it must be copied, never just removed) collide with the new stack's names. Rename them out of the way so the new install starts empty and v1's data stays intact:
+`live` only moves by `git merge --ff-only main`; never commit on it.
+
+- [ ] **Step 3: Install**
 
 ```bash
-for v in pg-data gbrain-home brain-repos; do
-  docker volume create "mobrain-molior-v1_$v"
-  docker run --rm -v "mobrain-molior_$v:/from:ro" -v "mobrain-molior-v1_$v:/to" mobrain-gbrain:0.60.230.0 cp -a /from/. /to/
-done
+cd ~/mobrain-live
+umask 077; printf '%s' "<key>" > "$SCRATCH/mobrain-key"
+bin/mobrain install --owner-email <email> --openai-key-file "$SCRATCH/mobrain-key" \
+  --project mobrain-live --port 19443 --public-url https://molior-vps.meerkat-kingsnake.ts.net:8443
+rm -f "$SCRATCH/mobrain-key"
+bin/mobrain status      # ok: true, pin.matches: true
 ```
 
-**ASK** before the next command, showing `docker volume ls | grep mobrain-molior` output: "The v1 volumes (pg-data, gbrain-home, brain-repos) are copied to `mobrain-molior-v1_*`; verify with `docker run --rm -v mobrain-molior-v1_brain-repos:/d:ro alpine ls -A /d` first. Remove the originals so the new stack can use the names?" On yes: `docker volume rm mobrain-molior_pg-data mobrain-molior_gbrain-home mobrain-molior_brain-repos mobrain-molior_caddy-data mobrain-molior_caddy-config`.
+- [ ] **Step 4: ASK, then expose it** — "Put the live brain on the tailnet at :8443?" On yes: `tailscale serve --bg --https=8443 http://127.0.0.1:19443`, then `curl -s https://<host>:8443/api/health`.
 
-- [ ] **Step 5: Move `molior` forward and install**
+- [ ] **Step 5: The agent onboards** — follow `skills/mobrain-install/SKILL.md` Phases 4–8 from `~/mobrain-live`, registering the MCP server as `gbrain`. Check `claude mcp list` first and **ASK** before removing any stale entry.
 
-```bash
-cd ~/mobrain-molior
-git merge --ff-only main
-mv .env .env.v1
-umask 077; printf '%s' "<the live OpenAI key, from .env.v1's OPENAI key line or the user>" > /tmp/mobrain-key
-bin/mobrain install --owner-email <user email> --openai-key-file /tmp/mobrain-key --project mobrain-molior \
-  --port 19443 --public-url https://molior-vps.meerkat-kingsnake.ts.net:8443
-rm -f /tmp/mobrain-key
-bin/mobrain status
-```
+- [ ] **Step 6: Verify** — the install skill's contract checks, then the UI at the public URL as owner.
 
-(`.env.v1` is never read again; it stays beside the new `.env` as the spec says.)
+- [ ] **Step 7: Write `CLAUDE.local.md`** (local, not committed): live path, branch `live`, project, port, URL; ship a change with `bin/mobrain backup`, `git merge --ff-only main`, `bin/mobrain up --build`, `bin/mobrain status`; never edit files in the live worktree, never `down -v` or restore without asking, never regenerate its `.env` (`ENCRYPTION_KEY` seals stored secrets).
 
-- [ ] **Step 6: ASK, then switch Tailscale** — "The new stack is healthy on 127.0.0.1:19443 (plain HTTP). Switch `tailscale serve` on 8443 from the old Caddy target to it?" On yes:
-
-```bash
-tailscale serve --bg --https=8443 http://127.0.0.1:19443
-curl -s https://molior-vps.meerkat-kingsnake.ts.net:8443/api/health
-```
-
-- [ ] **Step 7: The user's agent onboards** — follow `skills/mobrain-install/SKILL.md` Phases 4–8 against the live install, from `~/mobrain-molior`. **ASK** first: "Your Claude Code has an old `mobrain` MCP entry (it fails with 401). Remove it, and register the live brain as `gbrain`?" On yes: `claude mcp remove mobrain` (in the scope it lives in), then Phase 4 as written.
-
-If the user wants their old brain imported, create a `notes-import` collector for it (Phase 5) per the user's memory notes: refile into `mobrain-core`, through gbrain, never a raw copy.
-
-- [ ] **Step 8: Verify live** — the install skill's contract checks, plus the UI at the live URL.
-
-- [ ] **Step 9: Update `CLAUDE.local.md`** (local, not committed):
-  - Live: `~/mobrain-molior` on `molior`, project `mobrain-molior`, port 19443, public URL unchanged.
-  - Ship a change: commit on `main` in `~/MO-BRAIN`; in `~/mobrain-molior`: `bin/mobrain backup`, `git merge --ff-only main`, `bin/mobrain up --build`, `bin/mobrain status`.
-  - Keep every existing rule (never edit files there, never `down -v`, never regenerate `.env`, ask before reset or restore). Replace `molior.sh` references with `bin/mobrain`.
-  - v1 data: volumes `mobrain-molior-v1_*` and `.env.v1`, kept until the user says to remove them.
-
-- [ ] **Step 10: Update memory** — in `/home/ubuntu/.claude/projects/-home-ubuntu-MO-BRAIN/memory/`: mark `mobrain-live-first-onboarding.md` and `mobrain-skills-installed-by-agent.md` as superseded by the 2026-10-14 rebuild (skills now ship in the instance's bundle; the live brain was reinstalled), keep `ingest-through-gbrain-into-core-schema.md` and `mirror-gbrain-skills-exactly.md` (still true), and add one project memory: the new shape, the spec path, and where v1 data is kept. Update `MEMORY.md` lines to match.
-
-- [ ] **Step 11: Report to the user** — what changed, the live URL, what was ingested, the collector schedule, where v1 data and its backup are, and the one cleanup still open (removing v1 volumes when they are sure).
+- [ ] **Step 8: Report** — live URL, collectors and cadence, what was ingested, where backups go (`bin/mobrain backup`).

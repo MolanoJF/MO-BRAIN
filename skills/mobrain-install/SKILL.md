@@ -33,11 +33,13 @@ Look at your own tool list. For each source kind, note the tools that could read
 
 | Kind | Looks like |
 |---|---|
-| `email` | Gmail or Outlook tools: `mcp__claude_ai_Gmail__*`, names containing `gmail`, `outlook`, `mail`; gateway tools (Composio `GMAIL_*`, executor) |
+| `email` | Gmail or Outlook tools: `mcp__claude_ai_Gmail__*`, names containing `gmail`, `outlook`, `mail`; gateway tools (Composio `GMAIL_*`; executor, see below) |
 | `calendar` | `*calendar*`, Google Calendar, Outlook calendar, gateway calendar tools |
 | `meetings` | Granola, Fireflies, Circleback, Otter, Fathom, tl;dv, or Meet notes in Drive |
 | `docs` | Google Drive or Docs (`*drive*`), Notion (`*notion*`), Confluence, any knowledge base tool |
 | `notes-import` | a local folder you can read: an Obsidian vault, an old gbrain brain, Markdown, a Notion export |
+
+**Executor.** If `executor` is on `PATH` (`executor whoami` works), check `executor tools integrations` for `google_gmail`, `google_calendar`, `google_drive`. Use it through its CLI: `--tools 'Bash(executor *)'`. Do not use `mcp__executor__*`: `executor mcp` over stdio starts with an empty local scope and sees none of the signed-in server's connections. `Bash(executor *)` reaches every integration the executor holds, so say in `--notes` which one integration the collector may touch (for example "google_gmail only").
 
 Do not ask the person to authenticate anything to Mo-brain. Source access stays in their harness or gateway.
 
@@ -68,7 +70,7 @@ bin/mobrain client issue agent --register
 bin/mobrain skills install --dir ~/.claude/skills
 ```
 
-The registration adds an MCP server named `gbrain` to your harness. This interactive session will not see it until a restart; headless runs do, which is why backfills below run headless. The skills bundle is gbrain's pinned skills plus Mo-brain's, with one resolver; read its `RESOLVER.md` once.
+The registration adds an MCP server named `gbrain` to your harness. For a dev stack beside a live one, register under another name (for example `gbrain-dev`) and set `MOBRAIN_MCP_NAME=gbrain-dev` in `~/.config/mobrain/runner.env`, so headless collector runs allow and write through that server. This interactive session will not see it until a restart; headless runs do, which is why backfills below run headless. The skills bundle is gbrain's pinned skills plus Mo-brain's, with one resolver; read its `RESOLVER.md` once.
 
 ## Phase 5: Create the collectors
 

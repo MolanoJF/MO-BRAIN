@@ -52,7 +52,7 @@ bin/mobrain collector list --source c-company
 
 `add` takes `--title`, `--kind`, `--cadence`, and optionally `--tools` (comma-separated),
 `--model`, `--backfill-days`, `--source` and `--notes`. `set` changes only
-`--enabled` and `--cadence`; to change the tools a collector may call, re-create it with
+`--enabled` and `--cadence`; to change the tools a collector may call, re-add it (same title; `add` overwrites the page) with
 `collector add` and the same title.
 
 Cadences: `<n>m` (with `n >= 15`), `<n>h`, `<n>d`, `daily@HH:MM` (local time, `TZ` from
@@ -128,7 +128,7 @@ scheduler. The `autopilot` container runs gbrain's own maintenance as the spec Â
 |---|---|---|
 | `ok` | the run finished a complete batch | nothing |
 | `partial` | the per-run cap was reached (200 incremental, 500 backfill), or some items failed and stayed behind the watermark | nothing urgent; the next run continues. A persistent `partial` means the cadence is too slow for the volume |
-| `error` | the harness exited non-zero, or never printed its closing lines | read the newest log; usually a tool missing from `allowed_tools` (re-create the collector) or a source the harness cannot reach |
+| `error` | the harness exited non-zero, or never printed its closing lines | read the newest log; usually a tool missing from `allowed_tools` (re-add the collector with the same title) or a source the harness cannot reach |
 | `timeout` | the harness was killed at the timeout (incremental 20 min, backfill 2 h; exit 124) | a backfill that times out is normal on a big source; a *scheduled* run that times out is not â€” narrow the source, or raise the cadence window |
 | `running` | a run started and has not finished | if it is older than its timeout, `collect --due` starts the next one |
 
@@ -141,3 +141,9 @@ MOBRAIN_SUMMARY: <one line: read N, created N, updated N, skipped N, errors N>
 
 A run whose exit code is 0 but which prints no `MOBRAIN_STATUS` line is recorded as
 `error`: the runner never infers success from a clean exit.
+
+## Gateway tools and trust
+
+A collector may call exactly what its `allowed_tools` lists, and nothing gates what that tool reaches. `Bash(executor *)` reaches every integration the executor holds (CRM, Notion, Drive and more), not only Gmail. The collector's notes tell the agent to stay on one integration; that is an instruction, not a boundary. Prefer a narrow tool (`mcp__claude_ai_Gmail__*`) when the harness has one, and accept the gateway pattern only on a machine and executor account you trust with that breadth.
+
+The server name the headless run may write through defaults to `gbrain`; set `MOBRAIN_MCP_NAME` in `~/.config/mobrain/runner.env` to use another (a dev stack registered as `gbrain-dev`).

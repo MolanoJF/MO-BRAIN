@@ -69,7 +69,9 @@ const RULES: Rule[] = [
 // scratch directory for the subagent-driven-development process (ledgers,
 // task briefs, agent reports, review packages). It is never shipped, and
 // agent reports routinely quote the rules they are reporting about.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.mobrain-tmp', 'docs', '.superpowers']);
+// '.claude' is skipped too: it holds a person's locally installed agent skills
+// (git-excluded, never shipped), which quote upstream gbrain commands verbatim.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'contracts', '.mobrain-tmp', 'docs', '.superpowers', '.claude']);
 const EXTS = ['.ts', '.tsx', '.js', '.sh', '.yml', '.yaml', '.Dockerfile', '.md'];
 
 // Root-level HANDOFF.md is a planning document that lives outside docs/ by

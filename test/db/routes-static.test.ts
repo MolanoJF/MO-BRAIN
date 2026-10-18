@@ -32,3 +32,12 @@ test('unknown API paths are JSON 404s, not the app', async () => {
 test('path traversal never leaves the ui dir', async () => {
   expect(await (await app.request('/assets/../../etc/passwd')).text()).toBe('<html>app</html>');
 });
+test('a malformed percent escape falls back to the app, not a 500', async () => {
+  const r = await app.request('/pages/%zz');
+  expect(r.status).toBe(200);
+  expect(await r.text()).toBe('<html>app</html>');
+});
+test('a directory path falls back to the app, not an empty 200', async () => {
+  expect(await (await app.request('/assets')).text()).toBe('<html>app</html>');
+  expect(await (await app.request('/assets/')).text()).toBe('<html>app</html>');
+});
