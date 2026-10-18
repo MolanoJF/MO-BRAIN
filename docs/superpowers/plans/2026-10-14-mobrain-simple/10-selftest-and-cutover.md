@@ -242,6 +242,8 @@ git merge --ff-only simplify
 
 ### Task 10.5: Cutover of the live brain (`mobrain-molior`)
 
+> **Superseded 2026-10-18.** The live v1 stack, its volumes and all backups were deleted at the owner's request, and the `molior` worktree and branch are gone. There is nothing to cut over: skip steps 1–4 and 9's v1 notes, and do a fresh `bin/mobrain install` (steps 5–8, 11) when the owner wants a live brain.
+
 Live paths (from `CLAUDE.local.md`): worktree `~/mobrain-molior` on branch `molior`, compose project `mobrain-molior`, live URL `https://molior-vps.meerkat-kingsnake.ts.net:8443` via `tailscale serve` to Caddy on `127.0.0.1:19443`.
 
 - [ ] **Step 1: Look before touching**

@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-**Mo-brain 2 (simplified)** is built and verified on `mobrain-dev`, but **not yet cut over**: the live `mobrain-molior` stack still runs v1 until plan task 10.5 is done. v1 is frozen at tag `v1-final` (control plane, ops sidecar, scheduler, agent runner, control MCP, zones).
+**Mo-brain 2 (simplified)** is built and verified on a dev stack. As of 2026-10-18 this host runs **no** Mo-brain stack: the v1 live stack, its backups, and the dev stack were deleted at the owner's request. A new brain is a fresh `bin/mobrain install`. v1 is frozen at tag `v1-final` (control plane, ops sidecar, scheduler, agent runner, control MCP, zones).
 
 - Design: `docs/superpowers/specs/2026-10-14-mobrain-simple-design.md`. Probe results: `docs/superpowers/specs/2026-10-14-mobrain-simple-probes.md`.
 - Build plan: `docs/superpowers/plans/2026-10-14-mobrain-simple/`.
