@@ -256,7 +256,9 @@ Report what you see to the user (including the live brain's page count from the 
 
 - [ ] **Step 2: Back up v1** — `cd ~/mobrain-molior && ./molior.sh backup`. Record the backup path. Confirm it contains both databases.
 
-- [ ] **Step 3: ASK** — "v1 is backed up at <path> (<page count> pages). I'll now stop the v1 live stack (volumes kept, nothing deleted), fast-forward `molior` to the new `main`, install the new stack as project `mobrain-molior` on port 19443, and then ask you before switching `tailscale serve`. The v1 volumes stay until you tell me to remove them. Go ahead?"
+- [ ] **Step 3: ASK** — "v1 is backed up at <path> (<page count> pages). I'll now stop the v1 live stack (volumes kept, nothing deleted), fast-forward `molior` to the new `main`, install the new stack as project `mobrain-molior` on port 19443, and then ask you before switching `tailscale serve`. The v1 volumes stay until you tell me to remove them. Go ahead?
+
+  This also replaces the live `.env`: `ENCRYPTION_KEY` changes, so secrets sealed by v1 stay readable only with `.env.v1`. `CLAUDE.local.md` forbids regenerating `.env`; the user's yes here is the explicit override, so say so in the question."
 
 - [ ] **Step 4: Stop v1, keep its volumes**
 
@@ -266,16 +268,16 @@ cd ~/mobrain-molior
 docker compose ls -a      # mobrain-molior shows exited or is gone; volumes remain (docker volume ls | grep mobrain-molior)
 ```
 
-v1's volume names (`mobrain-molior_pg-data`, `mobrain-molior_gbrain-home`) collide with the new stack's names. Rename them out of the way so the new install starts empty and v1's data stays intact:
+v1's volume names (`mobrain-molior_pg-data`, `mobrain-molior_gbrain-home`, `mobrain-molior_brain-repos`; the last holds the live brain git repo and owner credential files, so it must be copied, never just removed) collide with the new stack's names. Rename them out of the way so the new install starts empty and v1's data stays intact:
 
 ```bash
-for v in pg-data gbrain-home; do
+for v in pg-data gbrain-home brain-repos; do
   docker volume create "mobrain-molior-v1_$v"
   docker run --rm -v "mobrain-molior_$v:/from:ro" -v "mobrain-molior-v1_$v:/to" mobrain-gbrain:0.60.230.0 cp -a /from/. /to/
 done
 ```
 
-**ASK** before the next command, showing `docker volume ls | grep mobrain-molior` output: "The v1 volumes are copied to `mobrain-molior-v1_*`. Remove the originals so the new stack can use the names?" On yes: `docker volume rm mobrain-molior_pg-data mobrain-molior_gbrain-home mobrain-molior_brain-repos mobrain-molior_caddy-data mobrain-molior_caddy-config`.
+**ASK** before the next command, showing `docker volume ls | grep mobrain-molior` output: "The v1 volumes (pg-data, gbrain-home, brain-repos) are copied to `mobrain-molior-v1_*`; verify with `docker run --rm -v mobrain-molior-v1_brain-repos:/d:ro alpine ls -A /d` first. Remove the originals so the new stack can use the names?" On yes: `docker volume rm mobrain-molior_pg-data mobrain-molior_gbrain-home mobrain-molior_brain-repos mobrain-molior_caddy-data mobrain-molior_caddy-config`.
 
 - [ ] **Step 5: Move `molior` forward and install**
 
