@@ -553,7 +553,8 @@ acquire_lock() {
 
 harness_run() {
   local slug=$1 source=$2 mode=$3 tools=$4 model=$5 timeout=$6
-  local allowed="mcp__gbrain__*" via="gbrain"
+  local brain=${MOBRAIN_MCP_NAME:-gbrain}   # dev stacks register as gbrain-dev
+  local allowed="mcp__${brain}__*" via="$brain"
   if [[ "$source" == c-* ]]; then allowed+=",mcp__gbrain-company-${source}__*"; via="gbrain-company-$source"; fi
   [ -n "$tools" ] && allowed+=",$tools"
   local prompt="Use the mobrain-collect skill to run collector $slug in source $source (mode: $mode). Write through the $via MCP server. Finish with the MOBRAIN_STATUS and MOBRAIN_SUMMARY lines the skill specifies."

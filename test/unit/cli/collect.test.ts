@@ -21,6 +21,16 @@ beforeEach(async () => { c = await cliWorld(); await c.runnerEnv(); });
 afterEach(async () => rm(c.root, { recursive: true, force: true }));
 
 describe('collect', () => {
+  test('MOBRAIN_MCP_NAME renames the brain server the headless run may use', async () => {
+    await c.stub('curl', routes(due()));
+    await c.stub('claude', 'echo "MOBRAIN_STATUS: ok"');
+    const r = await c.run(['collect', '--due'], { MOBRAIN_MCP_NAME: 'gbrain-dev' });
+    expect(r.code).toBe(0);
+    const [call] = await c.calls('claude');
+    expect(call![call!.indexOf('--allowedTools') + 1]).toBe('mcp__gbrain-dev__*,mcp__claude_ai_Gmail__*');
+    expect(call![1]).toContain('gbrain-dev MCP server');
+  });
+
   test('nothing due', async () => {
     await c.stub('curl', routes(''));
     const r = await c.run(['collect', '--due']);

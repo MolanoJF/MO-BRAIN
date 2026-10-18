@@ -31,7 +31,7 @@ test('creating a collector validates it and writes the page into my private sour
     title: 'Mail', kind: 'email', cadence: '2h', allowedTools: ['mcp__claude_ai_Gmail__*'], notes: 'Skip newsletters.' }) });
   expect(r.status).toBe(200);
   expect(await r.json()).toEqual({ slug: 'system/collectors/mail', source: 'p-own' });
-  expect(writes[0]!.argv).toEqual(['put', 'system/collectors/mail', '--source', 'p-own']);
+  expect(writes[0]!.argv).toEqual(['put', 'system/collectors/mail', '--source', 'p-own', '--force']);
   expect(writes[0]!.stdin).toContain('target_source: p-own');
 });
 

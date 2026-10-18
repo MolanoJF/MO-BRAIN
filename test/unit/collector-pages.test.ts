@@ -15,5 +15,5 @@ test('markdown round-trips through frontmatterOf', () => {
 });
 
 test('put argv names the slug and the source; content goes on stdin', () => {
-  expect(putPageArgv('system/collectors/mail', 'p-ada')).toEqual(['put', 'system/collectors/mail', '--source', 'p-ada']);
+  expect(putPageArgv('system/collectors/mail', 'p-ada')).toEqual(['put', 'system/collectors/mail', '--source', 'p-ada', '--force']);
 });
